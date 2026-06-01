@@ -1,0 +1,228 @@
+// ============ 工具管理 ============
+
+function openTools() {
+  document.getElementById('toolsModal').classList.add('show');
+  renderToolList();
+}
+
+function closeTools() {
+  document.getElementById('toolsModal').classList.remove('show');
+  persistTools();
+  updateSendBtn();
+}
+
+function renderToolList() {
+  const el = document.getElementById('toolList');
+  if (!state.tools.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;font-size:13px;">还没有工具<br><button class="btn btn-primary" style="margin-top:10px;" onclick="resetBuiltinTools()">🔄 加载内置工具</button></div>';
+    updateLmsToggleBtn();
+    return;
+  }
+  
+  const builtinNames = new Set((typeof BUILTIN_TOOLS !== 'undefined' ? BUILTIN_TOOLS : []).map(t => t.name));
+  
+  el.innerHTML = state.tools.map((t, i) => {
+    const isBuiltin = builtinNames.has(t.name);
+    const isLms = isLmsTool(t.name);
+    const badge = isLms
+      ? '<span style="background:#9c27b0;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">🎓 LMS</span>'
+      : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : '');
+    return `
+    <div class="tool-item">
+      <div class="tool-item-header" onclick="this.parentElement.classList.toggle('expanded')">
+        <span style="font-size:18px;">🔧</span>
+        <span class="tool-item-name">${escapeHtml(t.name)}${badge}</span>
+        <span class="tool-item-desc">${escapeHtml(t.description || '')}</span>
+        <button class="tool-toggle-btn" onclick="event.stopPropagation();editTool(${i})">✏️</button>
+        <button class="tool-toggle-btn" onclick="event.stopPropagation();deleteTool(${i})">×</button>
+      </div>
+      <div class="tool-item-body">
+        <pre style="background:var(--bg-input);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;">${escapeHtml(JSON.stringify(t.parameters, null, 2))}</pre>
+      </div>
+    </div>`;
+  }).join('');
+  updateLmsToggleBtn();
+}
+
+// ============ 🎓 LMS 工具批量启停 ============
+function isLmsTool(name) {
+  return typeof name === 'string' && name.startsWith('lms_');
+}
+
+function lmsToolsEnabled() {
+  return state.tools.some(t => isLmsTool(t.name));
+}
+
+function lmsToolCount() {
+  // BUILTIN_TOOLS 中总共有多少个 LMS 工具
+  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
+  return BUILTIN_TOOLS.filter(t => isLmsTool(t.name)).length;
+}
+
+function toggleLmsTools() {
+  if (lmsToolsEnabled()) {
+    // 禁用：从 state.tools 移除所有 lms_* 工具
+    const removed = state.tools.filter(t => isLmsTool(t.name)).length;
+    state.tools = state.tools.filter(t => !isLmsTool(t.name));
+    persistTools();
+    renderToolList();
+    toast(`🔕 已禁用 ${removed} 个 LMS 工具`);
+  } else {
+    // 启用：从 BUILTIN_TOOLS 中把 lms_* 工具加回来
+    if (typeof BUILTIN_TOOLS === 'undefined') {
+      toast('未找到内置工具定义');
+      return;
+    }
+    const lmsTools = BUILTIN_TOOLS.filter(t => isLmsTool(t.name));
+    let added = 0;
+    for (const tool of lmsTools) {
+      if (!state.tools.some(t => t.name === tool.name)) {
+        state.tools.push(JSON.parse(JSON.stringify(tool)));
+        added++;
+      }
+    }
+    persistTools();
+    renderToolList();
+    toast(`🎓 已启用 ${added} 个 LMS 工具`);
+  }
+}
+
+function updateLmsToggleBtn() {
+  const btn = document.getElementById('lmsToggleBtn');
+  if (!btn) return;
+  const enabled = lmsToolsEnabled();
+  const total = lmsToolCount();
+  if (enabled) {
+    const cur = state.tools.filter(t => isLmsTool(t.name)).length;
+    btn.textContent = `🔕 禁用 LMS 工具 (${cur})`;
+    btn.classList.remove('btn-primary');
+    btn.title = '当前 LMS 工具已启用，点击全部移除';
+  } else {
+    btn.textContent = `🎓 启用 LMS 工具 (${total})`;
+    btn.classList.add('btn-primary');
+    btn.title = '当前未启用，点击一键加入全部 LMS 工具';
+  }
+}
+
+function addPresetTool(key) {
+  const p = PRESET_TOOLS[key];
+  if (!p) return;
+  if (state.tools.some(t => t.name === p.name)) {
+    toast('已存在');
+    return;
+  }
+  state.tools.push(JSON.parse(JSON.stringify(p)));
+  persistTools();
+  renderToolList();
+  toast('✓ 已添加');
+}
+
+function addCustomTool() {
+  state.editingToolIdx = -1;
+  document.getElementById('te_name').value = '';
+  document.getElementById('te_desc').value = '';
+  document.getElementById('te_params').value = JSON.stringify({ type: 'object', properties: { input: { type: 'string' } }, required: ['input'] }, null, 2);
+  document.getElementById('te_code').value = `return '收到：' + args.input;`;
+  document.getElementById('toolEditModal').classList.add('show');
+}
+
+function editTool(i) {
+  state.editingToolIdx = i;
+  const t = state.tools[i];
+  document.getElementById('te_name').value = t.name;
+  document.getElementById('te_desc').value = t.description;
+  document.getElementById('te_params').value = JSON.stringify(t.parameters, null, 2);
+  document.getElementById('te_code').value = t.code;
+  document.getElementById('toolEditModal').classList.add('show');
+}
+
+function saveToolEdit() {
+  const name = document.getElementById('te_name').value.trim();
+  const desc = document.getElementById('te_desc').value.trim();
+  let params;
+  try {
+    params = JSON.parse(document.getElementById('te_params').value);
+  } catch (e) {
+    alert('参数 JSON 错误：' + e.message);
+    return;
+  }
+  const code = document.getElementById('te_code').value;
+  if (!name || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    alert('名称需为合法英文标识符');
+    return;
+  }
+  const tool = { name, description: desc, parameters: params, code };
+  if (state.editingToolIdx >= 0) state.tools[state.editingToolIdx] = tool;
+  else {
+    if (state.tools.some(t => t.name === name)) {
+      alert('已存在');
+      return;
+    }
+    state.tools.push(tool);
+  }
+  persistTools();
+  renderToolList();
+  document.getElementById('toolEditModal').classList.remove('show');
+  toast('✓ 已保存');
+}
+
+function deleteTool(i) {
+  if (!confirm('删除？')) return;
+  state.tools.splice(i, 1);
+  persistTools();
+  renderToolList();
+}
+
+function clearAllTools() {
+  if (!state.tools.length) return;
+  if (!confirm('清空所有工具？')) return;
+  state.tools = [];
+  persistTools();
+  renderToolList();
+}
+
+function toggleTools() {
+  if (!state.tools.length) {
+    toast('请先添加工具');
+    openTools();
+    return;
+  }
+  state.settings.useTools = !state.settings.useTools;
+  const btn = document.getElementById('toolsBtn');
+  if (state.settings.useTools) btn.classList.add('tool-active');
+  else btn.classList.remove('tool-active');
+  persistSettings();
+  updateSendBtn();
+}
+
+function buildToolsArray() {
+  if (!state.settings.useTools || !state.tools.length) return null;
+  
+  if (state.settings.apiFormat === 'anthropic') {
+    return state.tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.parameters
+    }));
+  } else {
+    return state.tools.map(t => ({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters
+      }
+    }));
+  }
+}
+
+async function executeTool(name, args) {
+  const tool = state.tools.find(t => t.name === name);
+  if (!tool) return { ok: false, value: `未找到工具：${name}` };
+  try {
+    const fn = new Function('args', `return (async () => { ${tool.code} })();`);
+    return { ok: true, value: await fn(args) };
+  } catch (e) {
+    return { ok: false, value: `工具出错：${e.message}` };
+  }
+}

@@ -1,0 +1,366 @@
+// ============ 常量配置 ============
+const STORE_KEY = 'aichat_data_v6';
+const SETTINGS_KEY = 'aichat_settings_v6';
+const TOOLS_KEY = 'aichat_tools_v6';
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v5';  // ⭐ 改了版本号，强制重新加载（搜索回退顺序改为 Bing 国内/百度/Bing 国际）
+
+// 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
+// 每项 { key, label, type, scope }
+//   type: 'localStorage' | 'state'
+//   scope: 'localStorage 中的键名' 或 'state.settings 中的字段名'
+const SECRET_REGISTRY = [
+  { label: '🔑 大模型 API Key',   type: 'state',        scope: 'apiKey' },
+  { label: '🎓 LMS Cookie',       type: 'localStorage', scope: 'lms_cookie_v1' },
+  { label: '🖥 本地终端 Token',    type: 'localStorage', scope: 'aichat_terminal_token_v1' },
+  { label: '🔐 终端永久授权',      type: 'localStorage', scope: 'aichat_terminal_perms_v1' },
+];
+
+// 清除所有敏感凭证（返回清除的项数组）
+function clearAllSecrets() {
+  const cleared = [];
+  for (const item of SECRET_REGISTRY) {
+    try {
+      if (item.type === 'localStorage') {
+        // ⭐ 兼容旧字段名：实际数据在 storage（IndexedDB）里
+        const _store = (typeof storage !== 'undefined') ? storage : {
+          get: k => localStorage.getItem(k),
+          remove: k => localStorage.removeItem(k)
+        };
+        if (_store.get(item.scope) != null) {
+          _store.remove(item.scope);
+          cleared.push(item.label);
+        }
+      } else if (item.type === 'state') {
+        if (typeof state !== 'undefined' && state.settings && state.settings[item.scope]) {
+          state.settings[item.scope] = '';
+          cleared.push(item.label);
+        }
+      }
+    } catch (e) { /* 忽略单项失败 */ }
+  }
+  // 持久化 state 改动
+  try { if (typeof persistSettings === 'function') persistSettings(); } catch (e) {}
+  return cleared;
+}
+
+const PROVIDERS = {
+  openai:    { url: 'https://api.openai.com/v1', path: '/chat/completions', format: 'openai', models: 'gpt-4o-mini, gpt-4o' },
+  anthropic: { url: 'https://api.anthropic.com/v1', path: '/messages', format: 'anthropic', models: 'claude-3-5-sonnet-20241022, claude-3-haiku-20240307' },
+  deepseek:  { url: 'https://api.deepseek.com/v1', path: '/chat/completions', format: 'openai', models: 'deepseek-chat, deepseek-reasoner' },
+  qwen:      { url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', path: '/chat/completions', format: 'openai', models: 'qwen-plus, qwen-max, qwen-vl-plus' },
+  zhipu:     { url: 'https://open.bigmodel.cn/api/paas/v4', path: '/chat/completions', format: 'openai', models: 'glm-4-flash, glm-4-plus' },
+  custom:    { url: '', path: '/chat/completions', format: 'openai', models: '' }
+};
+
+const REFLECTION_PRESETS = {
+  general: {
+    student: '你是认真负责的回答者。请准确、完整、清晰地回答用户问题。收到反馈请改进。',
+    teacher: '你是严格的评审老师。审视学生回答的准确性、完整性、清晰度、实用性。请用 JSON 输出（不要其他内容，不要代码块）：{"score":0-10的整数,"issues":["问题"],"suggestions":["建议"],"satisfied":true或false}'
+  },
+  code: {
+    student: '你是经验丰富的程序员。请编写正确、高效、可读的代码。',
+    teacher: '你是资深代码审查专家。审视：1.正确性 2.性能 3.可读性 4.健壮性 5.最佳实践。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+  },
+  writing: {
+    student: '你是优秀的作家。请创作有深度、有感染力的文字。',
+    teacher: '你是严苛的编辑。关注：1.逻辑 2.结构 3.文笔 4.表达 5.感染力。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+  },
+  math: {
+    student: '你是严谨的解题者。请详细列出每步推导，使用 $...$ 数学公式。',
+    teacher: '你是严格的数学老师。逐步检查推理、公式、计算。JSON输出：{"score":0-10,"issues":["第几步出错"],"suggestions":["如何修正"],"satisfied":true/false}'
+  },
+  analysis: {
+    student: '你是深刻的分析者。请从多角度深入分析，挖掘本质。',
+    teacher: '你是思想评审者。关注：1.视角 2.深度 3.论证 4.平衡 5.洞察。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+  },
+  translation: {
+    student: '你是资深翻译。追求信、达、雅。',
+    teacher: '你是翻译评审。关注：1.信 2.达 3.雅 4.专业术语。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+  }
+};
+
+const PLAN_PRESETS = {
+  general: {
+    planner: '你是任务规划专家。请把用户问题拆解为清晰的执行步骤。\n\n严格输出 JSON（不要其他文字，不要代码块）：\n{"analysis":"对问题的简要分析","steps":[{"title":"步骤标题","description":"详细说明"}]}\n\n要求：步骤 2-6 个，具体可执行，有逻辑顺序。',
+    executor: '你正在执行多步骤任务中的某一步。请聚焦当前步骤的目标，给出高质量回答。可参考之前步骤的结果。'
+  },
+  research: {
+    planner: '你是研究分析专家。把问题拆为多视角分析步骤。\nJSON：{"analysis":"...","steps":[{"title":"...","description":"..."}]}\n建议：背景定义→核心观点→多视角对比→争议→结论',
+    executor: '你是研究分析师。请就当前步骤给出有依据、有深度的分析。'
+  },
+  writing: {
+    planner: '你是写作规划师。把写作任务拆为章节大纲。\nJSON：{"analysis":"文章定位","steps":[{"title":"章节","description":"内容"}]}\n建议：引入→主体→结尾',
+    executor: '你是优秀作家。按当前章节写出有感染力的文字，注意连贯。'
+  },
+  code: {
+    planner: '你是软件架构师。把代码任务拆为开发步骤。\nJSON：{"analysis":"项目概述","steps":[{"title":"...","description":"..."}]}\n建议：需求分析→设计→实现→边界处理→测试',
+    executor: '你是高级程序员。就当前步骤写清晰、健壮、可读的代码。'
+  },
+  problem: {
+    planner: '你是解题专家。把复杂问题拆为推理步骤。\nJSON：{"analysis":"问题理解","steps":[{"title":"...","description":"..."}]}\n建议：理解→已知条件→推理→验证→结论',
+    executor: '你是严谨解题者。就当前步骤严密推理，使用 $...$ 公式。'
+  },
+  teaching: {
+    planner: '你是教学设计专家。拆为循序渐进的讲解步骤。\nJSON：{"analysis":"学习目标","steps":[{"title":"...","description":"..."}]}\n建议：例子引入→概念→原理→应用→误区',
+    executor: '你是优秀老师。就当前讲解步骤深入浅出说明，多用例子。'
+  }
+};
+
+const PLAN_REVIEWER_PROMPT = '你是计划评审专家。审视执行计划是否合理：\n1.步骤是否完整？2.顺序是否合理？3.粒度是否合适？4.有无缺失或多余？\n\nJSON输出（不要其他内容）：{"score":0-10,"satisfied":true/false,"issues":["..."],"revised_steps":[{"title":"...","description":"..."}] 或 null}\n\nsatisfied=true 时 revised_steps 可为 null。\nsatisfied=false 时请给出改进后的完整步骤。';
+
+const PRESET_TOOLS = {
+  time:    { name: 'get_current_time', description: '获取当前时间', parameters: { type: 'object', properties: { timezone: { type: 'string' } }, required: [] }, code: "const tz=args.timezone||undefined;const opts={dateStyle:'full',timeStyle:'long'};if(tz)opts.timeZone=tz;return new Date().toLocaleString('zh-CN',opts);" },
+  calc:    { name: 'calculator', description: '数学计算', parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] }, code: "try{return '结果：'+Function('\"use strict\"; return ('+args.expression+')')();}catch(e){return '错误：'+e.message;}" },
+  weather: { name: 'get_weather', description: '查天气（模拟）', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] }, code: "const c=['晴','多云','小雨','阴'];return{city:args.city,weather:c[Math.floor(Math.random()*c.length)],temperature:(Math.floor(Math.random()*30)+5)+'°C',note:'⚠️ 模拟数据'};" },
+  random:  { name: 'random_number', description: '随机整数', parameters: { type: 'object', properties: { min: { type: 'number' }, max: { type: 'number' } }, required: ['min', 'max'] }, code: "return Math.floor(Math.random()*(args.max-args.min+1))+args.min;" },
+  search:  { name: 'open_search', description: '打开搜索', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }, code: "window.open('https://www.bing.com/search?q='+encodeURIComponent(args.query),'_blank');return '已搜索：'+args.query;" },
+  fetch:   { name: 'http_get', description: 'HTTP GET', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }, code: "try{const r=await fetch(args.url);return{status:r.status,body:(await r.text()).slice(0,2000)};}catch(e){return '失败：'+e.message;}" }
+};
+
+// ⭐ 内置工具 - 低调伪装版（看起来像笔记/工作区应用）
+const BUILTIN_TOOLS = [
+  {
+    name: 'run_task',
+    description: '在用户的工作区执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: '要执行的任务指令，例如 ls -la 或 python script.py' },
+        cwd: { type: 'string', description: '工作目录（可选）' }
+      },
+      required: ['command']
+    },
+    code: 'return await executeTerminalCommand(args.command, args.cwd);'
+  },
+  {
+    name: 'load_document',
+    description: '加载并查看工作区中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_document 工具。可指定行号范围。文档超过 1MB 需指定行号范围。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文档路径' },
+        start_line: { type: 'number', description: '起始行号（可选，从 1 开始）' },
+        end_line: { type: 'number', description: '结束行号（可选）' }
+      },
+      required: ['path']
+    },
+    code: 'return await readFile(args.path, args.start_line, args.end_line);'
+  },
+  {
+    name: 'save_document',
+    description: '创建新文档或覆盖已存在文档的全部内容。可创建 .py .md .txt .json .html .css .js 等任何文本格式。父目录自动创建。每次保存会向用户确认。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文档路径，例如 hello.py 或 docs/readme.md' },
+        content: { type: 'string', description: '要保存的完整文档内容' }
+      },
+      required: ['path', 'content']
+    },
+    code: 'return await writeFile(args.path, args.content);'
+  },
+  {
+    name: 'append_note',
+    description: '在已存在的笔记/文档末尾追加内容，不覆盖原有内容。适合写日志、累加数据、续写笔记等场景。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文档路径' },
+        content: { type: 'string', description: '要追加的内容' }
+      },
+      required: ['path', 'content']
+    },
+    code: 'return await appendFile(args.path, args.content);'
+  },
+  {
+    name: 'update_document',
+    description: '精确查找并替换文档中的内容：在文档里找到 old_text 替换为 new_text。old_text 必须在文档中唯一存在。适合小范围修改笔记或文档。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文档路径' },
+        old_text: { type: 'string', description: '要被替换的原文本（必须在文档中唯一）' },
+        new_text: { type: 'string', description: '替换后的新文本' }
+      },
+      required: ['path', 'old_text', 'new_text']
+    },
+    code: 'return await editFile(args.path, args.old_text, args.new_text);'
+  },
+  {
+    name: 'browse_workspace',
+    description: '浏览工作区目录下的所有文档和子目录。不提供 path 则浏览当前目录。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '目录路径（可选）' }
+      },
+      required: []
+    },
+    code: 'return await listDir(args.path);'
+  },
+  {
+    name: 'find_in_notes',
+    description: '在笔记/文档中搜索包含特定文本或正则模式的内容。可指定 file_glob 限定文档类型（如 *.py、*.md）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '搜索的根目录（默认当前）' },
+        pattern: { type: 'string', description: '搜索关键词或正则表达式' },
+        file_glob: { type: 'string', description: '文档通配符（如 *.py），默认 *' }
+      },
+      required: ['pattern']
+    },
+    code: 'return await searchInFiles(args.path || ".", args.pattern, args.file_glob);'
+  },
+  {
+    name: 'remove_document',
+    description: '从工作区移除指定的文档或空目录。⚠️ 不可恢复，操作前会向用户确认。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '要移除的文档或空目录路径' }
+      },
+      required: ['path']
+    },
+    code: 'return await deleteFile(args.path);'
+  },
+  {
+    name: 'get_current_time',
+    description: '获取当前日期和时间。',
+    parameters: {
+      type: 'object',
+      properties: {
+        timezone: { type: 'string', description: '时区，例如 Asia/Shanghai（可选）' }
+      },
+      required: []
+    },
+    code: "const tz=args.timezone||undefined;const opts={dateStyle:'full',timeStyle:'long'};if(tz)opts.timeZone=tz;return new Date().toLocaleString('zh-CN',opts);"
+  },
+  {
+    name: 'calculator',
+    description: '执行数学表达式计算，支持 +-*/、括号、Math 函数（如 Math.sqrt、Math.sin）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        expression: { type: 'string', description: '数学表达式，例如 2*(3+4) 或 Math.sqrt(16)' }
+      },
+      required: ['expression']
+    },
+    code: "try{return '结果：'+Function('\"use strict\"; return ('+args.expression+')')();}catch(e){return '错误：'+e.message;}"
+  },
+  {
+    name: 'attach_document',
+    description: '把工作区中的多媒体文档（图片、PDF 等无法用 load_document 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在用户的附件区。但当前这一轮你还看不到内容，需要请用户再问一次（如"现在描述这张图"），才能真正查看。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 load_document 即可。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文档路径，例如 photo.jpg 或 docs/report.pdf' },
+        description: { type: 'string', description: '可选：对文档的简短说明' }
+      },
+      required: ['path']
+    },
+    code: 'return await attachFileForAI(args.path, args.description);'
+  },
+  {
+    name: 'find_references',
+    description: '查询在线参考资料：根据关键词在公开资料库中检索，返回相关条目的标题、链接和摘要列表。\n\n使用场景：\n- 用户询问的内容超出已有知识范围或需要最新信息\n- 需要查找具体资料、文档、教程的来源链接\n- 作为 load_webpage 的前置：先找到链接，再加载详情\n\n建议工作流：先 find_references 拿到链接 → 再 load_webpage 加载详细内容。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '查询关键词，可用中文或英文' },
+        max_results: { type: 'number', description: '返回结果数量，默认 8，最多 20' },
+        region: { type: 'string', description: '地区偏好，可选 cn（默认，国内优先）/ global（海外优先）' }
+      },
+      required: ['query']
+    },
+    code: 'return await webSearch(args.query, args.max_results, args.region);'
+  },
+  {
+    name: 'load_webpage',
+    description: '加载并查看一个网页的内容，自动识别编码并提取正文（去除 HTML 标签、脚本、样式）。\n\n使用场景：\n- 阅读 find_references 返回的某条结果的详情\n- 阅读用户直接给的链接\n- 加载 API 返回的 JSON / 纯文本资料\n\n注意：默认提取网页正文。如需保留原始 HTML/JSON，传 extract_text=false。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '完整链接，必须以 http:// 或 https:// 开头' },
+        extract_text: { type: 'boolean', description: '是否提取网页正文（默认 true）。设为 false 返回原始内容（适合 JSON/纯文本）' },
+        max_chars: { type: 'number', description: '最多返回字符数，默认 8000，最大 50000' }
+      },
+      required: ['url']
+    },
+    code: 'return await fetchUrl(args.url, args.extract_text, args.max_chars);'
+  },
+
+  // ============ 🎓 LMS 工具（西安交大学习系统） ============
+  // 实现函数定义在 lms.js 中（lmsToolXxx 系列）
+  {
+    name: 'lms_status',
+    description: '🎓【LMS】检查西安交大学习系统的 Cookie 是否有效，并显示过期时间。如果用户问"LMS 连上了吗""Cookie 还有效吗"用这个。',
+    parameters: { type: 'object', properties: {}, required: [] },
+    code: 'return await lmsToolStatus();'
+  },
+  {
+    name: 'lms_courses',
+    description: '🎓【LMS】列出当前学生在西安交大 LMS 上所有的课程（按学年分组）。返回包含课程 ID，后续调用 lms_materials 需要这个 ID。',
+    parameters: { type: 'object', properties: {}, required: [] },
+    code: 'return await lmsToolCourses();'
+  },
+  {
+    name: 'lms_todos',
+    description: '🎓【LMS】列出西安交大 LMS 上所有未完成的作业/待办事项，按截止时间排序。当用户问"作业""待办""ddl""有什么要交"时用。',
+    parameters: { type: 'object', properties: {}, required: [] },
+    code: 'return await lmsToolTodos();'
+  },
+  {
+    name: 'lms_homework',
+    description: '🎓【LMS】查看某项作业的详细要求（说明文字、附件、截止时间等）。需要先用 lms_todos 拿到作业 ID（hw_id）。',
+    parameters: {
+      type: 'object',
+      properties: { hw_id: { type: 'number', description: '作业 ID（从 lms_todos 输出里拿）' } },
+      required: ['hw_id']
+    },
+    code: 'return await lmsToolHomework(args.hw_id);'
+  },
+  {
+    name: 'lms_materials',
+    description: '🎓【LMS】列出某门课的全部课件资料（PPT/PDF/文档），并标注是否允许下载。需要先用 lms_courses 或 lms_find_course 拿到课程 ID。',
+    parameters: {
+      type: 'object',
+      properties: { course_id: { type: 'number', description: '课程 ID' } },
+      required: ['course_id']
+    },
+    code: 'return await lmsToolMaterials(args.course_id);'
+  },
+  {
+    name: 'lms_find_course',
+    description: '🎓【LMS】用关键词搜索课程，返回匹配的课程 ID 和名字。例如用户说"操作系统"就调这个找到 course_id。',
+    parameters: {
+      type: 'object',
+      properties: { keyword: { type: 'string', description: '课程名关键词' } },
+      required: ['keyword']
+    },
+    code: 'return await lmsToolFindCourse(args.keyword);'
+  },
+  {
+    name: 'lms_download',
+    description: '🎓【LMS】下载一个文件到本地（通过浏览器下载窗口）。需要 upload_id —— 从 lms_materials 或 lms_homework 输出里找到 ✅ 标记的那些。注意：老师设置了 🔒 的文件无法下载。',
+    parameters: {
+      type: 'object',
+      properties: {
+        upload_id: { type: 'number', description: 'upload_id（必须是允许下载的）' },
+        filename:  { type: 'string', description: '保存为的文件名（可选，默认使用原文件名）' }
+      },
+      required: ['upload_id']
+    },
+    code: 'return await lmsToolDownload(args.upload_id, args.filename);'
+  },
+  {
+    name: 'lms_set_cookie',
+    description: '🎓【LMS】保存用户提供的 LMS Cookie 到浏览器本地。当用户主动粘贴一长串 cookie 时用。一般用户应该在 🎓 学习面板里填写。',
+    parameters: {
+      type: 'object',
+      properties: { cookie: { type: 'string', description: '完整的 cookie 字符串，含 session=... 字段' } },
+      required: ['cookie']
+    },
+    code: 'return await lmsToolSetCookie(args.cookie);'
+  }
+];

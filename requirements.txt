@@ -1,0 +1,4 @@
+# Python 依赖
+# local_terminal_server.py 主体仅用标准库；
+# 但 web_search / fetch_url / LMS 助手依赖 requests
+requests>=2.31.0
