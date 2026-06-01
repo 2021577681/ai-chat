@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v6';  // ⭐ v6：新增 AI Git 快照工具（note_status / note_history / note_diff / note_snapshot / note_restore）
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v7';  // ⭐ v7：工具名去 Coding 化（save_document→save_note 等 9 个改名）
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -120,7 +120,7 @@ const PRESET_TOOLS = {
 // ⭐ 内置工具 - 低调伪装版（看起来像笔记/工作区应用）
 const BUILTIN_TOOLS = [
   {
-    name: 'run_task',
+    name: 'execute_action',
     description: '在用户的工作区执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。',
     parameters: {
       type: 'object',
@@ -133,8 +133,8 @@ const BUILTIN_TOOLS = [
     code: 'return await executeTerminalCommand(args.command, args.cwd);'
   },
   {
-    name: 'load_document',
-    description: '加载并查看工作区中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_document 工具。可指定行号范围。文档超过 1MB 需指定行号范围。',
+    name: 'read_note',
+    description: '加载并查看工作区中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_file 工具。可指定行号范围。文档超过 1MB 需指定行号范围。',
     parameters: {
       type: 'object',
       properties: {
@@ -147,7 +147,7 @@ const BUILTIN_TOOLS = [
     code: 'return await readFile(args.path, args.start_line, args.end_line);'
   },
   {
-    name: 'save_document',
+    name: 'save_note',
     description: '创建新文档或覆盖已存在文档的全部内容。可创建 .py .md .txt .json .html .css .js 等任何文本格式。父目录自动创建。每次保存会向用户确认。',
     parameters: {
       type: 'object',
@@ -173,7 +173,7 @@ const BUILTIN_TOOLS = [
     code: 'return await appendFile(args.path, args.content);'
   },
   {
-    name: 'update_document',
+    name: 'edit_note',
     description: '精确查找并替换文档中的内容：在文档里找到 old_text 替换为 new_text。old_text 必须在文档中唯一存在。适合小范围修改笔记或文档。',
     parameters: {
       type: 'object',
@@ -187,7 +187,7 @@ const BUILTIN_TOOLS = [
     code: 'return await editFile(args.path, args.old_text, args.new_text);'
   },
   {
-    name: 'browse_workspace',
+    name: 'list_notes',
     description: '浏览工作区目录下的所有文档和子目录。不提供 path 则浏览当前目录。',
     parameters: {
       type: 'object',
@@ -213,7 +213,7 @@ const BUILTIN_TOOLS = [
     code: 'return await searchInFiles(args.path || ".", args.pattern, args.file_glob);'
   },
   {
-    name: 'remove_document',
+    name: 'delete_note',
     description: '从工作区移除指定的文档或空目录。⚠️ 不可恢复，操作前会向用户确认。',
     parameters: {
       type: 'object',
@@ -249,8 +249,8 @@ const BUILTIN_TOOLS = [
     code: "try{return '结果：'+Function('\"use strict\"; return ('+args.expression+')')();}catch(e){return '错误：'+e.message;}"
   },
   {
-    name: 'attach_document',
-    description: '把工作区中的多媒体文档（图片、PDF 等无法用 load_document 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在用户的附件区。但当前这一轮你还看不到内容，需要请用户再问一次（如"现在描述这张图"），才能真正查看。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 load_document 即可。',
+    name: 'attach_file',
+    description: '把工作区中的多媒体文档（图片、PDF 等无法用 read_note 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在用户的附件区。但当前这一轮你还看不到内容，需要请用户再问一次（如"现在描述这张图"），才能真正查看。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 read_note 即可。',
     parameters: {
       type: 'object',
       properties: {
@@ -262,8 +262,8 @@ const BUILTIN_TOOLS = [
     code: 'return await attachFileForAI(args.path, args.description);'
   },
   {
-    name: 'find_references',
-    description: '查询在线参考资料：根据关键词在公开资料库中检索，返回相关条目的标题、链接和摘要列表。\n\n使用场景：\n- 用户询问的内容超出已有知识范围或需要最新信息\n- 需要查找具体资料、文档、教程的来源链接\n- 作为 load_webpage 的前置：先找到链接，再加载详情\n\n建议工作流：先 find_references 拿到链接 → 再 load_webpage 加载详细内容。',
+    name: 'web_search',
+    description: '查询在线参考资料：根据关键词在公开资料库中检索，返回相关条目的标题、链接和摘要列表。\n\n使用场景：\n- 用户询问的内容超出已有知识范围或需要最新信息\n- 需要查找具体资料、文档、教程的来源链接\n- 作为 fetch_url 的前置：先找到链接，再加载详情\n\n建议工作流：先 web_search 拿到链接 → 再 fetch_url 加载详细内容。',
     parameters: {
       type: 'object',
       properties: {
@@ -276,8 +276,8 @@ const BUILTIN_TOOLS = [
     code: 'return await webSearch(args.query, args.max_results, args.region);'
   },
   {
-    name: 'load_webpage',
-    description: '加载并查看一个网页的内容，自动识别编码并提取正文（去除 HTML 标签、脚本、样式）。\n\n使用场景：\n- 阅读 find_references 返回的某条结果的详情\n- 阅读用户直接给的链接\n- 加载 API 返回的 JSON / 纯文本资料\n\n注意：默认提取网页正文。如需保留原始 HTML/JSON，传 extract_text=false。',
+    name: 'fetch_url',
+    description: '加载并查看一个网页的内容，自动识别编码并提取正文（去除 HTML 标签、脚本、样式）。\n\n使用场景：\n- 阅读 web_search 返回的某条结果的详情\n- 阅读用户直接给的链接\n- 加载 API 返回的 JSON / 纯文本资料\n\n注意：默认提取网页正文。如需保留原始 HTML/JSON，传 extract_text=false。',
     parameters: {
       type: 'object',
       properties: {

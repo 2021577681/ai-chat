@@ -4,12 +4,12 @@ const TERMINAL_PERMS_KEY = 'aichat_terminal_perms_v1';
 
 // ⭐ 操作类别定义（共 9 类需弹窗的操作）
 const PERMISSION_CATEGORIES = {
-  execute: { icon: '🖥️',  label: '执行命令',       desc: 'run_task：在终端执行任意 shell 指令' },
-  write:   { icon: '✍️',  label: '写入/覆盖文档', desc: 'save_document：创建或完全覆盖文档' },
+  execute: { icon: '🖥️',  label: '执行命令',       desc: 'execute_action：在终端执行任意 shell 指令' },
+  write:   { icon: '✍️',  label: '写入/覆盖文档', desc: 'save_note：创建或完全覆盖文档' },
   append:  { icon: '📝',  label: '追加内容',       desc: 'append_note：向已存在文档末尾追加' },
-  edit:    { icon: '✏️',  label: '修改文档',       desc: 'update_document：查找替换' },
-  delete:  { icon: '🗑️',  label: '删除文档/目录', desc: 'remove_document：删除文件或空目录' },
-  attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_document：把二进制文件塞入对话上下文' },
+  edit:    { icon: '✏️',  label: '修改文档',       desc: 'edit_note：查找替换' },
+  delete:  { icon: '🗑️',  label: '删除文档/目录', desc: 'delete_note：删除文件或空目录' },
+  attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_file：把二进制文件塞入对话上下文' },
   // ⭐ AI Git 操作（3 个独立类别，权限粒度分级）
   git_read:    { icon: '🔍',  label: 'Git 查看',     desc: 'note_history / note_status / note_diff：只读查看版本历史' },
   git_write:   { icon: '💾',  label: 'Git 保存快照', desc: 'note_snapshot：将当前工作区改动提交为一个版本快照（不会覆盖文件）' },
@@ -699,11 +699,11 @@ async function attachFileForAI(path, description) {
     if (state._outlineExecuting) {
       // 附件已存到 state.pendingAIAttachments，大纲循环下一轮会读取并注入到上下文
       return `✅ 已加载 ${r.name}（${(r.size / 1024).toFixed(1)} KB）\n\n` +
-             `📌 系统：附件已加入对话上下文。如还需加载其他文件请继续调用 attach_document，否则继续推进任务。`;
+             `📌 系统：附件已加入对话上下文。如还需加载其他文件请继续调用 attach_file，否则继续推进任务。`;
     }
     scheduleAutoResend(r, description);
     return `✅ 已加载 ${r.name}（${(r.size / 1024).toFixed(1)} KB）\n\n` +
-           `📌 系统：附件已加入。如果还要加载其他文件，请继续调用 attach_document；否则简短回复完成。前端会自动重发让你看到附件。`;
+           `📌 系统：附件已加入。如果还要加载其他文件，请继续调用 attach_file；否则简短回复完成。前端会自动重发让你看到附件。`;
   } else {
     attachment._hidden = false;
     state.pendingAttachments.push(attachment);

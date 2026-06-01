@@ -494,7 +494,7 @@ async function callAPIWithOutline(options = {}) {
         aiMsg.outline.stalledRounds = 0;
       }
       
-      // ⭐ 消化由 attach_document 等工具产生的待处理附件
+      // ⭐ 消化由 attach_file 等工具产生的待处理附件
       // 把它们转成 user 消息注入到 conversationMessages，下一轮 LLM 就能直接"看到"
       // 否则 terminal.js 的 autoResend 会在大纲结束后另起一段新 AI 回复
       consumePendingAttachments(conversationMessages, aiMsg.outline);
@@ -784,7 +784,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
 
 // ============ 大纲工具处理（本地虚拟工具，不发请求）============
 
-// ⭐ 消化由 attach_document 等工具产生的待处理附件
+// ⭐ 消化由 attach_file 等工具产生的待处理附件
 // 把 state.pendingAIAttachments 中的项目转换为 user 消息注入到对话上下文，
 // 然后清空 pendingAIAttachments（防止 autoResend 在大纲结束后再触发新对话）
 function consumePendingAttachments(conversationMessages, outlineObj) {

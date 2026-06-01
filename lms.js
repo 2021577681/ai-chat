@@ -426,5 +426,5 @@ async function lmsToolSetCookie(cookie) {
 
 // ============ 工具注册说明 ============
 // 8 个 LMS 工具的元信息已迁移到 config.js 的 BUILTIN_TOOLS 数组中
-// （与 run_task / load_document 等其他内置工具地位相同）
+// （与 execute_action / read_note 等其他内置工具地位相同）
 // 本文件只负责提供 lmsToolXxx 系列实现函数，由 BUILTIN_TOOLS 的 code 字段调用。
