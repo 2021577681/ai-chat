@@ -80,10 +80,23 @@ function injectBuiltinTools() {
   } catch (e) {}
   const existingNames = new Set(state.tools.map(t => t.name));
   const currentSignatures = BUILTIN_TOOLS.map(t => t.name);
+  
+  // ⭐ 可选工具组：首次安装默认不注入（用户在工具面板手动一键启用）
+  // 既减少给模型的工具数量，也降低对外暴露的工具特征
+  const OPTIONAL_TOOL_PREFIXES = ['lms_'];
+  const OPTIONAL_TOOL_NAMES = new Set([
+    // 💾 Git 快照工具（5 个）
+    'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore'
+  ]);
+  const isOptional = (name) => 
+    OPTIONAL_TOOL_NAMES.has(name) || OPTIONAL_TOOL_PREFIXES.some(p => name.startsWith(p));
+  
   let added = 0;
   for (const tool of BUILTIN_TOOLS) {
     if (!existingNames.has(tool.name)) {
       if (!loadedSignatures.includes(tool.name)) {
+        // 可选工具组：首次见到时跳过自动注入
+        if (isOptional(tool.name)) continue;
         state.tools.push(JSON.parse(JSON.stringify(tool)));
         added++;
       }
@@ -276,9 +289,18 @@ function persistTools() {
 function currentChat() { return state.chats.find(c => c.id === state.currentId); }
 
 function resetBuiltinTools() {
-  if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。')) return;
+  if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。\n\n注意：LMS 和版本快照工具不会自动加回，需要在工具面板里点专用按钮启用。')) return;
   storage.remove(BUILTIN_TOOLS_LOADED_KEY);
+  
+  // ⭐ 与 injectBuiltinTools 保持一致：可选工具组（LMS / Git 快照）不自动恢复
+  const OPTIONAL_TOOL_NAMES = new Set([
+    'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore'
+  ]);
+  const isOptional = (name) => 
+    OPTIONAL_TOOL_NAMES.has(name) || name.startsWith('lms_');
+  
   for (const tool of BUILTIN_TOOLS) {
+    if (isOptional(tool.name)) continue;
     if (!state.tools.some(t => t.name === tool.name)) {
       state.tools.push(JSON.parse(JSON.stringify(tool)));
     }
