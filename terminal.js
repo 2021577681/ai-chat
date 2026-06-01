@@ -2,14 +2,18 @@
 const TERMINAL_STORAGE_KEY = 'aichat_terminal_token_v1';
 const TERMINAL_PERMS_KEY = 'aichat_terminal_perms_v1';
 
-// ⭐ 操作类别定义（共 6 类需弹窗的操作）
+// ⭐ 操作类别定义（共 9 类需弹窗的操作）
 const PERMISSION_CATEGORIES = {
   execute: { icon: '🖥️',  label: '执行命令',       desc: 'run_task：在终端执行任意 shell 指令' },
   write:   { icon: '✍️',  label: '写入/覆盖文档', desc: 'save_document：创建或完全覆盖文档' },
   append:  { icon: '📝',  label: '追加内容',       desc: 'append_note：向已存在文档末尾追加' },
   edit:    { icon: '✏️',  label: '修改文档',       desc: 'update_document：查找替换' },
   delete:  { icon: '🗑️',  label: '删除文档/目录', desc: 'remove_document：删除文件或空目录' },
-  attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_document：把二进制文件塞入对话上下文' }
+  attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_document：把二进制文件塞入对话上下文' },
+  // ⭐ AI Git 操作（3 个独立类别，权限粒度分级）
+  git_read:    { icon: '🔍',  label: 'Git 查看',     desc: 'note_history / note_status / note_diff：只读查看版本历史' },
+  git_write:   { icon: '💾',  label: 'Git 保存快照', desc: 'note_snapshot：将当前工作区改动提交为一个版本快照（不会覆盖文件）' },
+  git_restore: { icon: '⏪',  label: 'Git 恢复历史', desc: 'note_restore：将某个文件恢复到历史快照版本（⚠️ 会覆盖当前工作区文件）' }
 };
 
 // action → 类别 映射
@@ -458,6 +462,203 @@ async function callGit(subcommand, params) {
   }
 }
 window.callGit = callGit;
+
+// ============ 🤖 AI Git 工具（笔记快照风格） ============
+// 与人工 Git 面板共享 callGit 后端，但走自己的权限类别（git_read/git_write/git_restore）
+// 复用 termAskConfirm 弹窗机制 → 用户可以"永久允许"/"本任务允许"
+
+// 公共权限检查（与 callAgentBackend 同款，仅类别不同）
+async function _aiGitCheckPermission(category, title, summary) {
+  const alreadyAllowed =
+    TERMINAL_CONFIG.permanentAllow[category] ||
+    TERMINAL_CONFIG.taskAllow[category];
+  if (alreadyAllowed) return { ok: true };
+  const result = await termAskConfirm(title, '工作区', summary, category);
+  if (!result.allowed) {
+    if (result.rejectAll) {
+      return { ok: false, error: '🛑 用户拒绝并停止后续 Git 操作。', _stopAll: true };
+    }
+    return { ok: false, error: '⏭️ 用户拒绝此次 Git 操作。', _userRejected: true };
+  }
+  return { ok: true };
+}
+
+// 检查 Git 仓库是否就绪
+async function _aiGitEnsureRepo() {
+  const r = await callGit('check', {});
+  if (!r || !r.ok) {
+    return { ok: false, error: '❌ 未能连接 Git 后端：' + (r && r.error ? r.error : '未知错误') };
+  }
+  if (!r.gitInstalled) {
+    return { ok: false, error: '❌ 系统未安装 Git，AI 无法保存快照。请先安装 Git。' };
+  }
+  if (!r.inRepo) {
+    return { ok: false, error: '❌ 当前工作区不是 Git 仓库。请先在 🌿 Git 管理面板里初始化。' };
+  }
+  return { ok: true, info: r };
+}
+
+// 🔍 note_status — 查看当前工作区改动概览
+async function aiGitStatus() {
+  const repo = await _aiGitEnsureRepo();
+  if (!repo.ok) return repo.error;
+  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看版本状态', '[note_status] 列出当前未提交的改动文件');
+  if (!perm.ok) return perm.error;
+  const r = await callGit('status', {});
+  if (!r.ok) return `❌ ${r.error}`;
+  const branch = r.branch || '(无分支)';
+  // 后端字段：staged / unstaged / untracked（数组），ahead/behind
+  const staged = r.staged || [];
+  const unstaged = r.unstaged || [];
+  const untracked = r.untracked || [];
+  const total = staged.length + unstaged.length + untracked.length;
+  let out = `📊 版本状态\n分支：${branch}\n`;
+  if (r.ahead) out += `领先远程 ${r.ahead} 个提交\n`;
+  if (r.behind) out += `落后远程 ${r.behind} 个提交\n`;
+  out += `\n已暂存：${staged.length}　未暂存：${unstaged.length}　未跟踪：${untracked.length}　共 ${total}\n`;
+  if (total === 0) {
+    out += '\n✅ 工作区干净，没有未保存的改动。';
+    return out;
+  }
+  const fmt = (arr, label) => {
+    if (!arr.length) return '';
+    let s = `\n--- ${label} ---\n`;
+    for (const f of arr.slice(0, 30)) s += `${f.status || '?'}  ${f.path}\n`;
+    if (arr.length > 30) s += `... 还有 ${arr.length - 30} 个\n`;
+    return s;
+  };
+  out += fmt(staged, '已暂存');
+  out += fmt(unstaged, '未暂存改动');
+  out += fmt(untracked, '未跟踪文件');
+  return out;
+}
+
+// 📜 note_history — 查看历史快照
+async function aiGitHistory(limit) {
+  const repo = await _aiGitEnsureRepo();
+  if (!repo.ok) return repo.error;
+  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看历史快照', `[note_history] 列出最近 ${limit || 20} 个版本`);
+  if (!perm.ok) return perm.error;
+  const r = await callGit('log', { limit: Math.min(Math.max(limit || 20, 1), 100) });
+  if (!r.ok) return `❌ ${r.error}`;
+  const commits = r.commits || [];
+  if (commits.length === 0) return '📜 暂无历史快照（仓库还没有任何提交）。';
+  let out = `📜 历史快照（共 ${commits.length} 个）\n\n`;
+  for (const c of commits) {
+    const hash = c.shortHash || (c.hash || '').slice(0, 7);
+    const time = c.ts ? new Date(c.ts * 1000).toLocaleString('zh-CN') : '';
+    const author = c.author || '';
+    const subject = c.subject || '';
+    out += `● ${hash}  ${time}  ${author}\n   ${subject}\n\n`;
+  }
+  out += '💡 如需查看某个快照的具体改动，调用 note_diff 并传 commit 参数（7 位短 hash 即可）。';
+  return out;
+}
+
+// 🔬 note_diff — 查看某次快照或当前工作区的具体改动
+async function aiGitDiff(commit, path) {
+  const repo = await _aiGitEnsureRepo();
+  if (!repo.ok) return repo.error;
+  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看版本差异',
+    `[note_diff] ${commit ? '快照 ' + commit.slice(0, 7) : '当前工作区改动'}${path ? '  文件：' + path : ''}`);
+  if (!perm.ok) return perm.error;
+  const params = {};
+  if (commit) {
+    params.mode = 'commit';
+    params.commit = commit;
+  } else {
+    params.mode = 'working';
+  }
+  if (path) params.file = path;
+  const r = await callGit('diff', params);
+  if (!r.ok) return `❌ ${r.error}`;
+  const diff = r.diff || '';
+  if (!diff.trim()) return '（没有差异内容 —— 工作区干净，或指定文件没改动）';
+  const MAX = 40000;
+  if (diff.length > MAX) {
+    return `🔬 差异内容（已截断，原始 ${diff.length} 字符）\n\n` + diff.slice(0, MAX) + '\n\n... [已截断]';
+  }
+  return `🔬 差异内容\n\n${diff}`;
+}
+
+// 💾 note_snapshot — 保存当前工作区为一个新快照（git add . + git commit）
+async function aiGitSnapshot(message) {
+  const repo = await _aiGitEnsureRepo();
+  if (!repo.ok) return repo.error;
+  // 先看有没有改动可提交
+  const st = await callGit('status', {});
+  if (!st.ok) return `❌ 无法读取状态：${st.error}`;
+  const staged = st.staged || [];
+  const unstaged = st.unstaged || [];
+  const untracked = st.untracked || [];
+  const totalCount = staged.length + unstaged.length + untracked.length;
+  if (totalCount === 0) return '✅ 工作区干净，没有需要保存的改动。';
+  
+  const msg = (message && message.trim()) || `AI 自动快照 ${new Date().toLocaleString('zh-CN')}`;
+  const all = [...staged, ...unstaged, ...untracked];
+  const fileSummary = all.slice(0, 8).map(f => `${f.status || '?'} ${f.path}`).join('\n');
+  const more = all.length > 8 ? `\n... 共 ${all.length} 个文件` : '';
+  
+  const perm = await _aiGitCheckPermission('git_write', 'AI 想保存当前进度为版本快照',
+    `[note_snapshot]\n📝 信息：${msg}\n\n📋 包含改动：\n${fileSummary}${more}`);
+  if (!perm.ok) return perm.error;
+  
+  // 后端 add 接受 files 数组；用 ['.'] 等价 git add .
+  const addR = await callGit('add', { files: ['.'] });
+  if (!addR.ok) return `❌ 暂存失败：${addR.error}`;
+  const cmR = await callGit('commit', { message: msg });
+  if (!cmR.ok) return `❌ 提交失败：${cmR.error}`;
+  return `✅ 已保存快照\n📝 信息：${msg}\n📋 包含 ${all.length} 个文件改动\n\n💡 如需查看可调用 note_history，如需回退可调用 note_restore。`;
+}
+
+// ⏪ note_restore — 将某个文件恢复到历史版本（高危：覆盖工作区）
+async function aiGitRestore(commit, path) {
+  if (!commit || !path) return '❌ 必须同时提供 commit（快照 hash）和 path（要恢复的文件）。';
+  if (!/^[0-9a-fA-F]{4,40}$/.test(commit)) return '❌ commit 必须是 4-40 位的十六进制 hash。';
+  const repo = await _aiGitEnsureRepo();
+  if (!repo.ok) return repo.error;
+  
+  // 先确认这个 commit/path 存在
+  const showR = await callGit('show_file', { commit, path });
+  if (!showR.ok) {
+    return `❌ 在快照 ${commit.slice(0, 7)} 中找不到文件 ${path}：${showR.error}`;
+  }
+  
+  // ⭐ note_restore 是危险操作（覆盖工作区文件），优先使用 _confirmDangerous（输入"我确定"）
+  // 如果用户已永久授权 git_restore 类别，则跳过弹窗
+  const preauthed = TERMINAL_CONFIG.permanentAllow['git_restore'] || TERMINAL_CONFIG.taskAllow['git_restore'];
+  if (!preauthed) {
+    if (typeof _confirmDangerous === 'function') {
+      const ok = await _confirmDangerous({
+        title: `AI 想恢复文件 ${path} 到快照 ${commit.slice(0, 7)}`,
+        intro: '此操作会用历史快照中的版本覆盖当前工作区的文件。',
+        lossList: [
+          `${path} 中当前所有尚未提交的改动将丢失`,
+          '（已提交的快照不受影响，仍可在 note_history 中找回）'
+        ],
+        confirmWord: '我确定',
+        danger: true
+      });
+      if (!ok) return '⏭️ 用户拒绝了恢复操作。';
+    } else {
+      // fallback：普通确认弹窗
+      const perm = await _aiGitCheckPermission('git_restore', '⚠️ AI 想恢复文件到历史版本',
+        `[note_restore]\n🔴 这将覆盖工作区文件！\n\n文件：${path}\n恢复到快照：${commit.slice(0, 7)}\n\n注意：当前文件中尚未提交的改动会丢失。`);
+      if (!perm.ok) return perm.error;
+    }
+  }
+  
+  // 后端 checkout_file 接受 files 数组 + commit
+  const r = await callGit('checkout_file', { commit, files: [path] });
+  if (!r.ok) return `❌ 恢复失败：${r.error}`;
+  return `✅ 已将 ${path} 恢复到快照 ${commit.slice(0, 7)}\n\n💡 现在该文件已与快照一致。如需保留这个回退，可调用 note_snapshot 提交。`;
+}
+
+window.aiGitStatus = aiGitStatus;
+window.aiGitHistory = aiGitHistory;
+window.aiGitDiff = aiGitDiff;
+window.aiGitSnapshot = aiGitSnapshot;
+window.aiGitRestore = aiGitRestore;
 
 async function attachFileForAI(path, description) {
   const r = await callAgentBackend('read_file_binary', { path },

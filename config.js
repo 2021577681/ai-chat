@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v5';  // ⭐ 改了版本号，强制重新加载（搜索回退顺序改为 Bing 国内/百度/Bing 国际）
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v6';  // ⭐ v6：新增 AI Git 快照工具（note_status / note_history / note_diff / note_snapshot / note_restore）
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -362,5 +362,65 @@ const BUILTIN_TOOLS = [
       required: ['cookie']
     },
     code: 'return await lmsToolSetCookie(args.cookie);'
+  },
+
+  // ============ 💾 笔记快照（版本管理）============
+  // 让 AI 在写完一阶段工作时主动"保存进度"，类似存档点
+  // 实现位于 terminal.js（aiGitXxx 系列），共享后端 callGit
+  {
+    name: 'note_status',
+    description: '查看当前工作区里有哪些笔记/文档相对上次保存有改动。用法场景：\n- 写完一段代码、回答了一个复杂问题、修了一个 bug 之后\n- 准备调用 note_snapshot 保存进度前，先看一眼有多少改动\n- 用户问"你刚改了哪些文件"\n\n返回当前分支、已改动文件清单、未跟踪文件清单。不会修改任何内容。',
+    parameters: { type: 'object', properties: {}, required: [] },
+    code: 'return await aiGitStatus();'
+  },
+  {
+    name: 'note_history',
+    description: '查看历史快照（按时间倒序）。每个快照都有一个短 hash 标识。用法场景：\n- 想回顾之前都做了哪些工作\n- 准备调用 note_diff 看某次具体改动前\n- 准备调用 note_restore 回退文件前，先找到目标快照的 hash\n\n参数 limit 控制条数（1-100，默认 20）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: '最多返回多少条历史（默认 20，最大 100）' }
+      },
+      required: []
+    },
+    code: 'return await aiGitHistory(args.limit);'
+  },
+  {
+    name: 'note_diff',
+    description: '查看某次快照的具体改动内容，或当前工作区的未保存改动。用法场景：\n- 不传 commit：看现在工作区相对上次保存改了什么\n- 传 commit：看那次快照具体做了什么改动\n- 传 path：只看某个文件的改动\n\n返回标准的 diff 文本（+/- 行）。不会修改任何内容。',
+    parameters: {
+      type: 'object',
+      properties: {
+        commit: { type: 'string', description: '快照 hash（4-40 位十六进制，可选；不传则看当前工作区改动）' },
+        path: { type: 'string', description: '限定文件路径（可选）' }
+      },
+      required: []
+    },
+    code: 'return await aiGitDiff(args.commit, args.path);'
+  },
+  {
+    name: 'note_snapshot',
+    description: '【写入操作】把当前工作区的所有改动保存为一个新的版本快照，相当于"存档点"。\n\n何时主动调用：\n- 你刚完成一段完整的工作（如：实现完一个功能、修完一个 bug、重构完一个模块、写完一篇文档）\n- 觉得"写得差不多了"、"到一个稳定状态了"\n- 用户明确说"保存进度"、"存档一下"、"打个快照"\n- 即将开始新的尝试性改动前（防止后悔）\n\n建议的 message 写法：用一句话清楚描述这次做了什么，例如：\n  • "实现 Phase 2 的 5 大 Git 模块"\n  • "修复计时器不停止的 bug"\n  • "重构存储层迁移到 IndexedDB"\n\n本工具会自动暂存所有改动（git add .）并提交。每次调用都会向用户弹窗确认。',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: '本次快照的描述（必填，建议一句话清楚说明做了什么）' }
+      },
+      required: ['message']
+    },
+    code: 'return await aiGitSnapshot(args.message);'
+  },
+  {
+    name: 'note_restore',
+    description: '【⚠️ 危险操作 - 会覆盖工作区文件】把某个文件恢复到历史快照中的版本。\n\n用法严格限制：\n- 必须先用 note_history 找到目标快照的 hash\n- 必须明确知道要恢复哪个文件的路径\n- 当前文件中尚未保存的改动会丢失\n\n典型场景：\n- 用户说"刚才你改坏了 xxx 文件，恢复一下"\n- 你自己意识到刚才的改动是错的，主动回退\n\n建议工作流：\n1. note_history 找到坏掉之前的快照\n2. note_diff 看清那个快照里文件长啥样\n3. note_restore 执行恢复\n4. note_snapshot 把回退动作也存档（可选）\n\n每次调用都会向用户弹窗确认（高危类别，需输入"我确定"级别的确认）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        commit: { type: 'string', description: '要恢复到的快照 hash（4-40 位十六进制，从 note_history 拿）' },
+        path: { type: 'string', description: '要恢复的文件路径' }
+      },
+      required: ['commit', 'path']
+    },
+    code: 'return await aiGitRestore(args.commit, args.path);'
   }
 ];

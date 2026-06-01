@@ -1376,6 +1376,20 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
                 return self._send_json(200, {'ok': True})
 
+            # ===== show_file: 校验某 commit 中存在某文件（只读探测，用于 AI 工具的 restore 前置校验）=====
+            if sub == 'show_file':
+                commit = body.get('commit') or 'HEAD'
+                path = body.get('path') or ''
+                if commit != 'HEAD' and not re.match(r'^[0-9a-f]{4,40}$', commit):
+                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                if not path or '..' in path.split('/') or path.startswith('/'):
+                    return self._send_json(200, {'ok': False, 'error': '无效的文件路径'})
+                # 用 git cat-file -e <commit>:<path> 探测是否存在（不读内容，省内存）
+                r = self._git_run(['git', 'cat-file', '-e', f'{commit}:{path}'], cwd_abs, timeout=5)
+                if not r['ok']:
+                    return self._send_json(200, {'ok': False, 'error': '在指定快照中找不到该文件'})
+                return self._send_json(200, {'ok': True, 'exists': True})
+
             # ===== 分支 =====
             if sub == 'branch_list':
                 r = self._git_run(['git', 'branch', '--list', '--format=%(refname:short)|%(HEAD)|%(upstream:short)'], cwd_abs, timeout=10)
