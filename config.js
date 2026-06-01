@@ -117,16 +117,16 @@ const PRESET_TOOLS = {
   fetch:   { name: 'http_get', description: 'HTTP GET', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }, code: "try{const r=await fetch(args.url);return{status:r.status,body:(await r.text()).slice(0,2000)};}catch(e){return '失败：'+e.message;}" }
 };
 
-// ⭐ 内置工具 - 低调伪装版（看起来像笔记/工作区应用）
+// ⭐ 内置工具 - 低调伪装版（看起来像笔记/文件夹应用）
 const BUILTIN_TOOLS = [
   {
     name: 'execute_action',
-    description: '在用户的工作区执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。',
+    description: '在用户的本地文件夹中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。',
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: '要执行的任务指令，例如 ls -la 或 python script.py' },
-        cwd: { type: 'string', description: '工作目录（可选）' }
+        cwd: { type: 'string', description: '执行目录（可选）' }
       },
       required: ['command']
     },
@@ -134,7 +134,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'read_note',
-    description: '加载并查看工作区中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_file 工具。可指定行号范围。文档超过 1MB 需指定行号范围。',
+    description: '加载并查看本地文件夹中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_file 工具。可指定行号范围。文档超过 1MB 需指定行号范围。',
     parameters: {
       type: 'object',
       properties: {
@@ -188,7 +188,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'list_notes',
-    description: '浏览工作区目录下的所有文档和子目录。不提供 path 则浏览当前目录。',
+    description: '浏览本地文件夹下的所有文档和子目录。不提供 path 则浏览当前目录。',
     parameters: {
       type: 'object',
       properties: {
@@ -214,7 +214,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'delete_note',
-    description: '从工作区移除指定的文档或空目录。⚠️ 不可恢复，操作前会向用户确认。',
+    description: '从本地文件夹中移除指定的文档或空目录。⚠️ 不可恢复，操作前会向用户确认。',
     parameters: {
       type: 'object',
       properties: {
@@ -250,7 +250,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'attach_file',
-    description: '把工作区中的多媒体文档（图片、PDF 等无法用 read_note 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在用户的附件区。但当前这一轮你还看不到内容，需要请用户再问一次（如"现在描述这张图"），才能真正查看。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 read_note 即可。',
+    description: '把本地文件夹里的多媒体文档（图片、PDF 等无法用 read_note 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在用户的附件区。但当前这一轮你还看不到内容，需要请用户再问一次（如"现在描述这张图"），才能真正查看。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 read_note 即可。',
     parameters: {
       type: 'object',
       properties: {
@@ -369,7 +369,7 @@ const BUILTIN_TOOLS = [
   // 实现位于 terminal.js（aiGitXxx 系列），共享后端 callGit
   {
     name: 'note_status',
-    description: '查看当前工作区里有哪些笔记/文档相对上次保存有改动。用法场景：\n- 写完一段代码、回答了一个复杂问题、修了一个 bug 之后\n- 准备调用 note_snapshot 保存进度前，先看一眼有多少改动\n- 用户问"你刚改了哪些文件"\n\n返回当前分支、已改动文件清单、未跟踪文件清单。不会修改任何内容。',
+    description: '查看当前本地文件夹里有哪些笔记/文档相对上次保存有改动。用法场景：\n- 写完一段代码、回答了一个复杂问题、修了一个 bug 之后\n- 准备调用 note_snapshot 保存进度前，先看一眼有多少改动\n- 用户问"你刚改了哪些文件"\n\n返回当前分支、已改动文件清单、未跟踪文件清单。不会修改任何内容。',
     parameters: { type: 'object', properties: {}, required: [] },
     code: 'return await aiGitStatus();'
   },
@@ -387,11 +387,11 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'note_diff',
-    description: '查看某次快照的具体改动内容，或当前工作区的未保存改动。用法场景：\n- 不传 commit：看现在工作区相对上次保存改了什么\n- 传 commit：看那次快照具体做了什么改动\n- 传 path：只看某个文件的改动\n\n返回标准的 diff 文本（+/- 行）。不会修改任何内容。',
+    description: '查看某次快照的具体改动内容，或当前本地文件夹里的未保存改动。用法场景：\n- 不传 commit：看现在本地文件夹相对上次保存改了什么\n- 传 commit：看那次快照具体做了什么改动\n- 传 path：只看某个文件的改动\n\n返回标准的 diff 文本（+/- 行）。不会修改任何内容。',
     parameters: {
       type: 'object',
       properties: {
-        commit: { type: 'string', description: '快照 hash（4-40 位十六进制，可选；不传则看当前工作区改动）' },
+        commit: { type: 'string', description: '快照 hash（4-40 位十六进制，可选；不传则看当前本地文件夹改动）' },
         path: { type: 'string', description: '限定文件路径（可选）' }
       },
       required: []
@@ -400,7 +400,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'note_snapshot',
-    description: '【写入操作】把当前工作区的所有改动保存为一个新的版本快照，相当于"存档点"。\n\n何时主动调用：\n- 你刚完成一段完整的工作（如：实现完一个功能、修完一个 bug、重构完一个模块、写完一篇文档）\n- 觉得"写得差不多了"、"到一个稳定状态了"\n- 用户明确说"保存进度"、"存档一下"、"打个快照"\n- 即将开始新的尝试性改动前（防止后悔）\n\n建议的 message 写法：用一句话清楚描述这次做了什么，例如：\n  • "实现 Phase 2 的 5 大 Git 模块"\n  • "修复计时器不停止的 bug"\n  • "重构存储层迁移到 IndexedDB"\n\n本工具会自动暂存所有改动（git add .）并提交。每次调用都会向用户弹窗确认。',
+    description: '【写入操作】把当前本地文件夹里的所有改动保存为一个新的版本快照，相当于"存档点"。\n\n何时主动调用：\n- 你刚完成一段完整的工作（如：实现完一个功能、修完一个 bug、重构完一个模块、写完一篇文档）\n- 觉得"写得差不多了"、"到一个稳定状态了"\n- 用户明确说"保存进度"、"存档一下"、"打个快照"\n- 即将开始新的尝试性改动前（防止后悔）\n\n建议的 message 写法：用一句话清楚描述这次做了什么，例如：\n  • "实现 Phase 2 的 5 大 Git 模块"\n  • "修复计时器不停止的 bug"\n  • "重构存储层迁移到 IndexedDB"\n\n本工具会自动暂存所有改动（git add .）并提交。每次调用都会向用户弹窗确认。',
     parameters: {
       type: 'object',
       properties: {
@@ -412,7 +412,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'note_restore',
-    description: '【⚠️ 危险操作 - 会覆盖工作区文件】把某个文件恢复到历史快照中的版本。\n\n用法严格限制：\n- 必须先用 note_history 找到目标快照的 hash\n- 必须明确知道要恢复哪个文件的路径\n- 当前文件中尚未保存的改动会丢失\n\n典型场景：\n- 用户说"刚才你改坏了 xxx 文件，恢复一下"\n- 你自己意识到刚才的改动是错的，主动回退\n\n建议工作流：\n1. note_history 找到坏掉之前的快照\n2. note_diff 看清那个快照里文件长啥样\n3. note_restore 执行恢复\n4. note_snapshot 把回退动作也存档（可选）\n\n每次调用都会向用户弹窗确认（高危类别，需输入"我确定"级别的确认）。',
+    description: '【⚠️ 危险操作 - 会覆盖本地文件】把某个文件恢复到历史快照中的版本。\n\n用法严格限制：\n- 必须先用 note_history 找到目标快照的 hash\n- 必须明确知道要恢复哪个文件的路径\n- 当前文件中尚未保存的改动会丢失\n\n典型场景：\n- 用户说"刚才你改坏了 xxx 文件，恢复一下"\n- 你自己意识到刚才的改动是错的，主动回退\n\n建议工作流：\n1. note_history 找到坏掉之前的快照\n2. note_diff 看清那个快照里文件长啥样\n3. note_restore 执行恢复\n4. note_snapshot 把回退动作也存档（可选）\n\n每次调用都会向用户弹窗确认（高危类别，需输入"我确定"级别的确认）。',
     parameters: {
       type: 'object',
       properties: {
