@@ -9,10 +9,9 @@ function buildRequestBody(history, modelOverride, streamOverride) {
   const model = modelOverride || s.currentModel;
   const stream = streamOverride !== undefined ? streamOverride : !!s.stream;
   
-  // 摘要合并到 system
-  const summaries = history.filter(m => m._isSummary).map(m => m.content).join('\n\n');
-  let systemContent = s.systemPrompt || '';
-  if (summaries) systemContent += (systemContent ? '\n\n' : '') + summaries;
+  // ⭐ system 保持稳定（不混入动态摘要），最大化 prompt cache 命中率
+  // 摘要由各适配器自行注入到 messages 数组中（OpenAI: 作为 system message；Anthropic: prepend 到首条 user）
+  const systemContent = s.systemPrompt || '';
   
   // 准备所有占位符的值
   const apiMessages = s.apiFormat === 'anthropic' 

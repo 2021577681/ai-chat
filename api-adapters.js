@@ -61,8 +61,9 @@ function buildOpenAIMessages(history) {
 function buildAnthropicMessages(history) {
   const out = [];
   
-  // ⭐ 第一步：跟踪所有 tool_use ids 和它们对应的 tool_result
-  // 用于检测孤立的 tool_use
+  // ⭐ 收集摘要：Anthropic 的 system 字段保持稳定，摘要在循环结束后 prepend 到首条 user 消息
+  // 这样既不污染 system 缓存，又满足 Anthropic 必须 user 开头的要求
+  const summaryText = history.filter(m => m._isSummary).map(m => m.content).join('\n\n');
   
   for (const m of history) {
     if (m._isCompressing) continue;
@@ -139,7 +140,30 @@ function buildAnthropicMessages(history) {
     }
   }
   
-  // ⭐ 第二步：修复格式（自动补全缺失的 tool_result）
+  // ⭐ 第二步：把摘要 prepend 到第一条 user 消息内容前（保持 system 字段稳定 → 命中 prompt cache）
+  if (summaryText) {
+    const summaryBlock = `【对话历史摘要】\n${summaryText}\n\n---\n\n`;
+    const firstUserIdx = out.findIndex(m => m.role === 'user');
+    if (firstUserIdx >= 0) {
+      const u = out[firstUserIdx];
+      if (typeof u.content === 'string') {
+        u.content = summaryBlock + u.content;
+      } else if (Array.isArray(u.content)) {
+        // 找第一个 text 块；没有就在最前面插一个
+        const textPart = u.content.find(p => p.type === 'text');
+        if (textPart) {
+          textPart.text = summaryBlock + textPart.text;
+        } else {
+          u.content.unshift({ type: 'text', text: summaryBlock });
+        }
+      }
+    } else {
+      // 极端情况：没有任何 user 消息（理论上不会发生，但兜底）
+      out.unshift({ role: 'user', content: summaryBlock });
+    }
+  }
+  
+  // ⭐ 第三步：修复格式（自动补全缺失的 tool_result）
   return fixAnthropicMessageSequence(out);
 }
 
