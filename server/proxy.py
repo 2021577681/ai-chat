@@ -193,9 +193,13 @@ class ProxyMixin:
             req_body = b''
             target_headers.pop('Content-Type', None)
 
+        import time as _time
         print(f'\n🤖 [LLM 代理] {target_method} {target_url}')
         if req_body:
-            print(f'   请求体大小: {len(req_body)} 字节')
+            size_mb = len(req_body) / 1024 / 1024
+            print(f'   请求体大小: {len(req_body)} 字节 ({size_mb:.2f} MB)')
+            if size_mb > 1:
+                print(f'   ⏳ 正在上传 + 等待上游响应头...（大请求可能需 10-90s）', flush=True)
 
         req = urllib.request.Request(
             target_url,
@@ -204,8 +208,11 @@ class ProxyMixin:
             headers=target_headers,
         )
 
+        _t_send = _time.time()
         try:
             upstream = urllib.request.urlopen(req, timeout=600)
+            _t_headers = _time.time()
+            print(f'   📡 收到上游响应头，耗时 {_t_headers - _t_send:.2f}s', flush=True)
         except urllib.error.HTTPError as e:
             err_body = b''
             try: err_body = e.read()
@@ -240,17 +247,30 @@ class ProxyMixin:
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'close')
             self.end_headers()
+            _t_first_chunk = None
+            _total_bytes = 0
+            _last_log = _time.time()
             try:
                 while True:
                     chunk = upstream.read(1024)
                     if not chunk:
                         break
+                    if _t_first_chunk is None:
+                        _t_first_chunk = _time.time()
+                        print(f'   🎯 首字 chunk 到达，距请求头 {_t_first_chunk - _t_headers:.2f}s', flush=True)
+                    _total_bytes += len(chunk)
                     try:
                         self.wfile.write(chunk)
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError):
                         print('   ⚠️ 浏览器断开了流式连接')
                         break
+                    # 每 5s 打一次进度，避免长流式看起来死掉
+                    if _time.time() - _last_log > 5:
+                        print(f'   📤 已转发 {_total_bytes} 字节', flush=True)
+                        _last_log = _time.time()
+                _dur = _time.time() - (_t_first_chunk or _t_headers)
+                print(f'   ✅ 流式完成，共 {_total_bytes} 字节，流持续 {_dur:.2f}s', flush=True)
             except Exception as e:
                 print(f'   ⚠️ 流式转发中断: {e}')
             finally:
