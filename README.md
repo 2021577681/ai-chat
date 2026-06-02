@@ -1,8 +1,8 @@
 # 🤖 AI Chat - 大模型对话助手
 
-一个**零构建、纯前端**的大模型对话工具，配套本地工具执行服务、Git 可视化面板和西安交大 LMS 学习助手。
+一个**零构建、纯前端**的大模型对话工具，配套本地工具执行服务、Git 可视化面板与可扩展的工具组机制。
 
-> 单文件 HTML 打开即用，支持工具调用、动态规划、师生互评、版本快照等多种工作流。
+> 单文件 HTML 打开即用，支持函数调用、动态规划、多轮反思、版本快照等多种工作流。
 
 ---
 
@@ -18,26 +18,26 @@
 
 ### 工作流模式
 - 📋 **Plan 模式**：规划 → 审查 → 人工审批 → 分步执行 → 整合（瀑布式）
-- 📑 **大纲模式**：AI 自维护工作大纲，边做边改（敏捷式，支持暂停/继续/收尾）
-- 🎭 **师生讨论**：双模型互评打分，提升回答质量
+- 📑 **大纲模式**：模型自维护任务大纲，边做边改（敏捷式，支持暂停/继续/收尾）
+- 🎭 **多角色讨论**：双模型互评打分，提升回答质量
 
 ### 工具与集成
-- 🛠 **工具调用**：通过本地后端在**沙箱目录**内执行命令、读写文件、检索网页
+- 🛠 **函数调用**：通过本地后端在指定目录内执行命令、读写文件、检索网页
 - 💾 **Git 可视化面板**：状态/历史/diff/暂存/提交/撤销，纯前端 UI
-- 📸 **版本快照工具组**：AI 可主动调用 `note_snapshot` / `note_restore` 等做检查点（可选开关）
-- 🎓 **LMS 集成**：西安交大学习管理系统作业、课件查询与下载（可选开关）
+- 📸 **版本快照工具组**：模型可主动调用 `note_snapshot` / `note_restore` 等做检查点（可选开关）
+- 🎓 **教务系统示例工具**：内置一组对接学校 LMS 的查询/下载工具（可选开关，可按需替换为你自己学校的接口）
 
 ### 存储与运维
 - 💽 **IndexedDB 存储**：突破 localStorage 5MB 上限，支持大附件/长对话
 - 💾 **备份/恢复**：JSON 一键导出全量数据
 - 🧾 **Trace 日志**：git log 风格记录每次请求/工具调用
-- 🔒 **细粒度权限**：9 类操作（执行/读/写/追加/改/删/附件/Git 读/Git 写）独立授权
+- 🔒 **细粒度权限**：多类操作（执行/读/写/追加/改/删/附件/Git 读写）独立授权
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 启动本地工具后端（可选，需要工具调用才用）
+### 1. 启动本地工具后端（可选，需要函数调用才用）
 
 ```bash
 pip install -r requirements.txt
@@ -45,32 +45,19 @@ python local_terminal_server.py
 ```
 
 默认监听 `127.0.0.1:8765`，Token 自动生成到 `~/.aichat_terminal_token`。
-**沙箱根目录**为启动时的工作目录，所有文件操作被限制在内。
+启动时所在目录会作为模型可访问的**根目录**，所有文件操作限制在内。
 
 ### 2. 打开主界面
 
 直接用浏览器打开 `AI-Chat-大模型对话助手.html` 即可。
 首次使用请点击右上角 **⚙ 设置** 填入 API Key、模型名等。
 
-### 3. 配置 LMS 助手（可选）
+### 3. 启用可选工具组（按需）
 
-详见 [`lms_tool/README.md`](lms_tool/README.md)。简而言之：
+默认只暴露一组通用工具给模型。如需让模型使用其它能力：
 
-```bash
-# 二选一保存 Cookie
-export LMS_COOKIE="..."                        # Linux/Mac
-setx   LMS_COOKIE "..."                        # Windows
-# 或写入 lms_tool/.lms_cookie 文件
-
-cd lms_tool && python lms.py login             # 验证
-```
-
-### 4. 启用可选工具组
-
-默认只暴露 13 个基础工具给模型。如需让 AI 用其它能力：
-
-- 工具面板底部 → **🎓 启用 LMS 工具**（+8 个，需要先配好 Cookie）
-- 工具面板底部 → **💾 启用快照工具**（+5 个，需要工作目录是 Git 仓库）
+- 工具面板底部 → **💾 启用快照工具**（+5 个，需要当前目录是 Git 仓库）
+- 工具面板底部 → **🎓 启用教务工具**（需要先配好对应 Cookie，详见 [`lms_tool/README.md`](lms_tool/README.md)）
 
 ---
 
@@ -81,13 +68,13 @@ cd lms_tool && python lms.py login             # 验证
 ├── AI-Chat-大模型对话助手.html   # 主入口（单文件 HTML）
 │
 ├── base.css                      # 通用样式
-├── lms.css                       # LMS 学习面板专属样式
-├── git-panel.css                 # Git 面板专属样式
+├── lms.css                       # 教务面板样式
+├── git-panel.css                 # Git 面板样式
 │
 ├── main.js                       # 启动入口（init 钩子）
 ├── state.js                      # 全局 state + 内置工具注入 + 兼容迁移
 ├── config.js                     # 常量、Provider 预设、预设 Prompt、内置工具定义
-├── utils.js                      # toast / 转义 / 沙箱信息栏刷新等通用
+├── utils.js                      # toast / 转义 / 信息栏刷新等通用
 ├── theme.js                      # 亮/暗主题切换
 │
 ├── idb-store.js                  # IndexedDB 存储层（同步代理 + 异步持久化）
@@ -107,10 +94,10 @@ cd lms_tool && python lms.py login             # 验证
 ├── outline-core.js               # 大纲模式主循环 + 工具处理 + 保底收尾
 ├── outline-render.js             # 大纲模式 UI 渲染 + 用户介入操作
 │
-├── reflection.js                 # 师生讨论模式
+├── reflection.js                 # 多角色讨论模式
 │
-├── tools.js                      # 工具管理（增删改查、一键启停 LMS/快照工具组）
-├── terminal.js                   # 本地终端调用 + 权限弹窗（9 类）+ Token 自取
+├── tools.js                      # 工具管理（增删改查、一键启停可选工具组）
+├── terminal.js                   # 本地服务调用 + 权限弹窗 + Token 自取
 ├── permissions.js                # 工具权限管理面板
 │
 ├── git-panel.js                  # Git 可视化管理面板（状态/历史/diff/提交/回退）
@@ -124,12 +111,12 @@ cd lms_tool && python lms.py login             # 验证
 ├── rate-limiter.js               # 请求频率限制（每分钟上限、节流、随机延迟）
 ├── trace.js                      # Trace 日志（git log 风格）
 │
-├── lms.js                        # LMS 数据层（Cookie / API / 渲染 / 工具实现）
-├── lms_panel.js                  # LMS 学习面板抽屉 UI
+├── lms.js                        # 教务系统数据层（Cookie / API / 渲染 / 工具实现）
+├── lms_panel.js                  # 教务系统面板抽屉 UI
 │
-├── local_terminal_server.py      # 本地工具执行后端（标准库 + 沙箱）
+├── local_terminal_server.py      # 本地工具执行后端（标准库为主）
 ├── lms_tool/
-│   ├── lms.py                    # LMS 命令行助手
+│   ├── lms.py                    # 教务系统命令行助手
 │   ├── README.md
 │   ├── .lms_cookie.example       # Cookie 模板
 │   ├── data/                     # 缓存（.gitignore）
@@ -151,7 +138,7 @@ cd lms_tool && python lms.py login             # 验证
 
 | 工具 | 用途 |
 |------|------|
-| `execute_action` | 在工作区执行任务指令（命令行） |
+| `execute_action` | 在本地文件夹中执行任务指令（命令行） |
 | `read_note` / `save_note` / `append_note` / `edit_note` / `delete_note` | 文档增删改查 |
 | `list_notes` / `find_in_notes` | 目录浏览与全文搜索 |
 | `get_current_time` | 当前时间 |
@@ -159,17 +146,20 @@ cd lms_tool && python lms.py login             # 验证
 | `attach_file` | 把图片/PDF 加入对话供多模态查看 |
 | `web_search` / `fetch_url` | 联网搜索与网页正文加载 |
 
-### 💾 快照组（5 个，可选）—— Git 工具的 AI 接口
+### 💾 快照组（5 个，可选）—— Git 工具的模型接口
 
 | 工具 | 用途 |
 |------|------|
 | `note_status` | 查看仓库状态 |
 | `note_history` | 提交历史 |
 | `note_diff` | 文件 diff |
-| `note_snapshot` | AI 主动打快照（commit） |
+| `note_snapshot` | 主动打快照（commit） |
 | `note_restore` | 回退到指定快照 |
 
-### 🎓 LMS 组（8 个，可选）—— 西交大学习系统
+### 🎓 教务组（8 个，可选）—— 学校教务系统示例
+
+> 内置示例对接的是某高校的 LMS，使用前请阅读 [`lms_tool/README.md`](lms_tool/README.md)。
+> 如果你的学校用的是别的系统，可以参考 `lms.js` 替换为对应接口。
 
 | 工具 | 用途 |
 |------|------|
@@ -180,24 +170,24 @@ cd lms_tool && python lms.py login             # 验证
 
 ---
 
-## 🛡️ 安全说明（重要！）
+## 🛡️ 安全说明
 
 ### ✅ 已做
 
-- 后端 **沙箱根目录** 锁定（基于 `realpath`，防 symlink 越狱）
+- 后端运行目录在启动时锁定（基于 `realpath`，防 symlink 越狱）
 - 危险命令黑名单（`rm -rf` / `format` / `shutdown` / fork bomb / `eval` / `base64|sh` 等）
 - **Token 鉴权**（自动写到 `~/.aichat_terminal_token`，权限 600）
 - **CORS Origin 白名单**（仅 localhost / 127.0.0.1 / file:// 可访问）
-- **9 类操作权限**（执行/读/写/追加/改/删/附件/Git 读/Git 写/Git 回退）每次弹窗确认，可勾选「永久允许」
-- 自定义工具代码导入时 **二次确认**（含代码预览）
-- 一键 **清除所有凭证**（设置 → 工具权限管理 → 危险区）
+- **多类操作权限**（执行/读/写/追加/改/删/附件/Git 读/Git 写/Git 回退）每次弹窗确认，可勾选「永久允许」
+- 自定义工具代码导入时**二次确认**（含代码预览）
+- 一键**清除所有凭证**（设置 → 工具权限管理 → 危险区）
 
 ### ⚠️ 你需要注意
 
 - **永远不要**把 `lms_tool/.lms_cookie`、`~/.aichat_terminal_token`、API Key 提交到 Git
 - **永远不要**导入来路不明的备份文件（自定义工具是 JS 代码，等同于让对方在你浏览器里执行任意脚本）
 - API Key / Cookie 默认存在 IndexedDB，**和你浏览器登录态在一个安全域**，请勿在公共电脑使用
-- `note_restore` 工具会强制回退文件，**未提交的改动会丢失**，AI 调用时务必看清提示再确认
+- `note_restore` 工具会强制回退文件，**未提交的改动会丢失**，调用时务必看清提示再确认
 
 ---
 
@@ -221,8 +211,8 @@ cd lms_tool && python lms.py login             # 验证
 
 - **纯前端零构建**：所有 JS 用 `<script>` 顺序加载，全局函数互调；不用 ESM、不打包
 - **持久化**：IndexedDB（保留同步 API 风格，内部异步落盘）
-- **后端**：仅依赖 Python 标准库 + `requests`（LMS 助手用）
-- **工具命名风格**：基础笔记类工具用 `xxx_note`，避免 Coding 化命名暴露 Agent 特征
+- **后端**：仅依赖 Python 标准库 + `requests`（教务助手用）
+- **工具命名风格**：基础笔记类工具统一使用 `xxx_note` 命名
 - **可选工具组**：通过 `OPTIONAL_TOOL_NAMES` 白名单首次跳过自动注入，需用户手动启用
 
 ---

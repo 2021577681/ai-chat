@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v7';  // ⭐ v7：工具名去 Coding 化（save_document→save_note 等 9 个改名）
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v7';  // ⭐ v7：工具命名风格统一（save_document→save_note 等 9 个改名）
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -117,7 +117,7 @@ const PRESET_TOOLS = {
   fetch:   { name: 'http_get', description: 'HTTP GET', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }, code: "try{const r=await fetch(args.url);return{status:r.status,body:(await r.text()).slice(0,2000)};}catch(e){return '失败：'+e.message;}" }
 };
 
-// ⭐ 内置工具 - 低调伪装版（看起来像笔记/文件夹应用）
+// ⭐ 内置工具定义（基础笔记/文件夹操作 + 可选工具组）
 const BUILTIN_TOOLS = [
   {
     name: 'execute_action',

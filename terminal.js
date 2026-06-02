@@ -744,20 +744,24 @@ async function tryAutoResend() {
     return;
   }
   
+  // ⭐ 等待时间从 20s 延长到 120s，覆盖思考模型（Claude Opus / GPT-o1 / DeepSeek-R1）的长回复
+  // 超时后不再强制重置 state.isGenerating（会导致正在跑的流式回复 UI 错乱），
+  // 改为放弃本次自动重发，把附件保留在 pending 队列，等下一次时机再触发
   let waitCount = 0;
-  const MAX_WAIT = 40;
+  const MAX_WAIT = 240;   // 240 * 500ms = 120 秒
   while (state.isGenerating && waitCount < MAX_WAIT) {
-    console.log(`[自动重发] AI 还在生成（${waitCount + 1}/${MAX_WAIT}），等待 500ms...`);
+    if (waitCount % 20 === 0) {
+      console.log(`[自动重发] AI 还在生成（${waitCount + 1}/${MAX_WAIT}），等待 500ms...`);
+    }
     await new Promise(r => setTimeout(r, 500));
     waitCount++;
   }
   
   if (state.isGenerating) {
-    console.warn('[自动重发] AI 超时未完成（20s），强制重置状态');
-    state.isGenerating = false;
-    state.abortCtrl = null;
-    if (typeof updateSendBtn === 'function') updateSendBtn();
-    await new Promise(r => setTimeout(r, 500));
+    console.warn('[自动重发] AI 超过 120s 仍未完成，本次放弃自动重发（保留待发任务，下次再触发）');
+    // 不重置 state.isGenerating —— 让真正在跑的回复自然完成
+    // _autoResendInProgress 仍是 false，下次 scheduleAutoResend 调用时会重新尝试
+    return;
   }
   
   if (!_pendingAutoResend) {

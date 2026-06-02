@@ -148,7 +148,7 @@ function _renderInitWizard(checkResult) {
       <div class="git-init-form">
         <div class="git-form-row">
           <label>Git 用户名</label>
-          <input type="text" id="initUserName" placeholder="你的名字（如 philips）" />
+          <input type="text" id="initUserName" placeholder="你的名字（如 alice）" />
         </div>
         <div class="git-form-row">
           <label>Git 邮箱</label>
@@ -446,7 +446,7 @@ function _showGitConfigInline() {
     <div class="git-inline-config">
       <div class="git-form-row">
         <label>Git 用户名</label>
-        <input type="text" id="cfgUserName" placeholder="philips" />
+        <input type="text" id="cfgUserName" placeholder="alice" />
       </div>
       <div class="git-form-row">
         <label>Git 邮箱</label>
@@ -810,7 +810,7 @@ async function _refreshRemotePanel() {
     <!-- 用户信息 -->
     <section class="git-remote-section">
       <h3>👤 用户信息（git config）</h3>
-      <div class="git-form-row"><label>用户名</label><input id="cfgRpUserName" value="${escapeHtml((uname && uname.value) || '')}" placeholder="philips" /></div>
+      <div class="git-form-row"><label>用户名</label><input id="cfgRpUserName" value="${escapeHtml((uname && uname.value) || '')}" placeholder="alice" /></div>
       <div class="git-form-row"><label>邮箱</label><input id="cfgRpUserEmail" value="${escapeHtml((uemail && uemail.value) || '')}" placeholder="me@example.com" /></div>
       <div class="git-form-actions"><button class="git-btn git-btn-primary" onclick="_savePanelUser()">💾 保存</button></div>
     </section>

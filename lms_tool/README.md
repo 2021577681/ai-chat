@@ -1,7 +1,10 @@
-# 🎓 LMS Helper
+# 🎓 LMS Helper（教务系统助手示例）
 
-西安交通大学学习管理系统（lms.xjtu.edu.cn）的个人命令行助手。
+一个学校学习管理系统（LMS）的个人命令行助手示例。
 一个 `.py` 文件，零依赖（除了 `requests`），快速查作业、查课件、下载文件。
+
+> ⚠️ 内置示例 `BASE_URL` 指向某高校的 LMS 接口。如果你的学校用的是别的系统，
+> 请修改 `lms.py` 顶部的 `BASE_URL` 和相关 API 路径以适配。
 
 ## 📦 安装
 
@@ -11,7 +14,7 @@ pip install requests
 
 ## 🔑 配置 Cookie（第一次使用）
 
-1. 浏览器打开并登录 https://lms.xjtu.edu.cn/
+1. 浏览器登录你学校的 LMS 网站
 2. 按 `F12` → 切到 **Console（控制台）**
 3. 输入 `copy(document.cookie)` 回车
 4. **二选一**保存 Cookie：
@@ -19,7 +22,7 @@ pip install requests
    - 或新建文件 `lms_tool/.lms_cookie`，把 Cookie 粘进去（参考 `.lms_cookie.example`）
 5. 运行 `python lms.py login` 验证
 
-> ⏰ Cookie 大约 24 小时过期，过期后重新走一遍即可。
+> ⏰ Cookie 通常一天左右过期，过期后重新走一遍即可。
 > 🔒 `.lms_cookie` 已加入 `.gitignore`，不会泄漏到 Git 仓库。
 
 ## 🚀 命令一览
@@ -43,10 +46,10 @@ python lms.py todos
 # 看某个作业要交啥
 python lms.py homework 1021271
 
-# 找到操作系统的 course_id
+# 找到某门课的 course_id
 python lms.py find 操作系统
 
-# 看操作系统所有课件
+# 列出该课程所有课件
 python lms.py materials 21406
 
 # 下载第10章 PPT
@@ -73,8 +76,8 @@ lms_tool/
 
 ## 🔐 隐私
 
-- Cookie 仅保存在本地 `lms.py` 文件中
-- 所有 API 请求直接发往 `lms.xjtu.edu.cn`，不经过任何第三方
+- Cookie 仅保存在本地（环境变量或本地文件）
+- 所有 API 请求直接发往学校服务器，不经过任何第三方
 - 缓存数据存在 `data/` 目录，自己看着办
 
 ## 📜 License

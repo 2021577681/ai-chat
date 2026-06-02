@@ -193,7 +193,9 @@ function applyImport() {
   if (opts.tools && Array.isArray(data.tools)) {
     const existing = new Set(state.tools.map(t => t.name));
     const incoming = data.tools.filter(t => !existing.has(t.name));
+    const conflicting = data.tools.filter(t => existing.has(t.name));
 
+    // 先处理新增工具（无名称冲突）
     if (incoming.length > 0) {
       // 🛡️ 二次确认：把即将执行的工具名 + 代码摘要列出来，避免恶意备份偷渡 JS
       const preview = incoming.slice(0, 5).map(t => {
@@ -203,7 +205,7 @@ function applyImport() {
       }).join('\n\n');
       const more = incoming.length > 5 ? `\n\n…还有 ${incoming.length - 5} 个未显示` : '';
       const ok = confirm(
-        `⚠️ 即将导入 ${incoming.length} 个自定义工具。\n\n` +
+        `⚠️ 即将导入 ${incoming.length} 个新工具。\n\n` +
         `这些工具的 JS 代码将以页面权限执行（可读取 localStorage、调用 fetch、` +
         `操作 DOM）。如果备份文件来源不明，请取消。\n\n` +
         `——— 前 ${Math.min(5, incoming.length)} 个工具代码预览 ———\n${preview}${more}\n\n` +
@@ -211,12 +213,58 @@ function applyImport() {
       );
       if (ok) {
         for (const t of incoming) state.tools.push(t);
-        imported.push(`${incoming.length} 工具`);
+        imported.push(`${incoming.length} 新工具`);
       } else {
-        imported.push('0 工具(已取消)');
+        imported.push('0 新工具(已取消)');
       }
-    } else {
+    } else if (conflicting.length === 0) {
       imported.push('0 工具(无新增)');
+    }
+
+    // 再处理同名冲突：让用户决定是覆盖、跳过还是逐个询问
+    if (conflicting.length > 0) {
+      const names = conflicting.slice(0, 8).map(t => `• ${t.name}`).join('\n');
+      const more2 = conflicting.length > 8 ? `\n…还有 ${conflicting.length - 8} 个` : '';
+      const choice = prompt(
+        `🔁 备份里有 ${conflicting.length} 个工具与现有工具同名：\n\n${names}${more2}\n\n` +
+        `请输入处理方式：\n` +
+        `  1 = 全部覆盖（用备份版本替换当前版本）\n` +
+        `  2 = 全部跳过（保留当前版本）\n` +
+        `  3 = 逐个询问\n` +
+        `留空 / 取消 = 全部跳过`,
+        '2'
+      );
+      let overwriteCount = 0;
+      let skipCount = 0;
+      if (choice === '1') {
+        for (const t of conflicting) {
+          const idx = state.tools.findIndex(x => x.name === t.name);
+          if (idx >= 0) state.tools[idx] = t;
+          overwriteCount++;
+        }
+      } else if (choice === '3') {
+        for (const t of conflicting) {
+          const code = (t.code || '').trim();
+          const head = code.length > 200 ? code.slice(0, 200) + '…' : code;
+          const yes = confirm(
+            `覆盖工具 "${t.name}"？\n\n` +
+            `——— 备份版本代码预览 ———\n${head || '(无代码)'}\n\n` +
+            `[确定] = 覆盖     [取消] = 跳过`
+          );
+          if (yes) {
+            const idx = state.tools.findIndex(x => x.name === t.name);
+            if (idx >= 0) state.tools[idx] = t;
+            overwriteCount++;
+          } else {
+            skipCount++;
+          }
+        }
+      } else {
+        // choice === '2' 或留空 / 取消
+        skipCount = conflicting.length;
+      }
+      if (overwriteCount > 0) imported.push(`${overwriteCount} 覆盖`);
+      if (skipCount > 0) imported.push(`${skipCount} 跳过`);
     }
   }
   
