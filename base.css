@@ -277,7 +277,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:1000}
 .modal-mask.show{display:flex}
 .modal{background:var(--bg-sidebar);border-radius:14px;padding:24px;width:520px;max-width:92vw;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)}
-.modal.wide{width:760px}
+.modal.wide{width:min(1000px,95vw)}
 .modal h2{font-size:18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between}
 .modal-close{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary);line-height:1}
 .form-group{margin-bottom:16px}

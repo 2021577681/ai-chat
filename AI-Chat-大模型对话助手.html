@@ -253,9 +253,12 @@
     </div>
     
     <div class="form-group">
-      <label>模型名称</label>
+      <label style="display:flex;align-items:center;justify-content:space-between;">
+        <span>模型名称</span>
+        <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" onclick="onFetchModels()">📡 拉取模型</button>
+      </label>
       <input type="text" id="modelName">
-      <div class="form-hint">多个用逗号分隔</div>
+      <div class="form-hint">多个用逗号分隔。点【📡 拉取模型】可从服务商自动获取可用列表</div>
     </div>
     
     <div class="form-group">
@@ -367,6 +370,34 @@
       <button class="btn" onclick="closeSettings()">取消</button>
       <button class="btn" onclick="testConnection()">🔌 测试连接</button>
       <button class="btn btn-primary" onclick="saveAndClose()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 📡 拉取模型 - 选择列表 ============ -->
+<div class="modal-mask" id="fetchModelsModal">
+  <div class="modal">
+    <h2>📡 选择要添加的模型 <button class="modal-close" onclick="closeFetchModelsModal()">×</button></h2>
+    
+    <div id="fetchModelsHint" class="json-help" style="display:none;"></div>
+    
+    <div class="form-group" style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="fetchModelsFilter" placeholder="🔍 过滤模型名（支持关键词）" 
+             oninput="filterFetchModels()"
+             style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
+      <button class="btn" type="button" onclick="toggleSelectAllFetchModels()" id="fetchModelsSelAllBtn">全选</button>
+    </div>
+    
+    <div class="form-hint" id="fetchModelsCount" style="margin:6px 0 10px;">共 0 个</div>
+    
+    <div id="fetchModelsList" 
+         style="max-height:55vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg);">
+      <div style="text-align:center;color:var(--text-secondary);padding:20px;">加载中…</div>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeFetchModelsModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmAddFetchedModels()">✅ 添加选中</button>
     </div>
   </div>
 </div>

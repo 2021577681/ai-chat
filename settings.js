@@ -297,3 +297,273 @@ function onClearTerminalToken() {
   refreshTerminalTokenView();
   toast('🗑️ Token 已清除', 2000);
 }
+
+// ============================================================
+// 📡 拉取模型列表（OpenAI / Anthropic 兼容）
+// ============================================================
+//
+// 行为：
+//   1. 读取设置弹窗当前填写的 Base URL / API Key / API 格式
+//   2. 调用 GET {baseUrl}/models（如已开启本地代理则走 /llm-proxy）
+//   3. 解析返回，弹出复选框选择窗口
+//   4. 用户勾选后追加到模型名称输入框（已存在的自动跳过）
+//
+// 注意：
+//   - Anthropic 的 /v1/models 自 2024-10 起官方支持，需要 anthropic-version
+//   - 部分代理商不实现 /models（如某些转发服务），会优雅降级
+//
+
+let _fetchModelsBuffer = [];   // 当前拉取到的模型列表（用于过滤/全选）
+let _fetchModelsExisting = new Set();  // 当前输入框已有的模型
+
+async function onFetchModels() {
+  const baseUrl = (document.getElementById('baseUrl').value || '').trim();
+  const apiKey = (document.getElementById('apiKey').value || '').trim();
+  const apiFormat = document.getElementById('apiFormat').value;
+  
+  if (!baseUrl) { toast('❌ 请先填写 Base URL', 2500); return; }
+  if (!apiKey) { toast('❌ 请先填写 API Key', 2500); return; }
+  
+  // 立即打开弹窗，显示加载中
+  openFetchModelsModal();
+  const listEl = document.getElementById('fetchModelsList');
+  const countEl = document.getElementById('fetchModelsCount');
+  const hintEl = document.getElementById('fetchModelsHint');
+  if (hintEl) hintEl.style.display = 'none';
+  listEl.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;">📡 正在拉取模型列表…</div>';
+  if (countEl) countEl.textContent = '加载中…';
+  
+  // 构造 GET /models 请求
+  const url = buildModelsUrl(baseUrl);
+  const headers = buildModelsHeaders(apiKey, apiFormat);
+  
+  let models = [];
+  let errorMsg = '';
+  try {
+    const resp = await fetchModelsViaCorrectChannel(url, headers);
+    if (!resp.ok) {
+      errorMsg = `HTTP ${resp.status}：${(resp.text || '').slice(0, 200)}`;
+    } else {
+      models = parseModelsResponse(resp.text, apiFormat);
+      if (!models.length) {
+        errorMsg = '响应解析后为空。原始响应预览：\n' + (resp.text || '').slice(0, 300);
+      }
+    }
+  } catch (e) {
+    errorMsg = '网络错误：' + (e.message || e);
+  }
+  
+  if (errorMsg) {
+    listEl.innerHTML = `
+      <div style="padding:16px;color:var(--danger,#dc2626);">
+        <strong>❌ 拉取失败</strong>
+        <pre style="margin-top:8px;white-space:pre-wrap;font-size:12px;background:rgba(220,38,38,0.08);padding:8px;border-radius:6px;">${escapeHtml(errorMsg)}</pre>
+        <div style="margin-top:10px;font-size:12.5px;color:var(--text-secondary);line-height:1.6;">
+          可能原因：<br>
+          • 服务商不支持 <code>/models</code> 端点（如某些第三方转发）<br>
+          • Base URL 填错（应为根地址，不含 <code>/chat/completions</code>）<br>
+          • 跨域：可在上方勾选「通过本地服务代理」<br>
+          • API Key 无效或权限不足
+        </div>
+      </div>`;
+    if (countEl) countEl.textContent = '0 个';
+    return;
+  }
+  
+  // 排序：含 deepseek / claude / gpt / qwen / glm / o1 / gemini 之类的优先
+  models = sortModelsByRelevance(models);
+  _fetchModelsBuffer = models;
+  
+  // 记录已存在的（去重提示）
+  const currentText = (document.getElementById('modelName').value || '').trim();
+  _fetchModelsExisting = new Set(currentText.split(',').map(s => s.trim()).filter(Boolean));
+  
+  renderFetchModelsList(models);
+  
+  if (hintEl) {
+    hintEl.style.display = 'block';
+    hintEl.innerHTML = `✅ 从 <code>${escapeHtml(url)}</code> 拉取到 <strong>${models.length}</strong> 个模型。已自动跳过已添加的 ${_fetchModelsExisting.size} 个。`;
+  }
+}
+
+function buildModelsUrl(baseUrl) {
+  // baseUrl 末尾去 /，并去掉常见的子路径（兼容用户把完整端点填进去的场景）
+  let b = baseUrl.replace(/\/+$/, '');
+  // 去掉常见结尾路径
+  b = b.replace(/\/(chat\/completions|messages|completions)$/i, '');
+  return b + '/models';
+}
+
+function buildModelsHeaders(apiKey, apiFormat) {
+  if (apiFormat === 'anthropic') {
+    return {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    };
+  }
+  return { 'Authorization': 'Bearer ' + apiKey };
+}
+
+// 真正发请求：可选择走本地代理（解决 CORS）
+async function fetchModelsViaCorrectChannel(url, headers) {
+  const useProxy = document.getElementById('useLocalProxy');
+  // 1) 不走代理：直接 fetch
+  if (!useProxy || !useProxy.checked) {
+    const resp = await fetch(url, { method: 'GET', headers });
+    const text = await resp.text();
+    return { ok: resp.ok, status: resp.status, text };
+  }
+  
+  // 2) 走代理：用 /llm-proxy
+  const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
+  if (!tc || !tc.token) {
+    // 没有 token 也试直连
+    const resp = await fetch(url, { method: 'GET', headers });
+    const text = await resp.text();
+    return { ok: resp.ok, status: resp.status, text };
+  }
+  const proxyUrl = tc.serverUrl.replace(/\/+$/, '') + '/llm-proxy';
+  const resp = await fetch(proxyUrl, {
+    method: 'POST',  // /llm-proxy 始终用 POST，靠 header 传目标
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Token': tc.token,
+      'X-Target-Url': url,
+      'X-Target-Method': 'GET',
+      'X-Target-Headers': JSON.stringify(headers)
+    },
+    // /llm-proxy 期望有 body，给空对象避免有的实现报错
+    body: '{}'
+  });
+  const text = await resp.text();
+  return { ok: resp.ok, status: resp.status, text };
+}
+
+function parseModelsResponse(text, apiFormat) {
+  if (!text) return [];
+  let j;
+  try { j = JSON.parse(text); } catch (e) { return []; }
+  
+  // OpenAI / 兼容：{ data: [{ id: "gpt-4o", ... }, ...] }
+  if (Array.isArray(j.data)) {
+    return j.data
+      .map(m => (m && (m.id || m.name)) || '')
+      .filter(Boolean);
+  }
+  // Anthropic v1/models：{ data: [{ id: "claude-...", display_name, type:"model" }] }
+  // 已被上面覆盖
+  
+  // 兜底：有些代理直接返回数组
+  if (Array.isArray(j)) {
+    return j.map(m => (typeof m === 'string') ? m : (m.id || m.name || '')).filter(Boolean);
+  }
+  // 有些返回 { models: [...] }
+  if (Array.isArray(j.models)) {
+    return j.models.map(m => (typeof m === 'string') ? m : (m.id || m.name || '')).filter(Boolean);
+  }
+  return [];
+}
+
+function sortModelsByRelevance(models) {
+  // 把"主流命名"排到前面，便于用户选择
+  const PRIORITY_KEYWORDS = [
+    'gpt-4o', 'gpt-4', 'o1', 'o3',
+    'claude-3-5-sonnet', 'claude-3-7', 'claude-opus', 'claude-sonnet', 'claude-haiku',
+    'deepseek-chat', 'deepseek-reasoner', 'deepseek-v3',
+    'qwen-max', 'qwen-plus', 'qwen2.5',
+    'glm-4', 'gemini-2', 'gemini-1.5',
+  ];
+  function score(name) {
+    const lower = name.toLowerCase();
+    for (let i = 0; i < PRIORITY_KEYWORDS.length; i++) {
+      if (lower.includes(PRIORITY_KEYWORDS[i])) return i;
+    }
+    return 999;
+  }
+  return models.slice().sort((a, b) => {
+    const sa = score(a), sb = score(b);
+    if (sa !== sb) return sa - sb;
+    return a.localeCompare(b);
+  });
+}
+
+function renderFetchModelsList(models) {
+  const listEl = document.getElementById('fetchModelsList');
+  const countEl = document.getElementById('fetchModelsCount');
+  if (!models.length) {
+    listEl.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;">无匹配模型</div>';
+    if (countEl) countEl.textContent = '0 个';
+    return;
+  }
+  const html = models.map(m => {
+    const exists = _fetchModelsExisting.has(m);
+    const safe = escapeHtml(m);
+    return `
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:6px;${exists ? 'opacity:.55;' : ''}"
+             onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
+        <input type="checkbox" class="fetchModelItem" value="${safe}" ${exists ? 'checked disabled' : ''}>
+        <span style="flex:1;font-family:monospace;font-size:13px;">${safe}</span>
+        ${exists ? '<span style="font-size:11px;color:var(--text-secondary);">✓ 已添加</span>' : ''}
+      </label>`;
+  }).join('');
+  listEl.innerHTML = html;
+  if (countEl) {
+    const newCount = models.filter(m => !_fetchModelsExisting.has(m)).length;
+    countEl.textContent = `共 ${models.length} 个（${newCount} 个未添加）`;
+  }
+}
+
+function filterFetchModels() {
+  const kw = (document.getElementById('fetchModelsFilter').value || '').trim().toLowerCase();
+  const filtered = kw
+    ? _fetchModelsBuffer.filter(m => m.toLowerCase().includes(kw))
+    : _fetchModelsBuffer;
+  renderFetchModelsList(filtered);
+}
+
+function toggleSelectAllFetchModels() {
+  const boxes = document.querySelectorAll('.fetchModelItem:not(:disabled)');
+  if (!boxes.length) return;
+  const anyUnchecked = Array.from(boxes).some(b => !b.checked);
+  boxes.forEach(b => { b.checked = anyUnchecked; });
+  const btn = document.getElementById('fetchModelsSelAllBtn');
+  if (btn) btn.textContent = anyUnchecked ? '全不选' : '全选';
+}
+
+function confirmAddFetchedModels() {
+  const boxes = document.querySelectorAll('.fetchModelItem:not(:disabled):checked');
+  const picked = Array.from(boxes).map(b => b.value).filter(Boolean);
+  if (!picked.length) { toast('未选择任何模型', 2000); return; }
+  
+  const input = document.getElementById('modelName');
+  const existing = (input.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const existingSet = new Set(existing);
+  let added = 0;
+  picked.forEach(m => {
+    if (!existingSet.has(m)) { existing.push(m); existingSet.add(m); added++; }
+  });
+  input.value = existing.join(', ');
+  
+  toast(`✅ 已添加 ${added} 个模型（共 ${existing.length} 个）`, 2500);
+  closeFetchModelsModal();
+}
+
+function openFetchModelsModal() {
+  document.getElementById('fetchModelsModal').classList.add('show');
+}
+
+function closeFetchModelsModal() {
+  document.getElementById('fetchModelsModal').classList.remove('show');
+  _fetchModelsBuffer = [];
+  _fetchModelsExisting = new Set();
+  const f = document.getElementById('fetchModelsFilter');
+  if (f) f.value = '';
+}
+
+// 暴露到全局
+window.onFetchModels = onFetchModels;
+window.filterFetchModels = filterFetchModels;
+window.toggleSelectAllFetchModels = toggleSelectAllFetchModels;
+window.confirmAddFetchedModels = confirmAddFetchedModels;
+window.openFetchModelsModal = openFetchModelsModal;
+window.closeFetchModelsModal = closeFetchModelsModal;

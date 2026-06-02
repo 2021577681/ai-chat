@@ -1810,10 +1810,27 @@ class Handler(BaseHTTPRequestHandler):
         # 隐藏代理痕迹 / 不暴露用户 UA
         target_headers.setdefault('User-Agent', 'Mozilla/5.0 LLM-Proxy/1.0')
 
-        print(f'\n🤖 [LLM 代理] POST {target_url}')
-        print(f'   请求体大小: {len(req_body)} 字节')
+        # ⭐ 支持自定义 HTTP 方法（默认 POST 保持向后兼容；GET 用于拉取 /models 列表）
+        target_method = (self.headers.get('X-Target-Method', 'POST') or 'POST').strip().upper()
+        if target_method not in ('GET', 'POST', 'PUT', 'DELETE', 'PATCH'):
+            target_method = 'POST'
+        # GET 类请求不应带 body，避免某些服务端报 400
+        if target_method == 'GET':
+            req_body = b''
+            target_headers.pop('Content-Type', None)
 
-        req = urllib.request.Request(target_url, data=req_body, method='POST', headers=target_headers)
+        print(f'\n🤖 [LLM 代理] {target_method} {target_url}')
+        if req_body:
+            print(f'   请求体大小: {len(req_body)} 字节')
+
+        # urllib 的 Request 在 data 为 None 时自动 GET；为 bytes 时自动 POST
+        # 这里显式传 method 覆盖
+        req = urllib.request.Request(
+            target_url,
+            data=(req_body if req_body else None),
+            method=target_method,
+            headers=target_headers,
+        )
 
         try:
             # 注意：流式响应也是 urlopen 返回的同一个 response 对象，read 一次拿一块
@@ -2008,7 +2025,7 @@ if __name__ == '__main__':
     print('   - GET  /token      浏览器自动拉取 Token（需在终端按 y 授权）')
     print('   - GET  /workspace  查询当前沙箱目录（公开，无需鉴权）')
     print('   - GET  /lms-proxy  代理 LMS API 请求（需 X-Token + X-LMS-Cookie）')
-    print('   - POST /llm-proxy  代理 LLM 请求（绕过浏览器 CORS，需 X-Token + X-Target-Url + X-Target-Headers）')
+    print('   - POST /llm-proxy  代理 LLM 请求（绕过浏览器 CORS，需 X-Token + X-Target-Url + X-Target-Headers；可选 X-Target-Method=GET 用于拉模型列表）')
     print('   - execute          执行 shell 命令')
     print('   - read_file        读取文本文件')
     print('   - read_file_binary 读取二进制文件（图片/PDF）')

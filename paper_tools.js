@@ -146,29 +146,80 @@ async function semanticScholarSearch(query, maxResults, year) {
 // 工具 3：fetch_pdf_text —— 用 pdf.js 把 PDF 转成文本
 // =================================================================
 let _pdfJsLoading = null;
+// 多 CDN 列表，按顺序尝试。前面失败自动回退到下一个。
+// 优先使用国内可达性好的（jsdelivr / unpkg / npmmirror），最后才是 cdnjs
+const _PDFJS_CDNS = [
+  // jsDelivr —— 国内 CDN 节点多，速度快
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build',
+  // npmmirror（国内）—— 完全境内，最稳
+  'https://registry.npmmirror.com/pdfjs-dist/4.0.379/files/build',
+  // unpkg
+  'https://unpkg.com/pdfjs-dist@4.0.379/build',
+  // cdnjs（境外，国内可能不稳）
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379'
+];
+
+function _loadScript(src, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      s.remove();
+      reject(new Error('加载超时'));
+    }, timeoutMs || 8000);
+    s.onload = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    s.onerror = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      s.remove();
+      reject(new Error('脚本加载失败'));
+    };
+    document.head.appendChild(s);
+  });
+}
+
 async function _ensurePdfJs() {
   if (typeof window.pdfjsLib !== 'undefined') return window.pdfjsLib;
   if (_pdfJsLoading) return _pdfJsLoading;
 
-  // 使用稳定的 4.x 版本（4.x 是最后兼容旧浏览器的；5.x 需要 ES2020+）
-  const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379';
-
-  _pdfJsLoading = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = `${CDN}/pdf.min.js`;
-    s.onload = () => {
+  _pdfJsLoading = (async () => {
+    const errors = [];
+    for (const base of _PDFJS_CDNS) {
       try {
-        // 4.x 后命名空间在 window['pdfjs-dist/build/pdf']
+        // cdnjs 的目录结构不同：是 pdf.min.js（无 build 后缀），其他 CDN 是 build/pdf.min.js
+        // 但我们上面已把 cdnjs 的路径写到 .../4.0.379（无 /build），所以两边路径方式一致
+        // 实际：cdnjs 直接放 pdf.min.js；jsdelivr/unpkg/npmmirror 放在 build/pdf.min.js
+        // 这里统一用 ${base}/pdf.min.js，cdnjs 已含路径
+        await _loadScript(`${base}/pdf.min.js`, 10000);
         const lib = window.pdfjsLib || window['pdfjs-dist/build/pdf'];
-        if (!lib) return reject(new Error('pdf.js 加载后未挂载到 window'));
-        lib.GlobalWorkerOptions.workerSrc = `${CDN}/pdf.worker.min.js`;
+        if (!lib) {
+          errors.push(`${base}: 脚本加载后未挂载 pdfjsLib`);
+          continue;
+        }
+        lib.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.js`;
         window.pdfjsLib = lib;
-        resolve(lib);
-      } catch (e) { reject(e); }
-    };
-    s.onerror = () => reject(new Error('pdf.js CDN 加载失败（请检查网络）'));
-    document.head.appendChild(s);
-  });
+        console.log('[pdf.js] 成功从 CDN 加载：', base);
+        return lib;
+      } catch (e) {
+        errors.push(`${base}: ${e.message}`);
+        // 继续尝试下一个
+      }
+    }
+    // 全部失败
+    throw new Error('所有 CDN 均不可达：\n' + errors.map(x => '  • ' + x).join('\n'));
+  })();
+
+  // 失败时清空缓存，允许重试
+  _pdfJsLoading.catch(() => { _pdfJsLoading = null; });
   return _pdfJsLoading;
 }
 
