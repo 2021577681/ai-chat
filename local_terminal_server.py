@@ -1,22 +1,71 @@
 """
 本地 Agent 服务 - 主入口
-启动: python local_terminal_server.py
 
-⭐ 业务实现已拆分到 server/ 包下：
-    server/config.py    全局配置 & Token
-    server/sandbox.py   沙箱路径校验 + 危险命令黑名单
-    server/handler.py   HTTP Handler 主类（路由 + CORS）
-    server/exec.py      命令执行
-    server/files.py     文件 CRUD / 搜索
-    server/web.py       网络搜索 + 抓取
-    server/git_ops.py   Git 集成 + 敏感扫描
-    server/proxy.py     LLM/LMS 代理 + 静态文件
+🚀 启动方式
+─────────────────────────────────────────────────────────────
+方式 1：在工作目录里运行（沙箱根 = 当前目录，最常用）
+    cd D:\\项目A
+    python C:\\path\\to\\agent\\local_terminal_server.py
 
-本文件只负责：启动 banner + 起 HTTP 服务。
+方式 2：显式指定工作目录（代码本体与工作目录解耦）
+    python C:\\path\\to\\agent\\local_terminal_server.py --workspace D:\\项目A
+    python C:\\path\\to\\agent\\local_terminal_server.py -w .
+
+方式 3：用启动器脚本（推荐，零记忆负担）
+    把仓库根目录的 start_agent.bat / start_agent.sh 复制到任何工作文件夹
+    双击即可启动，自动锁定沙箱根 = 该文件夹
+
+🧱 业务实现已拆分到 server/ 包：
+    config / sandbox / handler / exec / files / web / git_ops / proxy
+本文件只负责：解析 CLI 参数 + banner + 启动 HTTP 服务。
 """
+import argparse
+import os
+import sys
 from http.server import ThreadingHTTPServer
 
+# Windows 控制台默认编码常为 GBK，输出 emoji 会 UnicodeEncodeError，
+# 重定向到文件或在某些终端里尤其常见。这里在 import 后立刻把 stdout/stderr 切到 utf-8。
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 from server import Handler, config
+
+
+def _parse_args(argv):
+    p = argparse.ArgumentParser(
+        prog='local_terminal_server',
+        description='Local Agent 后端服务（终端 + 文件 + Git + 网络 + LLM 代理）',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='示例:\n'
+               '  python local_terminal_server.py                       # 沙箱根 = 当前目录\n'
+               '  python local_terminal_server.py -w D:\\项目A           # 沙箱根 = D:\\项目A\n'
+               '  python local_terminal_server.py --workspace .         # 沙箱根 = 当前目录（显式）\n'
+               '  python local_terminal_server.py -w ~/work --port 9000 # 自定义端口\n'
+    )
+    p.add_argument(
+        '-w', '--workspace',
+        metavar='DIR',
+        default=None,
+        help='指定沙箱根目录（默认 = 启动时的当前目录）。所有文件操作都被锁定在此目录内。'
+    )
+    p.add_argument(
+        '--host',
+        default=None,
+        metavar='HOST',
+        help=f'监听地址（默认 {config.HOST}）'
+    )
+    p.add_argument(
+        '--port',
+        type=int,
+        default=None,
+        metavar='PORT',
+        help=f'监听端口（默认 {config.PORT}）'
+    )
+    return p.parse_args(argv)
 
 
 def _print_banner():
@@ -55,13 +104,43 @@ def _print_banner():
     print('   - fetch_url        🌐 抓取网页正文')
     print('   - file_info        查看文件信息')
     print('   - git              🌿 Git 集成（status/log/diff/add/commit/checkout/branch...）')
+    print('\n💡 提示: 用 -w / --workspace 指定任意目录作为沙箱根，无需复制代码！')
+    print('         详见 README.md 的"启动器"章节，或运行 --help 查看完整参数。')
     print('\n⚠️ 修改 server/*.py 后必须 Ctrl+C 重启服务！')
     print('=' * 60)
 
 
-if __name__ == '__main__':
+def main(argv=None):
+    args = _parse_args(argv if argv is not None else sys.argv[1:])
+
+    # --- 应用 CLI 参数（必须在启动 HTTP 服务前完成）---
+    if args.workspace:
+        try:
+            config.set_workspace(args.workspace)
+        except FileNotFoundError as e:
+            print(f'❌ {e}', file=sys.stderr)
+            sys.exit(2)
+        except Exception as e:
+            print(f'❌ 设置 workspace 失败: {e}', file=sys.stderr)
+            sys.exit(2)
+
+    if args.host:
+        config.HOST = args.host
+    if args.port:
+        config.PORT = args.port
+
     _print_banner()
     try:
         ThreadingHTTPServer((config.HOST, config.PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print('\n👋 服务已停止')
+    except OSError as e:
+        # 端口被占用的友好提示
+        if 'Address already in use' in str(e) or getattr(e, 'errno', None) in (48, 98, 10048):
+            print(f'\n❌ 端口 {config.PORT} 已被占用。请用 --port 指定其他端口，或停掉占用进程。', file=sys.stderr)
+            sys.exit(1)
+        raise
+
+
+if __name__ == '__main__':
+    main()
