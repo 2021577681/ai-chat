@@ -808,3 +808,327 @@ async function callOnceWithRole(history, model, rolePrompt) {
   }
 }
 
+
+
+// ============ 🤖 通用 Agent 循环引擎（独立于 c.messages）============
+// 【设计目标】
+// - 让 LLM 在隔离上下文里多轮调用工具直到自己说"完成"
+// - 不污染 c.messages，所有过程通过 onProgress 回调上报
+// - 支持流式文本输出（学生回答边写边看）
+// - 复用现有 _apiFetchWithTimeout / buildHeaders / executeTool / 重试机制
+// 【调用方】reflection.js（学生 / 老师）、未来可扩展给 Plan 模式
+
+async function runAgentLoop({
+  initialMessages,     // 标准格式：[{role:'user'|'assistant'|'tool', content, tool_calls?, tool_call_id?, name?}]
+  systemPrompt,        // 系统提示（独立于 settings.systemPrompt）
+  model,               // 模型 ID
+  maxRounds = 15,      // 最多工具调用轮数
+  signal,              // AbortSignal（用于中断）
+  onProgress,          // (event) => void 进度回调
+  useTools = true,     // 是否启用工具
+  stream = true,       // 是否流式
+  temperature,         // 可选，默认从 settings 取
+  maxTokens            // 可选，默认从 settings 取
+}) {
+  const s = state.settings;
+  const _temp = temperature !== undefined ? temperature : parseFloat(s.temperature);
+  const _max = maxTokens !== undefined ? maxTokens : parseInt(s.maxTokens);
+  
+  // 内部维护 messages（不动 c.messages）
+  const messages = JSON.parse(JSON.stringify(initialMessages || []));
+  const tools = useTools ? buildToolsArray() : null;
+  
+  let finalText = '';
+  let totalUsage = null;
+  
+  const _emit = (ev) => { try { onProgress && onProgress(ev); } catch (e) { console.warn('[runAgentLoop] onProgress 抛错:', e); } };
+  
+  for (let round = 0; round < maxRounds + 1; round++) {
+    // 中断检查
+    if (signal && signal.aborted) {
+      const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
+    }
+    
+    _emit({ type: 'round_start', round: round + 1 });
+    
+    // ----- 构造请求 -----
+    // 用现有适配器把内部 messages 转成 API 格式
+    const apiMessages = s.apiFormat === 'anthropic'
+      ? buildAnthropicMessages(messages)
+      : buildOpenAIMessages(messages);
+    
+    let body;
+    if (s.apiFormat === 'anthropic') {
+      body = {
+        model,
+        messages: apiMessages,
+        max_tokens: _max,
+        temperature: _temp,
+        stream
+      };
+      if (systemPrompt) body.system = systemPrompt;
+      // 最后一轮不带 tools，强制收尾
+      if (tools && round < maxRounds) body.tools = tools;
+    } else {
+      const msgs = systemPrompt ? [{ role: 'system', content: systemPrompt }] : [];
+      for (const m of apiMessages) if (m.role !== 'system') msgs.push(m);
+      body = {
+        model,
+        messages: msgs,
+        max_tokens: _max,
+        temperature: _temp,
+        stream
+      };
+      if (tools && round < maxRounds) body.tools = tools;
+      if (stream) body.stream_options = { include_usage: true };
+    }
+    
+    if (typeof applyRateLimit === 'function') await applyRateLimit();
+    
+    const url = buildFullUrl(s.baseUrl, s.apiPath);
+    const headers = buildHeaders();
+    
+    const resp = await _apiFetchWithTimeout(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    }, signal, API_FETCH_TIMEOUT_MS);
+    
+    if (typeof recordRequest === 'function') recordRequest();
+    
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${t.slice(0, 500)}`);
+    }
+    
+    // ----- 解析响应（流式 / 非流式）-----
+    let assistantText = '';
+    let assistantToolCalls = [];   // [{id, name, arguments(string)}]
+    let usage = null;
+    
+    const ct = resp.headers.get('content-type') || '';
+    const ctLower = ct.toLowerCase();
+    const looksLikeStream = ctLower.includes('event-stream')
+                         || ctLower.includes('stream+json')
+                         || (body.stream && !ctLower.includes('json') && !ctLower.includes('html'));
+    
+    if (body.stream && looksLikeStream && resp.body && typeof resp.body.getReader === 'function') {
+      // === 流式解析 ===
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const tcMap = {};                  // OpenAI: index -> {id, function:{name, arguments}}
+      const anthropicToolBlocks = {};    // Anthropic: index -> {id, name, partial_input}
+      let rawAccumulated = '';
+      
+      while (true) {
+        if (signal && signal.aborted) {
+          try { reader.cancel(); } catch (_) {}
+          const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        rawAccumulated += chunk;
+        buf += chunk;
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t || !t.startsWith('data:')) continue;
+          const data = t.slice(5).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const j = JSON.parse(data);
+            if (s.apiFormat === 'anthropic') {
+              if (j.type === 'content_block_delta' && j.delta?.type === 'text_delta') {
+                const delta = j.delta.text || '';
+                assistantText += delta;
+                _emit({ type: 'text_delta', text: delta });
+              }
+              if (j.type === 'content_block_start' && j.content_block?.type === 'tool_use') {
+                const idx = j.index ?? 0;
+                anthropicToolBlocks[idx] = {
+                  id: j.content_block.id,
+                  name: j.content_block.name,
+                  partial_input: ''
+                };
+              }
+              if (j.type === 'content_block_delta' && j.delta?.type === 'input_json_delta') {
+                const idx = j.index ?? 0;
+                if (anthropicToolBlocks[idx]) {
+                  anthropicToolBlocks[idx].partial_input += j.delta.partial_json || '';
+                }
+              }
+              if (j.type === 'message_start' && j.message?.usage) {
+                usage = { ...(usage || {}), ...j.message.usage };
+              }
+              if (j.type === 'message_delta' && j.usage) {
+                usage = { ...(usage || {}), ...j.usage };
+              }
+            } else {
+              const delta = j.choices?.[0]?.delta;
+              if (delta) {
+                if (delta.content) {
+                  assistantText += delta.content;
+                  _emit({ type: 'text_delta', text: delta.content });
+                }
+                if (delta.tool_calls) {
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    if (!tcMap[idx]) tcMap[idx] = { id: tc.id || '', function: { name: '', arguments: '' } };
+                    if (tc.id) tcMap[idx].id = tc.id;
+                    if (tc.function?.name) tcMap[idx].function.name += tc.function.name;
+                    if (tc.function?.arguments) tcMap[idx].function.arguments += tc.function.arguments;
+                  }
+                }
+              }
+              if (j.usage) usage = j.usage;
+            }
+          } catch (e) {}
+        }
+      }
+      
+      // 整理 tool_calls
+      if (s.apiFormat === 'anthropic') {
+        assistantToolCalls = Object.values(anthropicToolBlocks).map(tb => ({
+          id: tb.id, name: tb.name, arguments: tb.partial_input || '{}'
+        }));
+      } else {
+        assistantToolCalls = Object.values(tcMap).map(tc => ({
+          id: tc.id, name: tc.function.name, arguments: tc.function.arguments || '{}'
+        }));
+      }
+      
+      if (typeof recordRawResponse === 'function') {
+        recordRawResponse({
+          ts: Date.now(), isStream: true, contentType: ct,
+          raw: rawAccumulated, usage,
+          parsedContent: assistantText,
+          parsedToolCalls: assistantToolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.arguments } })),
+          request: { url, method: 'POST', headers, body },
+          _source: 'runAgentLoop · 流式'
+        });
+      }
+    } else {
+      // === 非流式解析 ===
+      const txt = await resp.text();
+      let j;
+      try { j = JSON.parse(txt); } catch (e) { throw new Error('JSON 解析失败：' + txt.slice(0, 200)); }
+      if (j.error) throw new Error(`API 错误：${j.error.message || JSON.stringify(j.error)}`);
+      
+      if (s.apiFormat === 'anthropic') {
+        const contents = j.content || [];
+        assistantText = contents.filter(p => p.type === 'text').map(p => p.text).join('');
+        const toolUses = contents.filter(p => p.type === 'tool_use');
+        assistantToolCalls = toolUses.map(tu => ({
+          id: tu.id, name: tu.name, arguments: JSON.stringify(tu.input || {})
+        }));
+        if (assistantText) _emit({ type: 'text_delta', text: assistantText });
+      } else {
+        const msg = j.choices?.[0]?.message;
+        if (msg) {
+          assistantText = msg.content || '';
+          if (assistantText) _emit({ type: 'text_delta', text: assistantText });
+          if (msg.tool_calls?.length) {
+            assistantToolCalls = msg.tool_calls.map(tc => ({
+              id: tc.id, name: tc.function?.name || '', arguments: tc.function?.arguments || '{}'
+            }));
+          }
+        }
+      }
+      usage = j.usage || null;
+      
+      if (typeof recordRawResponse === 'function') {
+        recordRawResponse({
+          ts: Date.now(), isStream: false, contentType: ct,
+          raw: txt, parsedJson: j, usage,
+          request: { url, method: 'POST', headers, body },
+          _source: 'runAgentLoop · 非流式'
+        });
+      }
+    }
+    
+    // 把 usage 累计到当前对话（让师生模式的 token 也进总账）
+    if (usage && typeof recordUsageFromResponse === 'function') {
+      const _c = typeof currentChat === 'function' ? currentChat() : null;
+      if (_c) recordUsageFromResponse(_c, usage);
+      totalUsage = totalUsage ? { ...totalUsage, ...usage } : usage;
+    }
+    
+    // 把 assistant 消息加入内部 messages
+    const assistantMsg = { role: 'assistant', content: assistantText };
+    if (assistantToolCalls.length) {
+      assistantMsg.tool_calls = assistantToolCalls.map(tc => ({
+        id: tc.id, type: 'function',
+        function: { name: tc.name, arguments: tc.arguments }
+      }));
+    }
+    messages.push(assistantMsg);
+    
+    _emit({ type: 'round_end', round: round + 1, hasToolCalls: assistantToolCalls.length > 0, text: assistantText });
+    
+    // 没工具调用 → 结束
+    if (!assistantToolCalls.length) {
+      finalText = assistantText;
+      break;
+    }
+    
+    // 到了 maxRounds 仍想调工具，但已无 tools → 把这次 assistant 文本当作 final
+    // （上面构造 body 时最后一轮已剥掉 tools，模型还硬要 call 极少见，但兜底）
+    if (round >= maxRounds) {
+      finalText = assistantText || '(已达最大工具调用轮数，强制结束)';
+      break;
+    }
+    
+    // 执行每个工具
+    for (const tc of assistantToolCalls) {
+      if (signal && signal.aborted) {
+        const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
+      }
+      
+      let args = {};
+      try { args = JSON.parse(tc.arguments || '{}'); } catch (e) {}
+      
+      _emit({ type: 'tool_call', id: tc.id, name: tc.name, args });
+      
+      const result = await executeTool(tc.name, args);
+      
+      let contentText;
+      let isError = false;
+      if (typeof result.value === 'string') {
+        contentText = result.value;
+        isError = !result.ok;
+      } else if (typeof result.value === 'object' && result.value !== null) {
+        if (result.value._stopAll || result.value._userRejected) {
+          contentText = result.value.error || '用户中断';
+          isError = true;
+        } else if (result.value.ok === false) {
+          contentText = result.value.error || JSON.stringify(result.value);
+          isError = true;
+        } else {
+          contentText = JSON.stringify(result.value);
+          isError = !result.ok;
+        }
+      } else {
+        contentText = JSON.stringify(result.value);
+        isError = !result.ok;
+      }
+      
+      _emit({ type: 'tool_result', id: tc.id, name: tc.name, content: contentText, ok: !isError });
+      
+      // 加入内部 messages（供下一轮 LLM 参考）
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        name: tc.name,
+        content: contentText
+      });
+    }
+    
+    // 继续下一轮
+  }
+  
+  _emit({ type: 'done', finalText });
+  return { finalText, messages, usage: totalUsage };
+}

@@ -25,6 +25,11 @@ let state = {
     refTeacherModel: '',
     refStudentPrompt: REFLECTION_PRESETS.general.student,
     refTeacherPrompt: REFLECTION_PRESETS.general.teacher,
+    // 🔧 师生模式工具调用支持
+    refStudentUseTools: true,           // 学生是否允许调用工具（多轮完成任务）
+    refTeacherUseTools: true,           // 老师是否允许调用工具（独立验证答案）
+    refStudentMaxToolRounds: 15,        // 学生单轮最多工具调用循环次数
+    refTeacherMaxToolRounds: 5,         // 老师单轮最多工具调用循环次数
     usePlan: false,
     planReview: true,
     planSynthesize: true,

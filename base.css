@@ -1276,3 +1276,13 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 
 
+
+
+/* ============ 师生模式：工具调用 + 流式态 ============ */
+.ref-tool-section{margin-bottom:10px}
+.ref-final-answer{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.ref-running-tag{margin-left:auto;font-size:11px;color:var(--primary);font-weight:500;display:inline-flex;align-items:center;gap:4px}
+.ref-running-tag::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--primary);animation:refBlink 1s infinite}
+@keyframes refBlink{0%,100%{opacity:.3}50%{opacity:1}}
+.ref-waiting{padding:8px 4px;font-size:12px;color:var(--text-secondary);font-style:italic}
+.ref-section-title{font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px}

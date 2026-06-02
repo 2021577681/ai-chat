@@ -15,7 +15,7 @@ function closeBackup() {
 
 function buildExportData() {
   const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt'];
-  const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt'];
+  const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
   const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
 
   const inc = {
@@ -144,7 +144,7 @@ function applyImport() {
   if (!pendingImportData) { alert('请先选择文件或粘贴 JSON'); return; }
   
   const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt'];
-  const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt'];
+  const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
   const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
 
   const data = pendingImportData;
