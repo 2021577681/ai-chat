@@ -95,7 +95,9 @@ function injectBuiltinTools() {
   const OPTIONAL_TOOL_PREFIXES = ['lms_'];
   const OPTIONAL_TOOL_NAMES = new Set([
     // 💾 Git 快照工具（5 个）
-    'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore'
+    'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
+    // 📚 论文工具（3 个）
+    'arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || OPTIONAL_TOOL_PREFIXES.some(p => name.startsWith(p));
@@ -298,12 +300,13 @@ function persistTools() {
 function currentChat() { return state.chats.find(c => c.id === state.currentId); }
 
 function resetBuiltinTools() {
-  if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。\n\n注意：LMS 和版本快照工具不会自动加回，需要在工具面板里点专用按钮启用。')) return;
+  if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。\n\n注意：LMS、版本快照、论文工具不会自动加回，需要在工具面板里点专用按钮启用。')) return;
   storage.remove(BUILTIN_TOOLS_LOADED_KEY);
   
-  // ⭐ 与 injectBuiltinTools 保持一致：可选工具组（LMS / Git 快照）不自动恢复
+  // ⭐ 与 injectBuiltinTools 保持一致：可选工具组（LMS / Git 快照 / 论文）不自动恢复
   const OPTIONAL_TOOL_NAMES = new Set([
-    'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore'
+    'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
+    'arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || name.startsWith('lms_');

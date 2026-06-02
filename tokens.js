@@ -482,16 +482,40 @@ async function autoCompressCheck() {
 
 async function compressChat(chat) {
   const keepLast = state.settings.compressKeepLast || 4;
-  let cutIdx = Math.max(0, chat.messages.length - keepLast);
-  // 1) 跳过 tool（防止 toKeep[0] 是孤立的 tool_result）
-  while (cutIdx < chat.messages.length && chat.messages[cutIdx].role === 'tool') cutIdx++;
-  // 2) ⭐ 关键修复：toKeep 必须以 user 消息开头
-  //    否则压缩后会出现 assistant(tool_calls) 紧跟摘要的情况，
-  //    导致摘要 text 块被 prepend 到 tool_result 前面 → Anthropic 报
-  //    "tool_use ids were found without tool_result blocks immediately after"
-  while (cutIdx < chat.messages.length && chat.messages[cutIdx].role !== 'user') cutIdx++;
-  if (cutIdx <= 0) { toast('对话太短，无需压缩'); return; }
-  if (cutIdx >= chat.messages.length) { toast('找不到可作为切点的 user 消息，跳过压缩'); return; }
+  
+  // ⭐ 切点策略：toKeep 必须以 user 消息开头（且不能是摘要消息）
+  //   否则压缩后会出现 assistant(tool_calls) 紧跟摘要的情况，
+  //   导致摘要 text 块被 prepend 到 tool_result 前面 → Anthropic 报
+  //   "tool_use ids were found without tool_result blocks immediately after"
+  //
+  // 算法（双向查找，避免末尾全是 tool/assistant 时找不到切点）：
+  //   1) 先尝试在 [length-keepLast, end) 范围内向后找第一条真实 user 消息
+  //      —— 命中：正好保留约 keepLast 条
+  //   2) 找不到（末尾全是工具循环 / assistant 收尾）→ 从末尾向前找最近一条真实 user
+  //      —— 这种情况会"多保留几条"，但能保证压缩成功而不是直接报错
+  const initialCutIdx = Math.max(0, chat.messages.length - keepLast);
+  const isRealUser = (m) => m && m.role === 'user' && !m._isSummary;
+  
+  let cutIdx = -1;
+  // 第 1 步：向后找
+  for (let i = initialCutIdx; i < chat.messages.length; i++) {
+    if (isRealUser(chat.messages[i])) { cutIdx = i; break; }
+  }
+  // 第 2 步：向后没找到 → 向前找（兜底，保留更多消息但能成功压缩）
+  if (cutIdx < 0) {
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+      if (isRealUser(chat.messages[i])) { cutIdx = i; break; }
+    }
+  }
+  
+  if (cutIdx < 0) {
+    toast('对话里没有任何 user 消息，无法压缩');
+    return;
+  }
+  if (cutIdx <= 0) {
+    toast('对话太短，无需压缩');
+    return;
+  }
   
   const toCompress = chat.messages.slice(0, cutIdx);
   const toKeep = chat.messages.slice(cutIdx);
