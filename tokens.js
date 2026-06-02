@@ -483,8 +483,15 @@ async function autoCompressCheck() {
 async function compressChat(chat) {
   const keepLast = state.settings.compressKeepLast || 4;
   let cutIdx = Math.max(0, chat.messages.length - keepLast);
+  // 1) 跳过 tool（防止 toKeep[0] 是孤立的 tool_result）
   while (cutIdx < chat.messages.length && chat.messages[cutIdx].role === 'tool') cutIdx++;
+  // 2) ⭐ 关键修复：toKeep 必须以 user 消息开头
+  //    否则压缩后会出现 assistant(tool_calls) 紧跟摘要的情况，
+  //    导致摘要 text 块被 prepend 到 tool_result 前面 → Anthropic 报
+  //    "tool_use ids were found without tool_result blocks immediately after"
+  while (cutIdx < chat.messages.length && chat.messages[cutIdx].role !== 'user') cutIdx++;
   if (cutIdx <= 0) { toast('对话太短，无需压缩'); return; }
+  if (cutIdx >= chat.messages.length) { toast('找不到可作为切点的 user 消息，跳过压缩'); return; }
   
   const toCompress = chat.messages.slice(0, cutIdx);
   const toKeep = chat.messages.slice(cutIdx);

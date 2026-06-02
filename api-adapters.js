@@ -140,10 +140,19 @@ function buildAnthropicMessages(history) {
     }
   }
   
-  // ⭐ 第二步：把摘要 prepend 到第一条 user 消息内容前（保持 system 字段稳定 → 命中 prompt cache）
+  // ⭐ 第二步：把摘要 prepend 到第一条"纯 user"消息内容前（保持 system 字段稳定 → 命中 prompt cache）
   if (summaryText) {
     const summaryBlock = `【对话历史摘要】\n${summaryText}\n\n---\n\n`;
-    const firstUserIdx = out.findIndex(m => m.role === 'user');
+    // ⭐ 关键修复：必须找"不含 tool_result 的 user 消息"
+    //    如果第一条 user 里有 tool_result，前面 prepend 文本会破坏
+    //    "tool_use 后立刻 tool_result" 的硬约束，触发 Anthropic 400
+    const firstUserIdx = out.findIndex(m => {
+      if (m.role !== 'user') return false;
+      if (Array.isArray(m.content)) {
+        return !m.content.some(p => p.type === 'tool_result');
+      }
+      return true;
+    });
     if (firstUserIdx >= 0) {
       const u = out[firstUserIdx];
       if (typeof u.content === 'string') {
@@ -158,7 +167,8 @@ function buildAnthropicMessages(history) {
         }
       }
     } else {
-      // 极端情况：没有任何 user 消息（理论上不会发生，但兜底）
+      // 兜底：连一条"干净 user"都没有，直接在最前面塞一条纯文本 user
+      // （由于 fix 函数会跑在后面，不会破坏 tool_use/tool_result 配对）
       out.unshift({ role: 'user', content: summaryBlock });
     }
   }
