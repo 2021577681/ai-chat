@@ -68,12 +68,22 @@ function _flushLastMsg() {
 }
 
 function stopGenerate() {
+  // ⭐ 一次性"软停止"标志：用于跨越 abortCtrl 重建的边界
+  //   - 普通对话工具循环、Plan/Outline/Reflection 的多轮循环
+  //   - 这些场景会在某些时刻把 abortCtrl 重建甚至清空，单靠 signal.aborted 检查会漏
+  //   - 各模式在工具循环、递归 callAPI 之前都应主动检查这个标志，及时退出
+  //   - 由 callAPI / Plan / Outline / Reflection 的"首次进入"分支负责清零
+  state.stopRequested = true;
   if (state.abortCtrl) {
     try {
       state.abortCtrl.abort();
     } catch (e) {
       console.error('[stopGenerate] 错误:', e);
     }
+  }
+  // ⭐ 同时打断"频率限制等待"，避免点了停止但仍卡在 rate-limiter 的 sleep 里
+  if (typeof window !== 'undefined' && window._rateWaitAbort) {
+    try { window._rateWaitAbort(); } catch (e) {}
   }
   // ⭐ 清掉流式刷新与残留光标
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();

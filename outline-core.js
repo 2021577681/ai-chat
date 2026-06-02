@@ -112,6 +112,8 @@ async function callAPIWithOutline(options = {}) {
   
   state.isGenerating = true;
   state.abortCtrl = new AbortController();
+  // ⭐ 清零软停止标志：本次任务是新的开始，不要被上次残留的停止意图误杀
+  state.stopRequested = false;
   state._outlineExecuting = true;
   if (typeof updateSendBtn === 'function') updateSendBtn();
   
@@ -210,7 +212,11 @@ async function callAPIWithOutline(options = {}) {
   
   const abortSignal = state.abortCtrl.signal;
   const throwIfAborted = () => {
-    if (abortSignal.aborted) {
+    // ⭐ 同时检查两种停止信号：
+    //   - abortSignal.aborted：fetch / sleep 等异步操作的标准中断
+    //   - state.stopRequested：跨 abortCtrl 重建边界的"软停止"，
+    //     用户点暂停后即使本轮 fetch 已经结束，下一轮也能立刻退出
+    if (abortSignal.aborted || state.stopRequested) {
       const err = new Error('用户中断');
       err.name = 'AbortError';
       throw err;

@@ -289,9 +289,12 @@ async function callAPI(roundLimit) {
   const s = state.settings;
   
   // 如果未显式传入 roundLimit，则使用设置中的值（首次调用）
-  if (typeof roundLimit !== 'number') {
+  const isFirstCall = (typeof roundLimit !== 'number');
+  if (isFirstCall) {
     const cfg = parseInt(s.maxToolRounds);
     roundLimit = (isNaN(cfg) || cfg < 0) ? 15 : cfg;
+    // ⭐ 关键：首次进入时清掉"停止请求"标志（递归进入不清，以便传递停止意图）
+    state.stopRequested = false;
   }
   
   state.isGenerating = true;
@@ -438,6 +441,12 @@ async function callAPI(roundLimit) {
       let userStoppedAll = false;
       
       for (const tc of msg.tool_calls) {
+        // ⭐ 用户点了"停止"：立刻退出工具循环，不再执行后续工具
+        //   即使当前轮的 fetch 已结束、abortCtrl 已 null，stopRequested 仍能拦住
+        if (state.stopRequested) {
+          userStoppedAll = true;
+          break;
+        }
         const fname = tc.function?.name || '';
         let args = {};
         try { args = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
@@ -492,6 +501,29 @@ async function callAPI(roundLimit) {
       }
       
       state.isGenerating = false;
+      
+      // ⭐ 用户点了"停止"：不再递归发下一轮请求
+      //   关键修复：避免"工具执行完后照样再发一轮 API"的死循环
+      if (state.stopRequested) {
+        // 在最后一条 assistant 消息上留个标记，让用户看清楚是被停了
+        const lastMsg = c.messages[c.messages.length - 1];
+        if (lastMsg && lastMsg.role === 'tool') {
+          // 工具消息后面再补一条占位的 assistant，写明已停止
+          c.messages.push({
+            role: 'assistant',
+            content: '*[已停止]*',
+            _startTime: Date.now(),
+            _endTime: Date.now()
+          });
+          if (typeof appendMsgNode === 'function') {
+            appendMsgNode(c.messages.length - 1);
+          } else {
+            renderMessages();
+          }
+        }
+        saveData();
+        return;
+      }
       
       if (userStoppedAll) {
         await callAPI(0);
@@ -899,9 +931,13 @@ async function runAgentLoop({
   
   const _emit = (ev) => { try { onProgress && onProgress(ev); } catch (e) { console.warn('[runAgentLoop] onProgress 抛错:', e); } };
   
+  // ⭐ 统一的中止检查：同时看传入的 signal 和全局 stopRequested
+  // 后者用于跨越 abortCtrl 重建边界的"软停止"（例如用户在等待 API 时点了暂停）
+  const _isAborted = () => (signal && signal.aborted) || state.stopRequested;
+  
   for (let round = 0; round < maxRounds + 1; round++) {
     // 中断检查
-    if (signal && signal.aborted) {
+    if (_isAborted()) {
       const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
     }
     
@@ -978,7 +1014,7 @@ async function runAgentLoop({
       let rawAccumulated = '';
       
       while (true) {
-        if (signal && signal.aborted) {
+        if (_isAborted()) {
           try { reader.cancel(); } catch (_) {}
           const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
         }
@@ -1139,7 +1175,7 @@ async function runAgentLoop({
     
     // 执行每个工具
     for (const tc of assistantToolCalls) {
-      if (signal && signal.aborted) {
+      if (_isAborted()) {
         const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
       }
       

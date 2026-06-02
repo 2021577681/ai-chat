@@ -11,6 +11,8 @@ async function callAPIWithReflection() {
   state.isGenerating = true;
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
   state.abortCtrl = new AbortController();
+  // ⭐ 清零软停止标志：新任务开始
+  state.stopRequested = false;
   updateSendBtn();
   
   const aiMsg = {

@@ -14,6 +14,37 @@ function _abortCurrentTaskIfAny() {
   // 这是预期的——他们应该回去点"强制中断"。
 }
 
+// ⭐ "一次性模式"消费：选定走哪条分支后立刻关闭对应开关 + 熄灭按钮
+//   下次发送将默认走普通对话，除非用户重新点亮开关
+//   返回值：'outline' | 'plan' | 'reflection' | 'normal'
+//   注意：Plan 的"执行计划"按钮（approveAndExecutePlan）不走这里，
+//        所以即便 usePlan 已熄灭，已生成的计划仍可正常执行
+function _consumeOneShotMode() {
+  const s = state.settings;
+  let mode = 'normal';
+  if (s.useOutline) {
+    mode = 'outline';
+    s.useOutline = false;
+    const btn = document.getElementById('outlineBtn');
+    if (btn) btn.classList.remove('outline-active');
+  } else if (s.usePlan) {
+    mode = 'plan';
+    s.usePlan = false;
+    const btn = document.getElementById('planBtn');
+    if (btn) btn.classList.remove('plan-active');
+  } else if (s.useReflection) {
+    mode = 'reflection';
+    s.useReflection = false;
+    const btn = document.getElementById('reflectBtn');
+    if (btn) btn.classList.remove('reflect-active');
+  }
+  if (mode !== 'normal') {
+    if (typeof persistSettings === 'function') persistSettings();
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+  }
+  return mode;
+}
+
 function newChat() {
   _abortCurrentTaskIfAny();
   const id = 'c_' + Date.now();
@@ -602,7 +633,9 @@ async function onSend() {
   const c = currentChat();
   
   // ⭐ 检查是否有未完成的 Plan（待审批、已暂停、出错状态）
-  if (state.settings.usePlan) {
+  //   注意：始终检查，不依赖 state.settings.usePlan
+  //   因为模式开关现在是"一次性"的，上次开启 Plan 留下的悬挂任务必须先处理
+  {
     const hasActivePlan = c.messages.some(m => 
       m.plan && (
         m.plan.status === 'pending_approval' || 
@@ -619,7 +652,8 @@ async function onSend() {
   }
   
   // ⭐ 检查是否有未完成的大纲任务（暂停、出错状态）
-  if (state.settings.useOutline) {
+  //   同上：始终检查，与 usePlan 一致
+  {
     const hasPausedOutline = c.messages.some(m => 
       m.outline && (m.outline.status === 'paused' || m.outline.status === 'error')
     );
@@ -664,9 +698,15 @@ async function onSend() {
   }
   
   try {
-    if (state.settings.useOutline) await callAPIWithOutline();
-    else if (state.settings.usePlan) await callAPIWithPlan();
-    else if (state.settings.useReflection) await callAPIWithReflection();
+    // ⭐ 双保险：每次发送/重发都清零软停止标志
+    //   各 callAPIWithXxx 内部也清，但放这里更直观，避免任何遗漏路径
+    state.stopRequested = false;
+    // ⭐ "一次性模式"：选定本轮走哪条分支，并立刻熄灭按钮
+    //   下次发送默认走普通对话，除非用户重新开启
+    const mode = (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
+    if (mode === 'outline') await callAPIWithOutline();
+    else if (mode === 'plan') await callAPIWithPlan();
+    else if (mode === 'reflection') await callAPIWithReflection();
     else await callAPI();
   } catch (e) {
     console.error('[onSend] 错误:', e);
@@ -712,9 +752,11 @@ async function regenerate(idx) {
   state._outlineForceFinish = false;
   renderMessages();
   saveData();
-  if (state.settings.useOutline) await callAPIWithOutline();
-  else if (state.settings.usePlan) await callAPIWithPlan();
-  else if (state.settings.useReflection) await callAPIWithReflection();
+  // ⭐ 与 onSend 行为一致：消费"一次性模式"
+  const mode = (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
+  if (mode === 'outline') await callAPIWithOutline();
+  else if (mode === 'plan') await callAPIWithPlan();
+  else if (mode === 'reflection') await callAPIWithReflection();
   else await callAPI();
 }
 

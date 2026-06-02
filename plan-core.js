@@ -11,6 +11,8 @@ async function callAPIWithPlan() {
   state.isGenerating = true;
   // ⭐ 创建 abortCtrl，让用户能中断规划/审批阶段
   state.abortCtrl = new AbortController();
+  // ⭐ 清零软停止标志：新任务开始
+  state.stopRequested = false;
   updateSendBtn();
   
   const aiMsg = {
@@ -131,6 +133,8 @@ async function approveAndExecutePlan(msgIdx) {
   state._planExecuting = true;
   // ⭐ 创建 abortCtrl，让用户能中断执行
   state.abortCtrl = new AbortController();
+  // ⭐ 清零软停止标志：本次执行是新的开始
+  state.stopRequested = false;
   updateSendBtn();
   
   // ⭐ 计时：清除之前(pending_approval/paused/error)留下的 _endTime，让计时继续
@@ -391,7 +395,7 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate) {
   // ⭐ 抓取当前 abortCtrl 的 signal 引用并保存
   // 即使 stopGenerate 把 state.abortCtrl 置 null，本函数仍能感知到中止
   const abortSignal = state.abortCtrl ? state.abortCtrl.signal : null;
-  const isAborted = () => abortSignal && abortSignal.aborted;
+  const isAborted = () => (abortSignal && abortSignal.aborted) || state.stopRequested;
   const throwIfAborted = () => {
     if (isAborted()) {
       const err = new Error('用户中断');
