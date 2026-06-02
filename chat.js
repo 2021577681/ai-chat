@@ -340,12 +340,13 @@ function renderMsg(m, idx) {
         </div>
         ${attsHtml}
         ${toolCallsHtml}
-        ${(m.plan || m.outline) ? '' : `<div class="msg-content">${renderMarkdown(m.content || '')}</div>`}
+        ${(m.plan || m.outline || m.reflection) ? '' : `<div class="msg-content">${renderMarkdown(m.content || '')}</div>`}
         ${planHtml}
         ${outlineHtml}
+        ${reflectionHtml}
         ${m.plan ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${m.outline ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
-        ${reflectionHtml}
+        ${m.reflection ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         <div class="msg-actions">
           <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
           ${!isUser && m.role !== 'tool' ? `<button class="msg-action" onclick="regenerate(${idx})">🔄 重新生成</button>` : ''}

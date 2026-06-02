@@ -77,7 +77,7 @@ async function callAPIWithReflection() {
         _running: true
       };
       aiMsg.reflection.turns.push(studentTurn);
-      renderMessages();
+      refreshReflectionLive(aiMsg, true);
       
       const studentSystemPrompt = s.refStudentPrompt + (studentUseTools ? STUDENT_TOOL_SUFFIX : '');
       
@@ -95,7 +95,7 @@ async function callAPIWithReflection() {
       currentAnswer = studentResult.finalText;
       studentTurn.content = currentAnswer;
       studentTurn._running = false;
-      renderMessages();
+      refreshReflectionLive(aiMsg, true);
       
       // ===== 2. 老师评审（只看最终答案，可调工具验证）=====
       aiMsg.reflection.progressText = `👨‍🏫 老师评审中（第 ${round} 轮）...`;
@@ -116,7 +116,7 @@ async function callAPIWithReflection() {
         _running: true
       };
       aiMsg.reflection.turns.push(teacherTurn);
-      renderMessages();
+      refreshReflectionLive(aiMsg, true);
       
       const teacherSystemPrompt = s.refTeacherPrompt + (teacherUseTools ? TEACHER_TOOL_SUFFIX : '');
       
@@ -140,7 +140,7 @@ async function callAPIWithReflection() {
         _running: false
       });
       aiMsg.reflection.finalScore = critique.score;
-      renderMessages();
+      refreshReflectionLive(aiMsg, true);
       
       teacherFeedback = critique;
       
@@ -157,9 +157,17 @@ async function callAPIWithReflection() {
     
     aiMsg.content = currentAnswer;
     aiMsg.reflection.inProgress = false;
+    // ⭐ 完成后自动折叠面板（用户看主要的"最终答案"，过程藏起来）
+    aiMsg.reflection.expanded = false;
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.reflection.progressText;
-    renderMessages();
+    // ⭐ 完成时做一次完整的局部刷新（重渲染整个消息节点，让最终答案 + 折叠态都生效）
+    const c2 = currentChat();
+    if (c2) {
+      const finalIdx = c2.messages.indexOf(aiMsg);
+      if (finalIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(finalIdx);
+      else renderMessages();
+    }
     saveData();
   } catch (e) {
     if (e.name === 'AbortError') aiMsg.content = (aiMsg.content || '') + '\n\n*[已停止]*';
@@ -174,9 +182,15 @@ async function callAPIWithReflection() {
       }
     }
     aiMsg.reflection.inProgress = false;
+    aiMsg.reflection.expanded = false;
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.reflection.progressText;
-    renderMessages();
+    const c3 = currentChat();
+    if (c3) {
+      const errIdx = c3.messages.indexOf(aiMsg);
+      if (errIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(errIdx);
+      else renderMessages();
+    }
     saveData();
   } finally {
     state.isGenerating = false;
@@ -186,48 +200,39 @@ async function callAPIWithReflection() {
 }
 
 // 学生进度回调：把 runAgentLoop 的事件投影到 studentTurn
+// ⭐ 所有事件都走 refreshReflectionLive（局部刷新），不调全量 renderMessages，避免闪烁
 function onStudentProgress(ev, turn, aiMsg) {
   if (ev.type === 'text_delta') {
     turn.content = (turn.content || '') + ev.text;
-    // 流式：只局部刷新当前 panel，避免整页重渲染卡顿
     refreshReflectionLive(aiMsg);
   } else if (ev.type === 'tool_call') {
     turn.toolCalls.push({
       id: ev.id, name: ev.name, args: ev.args,
       result: '', ok: null, _running: true
     });
-    renderMessages();
+    refreshReflectionLive(aiMsg, true);  // 工具卡片增减立刻刷
   } else if (ev.type === 'tool_result') {
-    // 找到对应工具卡片
     const card = turn.toolCalls.find(tc => tc.id === ev.id && tc._running);
     if (card) {
       card.result = (ev.content || '').slice(0, 1000);
       card.ok = ev.ok;
       card._running = false;
     }
-    renderMessages();
+    refreshReflectionLive(aiMsg, true);
   } else if (ev.type === 'round_start') {
-    // 模型即将开始新一轮：清掉刚才的文本（因为它会重新输出最终答案）
-    // 注意：仅当上一轮调用了工具时才清；否则 round_end 之后会直接 done
-    // 我们用 hasToolCalls 标识：在 round_end 里如果调了工具，下一轮 round_start 清文本
     if (turn._nextRoundClearText) {
       turn.content = '';
       turn._nextRoundClearText = false;
       refreshReflectionLive(aiMsg);
     }
   } else if (ev.type === 'round_end') {
-    if (ev.hasToolCalls) {
-      // 模型这轮选择调工具，下一轮 round_start 时把文本清掉
-      turn._nextRoundClearText = true;
-    }
+    if (ev.hasToolCalls) turn._nextRoundClearText = true;
   }
-  // done 事件忽略，外层会处理
 }
 
 // 老师进度回调：同上
 function onTeacherProgress(ev, turn, aiMsg) {
   if (ev.type === 'text_delta') {
-    // 老师的最终输出是 JSON 评分，过程中流式文本暂存到 _streamingText
     turn._streamingText = (turn._streamingText || '') + ev.text;
     refreshReflectionLive(aiMsg);
   } else if (ev.type === 'tool_call') {
@@ -235,7 +240,7 @@ function onTeacherProgress(ev, turn, aiMsg) {
       id: ev.id, name: ev.name, args: ev.args,
       result: '', ok: null, _running: true
     });
-    renderMessages();
+    refreshReflectionLive(aiMsg, true);
   } else if (ev.type === 'tool_result') {
     const card = turn.toolCalls.find(tc => tc.id === ev.id && tc._running);
     if (card) {
@@ -243,7 +248,7 @@ function onTeacherProgress(ev, turn, aiMsg) {
       card.ok = ev.ok;
       card._running = false;
     }
-    renderMessages();
+    refreshReflectionLive(aiMsg, true);
   } else if (ev.type === 'round_start') {
     if (turn._nextRoundClearText) {
       turn._streamingText = '';
@@ -251,29 +256,57 @@ function onTeacherProgress(ev, turn, aiMsg) {
       refreshReflectionLive(aiMsg);
     }
   } else if (ev.type === 'round_end') {
-    if (ev.hasToolCalls) {
-      turn._nextRoundClearText = true;
-    }
+    if (ev.hasToolCalls) turn._nextRoundClearText = true;
   }
 }
 
-// 增量刷新 reflection 面板（用于流式文本）
-function refreshReflectionLive(aiMsg) {
+// 增量刷新 reflection 面板（用于流式文本 / 工具卡片变化）
+// ⭐ 只替换 .reflection-body 的内部 HTML，不动外层节点，不动其它消息
+// immediate=true 时绕过节流（用于工具卡片增删，确保不丢事件）
+function refreshReflectionLive(aiMsg, immediate) {
   const c = currentChat();
   if (!c) return;
   const idx = c.messages.indexOf(aiMsg);
   if (idx < 0) return;
-  // 节流：100ms 内最多一次
-  if (refreshReflectionLive._t) return;
-  refreshReflectionLive._t = setTimeout(() => {
+  
+  const doUpdate = () => {
     refreshReflectionLive._t = null;
     const panel = document.querySelector(`.reflection-panel[data-msg-idx="${idx}"]`);
-    if (!panel) { renderMessages(); return; }
-    const turnsHtml = (aiMsg.reflection.turns || []).map(renderReflectionTurn).join('');
-    const turnsContainer = panel.querySelector('.ref-turns');
-    if (turnsContainer) turnsContainer.innerHTML = turnsHtml;
-    else renderMessages();
-  }, 100);
+    if (!panel) {
+      // 面板还没创建（首次出现）：局部刷新这一条消息
+      if (typeof refreshMsgNode === 'function') refreshMsgNode(idx);
+      return;
+    }
+    const ref = aiMsg.reflection || {};
+    // 1) 更新轮次内容（body 内部）
+    const body = panel.querySelector('.reflection-body');
+    if (body) {
+      const turnsHtml = (ref.turns || []).map(renderReflectionTurn).join('');
+      const progressHtml = ref.inProgress
+        ? `<div class="ref-progress"><span class="ref-spinner"></span><span>${escapeHtml(ref.progressText || '思考中...')}</span></div>`
+        : '';
+      body.innerHTML = turnsHtml + progressHtml;
+    }
+    // 2) 更新顶部统计（轮数 / 评分）
+    const stats = panel.querySelector('.reflection-stats');
+    if (stats) {
+      const studentCount = (ref.turns || []).filter(t => t.role === 'student').length;
+      stats.textContent = `${studentCount} 轮 · 最终评分 ${ref.finalScore ?? '?'}/10`;
+    }
+  };
+  
+  if (immediate) {
+    if (refreshReflectionLive._t) {
+      clearTimeout(refreshReflectionLive._t);
+      refreshReflectionLive._t = null;
+    }
+    doUpdate();
+    return;
+  }
+  
+  // 节流：100ms 内最多一次（流式文本用）
+  if (refreshReflectionLive._t) return;
+  refreshReflectionLive._t = setTimeout(doUpdate, 100);
 }
 
 // ============ Prompt 后缀 ============
@@ -465,9 +498,13 @@ function saveReflectionSettings() {
     if (outlineBtn) outlineBtn.classList.remove('outline-active');
   }
   persistSettings();
+  // 师生模式没有独立的工具栏按钮（通过"更多菜单"打开），不需要切换按钮态
+  // 旧代码里访问不存在的 reflectBtn 会抛 TypeError，导致后面的 close + updateSendBtn 都不执行
   const btn = document.getElementById('reflectBtn');
-  if (s.useReflection) btn.classList.add('reflect-active');
-  else btn.classList.remove('reflect-active');
+  if (btn) {
+    if (s.useReflection) btn.classList.add('reflect-active');
+    else btn.classList.remove('reflect-active');
+  }
   updateSendBtn();
   closeReflectionSettings();
   toast('✓ 已保存');
@@ -486,8 +523,10 @@ function toggleReflection() {
     if (outlineBtn) outlineBtn.classList.remove('outline-active');
   }
   const btn = document.getElementById('reflectBtn');
-  if (s.useReflection) btn.classList.add('reflect-active');
-  else btn.classList.remove('reflect-active');
+  if (btn) {
+    if (s.useReflection) btn.classList.add('reflect-active');
+    else btn.classList.remove('reflect-active');
+  }
   persistSettings();
   updateSendBtn();
   toast(s.useReflection ? '✓ 已启用师生' : '✓ 已关闭师生');
