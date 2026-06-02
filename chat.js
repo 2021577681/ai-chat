@@ -682,6 +682,12 @@ async function onSend() {
   // ⭐ Trace: 记录一条用户消息（仅本地）
   if (typeof traceUserMessage === 'function') traceUserMessage(text);
   
+  // 🧪 自动信标：在最新 user 消息之前可能插入一条隐藏的"记代号"消息
+  //    判定逻辑在 beacon.js：按用户消息计数 + 间隔
+  if (typeof maybeInsertBeacon === 'function') {
+    try { maybeInsertBeacon(c); } catch (e) { console.warn('[beacon] 插入失败:', e); }
+  }
+  
   input.value = '';
   input.style.height = 'auto';
   state.pendingAttachments = [];

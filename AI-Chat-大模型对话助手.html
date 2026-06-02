@@ -92,7 +92,7 @@
       <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手">🎓 学习</button>
       <button class="topbar-btn" onclick="openGitPanel()" title="Git 版本管理（本地仓库）">🌿 Git</button>
       <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）">📜 Trace</button>
-      <button class="topbar-btn" onclick="clearCurrentChat()">🗑 清空</button>
+      <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话">🧪 体检</button>
     </div>
     
     <!-- 沙箱信息栏（替代原 URL 预览栏） -->
@@ -339,6 +339,27 @@
         <span class="slider-val" id="compressKeepLastVal">4</span>
       </div>
       <div class="form-hint">最近的消息保留原样，前面的消息会被压缩成摘要</div>
+    </div>
+    
+    <!-- 🧪 自动信标（上下文体检） -->
+    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🧪 上下文体检（自动信标）</h3>
+    
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <label style="margin:0;">启用自动信标</label>
+        <div class="form-hint" style="margin-top:2px;">每隔 N 条用户消息悄悄塞入一条"记代号"消息（不在聊天界面显示），用于检测 AI 是否还记得上下文。点击顶栏 🧪 按钮一键体检。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="beaconEnabled"><span class="switch-slider"></span></label>
+    </div>
+    
+    <div class="form-group">
+      <label>埋点间隔（每 N 条用户消息埋一个）</label>
+      <div class="slider-row">
+        <input type="range" id="beaconInterval" min="1" max="20" step="1" oninput="document.getElementById('beaconIntervalVal').textContent=this.value">
+        <span class="slider-val" id="beaconIntervalVal">5</span>
+      </div>
+      <div class="form-hint">值越小信标越密集（监测越精细，但额外 token 越多）。每个信标约消耗 30-50 tokens。</div>
     </div>
     
     <!-- 本地终端 Token 设置 -->
@@ -1044,6 +1065,7 @@
 <script src="lms.js"></script>
 <script src="lms_panel.js"></script>
 <script src="paper_tools.js"></script>
+<script src="beacon.js"></script>
 <script src="chat.js"></script>
 <script src="main.js"></script>
 

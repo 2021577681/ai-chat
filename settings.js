@@ -54,6 +54,14 @@ function openSettings() {
   if (compKeep) compKeep.value = s.compressKeepLast || 4;
   if (compKeepVal) compKeepVal.textContent = s.compressKeepLast || 4;
   
+  // 🧪 自动信标
+  const bEnabled = document.getElementById('beaconEnabled');
+  const bInterval = document.getElementById('beaconInterval');
+  const bIntervalVal = document.getElementById('beaconIntervalVal');
+  if (bEnabled) bEnabled.checked = !!s.beaconEnabled;
+  if (bInterval) bInterval.value = s.beaconInterval || 5;
+  if (bIntervalVal) bIntervalVal.textContent = s.beaconInterval || 5;
+  
   updateUrlPreview();
 }
 
@@ -97,6 +105,15 @@ function saveAndClose() {
   if (compEnabled) s.compressAutoEnabled = compEnabled.checked;
   if (compThreshold) s.compressAutoThreshold = parseInt(compThreshold.value);
   if (compKeep) s.compressKeepLast = parseInt(compKeep.value);
+  
+  // 🧪 自动信标
+  const bEnabled = document.getElementById('beaconEnabled');
+  const bInterval = document.getElementById('beaconInterval');
+  if (bEnabled) s.beaconEnabled = bEnabled.checked;
+  if (bInterval) {
+    const v = parseInt(bInterval.value);
+    s.beaconInterval = (isNaN(v) || v < 1) ? 5 : v;
+  }
   
   refreshModelSelect();
   persistSettings();
