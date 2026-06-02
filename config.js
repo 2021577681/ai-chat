@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v7';  // ⭐ v7：工具命名风格统一（save_document→save_note 等 9 个改名）
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v8';  // ⭐ v8：新增 3 个论文工具（arxiv_search / semantic_scholar_search / fetch_pdf_text）
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -288,6 +288,51 @@ const BUILTIN_TOOLS = [
       required: ['url']
     },
     code: 'return await fetchUrl(args.url, args.extract_text, args.max_chars);'
+  },
+
+  // ============ 📚 论文/学术工具（前端直连 API，无需后端代理） ============
+  // 实现函数定义在 paper_tools.js 中（arxivSearch / semanticScholarSearch / fetchPdfText）
+  {
+    name: 'arxiv_search',
+    description: '📚【论文】在 arXiv 学术预印本库中搜索论文（覆盖 CS / 物理 / 数学 / 统计等）。返回标题、作者、发表日期、摘要页和 PDF 链接。\n\n使用场景：\n- 用户想找某个领域的最新研究（如"transformer 综述""扩散模型最新论文"）\n- 需要精确按主题/作者检索预印本\n\n后续可用 fetch_pdf_text 读取 PDF 全文。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '查询关键词，英文效果最佳，如 "attention mechanism" "diffusion model"' },
+        max_results: { type: 'number', description: '返回数量，默认 8，最多 20' },
+        sort_by: { type: 'string', description: '排序方式：relevance（相关度，默认）/ submittedDate（按日期，找最新论文用这个）' }
+      },
+      required: ['query']
+    },
+    code: 'return await arxivSearch(args.query, args.max_results, args.sort_by);'
+  },
+  {
+    name: 'semantic_scholar_search',
+    description: '🎓【论文】用 Semantic Scholar 搜索学术论文（覆盖全学科 2 亿+ 论文）。返回标题、作者、年份、引用数、期刊/会议、DOI、arXiv ID、开放 PDF 链接。\n\n相比 arxiv_search 优势：\n- 覆盖所有学科（不止理工）\n- 带引用数指标（找高影响力论文）\n- 已正式发表的期刊/会议论文（不止预印本）\n\n注意：未授权用户限速 100 次 / 5 分钟，连续调用可能 429。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '查询关键词，英文效果最佳' },
+        max_results: { type: 'number', description: '返回数量，默认 8，最多 20' },
+        year: { type: 'string', description: '年份过滤，如 "2023" 或区间 "2020-2024"（可选）' }
+      },
+      required: ['query']
+    },
+    code: 'return await semanticScholarSearch(args.query, args.max_results, args.year);'
+  },
+  {
+    name: 'fetch_pdf_text',
+    description: '📄【论文】下载并提取 PDF 全文内容（用于读论文正文，不只是摘要）。基于浏览器端 pdf.js，首次调用会自动加载库（约 300KB）。\n\n使用场景：\n- arxiv_search 拿到 PDF 链接后，用本工具读全文\n- 用户给一个 PDF 链接想让你总结/翻译/答疑\n\n推荐：arXiv 链接（https://arxiv.org/pdf/...）可靠性最高，其他源可能因 CORS 失败。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'PDF 完整 URL，如 https://arxiv.org/pdf/1706.03762' },
+        max_pages: { type: 'number', description: '最多读取页数，默认 20，最大 100' },
+        max_chars: { type: 'number', description: '最多返回字符数，默认 20000，最大 80000' }
+      },
+      required: ['url']
+    },
+    code: 'return await fetchPdfText(args.url, args.max_pages, args.max_chars);'
   },
 
   // ============ 🎓 LMS 工具（西安交大学习系统） ============

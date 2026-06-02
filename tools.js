@@ -17,6 +17,7 @@ function renderToolList() {
     el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;font-size:13px;">还没有工具<br><button class="btn btn-primary" style="margin-top:10px;" onclick="resetBuiltinTools()">🔄 加载内置工具</button></div>';
     updateLmsToggleBtn();
     updateGitToggleBtn();
+    updatePaperToggleBtn();
     return;
   }
   
@@ -26,11 +27,14 @@ function renderToolList() {
     const isBuiltin = builtinNames.has(t.name);
     const isLms = isLmsTool(t.name);
     const isGit = isGitTool(t.name);
+    const isPaper = isPaperTool(t.name);
     const badge = isLms
       ? '<span style="background:#9c27b0;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">🎓 LMS</span>'
       : (isGit
         ? '<span style="background:#2e7d32;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">💾 快照</span>'
-        : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : ''));
+        : (isPaper
+          ? '<span style="background:#0277bd;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">📚 论文</span>'
+          : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : '')));
     return `
     <div class="tool-item">
       <div class="tool-item-header" onclick="this.parentElement.classList.toggle('expanded')">
@@ -47,6 +51,7 @@ function renderToolList() {
   }).join('');
   updateLmsToggleBtn();
   updateGitToggleBtn();
+  updatePaperToggleBtn();
 }
 
 // ============ 🎓 LMS 工具批量启停 ============
@@ -169,6 +174,67 @@ function updateGitToggleBtn() {
     btn.textContent = `💾 启用快照工具 (${total})`;
     btn.classList.add('btn-primary');
     btn.title = '当前未启用，点击一键加入全部版本快照工具';
+  }
+}
+
+// ============ 📚 论文工具批量启停 ============
+const PAPER_TOOL_NAMES = ['arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'];
+
+function isPaperTool(name) {
+  return typeof name === 'string' && PAPER_TOOL_NAMES.includes(name);
+}
+
+function paperToolsEnabled() {
+  return state.tools.some(t => isPaperTool(t.name));
+}
+
+function paperToolCount() {
+  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
+  return BUILTIN_TOOLS.filter(t => isPaperTool(t.name)).length;
+}
+
+function togglePaperTools() {
+  if (paperToolsEnabled()) {
+    // 禁用：从 state.tools 移除所有论文工具
+    const removed = state.tools.filter(t => isPaperTool(t.name)).length;
+    state.tools = state.tools.filter(t => !isPaperTool(t.name));
+    persistTools();
+    renderToolList();
+    toast(`🔕 已禁用 ${removed} 个论文工具`);
+  } else {
+    // 启用：从 BUILTIN_TOOLS 中把论文工具加回来
+    if (typeof BUILTIN_TOOLS === 'undefined') {
+      toast('未找到内置工具定义');
+      return;
+    }
+    const paperTools = BUILTIN_TOOLS.filter(t => isPaperTool(t.name));
+    let added = 0;
+    for (const tool of paperTools) {
+      if (!state.tools.some(t => t.name === tool.name)) {
+        state.tools.push(JSON.parse(JSON.stringify(tool)));
+        added++;
+      }
+    }
+    persistTools();
+    renderToolList();
+    toast(`📚 已启用 ${added} 个论文工具`);
+  }
+}
+
+function updatePaperToggleBtn() {
+  const btn = document.getElementById('paperToggleBtn');
+  if (!btn) return;
+  const enabled = paperToolsEnabled();
+  const total = paperToolCount();
+  if (enabled) {
+    const cur = state.tools.filter(t => isPaperTool(t.name)).length;
+    btn.textContent = `🔕 禁用论文工具 (${cur})`;
+    btn.classList.remove('btn-primary');
+    btn.title = '当前论文工具已启用，点击全部移除';
+  } else {
+    btn.textContent = `📚 启用论文工具 (${total})`;
+    btn.classList.add('btn-primary');
+    btn.title = '当前未启用，点击一键加入 arXiv + Semantic Scholar + PDF 全文工具';
   }
 }
 
