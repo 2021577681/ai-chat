@@ -656,6 +656,13 @@ async function onSend() {
   renderMessages();
   saveData();
   
+  // ⭐ 发送消息后强制滚到底：无论用户之前是否在翻看历史，
+  // 都把视图带回新消息处，符合主流 chat 应用的体验。
+  // 用 rAF 等 DOM/布局完成后再滚，确保 scrollHeight 已更新到包含新消息。
+  if (typeof scrollBottom === 'function') {
+    requestAnimationFrame(() => scrollBottom());
+  }
+  
   try {
     if (state.settings.useOutline) await callAPIWithOutline();
     else if (state.settings.usePlan) await callAPIWithPlan();
@@ -678,6 +685,22 @@ function copyMsg(idx) {
 
 async function regenerate(idx) {
   const c = currentChat();
+  if (!c) return;
+  
+  // ⭐ 关键修复：必须先中止任何正在跑的旧请求，否则会出现：
+  //   1) 旧 SSE 流继续往新插入的占位消息写字符 → 内容错乱
+  //   2) 同时两条 API 流并发 → 用户被双倍计费
+  //   3) 两个 Promise 互相覆盖 saveData → 可能丢消息
+  // 与 onSend 的处理保持一致：abort → 等一拍让 catch finally 跑完 → 再继续
+  if (state.isGenerating || state.abortCtrl) {
+    if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny();
+    else if (state.abortCtrl) { try { state.abortCtrl.abort(); } catch (_) {} }
+    await new Promise(r => setTimeout(r, 200));
+    state.isGenerating = false;
+    state.abortCtrl = null;
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+  }
+  
   c.messages = c.messages.slice(0, idx);
   while (c.messages.length && c.messages[c.messages.length - 1].role === 'tool') c.messages.pop();
   // ⭐ 重新生成等价于"重新开始一个 AI 回合"，必须清理上次残留状态：

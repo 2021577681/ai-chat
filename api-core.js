@@ -753,53 +753,109 @@ async function callOnceWithRole(history, model, rolePrompt) {
     };
   }
   
-  if (typeof applyRateLimit === 'function') {
-    await applyRateLimit();
-  }
+  // ⭐ 自动重试：把"发请求 + 读响应 + 解析"整体包成可重试单元
+  // 复用主对话的 _isRetryableError / _retryDelay / _sleepAbortable
+  // 配置项也用同一套 retryMaxAttempts / retryBaseDelayMs
+  const maxAttempts = Math.max(1, (parseInt(s.retryMaxAttempts) || 3) + 1);
+  const baseDelay = Math.max(100, parseInt(s.retryBaseDelayMs) || 1000);
+  const url = buildFullUrl(s.baseUrl, s.apiPath);
+  const reqHeaders = buildHeaders();
+  let lastErr = null;
   
   try {
-    const url = buildFullUrl(s.baseUrl, s.apiPath);
-    const resp = await _apiFetchWithTimeout(url, {
-      method: 'POST',
-      headers: buildHeaders(),
-      body: JSON.stringify(body)
-    }, signal, API_FETCH_TIMEOUT_MS);
-    
-    if (typeof recordRequest === 'function') {
-      recordRequest();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let httpStatus = 0;
+      let retryAfter = null;
+      try {
+        if (typeof applyRateLimit === 'function') {
+          await applyRateLimit();
+        }
+        
+        const resp = await _apiFetchWithTimeout(url, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: JSON.stringify(body)
+        }, signal, API_FETCH_TIMEOUT_MS);
+        
+        if (typeof recordRequest === 'function') {
+          recordRequest();
+        }
+        
+        const ct = resp.headers.get('content-type') || '';
+        const txt = await resp.text();
+        if (!resp.ok) {
+          httpStatus = resp.status;
+          retryAfter = resp.headers.get('retry-after');
+          const err = new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
+          err.httpStatus = resp.status;
+          err.retryAfter = retryAfter;
+          throw err;
+        }
+        
+        // ⭐ 放宽 Content-Type 检查：与 handleNonStream 保持一致
+        // 一些中转服务会把 JSON 响应错标成 text/plain，只要内容像 JSON 就尝试解析
+        let j;
+        const trimmed = (txt || '').trim();
+        const looksLikeJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+        if (!ct.toLowerCase().includes('json') && !looksLikeJson) {
+          throw new Error(`非 JSON 响应 (${ct})\n${txt.slice(0, 200)}`);
+        }
+        try { j = JSON.parse(trimmed); }
+        catch (e) { throw new Error('JSON 解析失败：' + trimmed.slice(0, 200)); }
+        if (j.error) throw new Error(`API 错误：${j.error.message || JSON.stringify(j.error)}`);
+        
+        // ⭐ 记录原始响应（callOnceWithRole 被 Plan 规划/师生评审/Token 摘要等多处复用）
+        if (typeof recordRawResponse === 'function') {
+          recordRawResponse({
+            ts: Date.now(),
+            isStream: false,
+            contentType: ct,
+            raw: txt,
+            parsedJson: j,
+            usage: j.usage || null,
+            request: { url, method: 'POST', headers: reqHeaders, body },
+            _source: '辅助调用 (callOnceWithRole)'
+          });
+        }
+        
+        // ⭐ 把辅助调用（Plan 规划/审查/整合、师生评审、压缩摘要等）的 usage 计入当前对话统计
+        // 之前漏算导致 Plan/大纲/师生 模式的 token 都不进总账
+        if (j.usage && typeof recordUsageFromResponse === 'function') {
+          const _c = typeof currentChat === 'function' ? currentChat() : null;
+          if (_c) recordUsageFromResponse(_c, j.usage);
+        }
+        
+        if (s.apiFormat === 'anthropic') return (j.content || []).filter(p => p.type === 'text').map(p => p.text).join('') || '';
+        return j.choices?.[0]?.message?.content || '';
+      } catch (attemptErr) {
+        lastErr = attemptErr;
+        // 用户主动 abort（含桥接外层主对话中止）：不重试，直接抛
+        if (attemptErr.name === 'AbortError' || signal.aborted) throw attemptErr;
+        
+        const retryable = (typeof _isRetryableError === 'function')
+          ? _isRetryableError(attemptErr, httpStatus || attemptErr.httpStatus)
+          : false;
+        const remaining = maxAttempts - attempt;
+        if (!retryable || remaining <= 0) throw attemptErr;
+        
+        const wait = (typeof _retryDelay === 'function')
+          ? _retryDelay(attempt, retryAfter || attemptErr.retryAfter, baseDelay)
+          : (baseDelay * Math.pow(2, attempt - 1));
+        console.warn(`[callOnceWithRole] 第 ${attempt}/${maxAttempts} 次尝试失败：${attemptErr.message}\n  → ${wait}ms 后重试`);
+        
+        try {
+          if (typeof _sleepAbortable === 'function') {
+            await _sleepAbortable(wait, signal);
+          } else {
+            await new Promise(r => setTimeout(r, wait));
+          }
+        } catch (sleepErr) {
+          throw sleepErr;  // sleep 被 abort 中断
+        }
+      }
     }
-    
-    const ct = resp.headers.get('content-type') || '';
-    const txt = await resp.text();
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
-    if (!ct.includes('json')) throw new Error(`非 JSON 响应 (${ct})\n${txt.slice(0, 200)}`);
-    let j;
-    try { j = JSON.parse(txt); } catch (e) { throw new Error('JSON 解析失败'); }
-    if (j.error) throw new Error(`API 错误：${j.error.message || JSON.stringify(j.error)}`);
-    
-    // ⭐ 记录原始响应（callOnceWithRole 被 Plan 规划/师生评审/Token 摘要等多处复用）
-    if (typeof recordRawResponse === 'function') {
-      recordRawResponse({
-        ts: Date.now(),
-        isStream: false,
-        contentType: ct,
-        raw: txt,
-        parsedJson: j,
-        usage: j.usage || null,
-        request: { url, method: 'POST', headers: buildHeaders(), body },
-        _source: '辅助调用 (callOnceWithRole)'
-      });
-    }
-    
-    // ⭐ 把辅助调用（Plan 规划/审查/整合、师生评审、压缩摘要等）的 usage 计入当前对话统计
-    // 之前漏算导致 Plan/大纲/师生 模式的 token 都不进总账
-    if (j.usage && typeof recordUsageFromResponse === 'function') {
-      const _c = typeof currentChat === 'function' ? currentChat() : null;
-      if (_c) recordUsageFromResponse(_c, j.usage);
-    }
-    
-    if (s.apiFormat === 'anthropic') return (j.content || []).filter(p => p.type === 'text').map(p => p.text).join('') || '';
-    return j.choices?.[0]?.message?.content || '';
+    // 理论上走不到这（要么 return 要么 throw），兜底
+    throw lastErr || new Error('callOnceWithRole 未知错误');
   } finally {
     // 解绑桥接监听器，避免外层 controller 累积闭包引用
     if (_bridgeOuterAbort && state.abortCtrl && state.abortCtrl.signal) {
