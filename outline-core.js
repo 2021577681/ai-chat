@@ -810,7 +810,7 @@ function consumePendingAttachments(conversationMessages, outlineObj) {
   // 文本文件 → 拼到 textPart
   let textPart = '【系统：以下附件已加载到对话上下文】';
   if (atts.length) {
-    textPart += '\n\n' + atts.map(a => `- ${a.name}（${formatBytes(a.size || 0)}）`).join('\n');
+    textPart += '\n\n' + atts.map(a => `- ${a.name}（${formatSize(a.size || 0)}）`).join('\n');
   }
   for (const a of textFiles) {
     const content = (a.text || '').slice(0, 50000); // 单文件最多 50k 字符防爆 token
@@ -861,11 +861,7 @@ function consumePendingAttachments(conversationMessages, outlineObj) {
   });
 }
 
-function formatBytes(n) {
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / 1024 / 1024).toFixed(1) + ' MB';
-}
+// ⚠️ formatBytes 已合并到 utils.js 的 formatSize（统一格式：带空格 + MB 用 .toFixed(2)）
 
 // ============ 大纲工具处理（本地虚拟工具，不发请求）============
 

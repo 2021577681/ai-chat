@@ -288,15 +288,11 @@ function updateJsonStats(tokens, msgs, bytes) {
   const el = document.getElementById('jsonStats');
   if (!el) return;
   let html = `<span>💬 ${msgs} 条消息</span> · <span>🔤 ${formatNumber(tokens)} tokens</span>`;
-  if (bytes) html += ` · <span>📦 ${formatBytes(bytes)}</span>`;
+  if (bytes) html += ` · <span>📦 ${formatSize(bytes)}</span>`;
   el.innerHTML = html;
 }
 
-function formatBytes(b) {
-  if (b < 1024) return b + 'B';
-  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + 'KB';
-  return (b / 1024 / 1024).toFixed(2) + 'MB';
-}
+// ⚠️ formatBytes 已合并到 utils.js 的 formatSize（统一格式：带空格 + MB 用 .toFixed(2)）
 
 function copyJsonPreview() {
   const txt = document.getElementById('jsonPreview').value;
