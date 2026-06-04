@@ -90,7 +90,10 @@ function _emptyTokenStats() {
     thinkingTokens: 0,        // extended thinking
     totalRequests: 0,         // 累计请求次数
     source: null,
-    time: 0
+    time: 0,
+    // ⭐ 全局 Token 统计用：逐次记录每次 API usage，来源与对话栏统计一致
+    //   旧数据没有 events 时，统计页会用累计值做一次性兼容汇总。
+    events: []
   };
 }
 
@@ -110,6 +113,96 @@ function getChatTokenStats(chat) {
 
 let _tokenFetchTimer = null;
 let _tokenFetchInflight = false;
+
+// ============ 独立 Token 使用账本 ============
+// 与对话数据分开保存：删除对话不会影响这里的历史统计。
+const TOKEN_USAGE_LEDGER_KEY = 'aichat_token_usage_ledger_v1';
+
+function loadTokenUsageLedger() {
+  try {
+    const raw = storage.get(TOKEN_USAGE_LEDGER_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    console.warn('[token-ledger] 加载失败:', e);
+    return [];
+  }
+}
+
+function saveTokenUsageLedger(list) {
+  try {
+    storage.set(TOKEN_USAGE_LEDGER_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+  } catch (e) {
+    console.warn('[token-ledger] 保存失败:', e);
+  }
+}
+
+function appendTokenUsageLedger(event) {
+  if (!event) return;
+  const list = loadTokenUsageLedger();
+  list.push(event);
+  saveTokenUsageLedger(list);
+}
+
+function migrateChatTokenStatsToLedger() {
+  const ledger = loadTokenUsageLedger();
+  const seen = new Set(ledger.map(e => e && e.id).filter(Boolean));
+  let added = 0;
+  const chats = Array.isArray(state.chats) ? state.chats : [];
+  for (const chat of chats) {
+    const stats = chat && chat.tokenStats;
+    if (!stats || typeof stats !== 'object') continue;
+    if (Array.isArray(stats.events) && stats.events.length) {
+      stats.events.forEach((ev, i) => {
+        const id = ev.id || `${chat.id || 'chat'}_${ev.ts || stats.time || 0}_${ev.model || 'model'}_${ev.inputTokens || 0}_${ev.outputTokens || 0}_${i}`;
+        if (seen.has(id)) return;
+        seen.add(id);
+        ledger.push({
+          id,
+          chatId: chat.id || '',
+          chatTitle: chat.title || '未命名对话',
+          ts: ev.ts || stats.time || chat.createdAt || Date.now(),
+          model: ev.model || '未知模型',
+          provider: ev.provider || '',
+          format: ev.format || '',
+          inputTokens: Number(ev.inputTokens || 0),
+          outputTokens: Number(ev.outputTokens || 0),
+          cacheReadTokens: Number(ev.cacheReadTokens || 0),
+          cacheCreateTokens: Number(ev.cacheCreateTokens || 0),
+          thinkingTokens: Number(ev.thinkingTokens || 0),
+          source: ev.source || stats.source || 'usage',
+          migratedFromChat: true
+        });
+        added++;
+      });
+    } else if (stats.totalRequests > 0) {
+      const id = `${chat.id || 'chat'}_legacy_${stats.time || chat.createdAt || 0}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ledger.push({
+        id,
+        chatId: chat.id || '',
+        chatTitle: chat.title || '未命名对话',
+        ts: stats.time || chat.createdAt || Date.now(),
+        model: '历史累计（未记录模型）',
+        provider: '',
+        format: '',
+        inputTokens: Number(stats.inputTokens || 0),
+        outputTokens: Number(stats.outputTokens || 0),
+        cacheReadTokens: Number(stats.cacheReadTokens || 0),
+        cacheCreateTokens: Number(stats.cacheCreateTokens || 0),
+        thinkingTokens: Number(stats.thinkingTokens || 0),
+        source: stats.source || 'legacy',
+        _legacy: true,
+        _requests: Number(stats.totalRequests || 1),
+        migratedFromChat: true
+      });
+      added++;
+    }
+  }
+  if (added > 0) saveTokenUsageLedger(ledger);
+  return added;
+}
 
 /**
  * 从响应的 usage 字段记录详细 token 信息
@@ -137,6 +230,9 @@ function recordUsageFromResponse(chat, usage) {
     || usage.completion_tokens_details?.reasoning_tokens 
     || 0;
   
+  const now = Date.now();
+  const model = state.settings.currentModel || 'unknown';
+  
   // 累计统计（注意：累加，不是覆盖）
   stats.msgCount = chat.messages.length;
   stats.inputTokens += inputTokens;
@@ -148,7 +244,25 @@ function recordUsageFromResponse(chat, usage) {
   stats.thinkingTokens += thinking;
   stats.totalRequests += 1;
   stats.source = state.settings.apiFormat === 'anthropic' ? 'anthropic' : 'openai';
-  stats.time = Date.now();
+  stats.time = now;
+  const usageEvent = {
+    id: `usage_${now}_${Math.random().toString(36).slice(2, 10)}`,
+    chatId: chat.id || '',
+    chatTitle: chat.title || '未命名对话',
+    ts: now,
+    model,
+    provider: state.settings.provider || '',
+    format: state.settings.apiFormat || '',
+    inputTokens,
+    outputTokens,
+    cacheReadTokens: cacheRead,
+    cacheCreateTokens: cacheCreate,
+    thinkingTokens: thinking,
+    source: stats.source
+  };
+  if (!Array.isArray(stats.events)) stats.events = [];
+  stats.events.push(usageEvent);
+  appendTokenUsageLedger(usageEvent);
   
   // 持久化（让累计数字跟着对话一起存到 localStorage）
   if (typeof saveData === 'function') {
