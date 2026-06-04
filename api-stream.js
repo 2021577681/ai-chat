@@ -85,6 +85,12 @@ function stopGenerate() {
   if (typeof window !== 'undefined' && window._rateWaitAbort) {
     try { window._rateWaitAbort(); } catch (e) {}
   }
+  // ⭐ 切断 attach_file 等工具留下的"自动重发"定时器链路
+  //   否则点了暂停后 3 秒，tryAutoResend 仍会用隐藏 user 消息触发一次 callAPI，
+  //   表现为"莫名其妙又开一轮对话、AI 不回答、计时器空转"（幽灵对话 bug）
+  if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
+    try { window.cancelAutoResend(); } catch (e) {}
+  }
   // ⭐ 清掉流式刷新与残留光标
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
   state.isGenerating = false;

@@ -9,6 +9,12 @@ function _abortCurrentTaskIfAny() {
   if (typeof window !== 'undefined' && window._rateWaitAbort) {
     try { window._rateWaitAbort(); } catch (e) {}
   }
+  // ⭐ 切断 attach_file 等工具的"自动重发"定时器
+  //   切换/新建/删除对话时如果不清，旧对话挂起的 3 秒定时器会在新对话上触发
+  //   一次幽灵 callAPI（隐藏 user 消息 + 空 assistant 占位 + 计时器空转）
+  if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
+    try { window.cancelAutoResend(); } catch (e) {}
+  }
   // 状态旗标不清：让 catch finally 分支自己清理。如果 fetch 真卡死，
   // 用户开新对话发消息时 onSend 里的 _outlineExecuting 检查仍会拦下来，
   // 这是预期的——他们应该回去点"强制中断"。

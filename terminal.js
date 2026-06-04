@@ -886,6 +886,24 @@ function resetTaskPermission() {
   _autoResendInProgress = false;
 }
 
+// ⭐ 取消任何待执行的"自动重发"链路
+// 暴露给 stopGenerate() / 用户手动中止流程调用，防止 attach_file 触发的
+// 3 秒定时器在用户暂停后继续把附件以隐藏消息形式重新发出去（幽灵对话 bug）。
+// 同时清掉 pendingAIAttachments，避免下一次正常对话被脏附件污染。
+function cancelAutoResend() {
+  if (_autoResendTimer) {
+    try { clearTimeout(_autoResendTimer); } catch (e) {}
+    _autoResendTimer = null;
+  }
+  _pendingAutoResend = null;
+  _autoResendInProgress = false;
+  // 清掉 AI 准备好但尚未"自动重发"出去的隐藏附件
+  if (state && Array.isArray(state.pendingAIAttachments)) {
+    state.pendingAIAttachments = [];
+  }
+}
+window.cancelAutoResend = cancelAutoResend;
+
 function forceUnstuck() {
   console.log('[紧急恢复] 强制重置所有状态');
   
