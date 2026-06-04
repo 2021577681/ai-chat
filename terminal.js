@@ -10,6 +10,7 @@ const PERMISSION_CATEGORIES = {
   edit:    { icon: '✏️',  label: '修改文档',       desc: 'edit_note：查找替换' },
   delete:  { icon: '🗑️',  label: '删除文档/目录', desc: 'delete_note：删除文件或空目录' },
   attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_file：把二进制文件塞入对话上下文' },
+  screenshot: { icon: '📸', label: '屏幕截图',       desc: 'ai_screenshot：截取指定窗口/全屏/区域，可能包含屏幕隐私信息' },
   // ⭐ AI Git 操作（3 个独立类别，权限粒度分级）
   git_read:    { icon: '🔍',  label: 'Git 查看',     desc: 'note_history / note_status / note_diff：只读查看版本历史' },
   git_write:   { icon: '💾',  label: 'Git 保存快照', desc: 'note_snapshot：将当前工作区改动提交为一个版本快照（不会覆盖文件）' },
@@ -23,7 +24,9 @@ const ACTION_TO_CATEGORY = {
   append_file: 'append',
   edit_file: 'edit',
   delete_file: 'delete',
-  read_file_binary: 'attach'
+  read_file_binary: 'attach',
+  screenshot: 'screenshot',
+  list_windows: 'screenshot'
 };
 
 // 持久化的"永久允许"集合（{execute:true, ...}）
@@ -428,6 +431,69 @@ async function fetchUrl(url, extractText, maxChars) {
   if (r.truncated) output += `（已截断）`;
   output += `\n\n${r.content}`;
   return output;
+}
+
+// 📸 AI 截图工具：指定窗口优先 → 全屏兜底 → 用户置前提示
+async function aiScreenshot(args) {
+  args = args || {};
+  const mode = args.mode || 'auto';
+  const params = {
+    mode,
+    window_title: args.window_title || args.title || '',
+    process_name: args.process_name || '',
+    hwnd: args.hwnd || null,
+    x: args.x,
+    y: args.y,
+    width: args.width,
+    height: args.height,
+    all_screens: args.all_screens !== false
+  };
+  const summary = [
+    `[ai_screenshot] ${mode}`,
+    params.window_title ? `窗口标题：${params.window_title}` : '',
+    params.process_name ? `进程：${params.process_name}` : '',
+    params.hwnd ? `HWND：${params.hwnd}` : '',
+    (params.width && params.height) ? `区域：x=${params.x || 0}, y=${params.y || 0}, w=${params.width}, h=${params.height}` : '区域：未指定，截取预览图'
+  ].filter(Boolean).join('\n');
+  const r = await callAgentBackend('screenshot', params, 'AI 想截取屏幕/窗口图像', summary);
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `❌ ${r.error}${r.fallback ? '\n💡 ' + r.fallback : ''}`;
+
+  const att = {
+    id: 'ai_screenshot_' + Date.now(),
+    name: r.name || 'screenshot.png',
+    type: 'image',
+    mime: r.mime || 'image/png',
+    size: r.size || 0,
+    data: r.data,
+    description: args.description || 'AI 截图结果'
+  };
+  state.pendingAIAttachments = state.pendingAIAttachments || [];
+  state.pendingAIAttachments.push(att);
+
+  let out = `📸 截图完成：${att.name}\n`;
+  out += `来源：${r.source || 'unknown'}；策略：${r.strategy || ''}\n`;
+  out += `尺寸：${r.width}×${r.height}`;
+  if (r.cropped) out += `；裁剪框：${JSON.stringify(r.crop_box)}`;
+  if (r.window && r.window.title) out += `\n窗口：${r.window.title}`;
+  if (r.warnings && r.warnings.length) out += `\n⚠️ ${r.warnings.join('\n⚠️ ')}`;
+  out += '\n\n图片已加入下一轮对话附件。请根据用户需求分析该预览图：若已是最终区域则直接说明；若只是全屏/窗口预览，请判断目标 bbox 并再次调用 ai_screenshot 传入 x/y/width/height 裁剪；不确定则询问用户确认；无法定位则提示用户将目标窗口置于前台。';
+  return out;
+}
+
+async function aiListWindows(windowTitle, processName) {
+  const r = await callAgentBackend('list_windows', {
+    window_title: windowTitle || '',
+    process_name: processName || ''
+  }, 'AI 想查看当前窗口列表', `[list_windows]\n标题过滤：${windowTitle || '(无)'}\n进程过滤：${processName || '(无)'}`);
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `❌ ${r.error}`;
+  if (!r.windows || !r.windows.length) return `🪟 未找到匹配窗口（平台：${r.platform}）。可改用 ai_screenshot mode=fullscreen 获取全屏预览。`;
+  let out = `🪟 找到 ${r.count} 个窗口：\n\n`;
+  for (const w of r.windows.slice(0, 30)) {
+    out += `- hwnd=${w.hwnd} pid=${w.pid || ''} ${w.process_name || ''}\n  ${w.title}\n`;
+  }
+  return out;
 }
 
 function formatFileSize(b) {

@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v8';  // ⭐ v8：新增 3 个论文工具（arxiv_search / semantic_scholar_search / fetch_pdf_text）
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v9';  // ⭐ v9：新增 AI 截图工具（分级窗口截图/全屏截图/区域裁剪）
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -260,6 +260,40 @@ const BUILTIN_TOOLS = [
       required: ['path']
     },
     code: 'return await attachFileForAI(args.path, args.description);'
+  },
+  {
+    name: 'list_windows',
+    description: '列出当前桌面窗口，供截图前定位目标窗口使用。可按窗口标题或进程名过滤。截图流程中如用户提供窗口线索，优先用它确认 hwnd/title；若无窗口线索，可跳过直接 ai_screenshot 全屏预览。',
+    parameters: {
+      type: 'object',
+      properties: {
+        window_title: { type: 'string', description: '窗口标题关键词（可选，模糊匹配）' },
+        process_name: { type: 'string', description: '进程名关键词（可选，如 python.exe、chrome.exe）' }
+      },
+      required: []
+    },
+    code: 'return await aiListWindows(args.window_title, args.process_name);'
+  },
+  {
+    name: 'ai_screenshot',
+    description: 'AI 截图工具，按“指定窗口优先 → 全屏截图兜底 → 用户置前提示”的策略执行。\n\n推荐流程：\n1. 用户明确要求截图，或 AI 判断任务必须依赖屏幕内容时调用；若用户未明确要求但需要看屏幕，应先征得用户同意。\n2. 如有 window_title/process_name/hwnd，mode=auto 会先尝试后台/指定窗口截图；失败自动全屏截图。\n3. 第一次通常不传 x/y/width/height，得到全屏或窗口预览并分析目标区域。\n4. 如果置信度高，再次调用本工具传入 x/y/width/height 裁剪最终区域。\n5. 如果不确定，先询问用户确认；如果无法定位，提示用户将目标窗口置于前台后重试。\n\n注意：截图可能包含隐私信息。返回的图片会自动加入下一轮对话附件，模型下一轮可查看。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'auto/window/fullscreen/crop。默认 auto：有窗口信息则优先窗口截图，失败全屏兜底。fullscreen 直接全屏。window 只截指定窗口，失败不兜底。' },
+        window_title: { type: 'string', description: '目标窗口标题关键词，可选' },
+        process_name: { type: 'string', description: '目标进程名关键词，可选，如 python.exe/chrome.exe' },
+        hwnd: { type: 'number', description: '窗口句柄，可由 list_windows 获得，可选' },
+        x: { type: 'number', description: '裁剪区域左上角 x。对窗口截图时相对窗口图像；对全屏截图时相对全屏图像。' },
+        y: { type: 'number', description: '裁剪区域左上角 y。' },
+        width: { type: 'number', description: '裁剪区域宽度。' },
+        height: { type: 'number', description: '裁剪区域高度。' },
+        all_screens: { type: 'boolean', description: '全屏模式下是否覆盖多显示器，默认 true。' },
+        description: { type: 'string', description: '对此截图附件的简短说明。' }
+      },
+      required: []
+    },
+    code: 'return await aiScreenshot(args);'
   },
   {
     name: 'web_search',

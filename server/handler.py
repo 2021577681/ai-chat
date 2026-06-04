@@ -18,11 +18,12 @@ from .exec import ExecMixin
 from .files import FilesMixin
 from .git_ops import GitMixin
 from .proxy import ProxyMixin
+from .screenshot import ScreenshotMixin
 from .web import WebMixin
 
 
 class Handler(BaseHTTPRequestHandler,
-              ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin):
+              ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin):
     """主 HTTP Handler，通过 mixin 组合所有功能。
     各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
@@ -151,6 +152,10 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_file_info(body)
             elif action == 'git':
                 self.handle_git(body)
+            elif action == 'screenshot':
+                self.handle_screenshot(body)
+            elif action == 'list_windows':
+                self.handle_list_windows(body)
             else:
                 self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:
