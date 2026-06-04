@@ -130,6 +130,10 @@ let _currentConfirmCategory = '';
 let _pendingAutoResend = null;
 let _autoResendTimer = null;
 let _autoResendInProgress = false;
+// ⭐ 自动重发取消版本号：每次取消/重置时递增。
+// 已经进入 tryAutoResend 等待循环的旧任务醒来后会发现版本不一致并退出，
+// 防止"暂停后下一次正常对话结束才冒出幽灵等待"。
+let _autoResendCancelSeq = 0;
 
 function termAskConfirm(title, detail, command, category) {
   return new Promise(resolve => {
@@ -734,8 +738,18 @@ function scheduleAutoResend(fileInfo, description) {
 }
 
 async function tryAutoResend() {
+  // ⭐ 捕获当前版本。cancelAutoResend()/resetTaskPermission() 会递增版本号，
+  // 让已经启动并在 while(state.isGenerating) 中等待的旧任务醒来后自动失效。
+  const mySeq = _autoResendCancelSeq;
+  const isCancelled = () => mySeq !== _autoResendCancelSeq || state.stopRequested;
+  
   if (_autoResendInProgress) {
     console.log('[自动重发] 已有重发正在进行，跳过');
+    return;
+  }
+  
+  if (isCancelled()) {
+    console.log('[自动重发] 已取消，跳过');
     return;
   }
   
@@ -750,11 +764,20 @@ async function tryAutoResend() {
   let waitCount = 0;
   const MAX_WAIT = 240;   // 240 * 500ms = 120 秒
   while (state.isGenerating && waitCount < MAX_WAIT) {
+    if (isCancelled()) {
+      console.log('[自动重发] 等待期间已取消，退出');
+      return;
+    }
     if (waitCount % 20 === 0) {
       console.log(`[自动重发] AI 还在生成（${waitCount + 1}/${MAX_WAIT}），等待 500ms...`);
     }
     await new Promise(r => setTimeout(r, 500));
     waitCount++;
+  }
+  
+  if (isCancelled()) {
+    console.log('[自动重发] 发送前已取消，退出');
+    return;
   }
   
   if (state.isGenerating) {
@@ -877,6 +900,8 @@ function toggleAutoAnalyze() {
 function resetTaskPermission() {
   // ⭐ 任务级权限按类别清空（永久权限不动）
   TERMINAL_CONFIG.taskAllow = {};
+  // ⭐ 递增取消版本，让已经启动但正在等待的 tryAutoResend 失效
+  _autoResendCancelSeq++;
   
   if (_autoResendTimer) {
     clearTimeout(_autoResendTimer);
@@ -891,6 +916,8 @@ function resetTaskPermission() {
 // 3 秒定时器在用户暂停后继续把附件以隐藏消息形式重新发出去（幽灵对话 bug）。
 // 同时清掉 pendingAIAttachments，避免下一次正常对话被脏附件污染。
 function cancelAutoResend() {
+  // ⭐ 递增取消版本，让已经启动但正在等待 state.isGenerating=false 的 tryAutoResend 失效
+  _autoResendCancelSeq++;
   if (_autoResendTimer) {
     try { clearTimeout(_autoResendTimer); } catch (e) {}
     _autoResendTimer = null;
@@ -898,7 +925,7 @@ function cancelAutoResend() {
   _pendingAutoResend = null;
   _autoResendInProgress = false;
   // 清掉 AI 准备好但尚未"自动重发"出去的隐藏附件
-  if (state && Array.isArray(state.pendingAIAttachments)) {
+  if (typeof state !== 'undefined' && Array.isArray(state.pendingAIAttachments)) {
     state.pendingAIAttachments = [];
   }
 }
@@ -906,6 +933,8 @@ window.cancelAutoResend = cancelAutoResend;
 
 function forceUnstuck() {
   console.log('[紧急恢复] 强制重置所有状态');
+  // ⭐ 让任何已经启动的自动重发等待循环立即失效
+  _autoResendCancelSeq++;
   
   state.isGenerating = false;
   state.abortCtrl = null;
