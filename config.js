@@ -121,16 +121,17 @@ const PRESET_TOOLS = {
 const BUILTIN_TOOLS = [
   {
     name: 'execute_action',
-    description: '在用户的本地文件夹中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。',
+    description: '在用户的本地文件夹中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。如果用户明确要求在新终端窗口中运行（如想看到实时输出、命令耗时很长不想阻塞），请设置 new_window: true。',
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: '要执行的任务指令，例如 ls -la 或 python script.py' },
-        cwd: { type: 'string', description: '执行目录（可选）' }
+        cwd: { type: 'string', description: '执行目录（可选）' },
+        new_window: { type: 'boolean', description: '是否在新终端窗口中运行（默认 false 即后台静默运行）。适合长时间命令（如安装依赖、训练模型、启动服务），或用户明确要求看到终端实时输出时使用。' }
       },
       required: ['command']
     },
-    code: 'return await executeTerminalCommand(args.command, args.cwd);'
+    code: 'return await executeTerminalCommand(args.command, args.cwd, args.new_window);'
   },
   {
     name: 'read_note',

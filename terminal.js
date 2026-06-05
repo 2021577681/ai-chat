@@ -323,8 +323,8 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand) {
   }
 }
 
-async function executeTerminalCommand(command, cwd) {
-  const r = await callAgentBackend('execute', { command, cwd, timeout: 60 },
+async function executeTerminalCommand(command, cwd, newWindow) {
+  const r = await callAgentBackend('execute', { command, cwd, timeout: 60, new_window: !!newWindow },
     'AI 想执行任务指令', command);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;

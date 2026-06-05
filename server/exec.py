@@ -6,7 +6,9 @@
 # ============================================================
 
 import os
+import re
 import subprocess
+import tempfile
 
 from . import config
 from .sandbox import is_dangerous_command, is_inside_workspace, resolve_path
@@ -39,6 +41,67 @@ class ExecMixin:
                 'ok': False,
                 'error': f'🚫 工作目录越界：{cwd_abs}\n沙箱根: {config.WORKSPACE_ROOT}'
             })
+
+        # ⭐ 新终端窗口模式：弹出独立 cmd 窗口运行命令，用户可看到实时输出
+        #  适合长时间任务（安装依赖、训练、启动服务等），不受 timeout 限制
+        if body.get('new_window'):
+            print(f'🪟 [新窗口] cwd={cwd_abs}\n   $ {command}')
+            try:
+                # 构建 bat 文件：
+                #   - chcp 65001 解决中文乱码
+                #   - @echo off 隐藏辅助步骤，@echo on 开启命令回显
+                #   - echo 类命令加 @ 前缀：只显示输出，不显示命令本身
+                #   - 普通命令（cd、dir 等）：完整回显命令 + 输出
+                bat_lines = [
+                    '@echo off',
+                    'chcp 65001 >nul',
+                    f'cd /d "{cwd_abs}"',
+                    'timeout /t 1 /nobreak >nul',
+                ]
+                for part in re.split(r'&&', command):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if part.startswith('echo'):
+                        # echo 命令：@ 前缀 → 命令本身不回显，只显示输出
+                        bat_lines.append('@echo on')
+                        bat_lines.append('@' + part)
+                        bat_lines.append('@echo off')
+                        bat_lines.append('timeout /t 1 /nobreak >nul')
+                    else:
+                        # 普通命令（cd, dir, python 等）：完整回显
+                        bat_lines.append('@echo on')
+                        bat_lines.append(part)
+                        bat_lines.append('@echo off')
+                        bat_lines.append('timeout /t 1 /nobreak >nul')
+                # 去掉末尾多余的 timeout
+                while bat_lines and bat_lines[-1].startswith('timeout'):
+                    bat_lines.pop()
+
+                with tempfile.NamedTemporaryFile(
+                    mode='w', suffix='.bat', delete=False, encoding='utf-8'
+                ) as f:
+                    bat_path = f.name
+                    f.write('\n'.join(bat_lines))
+
+                proc = subprocess.Popen(
+                    f'cmd /k "title AI 终端 & "{bat_path}" & del "{bat_path}""',
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    cwd=cwd_abs
+                )
+                return self._send_json(200, {
+                    'ok': True,
+                    'stdout': f'✅ 已在新终端窗口启动命令 (PID: {proc.pid})',
+                    'stderr': '',
+                    'returncode': 0,
+                    'cwd': cwd_abs,
+                    'new_window': True
+                })
+            except Exception as e:
+                return self._send_json(200, {
+                    'ok': False,
+                    'error': f'无法创建新终端窗口: {e}'
+                })
 
         # ⭐ L2: cd 拦截
         if command.strip().startswith('cd '):
