@@ -442,7 +442,8 @@ async function aiScreenshot(args) {
     window_title: args.window_title || args.title || '',
     process_name: args.process_name || '',
     hwnd: args.hwnd || null,
-    all_screens: args.all_screens !== false
+    all_screens: args.all_screens !== false,
+    use_printwindow: !!args.use_printwindow
   };
   const summary = [
     `[ai_screenshot] ${mode}`,
