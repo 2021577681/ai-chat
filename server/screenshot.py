@@ -4,11 +4,10 @@
 # 提供 ScreenshotMixin，给 Handler 用。
 # action: screenshot
 # 参数：
-#   mode 可选：auto/window/fullscreen/crop
+#   mode 可选：auto/window/fullscreen
 #   window_title/process_name/hwnd 可选：用于指定窗口截图。
-#   x, y, width, height 可选：用于全屏截图后裁剪，或对窗口截图结果裁剪。
 #   all_screens 可选，默认 True，尽量覆盖多显示器。
-# 返回：PNG base64 data URL + 尺寸信息 + 分级截图策略信息。
+# 截图自动保存到当前工作目录，返回本地文件路径。
 # ============================================================
 
 import base64
@@ -21,27 +20,37 @@ from io import BytesIO
 class ScreenshotMixin:
     """Handler mixin：屏幕/窗口截图。"""
 
-    def _encode_png_response(self, img, *, source, full_size=None, cropped=False,
-                             crop_box=None, window_info=None, strategy=None,
-                             warnings=None):
-        out = BytesIO()
-        img.save(out, format='PNG')
-        raw = out.getvalue()
-        b64 = base64.b64encode(raw).decode('ascii')
+    def _save_and_encode_response(self, img, *, source, window_info=None,
+                                   strategy=None, warnings=None):
+        """保存截图到当前工作目录并返回路径信息。"""
+        from . import config
+
         ts = time.strftime('%Y%m%d_%H%M%S')
-        name = f'screenshot_{ts}_{source}{"_crop" if cropped else ""}.png'
-        full_w, full_h = full_size or img.size
+        name = f'screenshot_{ts}_{source}.png'
+        # ⭐ 兜底：若 current_cwd 不是有效目录，回退到 os.getcwd()
+        save_dir = config.current_cwd
+        if not os.path.isdir(save_dir):
+            save_dir = os.getcwd()
+        save_path = os.path.join(save_dir, name)
+        abs_path = os.path.abspath(save_path)
+
+        # 保存 PNG 到文件
+        img.save(abs_path, format='PNG')
+
+        # 读取并编码 base64（前端预览用）
+        with open(abs_path, 'rb') as f:
+            raw = f.read()
+        b64 = base64.b64encode(raw).decode('ascii')
+
         payload = {
             'ok': True,
             'name': name,
+            'path': abs_path,
+            'dir': save_dir,
             'mime': 'image/png',
             'size': len(raw),
             'width': img.size[0],
             'height': img.size[1],
-            'full_width': full_w,
-            'full_height': full_h,
-            'cropped': cropped,
-            'crop_box': crop_box,
             'source': source,
             'strategy': strategy or source,
             'window': window_info,
@@ -50,31 +59,6 @@ class ScreenshotMixin:
             'data': 'data:image/png;base64,' + b64
         }
         self._send_json(200, payload)
-
-    def _crop_if_needed(self, img, body):
-        full_w, full_h = img.size
-        x = body.get('x', None)
-        y = body.get('y', None)
-        w = body.get('width', None)
-        h = body.get('height', None)
-        if x is None and y is None and w is None and h is None:
-            return img, False, None, (full_w, full_h)
-        try:
-            x = int(x or 0)
-            y = int(y or 0)
-            w = int(w or 0)
-            h = int(h or 0)
-        except Exception:
-            raise ValueError('截图区域参数必须是整数：x, y, width, height')
-        if w <= 0 or h <= 0:
-            raise ValueError('截图区域 width/height 必须大于 0')
-        left = max(0, x)
-        top = max(0, y)
-        right = min(full_w, x + w)
-        bottom = min(full_h, y + h)
-        if right <= left or bottom <= top:
-            raise ValueError(f'截图区域超出图像范围。图像尺寸：{full_w}×{full_h}')
-        return img.crop((left, top, right, bottom)), True, [left, top, right, bottom], (full_w, full_h)
 
     def _grab_fullscreen(self, body):
         try:
@@ -131,7 +115,6 @@ class ScreenshotMixin:
                 pname = get_proc_name(pid)
                 if proc_l and pname and proc_l not in pname:
                     return
-                # 如果要求 process_name 但没有 psutil，无法核验，则不过滤，交给标题过滤兜底
                 matches.append({'hwnd': h, 'title': text, 'pid': pid, 'process_name': pname})
             except Exception:
                 pass
@@ -140,13 +123,18 @@ class ScreenshotMixin:
         return matches
 
     def _capture_window_win32(self, body):
+        """窗口截图：全屏截图 + 裁剪到窗口坐标。
+        
+        原理（参考微信/QQ 截图等主流工具）：
+        - 不碰窗口 DC（GPU 加速窗口的 DC 是黑的）
+        - 从屏幕 DC 直接读像素（ImageGrab 内部用 BitBlt from GetDC(0)）
+        - 用 GetWindowRect 获取窗口在屏幕上的坐标，裁剪即可
+        """
         if sys.platform != 'win32':
             raise RuntimeError('当前系统暂不支持后台窗口截图，仅 Windows 支持 window 模式；请改用 fullscreen。')
         try:
-            import win32con
             import win32gui
-            import win32ui
-            from PIL import Image
+            from PIL import ImageGrab
         except Exception as e:
             raise RuntimeError('窗口截图依赖 pywin32/Pillow。请先运行：pip install pywin32 pillow\n' + str(e))
 
@@ -159,43 +147,29 @@ class ScreenshotMixin:
             raise RuntimeError('未找到匹配的目标窗口')
         info = wins[0]
         hwnd = int(info['hwnd'])
+        
+        # 获取窗口在屏幕上的坐标
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         width = right - left
         height = bottom - top
         if width <= 0 or height <= 0:
             raise RuntimeError('目标窗口尺寸无效，可能已最小化')
 
-        hwnd_dc = win32gui.GetWindowDC(hwnd)
-        mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
-        save_dc = mfc_dc.CreateCompatibleDC()
-        bitmap = win32ui.CreateBitmap()
-        bitmap.CreateCompatibleBitmap(mfc_dc, width, height)
-        save_dc.SelectObject(bitmap)
         warnings = []
+        
+        # ⭐ 核心：用 ImageGrab 从屏幕 DC 截取窗口区域
+        #   ImageGrab.grab(bbox=...) 内部调用 BitBlt from GetDC(0)，
+        #   直接读屏幕像素，不经过窗口 DC，对 GPU 加速窗口完全兼容
         try:
-            flags = int(body.get('printwindow_flags', 2))  # PW_RENDERFULLCONTENT on newer Windows
-            result = win32gui.PrintWindow(hwnd, save_dc.GetSafeHdc(), flags)
-            if not result:
-                warnings.append('PrintWindow 返回失败，已尝试 BitBlt 可见区域兜底；被遮挡部分可能不完整。')
-                save_dc.BitBlt((0, 0), (width, height), mfc_dc, (0, 0), win32con.SRCCOPY)
-            bmpinfo = bitmap.GetInfo()
-            bmpstr = bitmap.GetBitmapBits(True)
-            img = Image.frombuffer(
-                'RGB',
-                (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
-                bmpstr,
-                'raw',
-                'BGRX',
-                0,
-                1
-            )
-        finally:
-            win32gui.DeleteObject(bitmap.GetHandle())
-            save_dc.DeleteDC()
-            mfc_dc.DeleteDC()
-            win32gui.ReleaseDC(hwnd, hwnd_dc)
+            img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+        except TypeError:
+            # 旧版 Pillow 可能不支持 all_screens 参数
+            img = ImageGrab.grab(bbox=(left, top, right, bottom))
 
-        info.update({'rect': [left, top, right, bottom]})
+        if img is None:
+            raise RuntimeError('ImageGrab 返回空图像')
+
+        info.update({'rect': [left, top, right, bottom], 'method': 'screengrab_crop'})
         return img, info, warnings
 
     def handle_screenshot(self, body):
@@ -224,13 +198,9 @@ class ScreenshotMixin:
                 img = self._grab_fullscreen(body)
                 source = 'fullscreen'
 
-            img, cropped, crop_box, full_size = self._crop_if_needed(img, body)
-            self._encode_png_response(
+            self._save_and_encode_response(
                 img,
                 source=source,
-                full_size=full_size,
-                cropped=cropped,
-                crop_box=crop_box,
                 window_info=window_info,
                 strategy=' -> '.join(strategy) if strategy else source,
                 warnings=warnings
@@ -239,7 +209,7 @@ class ScreenshotMixin:
             self._send_json(200, {
                 'ok': False,
                 'error': f'截图失败：{e}',
-                'fallback': '请将目标窗口置于前台后重试，或改用全屏截图再裁剪。'
+                'fallback': '请将目标窗口置于前台后重试，或改用全屏截图。'
             })
 
     def handle_list_windows(self, body):

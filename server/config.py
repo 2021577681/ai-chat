@@ -10,7 +10,27 @@
 
 import os
 import secrets
+import sys
 import threading
+
+# ⭐ DPI 感知：必须在任何 GDI/窗口操作之前设置，否则 GetWindowRect / ImageGrab
+#   在高 DPI 显示器（125%/150%/200% 缩放）上坐标对不上，截图会错位或残缺。
+#   PER_MONITOR_AWARE_V2 (2) 是最新模式，每个显示器独立缩放。
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        # Windows 10 1703+ 首选
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_AWARE_V2
+    except Exception:
+        try:
+            # Windows 8.1 备用
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PER_MONITOR_AWARE
+        except Exception:
+            try:
+                # Vista/7 兜底
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
 
 # ---------- 网络配置 ----------
 PORT = 8765

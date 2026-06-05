@@ -26,7 +26,7 @@ const ACTION_TO_CATEGORY = {
   delete_file: 'delete',
   read_file_binary: 'attach',
   screenshot: 'screenshot',
-  list_windows: 'screenshot'
+  list_windows: 'screenshot',
 };
 
 // 持久化的"永久允许"集合（{execute:true, ...}）
@@ -442,10 +442,6 @@ async function aiScreenshot(args) {
     window_title: args.window_title || args.title || '',
     process_name: args.process_name || '',
     hwnd: args.hwnd || null,
-    x: args.x,
-    y: args.y,
-    width: args.width,
-    height: args.height,
     all_screens: args.all_screens !== false
   };
   const summary = [
@@ -453,33 +449,21 @@ async function aiScreenshot(args) {
     params.window_title ? `窗口标题：${params.window_title}` : '',
     params.process_name ? `进程：${params.process_name}` : '',
     params.hwnd ? `HWND：${params.hwnd}` : '',
-    (params.width && params.height) ? `区域：x=${params.x || 0}, y=${params.y || 0}, w=${params.width}, h=${params.height}` : '区域：未指定，截取预览图'
+    '截图范围：' + (params.window_title || params.process_name || params.hwnd ? '指定窗口' : '全屏')
   ].filter(Boolean).join('\n');
   const r = await callAgentBackend('screenshot', params, 'AI 想截取屏幕/窗口图像', summary);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}${r.fallback ? '\n💡 ' + r.fallback : ''}`;
 
-  const att = {
-    id: 'ai_screenshot_' + Date.now(),
-    name: r.name || 'screenshot.png',
-    type: 'image',
-    mime: r.mime || 'image/png',
-    size: r.size || 0,
-    data: r.data,
-    description: args.description || 'AI 截图结果'
-  };
-  state.pendingAIAttachments = state.pendingAIAttachments || [];
-  state.pendingAIAttachments.push(att);
-
-  let out = `📸 截图完成：${att.name}\n`;
+  let out = `📸 截图完成：${r.name || 'screenshot.png'}\n`;
+  out += `已保存至：${r.path || r.dir || '(未知路径)'}\n`;
   out += `来源：${r.source || 'unknown'}；策略：${r.strategy || ''}\n`;
   out += `尺寸：${r.width}×${r.height}`;
-  if (r.cropped) out += `；裁剪框：${JSON.stringify(r.crop_box)}`;
   if (r.window && r.window.title) out += `\n窗口：${r.window.title}`;
   if (r.warnings && r.warnings.length) out += `\n⚠️ ${r.warnings.join('\n⚠️ ')}`;
-  out += '\n\n图片已加入下一轮对话附件。请根据用户需求分析该预览图：若已是最终区域则直接说明；若只是全屏/窗口预览，请判断目标 bbox 并再次调用 ai_screenshot 传入 x/y/width/height 裁剪；不确定则询问用户确认；无法定位则提示用户将目标窗口置于前台。';
   return out;
 }
+
 
 async function aiListWindows(windowTitle, processName) {
   const r = await callAgentBackend('list_windows', {

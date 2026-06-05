@@ -54,7 +54,55 @@ function buildOpenAIMessages(history) {
       out.push({ role: m.role, content: textContent });
     }
   }
-  return out;
+  
+  // ⭐ 关键修复：确保每个 assistant(tool_calls) 后面都有对应的 tool 消息
+  // 否则 DeepSeek/OpenAI 会报 400："An assistant message with 'tool_calls' must be followed by tool messages"
+  return fixOpenAIMessageSequence(out);
+}
+
+// ⭐ 新增：修复 OpenAI 消息序列，确保每个 tool_calls 中的 id 都有对应的 tool 消息
+function fixOpenAIMessageSequence(messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'assistant' || !m.tool_calls || !m.tool_calls.length) continue;
+    
+    // 收集这条 assistant 消息之后的所有 tool 消息的 tool_call_id
+    const subsequentToolIds = new Set();
+    for (let j = i + 1; j < messages.length; j++) {
+      if (messages[j].role === 'tool' && messages[j].tool_call_id) {
+        subsequentToolIds.add(messages[j].tool_call_id);
+      }
+      // 遇到下一条 user 或 assistant 消息就停止（tool 消息必须紧跟在 assistant 之后）
+      if (messages[j].role === 'user' || messages[j].role === 'assistant') break;
+    }
+    
+    // 找出缺失的 tool_call_id
+    const missingIds = m.tool_calls
+      .map(tc => tc.id)
+      .filter(id => id && !subsequentToolIds.has(id));
+    
+    if (missingIds.length > 0) {
+      console.warn(`[修复·OpenAI] 缺失 tool 消息：${missingIds.join(', ')}，自动补全`);
+      
+      // 在 assistant 消息后面插入占位 tool 消息
+      const fillerMessages = missingIds.map(id => ({
+        role: 'tool',
+        tool_call_id: id,
+        content: '[系统：此工具调用被中断或结果丢失，操作未完成]'
+      }));
+      
+      // 找到插入位置：assistant 消息之后、下一条非 tool 消息之前
+      let insertAt = i + 1;
+      while (insertAt < messages.length && messages[insertAt].role === 'tool') {
+        insertAt++;
+      }
+      messages.splice(insertAt, 0, ...fillerMessages);
+      
+      // 由于我们插入了消息，调整 i 跳过刚插入的
+      i += fillerMessages.length;
+    }
+  }
+  return messages;
 }
 
 // ⭐ 关键修复：支持 PDF 和图片

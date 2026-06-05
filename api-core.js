@@ -439,12 +439,16 @@ async function callAPI(roundLimit) {
       if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx);
       
       let userStoppedAll = false;
+      const executedToolCallIds = [];  // ⭐ 记录已执行完成的 tool_call_id
       
       for (const tc of msg.tool_calls) {
         // ⭐ 用户点了"停止"：立刻退出工具循环，不再执行后续工具
         //   即使当前轮的 fetch 已结束、abortCtrl 已 null，stopRequested 仍能拦住
         if (state.stopRequested) {
           userStoppedAll = true;
+          // ⭐ 关键修复：去掉未执行的 tool_calls，避免下次请求时
+          //   DeepSeek/OpenAI 报 400："tool_calls must be followed by tool messages"
+          msg.tool_calls = msg.tool_calls.filter(tc => executedToolCallIds.includes(tc.id));
           break;
         }
         const fname = tc.function?.name || '';
@@ -489,6 +493,7 @@ async function callAPI(roundLimit) {
           _startTime: Date.now(),
           _endTime: Date.now()
         });
+        executedToolCallIds.push(tc.id);  // ⭐ 记录已执行
         // ⭐ 增量追加单条工具消息（不重建整个列表），避免闪烁
         if (typeof appendMsgNode === 'function') {
           appendMsgNode(c.messages.length - 1);
@@ -497,7 +502,11 @@ async function callAPI(roundLimit) {
         }
         saveData();
         
-        if (stopAll) break;
+        if (stopAll) {
+          // ⭐ stopAll 也会导致后续 tool_calls 不执行，同样需要清理
+          msg.tool_calls = msg.tool_calls.filter(tc => executedToolCallIds.includes(tc.id));
+          break;
+        }
       }
       
       state.isGenerating = false;
