@@ -32,7 +32,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .more-menu-wrap::after{content:'';position:absolute;bottom:100%;left:0;right:0;height:8px;background:transparent}
 .more-menu-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:transparent;border:none;border-radius:6px;cursor:pointer;color:var(--text);font-size:13px;text-align:left;width:100%;transition:background .15s}
 .more-menu-item:hover{background:var(--bg-hover);color:var(--primary)}
-.more-menu-icon{font-size:15px;flex-shrink:0}
+.more-menu-icon{font-size:15px;flex-shrink:0;width:22px;text-align:center}
 [data-theme="dark"] .more-menu{box-shadow:0 4px 20px rgba(0,0,0,.5)}
 @media (max-width:768px){.more-menu-wrap.open .more-menu{opacity:1;visibility:visible;transform:translateY(0)}}
 
