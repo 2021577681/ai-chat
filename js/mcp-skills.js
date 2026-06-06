@@ -2,10 +2,18 @@
 
 const MCP_SKILL_DEFAULTS = {
   mcpServers: [],
-  skillRoots: ['skills', '.skills', '.codex/skills'],
+  skillRoots: ['skill'],
   skills: [],
   useSkills: true
 };
+
+const LEGACY_SKILL_ROOTS = ['skills', '.skills', '.codex/skills'];
+
+function isLegacySkillRoots(roots) {
+  return Array.isArray(roots) &&
+    roots.length === LEGACY_SKILL_ROOTS.length &&
+    roots.every((root, i) => root === LEGACY_SKILL_ROOTS[i]);
+}
 
 let _editingMcpServerId = '';
 
@@ -15,7 +23,11 @@ function ensureMcpSkillSettings() {
   }
   const cfg = state.settings.mcpSkill;
   if (!Array.isArray(cfg.mcpServers)) cfg.mcpServers = [];
-  if (!Array.isArray(cfg.skillRoots)) cfg.skillRoots = ['skills', '.skills', '.codex/skills'];
+  const rootsWereLegacy = isLegacySkillRoots(cfg.skillRoots);
+  if (!Array.isArray(cfg.skillRoots) || rootsWereLegacy) {
+    cfg.skillRoots = ['skill'];
+    if (rootsWereLegacy) cfg.skills = [];
+  }
   if (!Array.isArray(cfg.skills)) cfg.skills = [];
   if (cfg.useSkills === undefined) cfg.useSkills = true;
   return cfg;
@@ -191,6 +203,11 @@ function toggleMcpServer(id) {
   const server = cfg.mcpServers.find(s => s.id === id);
   if (!server) return;
   server.enabled = !server.enabled;
+  if (server.enabled === false) {
+    state.tools = state.tools.filter(t => !(t._mcp && t._mcp.serverId === id));
+    persistTools();
+    if (typeof renderToolList === 'function') renderToolList();
+  }
   persistSettings();
   renderMcpServerList();
 }
@@ -309,6 +326,7 @@ async function callMcpTool(serverId, toolName, args) {
   const cfg = ensureMcpSkillSettings();
   const server = cfg.mcpServers.find(s => s.id === serverId);
   if (!server) return `MCP 服务器不存在：${serverId}`;
+  if (server.enabled === false) return `MCP server disabled: ${server.name || serverId}`;
   const r = await callAgentBackend(
     'mcp_call_tool',
     { server, tool_name: toolName, arguments: args || {} },
@@ -318,6 +336,21 @@ async function callMcpTool(serverId, toolName, args) {
   if (typeof r === 'string') return r;
   if (!r.ok) return `MCP 工具失败：${r.error || r.text || '(unknown error)'}`;
   return r.text || JSON.stringify(r.result, null, 2);
+}
+
+async function readSkill(path) {
+  const r = await callAgentBackend(
+    'skill_read',
+    { path },
+    'AI wants to read a local Skill',
+    `[Skill read]\n${path || ''}`
+  );
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `Skill read failed: ${r.error || '(unknown error)'}`;
+  const skill = r.skill || {};
+  const content = skill.content || '';
+  const truncated = skill.truncated ? '\n\n[Skill content truncated by local server]' : '';
+  return `<skill name="${skill.name || skill.path || path}" path="${skill.path || path}">\n${content}${truncated}\n</skill>`;
 }
 
 function renderSkillSettings() {
@@ -335,7 +368,7 @@ function saveSkillRootsFromUi() {
     .split(/[\n,;]+/)
     .map(x => x.trim())
     .filter(Boolean);
-  cfg.skillRoots = roots.length ? roots : ['skills', '.skills', '.codex/skills'];
+  cfg.skillRoots = roots.length ? roots : ['skill'];
   const useEl = document.getElementById('skillUseEnabled');
   if (useEl) cfg.useSkills = useEl.checked;
   persistSettings();
@@ -356,10 +389,16 @@ async function scanSkills() {
     if (box) box.textContent = `扫描失败：${r.error}`;
     return;
   }
-  cfg.skills = (r.skills || []).map(skill => ({
-    ...skill,
-    enabled: previous.has(skill.path) ? previous.get(skill.path) : false
-  }));
+  cfg.skills = (r.skills || []).map(skill => {
+    const content = skill.content || '';
+    const { content: _content, ...meta } = skill;
+    return {
+      ...meta,
+      contentPreview: content.slice(0, 4000),
+      contentLength: content.length,
+      enabled: previous.has(skill.path) ? previous.get(skill.path) : false
+    };
+  });
   persistSettings();
   renderSkillList();
   const errText = (r.errors || []).map(e => `${e.root}: ${e.error}`).join('\n');
@@ -386,7 +425,7 @@ function renderSkillList() {
       </div>
       <div class="tool-item-body">
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${escapeHtml(skill.path)}${skill.truncated ? ' · 已截断' : ''}</div>
-        <pre style="max-height:160px;overflow:auto;background:var(--bg-input);padding:8px;border-radius:6px;font-size:12px;">${escapeHtml((skill.content || '').slice(0, 4000))}</pre>
+        <pre style="max-height:160px;overflow:auto;background:var(--bg-input);padding:8px;border-radius:6px;font-size:12px;">${escapeHtml(skill.contentPreview || '')}</pre>
       </div>
     </label>
   `;
@@ -405,25 +444,27 @@ function toggleSkill(path, enabled) {
 function getActiveSkillPrompt() {
   const cfg = ensureMcpSkillSettings();
   if (!cfg.useSkills) return '';
-  const active = (cfg.skills || []).filter(s => s.enabled && s.content);
+  const active = (cfg.skills || []).filter(s => s.enabled);
   if (!active.length) return '';
 
   const parts = [
-    'The following local Skills are enabled. Use them only when they are relevant to the user task.'
+    'The following local Skills are enabled as a catalog. Use them only when they are relevant to the user task.',
+    'Do not assume the full skill instructions are loaded. When a task matches a skill, call the read_skill tool with that skill path before applying the skill workflow.'
   ];
-  let total = parts[0].length;
+  let total = parts.join('\n').length;
   for (const skill of active) {
-    let content = skill.content || '';
-    if (content.length > 12000) content = content.slice(0, 12000) + '\n\n[Skill content truncated]';
-    const block = `\n\n<skill name="${skill.name || skill.path}" path="${skill.path}">\n${content}\n</skill>`;
+    const desc = skill.description || '';
+    const len = Number.isFinite(skill.contentLength) ? ` content_chars="${skill.contentLength}"` : '';
+    const truncated = skill.truncated ? ' truncated="true"' : '';
+    const block = `\n<skill-ref name="${skill.name || skill.path}" path="${skill.path}"${len}${truncated}>${desc}</skill-ref>`;
     if (total + block.length > 40000) {
-      parts.push('\n\n[Additional enabled skills omitted because the prompt budget limit was reached.]');
+      parts.push('\n[Additional enabled skills omitted because the prompt budget limit was reached.]');
       break;
     }
     parts.push(block);
     total += block.length;
   }
-  return parts.join('');
+  return parts.join('\n');
 }
 
 function withActiveSkillPrompt(basePrompt) {
@@ -447,6 +488,7 @@ window.toggleMcpServer = toggleMcpServer;
 window.discoverMcpServer = discoverMcpServer;
 window.syncMcpTools = syncMcpTools;
 window.callMcpTool = callMcpTool;
+window.readSkill = readSkill;
 window.scanSkills = scanSkills;
 window.saveSkillRootsFromUi = saveSkillRootsFromUi;
 window.toggleSkill = toggleSkill;

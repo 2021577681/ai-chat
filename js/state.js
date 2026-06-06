@@ -66,7 +66,7 @@ let state = {
     beaconInterval: 5,          // 每 N 条用户消息埋一个（1 表示每条都埋，5 表示每 5 条）
     mcpSkill: {
       mcpServers: [],
-      skillRoots: ['skills', '.skills', '.codex/skills'],
+      skillRoots: ['skill'],
       skills: [],
       useSkills: true
     }

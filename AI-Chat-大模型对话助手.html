@@ -657,7 +657,7 @@
     <h2>🔌 MCP / Skill <button class="modal-close" onclick="closeMcpSkillSettings()">×</button></h2>
     
     <div class="json-help">
-      MCP 服务器会同步成普通工具；Skill 会追加到系统提示中，仅在相关任务中使用。当前 MCP 支持 stdio server。
+      MCP 服务器会同步成普通工具；Skill 会以目录摘要追加到系统提示中，全文由 read_skill 按需读取。当前 MCP 支持 stdio server。
     </div>
     
     <div class="json-tabs">
@@ -718,14 +718,14 @@
     <div class="mcp-skill-pane" data-pane="skills" style="display:none;">
       <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
         <div>
-          <label style="margin:0;">启用 Skill 提示注入</label>
-          <div class="form-hint">勾选的 Skill 会追加到 System Prompt。目录必须在沙箱内。</div>
+          <label style="margin:0;">启用 Skill 目录摘要</label>
+          <div class="form-hint">勾选的 Skill 只追加摘要到 System Prompt；需要全文时由 read_skill 工具按路径读取。</div>
         </div>
         <label class="switch"><input type="checkbox" id="skillUseEnabled" checked onchange="saveSkillRootsFromUi()"><span class="switch-slider"></span></label>
       </div>
       <div class="form-group">
         <label>Skill 根目录（每行一个，支持相对沙箱路径）</label>
-        <textarea id="skillRootsText" rows="4" placeholder="skills&#10;.skills&#10;.codex/skills"></textarea>
+        <textarea id="skillRootsText" rows="4" placeholder="skill"></textarea>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         <button class="btn btn-primary" onclick="scanSkills()">🔍 扫描 Skill</button>

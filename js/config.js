@@ -121,6 +121,18 @@ const PRESET_TOOLS = {
 // ⭐ 内置工具定义（基础笔记/文件夹操作 + 可选工具组）
 const BUILTIN_TOOLS = [
   {
+    name: 'read_skill',
+    description: '读取一个已扫描到的本地 Skill 的完整 SKILL.md 内容。仅当系统提示中的 skill-ref 摘要与当前任务相关时调用，参数 path 必须来自 skill-ref 的 path。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Skill 路径，必须使用系统提示中 skill-ref 的 path 值，例如 skill/example/SKILL.md' }
+      },
+      required: ['path']
+    },
+    code: 'return await readSkill(args.path);'
+  },
+  {
     name: 'execute_action',
     description: '在用户的本地文件夹中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。如果用户明确要求在新终端窗口中运行（如想看到实时输出、命令耗时很长不想阻塞），请设置 new_window: true。',
     parameters: {

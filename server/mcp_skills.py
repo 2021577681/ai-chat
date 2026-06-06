@@ -303,7 +303,7 @@ class McpSkillsMixin:
         if isinstance(roots, str):
             roots = [x.strip() for x in re.split(r'[\n,;]+', roots) if x.strip()]
         if not roots:
-            roots = ['skills', '.skills', '.codex/skills']
+            roots = ['skill']
 
         skills = []
         errors = []
