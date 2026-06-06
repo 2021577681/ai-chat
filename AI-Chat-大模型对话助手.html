@@ -753,12 +753,12 @@
       项目记忆用于记录当前工作区的长期背景。关闭时不会读取、生成或注入任何项目记忆。
     </div>
 
-    <div class="form-group">
-      <label style="display:flex;align-items:center;gap:8px;margin:0;">
-        <input type="checkbox" id="projectMemoryEnabled">
-        <span>启用项目记忆</span>
-      </label>
-      <div class="form-hint">开启后才会检测当前项目是否存在记忆文件；不存在时会询问是否生成草稿。</div>
+    <div class="project-memory-toggle-row">
+      <div>
+        <div class="project-memory-toggle-title">启用项目记忆</div>
+        <div class="form-hint">开启后才会检测当前项目是否存在记忆文件；不存在时会询问是否生成草稿。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="projectMemoryEnabled"><span class="switch-slider"></span></label>
     </div>
 
     <div class="form-row two-cols">

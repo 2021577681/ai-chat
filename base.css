@@ -294,6 +294,9 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .project-memory-status{min-height:20px;margin:8px 0 12px;font-size:12px;color:var(--text-secondary);line-height:1.5}
 .project-memory-status.error{color:var(--danger)}
 .project-memory-status.ok{color:var(--success)}
+.project-memory-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;margin-bottom:16px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px}
+.project-memory-toggle-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:2px}
+.project-memory-toggle-row .switch{flex:0 0 auto}
 .url-final-preview{margin-top:6px;padding:8px 10px;background:var(--bg-code);color:#61dafb;border-radius:6px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:12px;word-break:break-all;line-height:1.5}
 .url-final-preview .label{color:#9ca3af;margin-right:6px}
 .key-wrap{position:relative}
