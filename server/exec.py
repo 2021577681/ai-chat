@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 
 from . import config
-from .sandbox import is_dangerous_command, is_inside_workspace, resolve_path
+from .sandbox import command_workspace_violation, is_dangerous_command, is_inside_workspace, resolve_path
 
 
 class ExecMixin:
@@ -32,6 +32,15 @@ class ExecMixin:
             return self._send_json(200, {
                 'ok': False,
                 'error': f'🚫 命令被沙箱黑名单拒绝：{reason}\n命令：{command}'
+            })
+
+        # ⭐ L4: 命令文本中的路径越界检测
+        violates_workspace, workspace_reason = command_workspace_violation(command)
+        if violates_workspace:
+            print(f'🚫 [拦截] 命令路径越界：{workspace_reason}')
+            return self._send_json(200, {
+                'ok': False,
+                'error': f'🚫 命令被沙箱路径规则拒绝：{workspace_reason}\n命令：{command}'
             })
 
         # ⭐ L1: cwd 必须在沙箱内

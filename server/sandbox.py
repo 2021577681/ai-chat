@@ -95,6 +95,80 @@ def is_dangerous_command(cmd):
     return False, ''
 
 
+# ============ L4：命令文本中的路径越界检测 ============
+# 这层不是完整 shell 解析器，目标是拦住常见绕过：
+#   type C:\outside\secret.txt
+#   powershell -Command "Get-Content C:\outside\secret.txt"
+#   python -c "open(r'C:\outside\secret.txt').read()"
+#   cmd /c "cd /d C:\outside && dir"
+#   copy C:\outside\secret.txt .
+#   ../ / ..\ 父目录跳转
+_WINDOWS_ABS_PATH_RE = re.compile(r'(?i)([a-z]:[\\/][^"\'<>\r\n&|]*)')
+_UNC_PATH_RE = re.compile(r'(\\\\[^\\/\s"\'<>|&]+[\\/][^"\'<>|&]+)')
+_PARENT_TRAVERSAL_RE = re.compile(r'(^|[\s"\'=])\.\.[\\/]')
+_USER_HOME_REF_RE = re.compile(
+    r'(?i)(~[\\/]|'
+    r'%\s*(userprofile|homepath|homedrive|appdata|localappdata|temp|tmp)\s*%|'
+    r'\$(home|env:userprofile|env:homepath)|'
+    r'\$\{home\})'
+)
+
+
+def _trim_shell_path(p: str) -> str:
+    """清理从命令文本里粗略抓出的路径片段。"""
+    if not p:
+        return ''
+    p = p.strip().strip('"').strip("'")
+    # 去掉常见结尾标点/重定向残留
+    p = p.rstrip('.,;')
+    return p
+
+
+def _masked_urls(cmd: str) -> str:
+    """URL 里的 / 不应被当成本地绝对路径。"""
+    return re.sub(r'https?://\S+', ' ', cmd, flags=re.IGNORECASE)
+
+
+def command_workspace_violation(cmd: str):
+    """返回 (是否越界, 原因)。用于 shell 命令执行前的保守拦截。
+
+    注意：这是防御层，不是为了证明命令绝对安全。命令里只要出现
+    明显外部路径/家目录引用/父目录遍历，就直接拒绝。
+    """
+    if not cmd:
+        return False, ''
+
+    masked = _masked_urls(cmd)
+
+    if _USER_HOME_REF_RE.search(masked):
+        return True, '命令引用了用户目录/环境变量（如 ~、%USERPROFILE%、$HOME），可能越出沙箱'
+
+    if _PARENT_TRAVERSAL_RE.search(masked):
+        return True, '命令包含 ../ 或 ..\\ 父目录跳转，可能越出沙箱'
+
+    for m in _UNC_PATH_RE.finditer(masked):
+        p = _trim_shell_path(m.group(1))
+        return True, f'命令引用了 UNC/网络绝对路径：{p}'
+
+    for m in _WINDOWS_ABS_PATH_RE.finditer(masked):
+        p = _trim_shell_path(m.group(1))
+        if not p:
+            continue
+        # 允许明确指向沙箱内的绝对路径；拒绝其他盘符/目录。
+        if not is_inside_workspace(p):
+            return True, f'命令引用了沙箱外绝对路径：{p}'
+
+    # Unix/macOS/Linux 绝对路径。Windows 下跳过，避免把 cmd 参数 /c /d 误判。
+    if os.name != 'nt':
+        unix_abs_re = re.compile(r'(?<![:\w.-])(/[^\s"\'<>|&]+)')
+        for m in unix_abs_re.finditer(masked):
+            p = _trim_shell_path(m.group(1))
+            if p and not is_inside_workspace(p):
+                return True, f'命令引用了沙箱外绝对路径：{p}'
+
+    return False, ''
+
+
 # ============ L1：路径校验 ============
 def is_inside_workspace(abs_path):
     """检查 abs_path 是否在沙箱根目录内（含 realpath 解析以防 symlink 越狱）"""
