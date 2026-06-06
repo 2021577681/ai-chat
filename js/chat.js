@@ -23,7 +23,7 @@ function _abortCurrentTaskIfAny() {
 // ⭐ "一次性模式"消费：选定走哪条分支后立刻关闭对应开关 + 熄灭按钮
 //   下次发送将默认走普通对话，除非用户重新点亮开关
 //   返回值：'outline' | 'plan' | 'reflection' | 'normal'
-//   注意：Plan 的"执行计划"按钮（approveAndExecutePlan）不走这里，
+//   注意：计划模式的"执行计划"按钮（approveAndExecutePlan）不走这里，
 //        所以即便 usePlan 已熄灭，已生成的计划仍可正常执行
 function _consumeOneShotMode() {
   const s = state.settings;
@@ -113,9 +113,9 @@ function renderMessages() {
     inner.innerHTML = `
       <div class="welcome">
         <h1>👋 你好，我是你的 AI 助手</h1>
-        <p>📋 Plan · 🎭 师生 · 🛠 工具 · 🖼️ 图片 · 📎 文件 · 💾 备份 · 🗜️ 压缩</p>
+        <p>📋 计划模式 · 🎭 师生 · 🛠 工具 · 🖼️ 图片 · 📎 文件 · 💾 备份 · 🗜️ 压缩</p>
         <div class="suggestions">
-          <div class="suggestion" onclick="useSuggestion('请帮我写一篇 2000 字的科普文章介绍量子计算')"><strong>📋 Plan 模式</strong><span>复杂任务先规划再执行</span></div>
+          <div class="suggestion" onclick="useSuggestion('请帮我写一篇 2000 字的科普文章介绍量子计算')"><strong>📋 计划模式</strong><span>复杂任务先规划再执行</span></div>
           <div class="suggestion" onclick="useSuggestion('用 Python 写一个二分查找')"><strong>💻 代码</strong><span>代码 + 公式渲染</span></div>
           <div class="suggestion" onclick="useSuggestion('用表格列出五种排序算法')"><strong>📊 表格</strong><span>Markdown 表格</span></div>
           <div class="suggestion" onclick="useSuggestion('帮我创建一个 hello.py 写个 Hello World')"><strong>🛠 工具</strong><span>让 AI 操作文件</span></div>
@@ -369,8 +369,8 @@ function renderMsg(m, idx) {
     <div class="message" data-idx="${idx}">
       <div class="avatar ${isUser ? 'user' : 'assistant'}">${isUser ? '我' : 'AI'}</div>
       <div class="msg-body">
-        <div class="msg-role">${isUser ? '你' : 'AI 助手'} 
-          ${hasPlanBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,var(--primary),var(--success));">📋 Plan</span>' : ''} 
+        <div class="msg-role">${isUser ? '你' : 'AI 助手'}
+          ${hasPlanBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,var(--primary),var(--success));">📋 计划</span>' : ''}
           ${hasOutlineBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);">📑 大纲</span>' : ''}
           ${hasRefBadge ? '<span class="msg-badge">🎭 师生</span>' : ''}
           ${!isUser ? `<span class="msg-timer" data-msg-idx="${idx}">${formatMsgTimer(m)}</span>` : ''}
@@ -608,9 +608,9 @@ async function onSend() {
     return;
   }
   
-  // ⭐ Plan 执行中拒绝任何新消息
+  // ⭐ 计划模式执行中拒绝任何新消息
   if (state._planExecuting) {
-    toast('⏳ 当前 Plan 任务正在执行中。如已卡死，请到对应消息点「强制中断」或调用 forceUnstuck()', 5000);
+    toast('⏳ 当前计划模式任务正在执行中。如已卡死，请先停止当前任务或刷新后处理未完成计划', 5000);
     return;
   }
   
@@ -638,9 +638,9 @@ async function onSend() {
   
   const c = currentChat();
   
-  // ⭐ 检查是否有未完成的 Plan（待审批、已暂停、出错状态）
+  // ⭐ 检查是否有未完成的计划模式任务（待审批、已暂停、出错状态）
   //   注意：始终检查，不依赖 state.settings.usePlan
-  //   因为模式开关现在是"一次性"的，上次开启 Plan 留下的悬挂任务必须先处理
+  //   因为模式开关现在是"一次性"的，上次开启计划模式留下的悬挂任务必须先处理
   {
     const hasActivePlan = c.messages.some(m => 
       m.plan && (
@@ -652,7 +652,7 @@ async function onSend() {
     );
     
     if (hasActivePlan) {
-      toast('⚠️ 有未完成的 Plan，请先在上方计划区点击「执行计划」或「取消」', 4000);
+      toast('⚠️ 有未完成的计划模式任务，请先在上方计划区点击「执行计划」或「取消」', 4000);
       return;
     }
   }
@@ -757,7 +757,7 @@ async function regenerate(idx) {
   while (c.messages.length && c.messages[c.messages.length - 1].role === 'tool') c.messages.pop();
   // ⭐ 重新生成等价于"重新开始一个 AI 回合"，必须清理上次残留状态：
   // 1. 任务级临时授权 + 自动重发定时器（与 newChat/onSend 行为一致）
-  // 2. Plan / 大纲的执行中标志（防止旧标志卡住 onSend）
+  // 2. 计划模式 / 大纲的执行中标志（防止旧标志卡住 onSend）
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
   state._planExecuting = false;
   state._outlineExecuting = false;

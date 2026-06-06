@@ -2,7 +2,7 @@
 // 【模块定位】常量与提示词模板（无副作用，无依赖）
 // 单一长上下文 Agent：模型自己维护一份可变的"工作大纲"，
 // 边做边改，发现新需求就追加条目，完成后给出综合回答。
-// 与现有 Plan 模式（瀑布式）并存，二选一。
+// 与现有计划模式（瀑布式）并存，二选一。
 //
 // 本文件导出全局：OUTLINE_TOOLS、OUTLINE_TOOL_NAMES、DEFAULT_OUTLINE_SYSTEM_PROMPT
 // 加载顺序：必须先于 outline-core.js 和 outline-render.js

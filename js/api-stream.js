@@ -109,7 +109,7 @@ function updateSendBtn() {
     btn.textContent = '↑';
     btn.classList.remove('stop');
     let info = `${state.settings.apiFormat === 'anthropic' ? '🟠 Anthropic' : '🟢 OpenAI'}`;
-    if (state.settings.usePlan) info += ` · 📋 Plan(${state.settings.planMaxSteps}步)`;
+    if (state.settings.usePlan) info += ` · 📋 计划模式(${state.settings.planMaxSteps}步)`;
     if (state.settings.useReflection) info += ` · 🎭 师生(${state.settings.refRounds}轮)`;
     if (state.settings.useOutline) info += ` · 📑 大纲(${state.settings.outlineMaxRounds || 30}轮)`;
     if (state.settings.useTools && state.tools.length) info += ` · 🛠 ${state.tools.length}工具`;

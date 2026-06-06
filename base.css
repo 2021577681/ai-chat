@@ -229,8 +229,28 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .plan-step-item.done::before{background:var(--success);color:#fff;content:'✓'}
 .plan-step-item.running{border-left-color:var(--warning);background:rgba(245,158,11,.05)}
 .plan-step-item.running::before{background:var(--warning);color:#fff}
-.plan-step-title{font-weight:600;margin-bottom:2px}
+.plan-step-item.failed{border-left-color:var(--danger);background:rgba(239,68,68,.05)}
+.plan-step-item.failed::before{background:var(--danger);color:#fff;content:'!'}
+.plan-step-item.skipped{border-left-color:var(--text-secondary);background:rgba(107,114,128,.04);opacity:.78}
+.plan-step-item.skipped::before{background:var(--text-secondary);color:#fff;content:'~'}
+.plan-step-item.skipped .plan-step-title span:first-child{text-decoration:line-through}
+.plan-step-title{font-weight:600;margin-bottom:2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .plan-step-desc{font-size:12px;color:var(--text-secondary);line-height:1.5}
+.plan-step-status{font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;background:var(--border);color:var(--text-secondary);white-space:nowrap}
+.plan-step-status.pending{background:rgba(148,163,184,.18);color:var(--text-secondary)}
+.plan-step-status.running{background:rgba(245,158,11,.16);color:var(--warning)}
+.plan-step-status.done{background:rgba(16,185,129,.16);color:var(--success)}
+.plan-step-status.failed{background:rgba(239,68,68,.16);color:var(--danger)}
+.plan-step-status.skipped{background:rgba(107,114,128,.14);color:var(--text-secondary)}
+.plan-step-attempts{font-size:10px;color:var(--text-secondary);font-weight:500}
+.plan-step-meta{margin-top:7px;padding:7px 9px;background:var(--bg-chat);border:1px dashed var(--border);border-radius:6px;font-size:12px;color:var(--text-secondary)}
+.plan-step-meta-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;color:var(--text-secondary)}
+.plan-step-meta ul{margin:4px 0 0 18px;padding:0}
+.plan-step-meta li{margin:2px 0}
+.plan-command-list{display:flex;flex-direction:column;gap:4px}
+.plan-command-list code{display:block;padding:4px 6px;background:var(--bg-code);border-radius:4px;color:var(--text);white-space:pre-wrap;word-break:break-all}
+.plan-step-note{margin-top:4px;line-height:1.5}
+.plan-step-error{margin-top:8px;padding:8px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:var(--danger);font-size:12px;white-space:pre-wrap}
 .plan-step-result{margin-top:8px;padding:8px 10px;background:var(--bg-chat);border:1px solid var(--border);border-radius:6px;font-size:12.5px;line-height:1.6}
 .plan-step-result-label{font-size:10px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:4px;letter-spacing:.5px}
 .plan-progress-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin:8px 0}
@@ -831,7 +851,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .perm-task-empty{color:var(--text-secondary);font-style:italic;opacity:.7;font-size:12px}
 
 
-/* ============ Plan 模式工具调用实时显示 ============ */
+/* ============ 计划模式工具调用实时显示 ============ */
 .plan-tool-calls {
   display: flex;
   flex-direction: column;
@@ -904,6 +924,57 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   white-space: pre-wrap;
   word-break: break-all;
 }
+.plan-verification-runs {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-verification-run {
+  border: 1px solid var(--border);
+  background: var(--bg-chat);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 12px;
+}
+.plan-verification-run.success {
+  border-color: rgba(16,185,129,.32);
+  background: rgba(16,185,129,.05);
+}
+.plan-verification-run.error {
+  border-color: rgba(239,68,68,.35);
+  background: rgba(239,68,68,.05);
+}
+.plan-verification-run.running {
+  border-color: rgba(59,130,246,.35);
+  background: rgba(59,130,246,.05);
+}
+.plan-verification-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.plan-verification-head code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.plan-verification-run pre {
+  margin: 6px 0 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 6px 8px;
+  background: var(--bg-code);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 11px;
+}
 /* 旋转加载指示器（工具调用中） */
 .plan-tool-spin {
   display: inline-block;
@@ -918,7 +989,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   to { transform: rotate(360deg); }
 }
 
-/* ============ Plan 进度提示（紧跟在 plan 内容下方） ============ */
+/* ============ 计划模式进度提示（紧跟在 plan 内容下方） ============ */
 .plan-panel .plan-body > .ref-progress {
   margin-top: 12px;
   padding: 10px 14px;
@@ -928,7 +999,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   font-weight: 500;
 }
 
-/* ============ Plan 最终答案（位于 plan-panel 下方） ============ */
+/* ============ 计划模式最终答案（位于 plan-panel 下方） ============ */
 .msg-content.plan-final-answer {
   margin-top: 12px;
   padding-top: 12px;

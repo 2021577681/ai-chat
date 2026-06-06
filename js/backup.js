@@ -179,7 +179,7 @@ function applyImport() {
         PLAN_KEYS.forEach(k => {
           if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
         });
-        imported.push('Plan');
+        imported.push('计划模式');
       }
       if (opts.outline) {
         OUTLINE_KEYS.forEach(k => {

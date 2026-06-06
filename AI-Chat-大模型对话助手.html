@@ -46,7 +46,7 @@
         <button class="icon-btn more-btn">⋯ 更多</button>
         <div class="more-menu">
           <button class="more-menu-item" onclick="openPlanSettings()">
-            <span class="more-menu-icon">📋</span><span>Plan 模式</span>
+            <span class="more-menu-icon">📋</span><span>计划模式</span>
           </button>
           <button class="more-menu-item" onclick="openOutlineSettings()">
             <span class="more-menu-icon">📑</span><span>大纲模式</span>
@@ -95,7 +95,7 @@
       <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
       <select class="model-select" id="modelSelect" onchange="saveSettings()"></select>
       <div class="topbar-spacer"></div>
-      <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="任务规划模式">📋 Plan</button>
+      <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式">📋 计划</button>
       <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）">📑 大纲</button>
       <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用">🛠 工具</button>
       <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手">🎓 学习</button>
@@ -293,10 +293,11 @@
     <div class="form-group">
       <label>🛠️ 工具调用最大轮数</label>
       <div class="slider-row">
-        <input type="range" id="maxToolRounds" min="1" max="50" step="1" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value">
+        <input type="range" id="maxToolRounds" min="1" max="100" step="1" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRoundsInput').value=this.value">
         <span class="slider-val" id="maxToolRoundsVal">15</span>
       </div>
-      <div class="form-hint">单次对话中模型连续调用工具的最大轮次。一轮可包含多个并行工具。</div>
+      <input type="number" id="maxToolRoundsInput" min="1" step="1" style="margin-top:8px;" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRounds').value=Math.max(1, Math.min(100, parseInt(this.value)||1))">
+      <div class="form-hint">单次对话中模型连续调用工具的最大轮次。一轮可包含多个并行工具。滑块最高 100，也可以直接输入更大的整数。</div>
     </div>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
@@ -434,19 +435,19 @@
   </div>
 </div>
 
-<!-- ============ Plan 模式设置 ============ -->
+<!-- ============ 计划模式设置 ============ -->
 <div class="modal-mask" id="planModal">
   <div class="modal wide">
-    <h2>📋 Plan Mode - 任务规划模式 <button class="modal-close" onclick="closePlanSettings()">×</button></h2>
+    <h2>📋 计划模式 <button class="modal-close" onclick="closePlanSettings()">×</button></h2>
     
     <div class="json-help">
-      💡 <strong>流程</strong>：① AI 生成执行计划 → ② 老师评审改进 → ③ 按计划逐步执行 → ④ 整合输出。<br>
+      💡 <strong>流程</strong>：① AI 生成执行计划（工具开启时可先侦察项目）→ ② 老师评审 → ③ 规划者根据意见修订 → ④ 按计划逐步执行 → ⑤ 整合输出。<br>
       <strong>适合</strong>：复杂任务（写报告、研究、多步推理、代码项目等）。<br>
       ⚠️ 调用 LLM 多次，成本较高。
     </div>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
-      <div><label style="margin:0;">启用 Plan 模式</label></div>
+      <div><label style="margin:0;">启用计划模式</label></div>
       <label class="switch"><input type="checkbox" id="plan_enabled"><span class="switch-slider"></span></label>
     </div>
     
@@ -522,13 +523,13 @@
     
     <div class="json-help">
       💡 <strong>机制</strong>：AI 在单一上下文中边做边维护一份"工作大纲"，发现新需求会动态追加条目，全程使用工具。<br>
-      <strong>与 Plan 模式的区别</strong>：Plan 是"先规划→人审批→分步执行"的瀑布式；大纲是"自主探索 + 动态调整"的敏捷式。<br>
+      <strong>与计划模式的区别</strong>：计划模式是"先规划→人审批→分步执行"的瀑布式；大纲是"自主探索 + 动态调整"的敏捷式。<br>
       <strong>适合</strong>：探索性任务、代码调试、需要边做边发现的工作。<br>
       ⚠️ 强依赖工具调用能力，请确保已加载至少一个工具。
     </div>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
-      <div><label style="margin:0;">启用大纲模式</label><div class="form-hint" style="margin-top:2px;">启用后会自动关闭 Plan / 师生模式</div></div>
+      <div><label style="margin:0;">启用大纲模式</label><div class="form-hint" style="margin-top:2px;">启用后会自动关闭计划模式 / 师生模式</div></div>
       <label class="switch"><input type="checkbox" id="outline_enabled"><span class="switch-slider"></span></label>
     </div>
     
@@ -881,7 +882,7 @@
     <!-- Tab 2: AI 响应（原始 JSON / SSE）-->
     <div id="jsonTab-response" style="display:none;">
       <div class="json-help">
-        💡 显示最近 10 次 LLM 调用的<strong>完整请求体 + 完整响应体</strong>（含主对话、Plan、大纲、师生、压缩摘要等所有调用）。<br>
+        💡 显示最近 10 次 LLM 调用的<strong>完整请求体 + 完整响应体</strong>（含主对话、计划模式、大纲、师生、压缩摘要等所有调用）。<br>
         请求头中的 API Key 已自动脱敏；流式响应保留原始 SSE 字节流。⚠️ 仅当前浏览会话有效，刷新页面后清空。
       </div>
       <div class="resp-container">
@@ -967,7 +968,7 @@
           <input type="checkbox" id="exp_apiKey" checked> <span style="color:var(--warning);">🔑 API Key（敏感）</span>
         </label>
         <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_plan" checked> <span>📋 Plan 设置</span>
+          <input type="checkbox" id="exp_plan" checked> <span>📋 计划模式设置</span>
         </label>
         <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
           <input type="checkbox" id="exp_reflection" checked> <span>🎭 师生设置</span>
@@ -1006,7 +1007,7 @@
           <input type="checkbox" id="imp_settings" checked> <span>⚙️ 基础设置</span>
         </label>
         <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_plan" checked> <span>📋 Plan</span>
+          <input type="checkbox" id="imp_plan" checked> <span>📋 计划模式</span>
         </label>
         <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
           <input type="checkbox" id="imp_reflection" checked> <span>🎭 师生</span>

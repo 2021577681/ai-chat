@@ -31,9 +31,12 @@ function openSettings() {
   // 工具调用轮数
   const maxToolRoundsEl = document.getElementById('maxToolRounds');
   const maxToolRoundsValEl = document.getElementById('maxToolRoundsVal');
+  const maxToolRoundsInputEl = document.getElementById('maxToolRoundsInput');
   if (maxToolRoundsEl) {
-    maxToolRoundsEl.value = s.maxToolRounds || 15;
-    if (maxToolRoundsValEl) maxToolRoundsValEl.textContent = s.maxToolRounds || 15;
+    const v = s.maxToolRounds || 15;
+    maxToolRoundsEl.value = Math.max(1, Math.min(100, v));
+    if (maxToolRoundsInputEl) maxToolRoundsInputEl.value = v;
+    if (maxToolRoundsValEl) maxToolRoundsValEl.textContent = v;
   }
   
   // ⭐ 终端 Token 显示
@@ -94,8 +97,10 @@ function saveAndClose() {
   
   // 工具调用轮数
   const maxToolRoundsEl = document.getElementById('maxToolRounds');
-  if (maxToolRoundsEl) {
-    const v = parseInt(maxToolRoundsEl.value);
+  const maxToolRoundsInputEl = document.getElementById('maxToolRoundsInput');
+  if (maxToolRoundsInputEl || maxToolRoundsEl) {
+    const raw = maxToolRoundsInputEl ? maxToolRoundsInputEl.value : maxToolRoundsEl.value;
+    const v = parseInt(raw);
     s.maxToolRounds = (isNaN(v) || v < 1) ? 15 : v;
   }
   

@@ -1082,7 +1082,7 @@ async function callOnceWithRole(history, model, rolePrompt) {
 // - 不污染 c.messages，所有过程通过 onProgress 回调上报
 // - 支持流式文本输出（学生回答边写边看）
 // - 复用现有 _apiFetchWithTimeout / buildHeaders / executeTool / 重试机制
-// 【调用方】reflection.js（学生 / 老师）、未来可扩展给 Plan 模式
+// 【调用方】reflection.js（学生 / 老师）、未来可扩展给计划模式
 
 async function runAgentLoop({
   initialMessages,     // 标准格式：[{role:'user'|'assistant'|'tool', content, tool_calls?, tool_call_id?, name?}]
