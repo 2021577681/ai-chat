@@ -63,7 +63,13 @@ let state = {
     // 🧪 自动信标系统：每隔 N 条用户消息塞入一条隐藏的"记代号"消息，
     //    供"体检"功能测试 AI 是否还记得上下文（中段消息最易丢）
     beaconEnabled: false,       // 默认关闭，避免增加不必要 token
-    beaconInterval: 5           // 每 N 条用户消息埋一个（1 表示每条都埋，5 表示每 5 条）
+    beaconInterval: 5,          // 每 N 条用户消息埋一个（1 表示每条都埋，5 表示每 5 条）
+    mcpSkill: {
+      mcpServers: [],
+      skillRoots: ['skills', '.skills', '.codex/skills'],
+      skills: [],
+      useSkills: true
+    }
   },
   pendingAttachments: [],
   abortCtrl: null,

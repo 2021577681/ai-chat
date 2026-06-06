@@ -7,7 +7,10 @@
 
 function buildOpenAIMessages(history) {
   const out = [];
-  if (state.settings.systemPrompt) out.push({ role: 'system', content: state.settings.systemPrompt });
+  const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+    ? getEffectiveSystemPrompt()
+    : state.settings.systemPrompt;
+  if (systemPrompt) out.push({ role: 'system', content: systemPrompt });
   
   for (const m of history) {
     if (m._isCompressing) continue;

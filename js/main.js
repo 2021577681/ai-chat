@@ -150,7 +150,7 @@ async function init() {
       // ⭐ 顺序：先关最上层（图片预览、终端确认）→ 普通模态 → LMS 抽屉
       const modals = [
         'imgPreview', 'termConfirmMask',
-        'toolEditModal', 'backupModal', 'toolsModal', 'reflectionModal',
+        'toolEditModal', 'backupModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
         'planModal', 'outlineModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'

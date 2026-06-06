@@ -388,6 +388,9 @@ async function executeStepWithTools(userQuestion, plan, stepIdx, prevResults, mo
 async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate) {
   const s = state.settings;
   const tools = buildToolsArray();
+  const effectiveSystemPrompt = typeof withActiveSkillPrompt === 'function'
+    ? withActiveSkillPrompt(systemPrompt || '')
+    : (systemPrompt || '');
   // ⭐ 读用户设置，与主对话共用同一个上限
   const cfgRounds = parseInt(s.maxToolRounds);
   const MAX_LOOPS = (isNaN(cfgRounds) || cfgRounds < 1) ? 15 : cfgRounds;
@@ -447,12 +450,12 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate) {
         max_tokens: parseInt(s.maxTokens),
         temperature: parseFloat(s.temperature),
         stream: false,
-        system: systemPrompt
+        system: effectiveSystemPrompt
       };
       if (tools) body.tools = tools;
     } else {
       const oaiMsgs = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: effectiveSystemPrompt },
         { role: 'user', content: userPrompt },
         ...conversationMessages
       ];

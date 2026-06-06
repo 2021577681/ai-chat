@@ -11,7 +11,9 @@ function buildRequestBody(history, modelOverride, streamOverride) {
   
   // ⭐ system 保持稳定（不混入动态摘要），最大化 prompt cache 命中率
   // 摘要由各适配器自行注入到 messages 数组中（OpenAI: 作为 system message；Anthropic: prepend 到首条 user）
-  const systemContent = s.systemPrompt || '';
+  const systemContent = typeof getEffectiveSystemPrompt === 'function'
+    ? getEffectiveSystemPrompt()
+    : (s.systemPrompt || '');
   
   // 准备所有占位符的值
   const apiMessages = s.apiFormat === 'anthropic' 
@@ -1097,6 +1099,9 @@ async function runAgentLoop({
   const s = state.settings;
   const _temp = temperature !== undefined ? temperature : parseFloat(s.temperature);
   const _max = maxTokens !== undefined ? maxTokens : parseInt(s.maxTokens);
+  const effectiveSystemPrompt = typeof withActiveSkillPrompt === 'function'
+    ? withActiveSkillPrompt(systemPrompt || '')
+    : (systemPrompt || '');
   
   // 内部维护 messages（不动 c.messages）
   const messages = JSON.parse(JSON.stringify(initialMessages || []));
@@ -1134,7 +1139,7 @@ async function runAgentLoop({
         temperature: _temp,
         stream
       };
-      if (systemPrompt) body.system = systemPrompt;
+      if (effectiveSystemPrompt) body.system = effectiveSystemPrompt;
       // 最后一轮不带 tools，强制收尾
       if (tools && round < maxRounds) body.tools = tools;
     } else if (s.apiFormat === 'responses') {
@@ -1145,10 +1150,10 @@ async function runAgentLoop({
         temperature: _temp,
         stream
       };
-      if (systemPrompt) body.instructions = systemPrompt;
+      if (effectiveSystemPrompt) body.instructions = effectiveSystemPrompt;
       if (tools && round < maxRounds) body.tools = tools;
     } else {
-      const msgs = systemPrompt ? [{ role: 'system', content: systemPrompt }] : [];
+      const msgs = effectiveSystemPrompt ? [{ role: 'system', content: effectiveSystemPrompt }] : [];
       for (const m of apiMessages) if (m.role !== 'system') msgs.push(m);
       body = {
         model,

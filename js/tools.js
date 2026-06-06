@@ -28,13 +28,16 @@ function renderToolList() {
     const isLms = isLmsTool(t.name);
     const isGit = isGitTool(t.name);
     const isPaper = isPaperTool(t.name);
+    const isMcp = (typeof isMcpTool === 'function') && isMcpTool(t);
     const badge = isLms
       ? '<span style="background:#9c27b0;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">🎓 LMS</span>'
       : (isGit
         ? '<span style="background:#2e7d32;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">💾 快照</span>'
         : (isPaper
           ? '<span style="background:#0277bd;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">📚 论文</span>'
-          : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : '')));
+          : (isMcp
+            ? '<span style="background:#455a64;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">MCP</span>'
+            : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : ''))));
     return `
     <div class="tool-item">
       <div class="tool-item-header" onclick="this.parentElement.classList.toggle('expanded')">

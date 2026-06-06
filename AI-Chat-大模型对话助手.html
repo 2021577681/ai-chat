@@ -57,6 +57,9 @@
           <button class="more-menu-item" onclick="openTools()">
             <span class="more-menu-icon">🛠</span><span>工具管理</span>
           </button>
+          <button class="more-menu-item" onclick="openMcpSkillSettings()">
+            <span class="more-menu-icon">🔌</span><span>MCP / Skill</span>
+          </button>
           <button class="more-menu-item" onclick="openJsonEditor()">
             <span class="more-menu-icon">{ }</span><span>JSON 查看器</span>
           </button>
@@ -648,6 +651,97 @@
   </div>
 </div>
 
+<!-- ============ MCP / Skill 设置 ============ -->
+<div class="modal-mask" id="mcpSkillModal">
+  <div class="modal wide">
+    <h2>🔌 MCP / Skill <button class="modal-close" onclick="closeMcpSkillSettings()">×</button></h2>
+    
+    <div class="json-help">
+      MCP 服务器会同步成普通工具；Skill 会追加到系统提示中，仅在相关任务中使用。当前 MCP 支持 stdio server。
+    </div>
+    
+    <div class="json-tabs">
+      <button class="json-tab mcp-skill-tab active" data-tab="mcp" onclick="switchMcpSkillTab('mcp')">🔌 MCP 服务器</button>
+      <button class="json-tab mcp-skill-tab" data-tab="skills" onclick="switchMcpSkillTab('skills')">📚 Skill</button>
+    </div>
+    
+    <div class="mcp-skill-pane" data-pane="mcp">
+      <div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1fr);gap:14px;align-items:start;">
+        <div>
+          <h3 style="font-size:14px;margin:0 0 10px;">已配置服务器</h3>
+          <div id="mcpServerList"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="syncMcpTools()">🔄 同步 MCP 工具到工具列表</button>
+            <button class="btn" onclick="openTools()">查看工具管理</button>
+          </div>
+          <pre id="mcpSyncResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:52px;max-height:180px;overflow:auto;font-size:12px;margin-top:10px;color:var(--text-secondary);"></pre>
+        </div>
+        
+        <div>
+          <h3 id="mcpServerFormTitle" style="font-size:14px;margin:0 0 10px;">添加 MCP 服务器</h3>
+          <input type="hidden" id="mcpServerId">
+          <div class="form-group">
+            <label>名称</label>
+            <input type="text" id="mcpServerName" placeholder="filesystem">
+          </div>
+          <div class="form-group">
+            <label>Command</label>
+            <input type="text" id="mcpServerCommand" placeholder="npx / node / python">
+          </div>
+          <div class="form-group">
+            <label>Args（每行一个参数）</label>
+            <textarea id="mcpServerArgs" rows="4" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;."></textarea>
+          </div>
+          <div class="form-group">
+            <label>CWD（留空 = 当前沙箱根目录）</label>
+            <input type="text" id="mcpServerCwd" placeholder=".">
+          </div>
+          <div class="form-group">
+            <label>Env（JSON 或 KEY=VALUE，每行一个）</label>
+            <textarea id="mcpServerEnv" rows="4" placeholder='{"API_KEY":"..."}'></textarea>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+            <label style="margin:0;">启用</label>
+            <label class="switch"><input type="checkbox" id="mcpServerEnabled" checked><span class="switch-slider"></span></label>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="saveMcpServer()">保存服务器</button>
+            <button class="btn" onclick="clearMcpServerForm()">清空表单</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px;">
+            服务器进程由本地后端启动。同步和调用 MCP 工具时会走“权限管理”里的 MCP 服务器确认。
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="mcp-skill-pane" data-pane="skills" style="display:none;">
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <label style="margin:0;">启用 Skill 提示注入</label>
+          <div class="form-hint">勾选的 Skill 会追加到 System Prompt。目录必须在沙箱内。</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="skillUseEnabled" checked onchange="saveSkillRootsFromUi()"><span class="switch-slider"></span></label>
+      </div>
+      <div class="form-group">
+        <label>Skill 根目录（每行一个，支持相对沙箱路径）</label>
+        <textarea id="skillRootsText" rows="4" placeholder="skills&#10;.skills&#10;.codex/skills"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn btn-primary" onclick="scanSkills()">🔍 扫描 Skill</button>
+        <button class="btn" onclick="saveSkillRootsFromUi()">保存设置</button>
+      </div>
+      <pre id="skillScanResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:40px;max-height:120px;overflow:auto;font-size:12px;color:var(--text-secondary);"></pre>
+      <div id="skillList" style="margin-top:10px;"></div>
+    </div>
+    
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMcpSkillSettings()">关闭</button>
+      <button class="btn btn-primary" onclick="closeMcpSkillSettings()">保存并完成</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 工具管理 ============ -->
 <div class="modal-mask" id="toolsModal">
   <div class="modal wide">
@@ -1046,6 +1140,7 @@
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/utils.js"></script>
+<script src="js/mcp-skills.js"></script>
 <script src="js/rate-limiter.js"></script> 
 <script src="js/markdown.js"></script>
 <script src="js/theme.js"></script>

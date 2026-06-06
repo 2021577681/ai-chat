@@ -327,14 +327,14 @@ async function callAPIWithOutline(options = {}) {
           max_tokens: parseInt(s.maxTokens),
           temperature: parseFloat(s.temperature),
           stream: false,
-          system: systemPrompt
+          system: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt)
         };
         if (tools.length) body.tools = tools;
       } else {
         const baseMsgs = (typeof buildOpenAIMessages === 'function')
           ? buildOpenAIMessages(history).filter(m => m.role !== 'system') : [];
         const allMsgs = [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt) },
           ...baseMsgs,
           ...conversationMessages
         ];
@@ -638,7 +638,7 @@ async function callAPIWithOutline(options = {}) {
 async function doFinalSummaryCall(conversationMessages, history, systemPrompt, model, outlineObj, abortSignal) {
   const s = state.settings;
   
-  const finalSystemPrompt = systemPrompt + 
+  const finalSystemPrompt = (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt) + 
     '\n\n【最终阶段·强制收尾】你已达到执行轮数上限。请基于上面所有已收集的信息和工具结果，' +
     '直接给出完整的 Markdown 格式最终答案。不要再调用任何工具。' +
     '如有未完成的条目，可在答案末尾用"⚠️ 受限说明"小节简要说明。';

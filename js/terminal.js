@@ -11,6 +11,7 @@ const PERMISSION_CATEGORIES = {
   delete:  { icon: '🗑️',  label: '删除文档/目录', desc: 'delete_note：删除文件或空目录' },
   attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_file：把二进制文件塞入对话上下文' },
   screenshot: { icon: '📸', label: '屏幕截图',       desc: 'ai_screenshot：截取指定窗口/全屏/区域，可能包含屏幕隐私信息' },
+  mcp: { icon: '🔌', label: 'MCP 服务器', desc: '连接或调用本地 MCP stdio 服务器。服务器代码可能访问文件、网络或外部服务。' },
   // ⭐ AI Git 操作（3 个独立类别，权限粒度分级）
   git_read:    { icon: '🔍',  label: 'Git 查看',     desc: 'note_history / note_status / note_diff：只读查看版本历史' },
   git_write:   { icon: '💾',  label: 'Git 保存快照', desc: 'note_snapshot：将当前工作区改动提交为一个版本快照（不会覆盖文件）' },
@@ -27,6 +28,8 @@ const ACTION_TO_CATEGORY = {
   read_file_binary: 'attach',
   screenshot: 'screenshot',
   list_windows: 'screenshot',
+  mcp_list_tools: 'mcp',
+  mcp_call_tool: 'mcp',
 };
 
 // 持久化的"永久允许"集合（{execute:true, ...}）

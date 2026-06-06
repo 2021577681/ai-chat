@@ -9,6 +9,7 @@
 #   - POST 路由分发（/llm-proxy / 鉴权 + action 分发）
 # ============================================================
 
+import copy
 import json
 
 from http.server import BaseHTTPRequestHandler
@@ -17,13 +18,15 @@ from . import config
 from .exec import ExecMixin
 from .files import FilesMixin
 from .git_ops import GitMixin
+from .mcp_skills import McpSkillsMixin
 from .proxy import ProxyMixin
 from .screenshot import ScreenshotMixin
 from .web import WebMixin
 
 
 class Handler(BaseHTTPRequestHandler,
-              ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin):
+              ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
+              McpSkillsMixin):
     """主 HTTP Handler，通过 mixin 组合所有功能。
     各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
@@ -119,7 +122,12 @@ class Handler(BaseHTTPRequestHandler,
         print(f'\n{"="*60}')
         print(f'📥 收到请求: action="{action}"')
         if action != 'read_file_binary':
-            print(f'📦 完整请求体: {json.dumps(body, ensure_ascii=False)[:500]}')
+            log_body = body
+            if action in ('mcp_list_tools', 'mcp_call_tool'):
+                log_body = copy.deepcopy(body)
+                if isinstance(log_body.get('server'), dict) and log_body['server'].get('env'):
+                    log_body['server']['env'] = '***'
+            print(f'📦 完整请求体: {json.dumps(log_body, ensure_ascii=False)[:500]}')
         else:
             print(f'📦 请求体: action=read_file_binary, path={body.get("path", "")}')
         print(f'{"="*60}')
@@ -156,6 +164,14 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_screenshot(body)
             elif action == 'list_windows':
                 self.handle_list_windows(body)
+            elif action == 'mcp_list_tools':
+                self.handle_mcp_list_tools(body)
+            elif action == 'mcp_call_tool':
+                self.handle_mcp_call_tool(body)
+            elif action == 'skill_list':
+                self.handle_skill_list(body)
+            elif action == 'skill_read':
+                self.handle_skill_read(body)
             else:
                 self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:

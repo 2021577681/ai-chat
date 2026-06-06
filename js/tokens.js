@@ -68,7 +68,10 @@ function estimateMessageTokens(msg) {
 
 function estimateChatTokens(chat) {
   if (!chat || !chat.messages) return 0;
-  let total = estimateTokens(state.settings.systemPrompt || '');
+  const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+    ? getEffectiveSystemPrompt()
+    : (state.settings.systemPrompt || '');
+  let total = estimateTokens(systemPrompt);
   for (const m of chat.messages) total += estimateMessageTokens(m);
   return total;
 }
@@ -284,7 +287,10 @@ async function fetchAnthropicTokenCount(chat) {
     if (!messages.length) return null;
     
     const body = { model: s.currentModel, messages: messages };
-    if (s.systemPrompt) body.system = s.systemPrompt;
+    const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+      ? getEffectiveSystemPrompt()
+      : (s.systemPrompt || '');
+    if (systemPrompt) body.system = systemPrompt;
     const tools = buildToolsArray();
     if (tools) body.tools = tools;
     
