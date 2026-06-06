@@ -69,6 +69,12 @@ let state = {
       skillRoots: ['skill'],
       skills: [],
       useSkills: true
+    },
+    projectMemory: {
+      enabled: false,
+      path: '.agent/memory.md',
+      maxChars: 12000,
+      declinedWorkspaces: []
     }
   },
   pendingAttachments: [],

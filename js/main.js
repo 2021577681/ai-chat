@@ -114,6 +114,11 @@ async function init() {
   
   // 8. 更新 Token 显示
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+
+  // ⭐ 8.5 项目记忆：只有显式开启后才检测/读取/生成
+  if (typeof initProjectMemory === 'function') {
+    setTimeout(() => initProjectMemory(false), 800);
+  }
   
   // ⭐ 9. 初始化请求频率管理
   if (typeof loadRateLimiter === 'function') {
@@ -150,7 +155,7 @@ async function init() {
       // ⭐ 顺序：先关最上层（图片预览、终端确认）→ 普通模态 → LMS 抽屉
       const modals = [
         'imgPreview', 'termConfirmMask',
-        'toolEditModal', 'backupModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
+        'toolEditModal', 'backupModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
         'planModal', 'outlineModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'

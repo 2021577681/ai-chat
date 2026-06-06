@@ -60,6 +60,9 @@
           <button class="more-menu-item" onclick="openMcpSkillSettings()">
             <span class="more-menu-icon">🔌</span><span>MCP / Skill</span>
           </button>
+          <button class="more-menu-item" onclick="openProjectMemorySettings()">
+            <span class="more-menu-icon">🧠</span><span>项目记忆</span>
+          </button>
           <button class="more-menu-item" onclick="openJsonEditor()">
             <span class="more-menu-icon">{ }</span><span>JSON 查看器</span>
           </button>
@@ -742,6 +745,57 @@
   </div>
 </div>
 
+<!-- ============ 项目记忆 ============ -->
+<div class="modal-mask" id="projectMemoryModal">
+  <div class="modal wide">
+    <h2>🧠 项目记忆 <button class="modal-close" onclick="closeProjectMemorySettings()">×</button></h2>
+    <div class="json-help" style="margin-bottom:12px;">
+      项目记忆用于记录当前工作区的长期背景。关闭时不会读取、生成或注入任何项目记忆。
+    </div>
+
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;margin:0;">
+        <input type="checkbox" id="projectMemoryEnabled">
+        <span>启用项目记忆</span>
+      </label>
+      <div class="form-hint">开启后才会检测当前项目是否存在记忆文件；不存在时会询问是否生成草稿。</div>
+    </div>
+
+    <div class="form-row two-cols">
+      <div>
+        <label>记忆文件路径</label>
+        <input type="text" id="projectMemoryPath" placeholder=".agent/memory.md">
+        <div class="form-hint">相对于当前 workspace。建议保持默认路径。</div>
+      </div>
+      <div>
+        <label>注入最大字符数</label>
+        <input type="number" id="projectMemoryMaxChars" min="1000" step="1000">
+        <div class="form-hint">超过上限会截断后注入，避免占用过多上下文。</div>
+      </div>
+    </div>
+
+    <div class="project-memory-meta">
+      <span>当前 workspace：</span>
+      <code id="projectMemoryWorkspace">尚未检测</code>
+    </div>
+    <div id="projectMemoryStatus" class="project-memory-status"></div>
+
+    <div class="form-group">
+      <label>项目记忆内容</label>
+      <textarea id="projectMemoryContent" rows="16" placeholder="开启后可读取或生成 .agent/memory.md"></textarea>
+    </div>
+
+    <div class="modal-footer" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="saveProjectMemorySettingsFromUi()">保存设置</button>
+      <button class="btn" onclick="initProjectMemory(true)">检测/读取</button>
+      <button class="btn" onclick="generateProjectMemoryDraft()">生成/刷新草稿</button>
+      <button class="btn btn-primary" onclick="saveProjectMemoryFromUi()">保存到项目</button>
+      <button class="btn" onclick="clearLoadedProjectMemory()">卸载当前记忆</button>
+      <button class="btn" onclick="closeProjectMemorySettings()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 工具管理 ============ -->
 <div class="modal-mask" id="toolsModal">
   <div class="modal wide">
@@ -1140,6 +1194,7 @@
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/utils.js"></script>
+<script src="js/project-memory.js"></script>
 <script src="js/mcp-skills.js"></script>
 <script src="js/rate-limiter.js"></script> 
 <script src="js/markdown.js"></script>

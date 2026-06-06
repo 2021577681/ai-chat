@@ -468,9 +468,13 @@ function getActiveSkillPrompt() {
 }
 
 function withActiveSkillPrompt(basePrompt) {
+  let out = basePrompt || '';
+  if (typeof withProjectMemoryPrompt === 'function') {
+    out = withProjectMemoryPrompt(out);
+  }
   const skillPrompt = getActiveSkillPrompt();
-  if (!skillPrompt) return basePrompt || '';
-  return `${basePrompt || ''}\n\n${skillPrompt}`.trim();
+  if (!skillPrompt) return out;
+  return `${out}\n\n${skillPrompt}`.trim();
 }
 
 function getEffectiveSystemPrompt() {

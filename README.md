@@ -1,222 +1,188 @@
-# 🤖 AI Chat - 大模型对话助手
+# AI Chat - 本地 Agent 工作台
 
-一个**零构建、纯前端**的大模型对话工具，配套本地工具执行服务、Git 可视化面板与可扩展的工具组机制。
+一个零构建、纯前端的大模型 Agent 工作台。前端可以直接用浏览器打开，配合本地 Python 服务后，模型可以在受控目录内读写文件、执行命令、检索网页、调用 Git、连接 MCP 工具，并通过 Plan / 大纲 / 多角色反思等模式完成复杂任务。
 
-> 单文件 HTML 打开即用，支持函数调用、动态规划、多轮反思、版本快照等多种工作流。
+它不是单纯的聊天页面，而是一个可改请求、可看成本、可接工具、可落地执行的个人 AI 控制台。
 
----
+## 核心优势
 
-## ✨ 特性
+- **多模型多接口**：支持 OpenAI、OpenAI Responses、Anthropic、DeepSeek、Qwen、智谱和自定义兼容接口，适合在多个模型和代理网关之间切换。
+- **请求完全可观察**：内置 JSON 请求查看器，可以预览实际发送的 URL、Headers、Body，查看原始响应、复制 cURL、保存请求历史。
+- **请求可定制**：支持自定义请求体模板和额外请求头，适合兼容非标准 API、代理服务、特殊网关、需要定制 User-Agent 的场景。
+- **Token 和费用透明**：对话顶部实时显示 Token 占用，支持 API usage 精确统计、Anthropic count_tokens、缓存命中、thinking/reasoning token、全局按模型汇总和费用估算。
+- **本地可执行**：通过本地后端把模型接到真实工作目录，可以执行命令、读写文件、搜索文件、截图、调用 Git，而不是只停留在建议层面。
+- **人可控的 Agent 流程**：Plan 模式先规划再审批，大纲模式边做边维护任务状态，多角色讨论模式可互评打分。
+- **可扩展工具生态**：支持自定义 JS 工具、本地 Skill、MCP stdio 工具、论文工具、LMS 示例工具和 Git 快照工具组。
+- **项目级记忆**：可在更多菜单显式开启。开启后才会检测当前 workspace 的 `.agent/memory.md`，不存在时询问是否生成草稿，确认保存后后续自动注入项目背景。
+- **数据在本地**：对话、配置、工具、统计数据默认存放在浏览器 IndexedDB 中，支持备份和恢复。
 
-### 对话与生成
-- 💬 **多 Provider**：OpenAI / Anthropic 兼容格式，一键切换模型
-- 🗂️ **配置档案**：保存多套 API 配置（Provider/Key/模型/参数），秒切环境
-- 🌐 **流式响应** + 📐 **KaTeX 公式** + 🎨 **代码高亮** + 🌙 **暗色主题**
-- 📊 **完整 Token 统计**：估算 + 精确计数 + 自定义定价 + 缓存命中显示
-- 🗜️ **自动压缩**：上下文超阈值自动摘要旧消息，支持增量叠加
-- 🚦 **请求限流**：每分钟上限、节流、随机延迟，避开服务端 429
+## 功能总览
 
-### 工作流模式
-- 📋 **Plan 模式**：规划 → 审查 → 人工审批 → 分步执行 → 整合（瀑布式）
-- 📑 **大纲模式**：模型自维护任务大纲，边做边改（敏捷式，支持暂停/继续/收尾）
-- 🎭 **多角色讨论**：双模型互评打分，提升回答质量
+### 对话与模型
 
-### 工具与集成
-- 🛠 **函数调用**：通过本地后端在指定目录内执行命令、读写文件、检索网页
-- 💾 **Git 可视化面板**：状态/历史/diff/暂存/提交/撤销，纯前端 UI
-- 📸 **版本快照工具组**：模型可主动调用 `note_snapshot` / `note_restore` 等做检查点（可选开关）
-- 🎓 **教务系统示例工具**：内置一组对接学校 LMS 的查询/下载工具（可选开关，可按需替换为你自己学校的接口）
+- 多 Provider 配置：OpenAI、OpenAI Responses、Anthropic、DeepSeek、Qwen、智谱、自定义。
+- 多套 API 配置档案：Provider、Base URL、Path、API Key、模型名、温度、最大输出、上下文上限等可以保存并快速切换。
+- 流式输出、停止生成、自动重试、请求超时、频率限制、随机延迟。
+- Markdown、代码高亮、KaTeX 公式、图片/PDF/文本附件。
+- OpenAI / Anthropic 消息格式适配，自动修复部分 tool call / tool result 序列问题。
 
-### 存储与运维
-- 💽 **IndexedDB 存储**：突破 localStorage 5MB 上限，支持大附件/长对话
-- 💾 **备份/恢复**：JSON 一键导出全量数据
-- 🧾 **Trace 日志**：git log 风格记录每次请求/工具调用
-- 🔒 **细粒度权限**：多类操作（执行/读/写/追加/改/删/附件/Git 读写）独立授权
+### 请求调试与接口适配
 
----
+- 请求 JSON 预览：展示 `_meta`、脱敏后的 `_headers` 和实际 `_body`。
+- 自定义 JSON 模板：可改请求体结构，支持 `{{model}}`、`{{messages}}`、`{{system}}`、`{{temperature}}`、`{{max_tokens}}`、`{{stream}}`、`{{tools}}` 占位符。
+- 自定义请求头：可追加额外 Headers，用于代理网关、兼容接口、特殊鉴权或 User-Agent 伪装。
+- 原始响应查看：保留最近若干次响应，支持查看非流式 JSON 和原始 SSE 流。
+- 请求历史：保存 URL、Headers、Body、响应摘要或错误信息，便于复现问题。
+- 一键复制请求体和 cURL，方便拿到终端或 Postman 中调试。
 
-## 🚀 快速开始
+### Token、价格与成本统计
 
-### 1. 启动本地工具后端（可选，需要函数调用才用）
+- 当前对话 Token 条：输入占用、输出累计、上下文比例、消息数、缓存命中、thinking/reasoning token。
+- 精确统计：优先使用 API 返回的 `usage`，Anthropic 可额外调用 `count_tokens` 获取当前上下文精确输入。
+- 全局 Token 使用统计：独立账本记录每次请求，删除对话后也能保留历史统计。
+- 按模型聚合：请求数、输入 token、输出 token、缓存读、思考 token、费用。
+- 请求趋势曲线：按日期查看请求次数随时间变化。
+- 定价管理：自定义不同模型的输入、输出、缓存读取单价和汇率，用于估算美元/人民币成本。
+- 自动压缩：上下文超过阈值后自动摘要旧消息，也支持手动压缩。
+
+### Agent 工作流
+
+- **Plan 模式**：模型先生成执行计划，可开启计划审查；用户审批后再逐步执行，最后整合答案。
+- **大纲模式**：模型在执行过程中维护任务大纲，支持暂停、继续、中途注入用户意见、达到轮数上限后强制收尾。
+- **多角色讨论**：使用学生/老师式互评提示词，让另一个角色对答案评分并提出修改意见。
+- **项目记忆**：默认关闭；开启后读取/生成 `.agent/memory.md`，用于保存项目定位、启动方式、架构约定、关键文件、已知坑点和长期待办。
+- 工具调用循环：在 Plan 和大纲模式中，模型可以连续调用文件、终端、网页、MCP 等工具推进任务。
+
+### 本地工具能力
+
+基础工具默认可用：
+
+| 工具 | 能力 |
+| --- | --- |
+| `execute_action` | 在工作区内执行命令，可选择新终端窗口运行长任务 |
+| `read_note` / `save_note` / `append_note` / `edit_note` / `delete_note` | 文本文件读写、追加、精确替换、删除 |
+| `list_notes` / `find_in_notes` | 目录浏览和全文搜索 |
+| `attach_file` | 把本地图片、PDF、文本附件加入对话 |
+| `web_search` / `fetch_url` | 联网搜索和网页正文提取 |
+| `ai_screenshot` / `list_windows` | 截取全屏或指定窗口，辅助模型观察界面 |
+| `get_current_time` / `calculator` | 当前时间和数学表达式计算 |
+| `read_skill` | 按需读取已扫描的本地 Skill |
+
+可选工具组：
+
+| 工具组 | 能力 |
+| --- | --- |
+| Git 快照工具 | `note_status`、`note_history`、`note_diff`、`note_snapshot`、`note_restore` |
+| 论文工具 | `arxiv_search`、`semantic_scholar_search`、`fetch_pdf_text` |
+| LMS 工具 | 课程、待办、作业详情、课件、下载、Cookie 状态等示例接口 |
+| MCP 工具 | 配置 stdio MCP server，拉取工具列表并映射为模型可调用工具 |
+| 自定义工具 | 在工具面板中写 JS 工具，定义参数 schema 后让模型调用 |
+
+## 快速开始
+
+### 1. 安装依赖并启动本地后端
+
+如果只想聊天，可以直接打开 HTML；如果需要文件、命令、Git、网页代理、MCP、截图等能力，需要启动本地服务。
 
 ```bash
 pip install -r requirements.txt
 python local_terminal_server.py
 ```
 
-默认监听 `127.0.0.1:8765`，Token 自动生成到 `~/.aichat_terminal_token`。
-启动时所在目录会作为模型可访问的**根目录**，所有文件操作限制在内。
+默认监听 `127.0.0.1:8765`。服务启动目录会作为模型可访问的工作区根目录，文件操作会被限制在这个目录内。
 
 ### 2. 打开主界面
 
-直接用浏览器打开 `AI-Chat-大模型对话助手.html` 即可。
-首次使用请点击右上角 **⚙ 设置** 填入 API Key、模型名等。
+用浏览器打开：
 
-### 3. 启用可选工具组（按需）
-
-默认只暴露一组通用工具给模型。如需让模型使用其它能力：
-
-- 工具面板底部 → **💾 启用快照工具**（+5 个，需要当前目录是 Git 仓库）
-- 工具面板底部 → **🎓 启用教务工具**（需要先配好对应 Cookie，详见 [`lms_tool/README.md`](lms_tool/README.md)）
-
----
-
-## 📁 目录结构
-
+```text
+AI-Chat-大模型对话助手.html
 ```
+
+首次使用进入设置，填入 API Key、Base URL、模型名和接口格式。需要经过本地代理访问 API 时，先在设置里拉取本地终端 Token。
+
+### 3. 按需开启工具
+
+- 在工具面板启用 Git 快照工具、论文工具、LMS 工具。
+- 在 MCP / Skill 面板添加 MCP server 或扫描 `skill/` 目录。
+- 在更多菜单开启项目记忆后，agent 才会检测或生成 `.agent/memory.md`。
+- 在 JSON 请求编辑器中调整请求体模板和额外请求头。
+- 在定价管理中配置模型价格，用于费用估算。
+
+## 目录结构
+
+```text
 .
-├── AI-Chat-大模型对话助手.html   # 主入口（单文件 HTML）
-│
+├── AI-Chat-大模型对话助手.html   # 主入口，浏览器直接打开
 ├── base.css                      # 通用样式
-├── lms.css                       # 教务面板样式
 ├── git-panel.css                 # Git 面板样式
-│
-├── main.js                       # 启动入口（init 钩子）
-├── state.js                      # 全局 state + 内置工具注入 + 兼容迁移
-├── config.js                     # 常量、Provider 预设、预设 Prompt、内置工具定义
-├── utils.js                      # toast / 转义 / 信息栏刷新等通用
-├── theme.js                      # 亮/暗主题切换
-│
-├── idb-store.js                  # IndexedDB 存储层（同步代理 + 异步持久化）
-├── api-profiles.js               # API 配置档案（多套 Key/Provider 切换）
-│
-├── chat.js                       # 对话列表 + 消息渲染 + onSend 入口
-├── markdown.js                   # Markdown / 数学 / 代码高亮渲染
-│
-├── api-adapters.js               # OpenAI / Anthropic 消息格式适配
-├── api-core.js                   # buildRequestBody + callAPI + 流式/非流式处理
-├── api-stream.js                 # 流式 RAF 节流 + stopGenerate
-│
-├── plan-core.js                  # Plan 模式核心逻辑（规划 / 审查 / 执行）
-├── plan-ui.js                    # Plan 模式 UI 渲染 + 设置面板
-│
-├── outline-prompts.js            # 大纲模式提示词 + 隐藏工具定义
-├── outline-core.js               # 大纲模式主循环 + 工具处理 + 保底收尾
-├── outline-render.js             # 大纲模式 UI 渲染 + 用户介入操作
-│
-├── reflection.js                 # 多角色讨论模式
-│
-├── tools.js                      # 工具管理（增删改查、一键启停可选工具组）
-├── terminal.js                   # 本地服务调用 + 权限弹窗 + Token 自取
-├── permissions.js                # 工具权限管理面板
-│
-├── git-panel.js                  # Git 可视化管理面板（状态/历史/diff/提交/回退）
-│
-├── settings.js                   # 设置面板逻辑
-├── backup.js                     # 备份 / 导入 / 恢复
-├── json-editor.js                # 请求 JSON 查看器 + 自定义模板 + 历史
-│
-├── pricing.js                    # 模型定价管理（输入/输出/缓存/汇率）
-├── tokens.js                     # Token 估算 + 精确计数 + 自动压缩
-├── rate-limiter.js               # 请求频率限制（每分钟上限、节流、随机延迟）
-├── trace.js                      # Trace 日志（git log 风格）
-│
-├── lms.js                        # 教务系统数据层（Cookie / API / 渲染 / 工具实现）
-├── lms_panel.js                  # 教务系统面板抽屉 UI
-│
-├── local_terminal_server.py      # 本地工具执行后端（标准库为主）
-├── lms_tool/
-│   ├── lms.py                    # 教务系统命令行助手
-│   ├── README.md
-│   ├── .lms_cookie.example       # Cookie 模板
-│   ├── data/                     # 缓存（.gitignore）
-│   └── downloads/                # 下载文件（.gitignore）
-├── requirements.txt
-└── .gitignore
+├── lms.css                       # LMS 面板样式
+├── local_terminal_server.py      # 本地工具后端入口
+├── requirements.txt              # Python 依赖
+├── start_agent.bat / start_agent.sh
+├── js/
+│   ├── api-adapters.js           # OpenAI / Anthropic / Responses 消息适配
+│   ├── api-core.js               # 请求体构造、重试、代理、非流式处理
+│   ├── api-stream.js             # 流式响应处理
+│   ├── api-profiles.js           # 多套 API 配置档案
+│   ├── json-editor.js            # 请求预览、模板、Headers、响应、历史
+│   ├── tokens.js                 # Token 估算、精确统计、压缩
+│   ├── token-usage.js            # 全局 Token 使用统计
+│   ├── pricing.js                # 模型定价和费用估算
+│   ├── project-memory.js         # 项目级记忆读取、生成和注入
+│   ├── plan-core.js / plan-ui.js
+│   ├── outline-core.js / outline-render.js / outline-prompts.js
+│   ├── tools.js / terminal.js / permissions.js
+│   ├── mcp-skills.js             # MCP 和本地 Skill 前端集成
+│   ├── git-panel.js              # Git 可视化面板
+│   ├── paper_tools.js            # arXiv / Semantic Scholar / PDF 文本
+│   └── ...
+├── server/
+│   ├── handler.py                # HTTP 路由
+│   ├── exec.py                   # 命令执行
+│   ├── files.py                  # 文件读写
+│   ├── git_ops.py                # Git 操作
+│   ├── mcp_skills.py             # MCP stdio client + Skill loader
+│   ├── proxy.py                  # LLM 代理
+│   ├── sandbox.py                # 工作区和危险命令限制
+│   ├── screenshot.py             # 窗口/屏幕截图
+│   └── web.py                    # 搜索与网页读取
+├── skill/
+│   └── README.md                 # 本地 Skill 目录说明
+└── lms_tool/
+    ├── lms.py
+    ├── README.md
+    └── .lms_cookie.example
 ```
 
-> 💡 **加载顺序很重要**：所有 JS 在 HTML 末尾按依赖顺序串行 `<script>` 加载，
-> 大致是 `config → state → utils → idb-store → adapter → core → 上层模式 → UI → chat → main`。
+## 安全设计
 
----
+已实现的防护：
 
-## 🧰 内置工具一览
+- 本地服务使用 Token 鉴权，浏览器端需要授权后才能调用。
+- 文件操作和 MCP server cwd 限制在工作区根目录内。
+- 使用 `realpath` / `commonpath` 防止路径越界和 symlink 越狱。
+- 命令执行前检查危险命令和明显的工作区外路径。
+- 工具权限按类别弹窗确认，包括执行、读、写、删除、附件、MCP、Git 读写、Git 回退。
+- 自定义工具导入有二次确认和代码预览。
+- API Key、LMS Cookie、本地 Token 等可以一键清除。
 
-工具分三组，**默认只注入基础组**给模型，其它需手动启用：
+仍需注意：
 
-### 📝 基础组（13 个，默认开启）
+- 不要把 API Key、`~/.aichat_terminal_token`、`lms_tool/.lms_cookie` 提交到 Git。
+- `.agent/` 默认被 `.gitignore` 排除，项目记忆可能包含个人偏好、内部路径或待办，不建议直接提交。
+- 不要导入不可信备份，自定义工具本质上是浏览器里执行的 JS 代码。
+- `note_restore` 会覆盖工作区文件，执行前要确认目标 commit 和 path。
+- 浏览器 IndexedDB 是本地存储，不适合在公共电脑长期保存密钥。
 
-| 工具 | 用途 |
-|------|------|
-| `execute_action` | 在本地文件夹中执行任务指令（命令行） |
-| `read_note` / `save_note` / `append_note` / `edit_note` / `delete_note` | 文档增删改查 |
-| `list_notes` / `find_in_notes` | 目录浏览与全文搜索 |
-| `get_current_time` | 当前时间 |
-| `calculator` | 数学表达式计算 |
-| `attach_file` | 把图片/PDF 加入对话供多模态查看 |
-| `web_search` / `fetch_url` | 联网搜索与网页正文加载 |
+## 开发约定
 
-### 💾 快照组（5 个，可选）—— Git 工具的模型接口
+- 纯前端零构建：JS 通过 HTML 中的 `<script>` 顺序加载，不使用打包器。
+- 状态持久化使用 IndexedDB，并保留类似同步存取的业务接口。
+- 后端尽量保持轻依赖，主要使用 Python 标准库，部分网络功能依赖 `requests`。
+- 内置工具以 JSON schema 描述参数，由模型通过 function calling 调用。
+- 可选工具组默认不全部注入，避免工具列表过长；需要时在 UI 中手动启用。
 
-| 工具 | 用途 |
-|------|------|
-| `note_status` | 查看仓库状态 |
-| `note_history` | 提交历史 |
-| `note_diff` | 文件 diff |
-| `note_snapshot` | 主动打快照（commit） |
-| `note_restore` | 回退到指定快照 |
+## License
 
-### 🎓 教务组（8 个，可选）—— 学校教务系统示例
-
-> 内置示例对接的是某高校的 LMS，使用前请阅读 [`lms_tool/README.md`](lms_tool/README.md)。
-> 如果你的学校用的是别的系统，可以参考 `lms.js` 替换为对应接口。
-
-| 工具 | 用途 |
-|------|------|
-| `lms_status` | 检查 Cookie 是否有效 |
-| `lms_courses` / `lms_assignments` / `lms_assignment_detail` | 课程与作业查询 |
-| `lms_resources` / `lms_download_resource` | 课件浏览与下载 |
-| `lms_notifications` / `lms_grades` | 通知和成绩 |
-
----
-
-## 🛡️ 安全说明
-
-### ✅ 已做
-
-- 后端运行目录在启动时锁定（基于 `realpath`，防 symlink 越狱）
-- 危险命令黑名单（`rm -rf` / `format` / `shutdown` / fork bomb / `eval` / `base64|sh` 等）
-- **Token 鉴权**（自动写到 `~/.aichat_terminal_token`，权限 600）
-- **CORS Origin 白名单**（仅 localhost / 127.0.0.1 / file:// 可访问）
-- **多类操作权限**（执行/读/写/追加/改/删/附件/Git 读/Git 写/Git 回退）每次弹窗确认，可勾选「永久允许」
-- 自定义工具代码导入时**二次确认**（含代码预览）
-- 一键**清除所有凭证**（设置 → 工具权限管理 → 危险区）
-
-### ⚠️ 你需要注意
-
-- **永远不要**把 `lms_tool/.lms_cookie`、`~/.aichat_terminal_token`、API Key 提交到 Git
-- **永远不要**导入来路不明的备份文件（自定义工具是 JS 代码，等同于让对方在你浏览器里执行任意脚本）
-- API Key / Cookie 默认存在 IndexedDB，**和你浏览器登录态在一个安全域**，请勿在公共电脑使用
-- `note_restore` 工具会强制回退文件，**未提交的改动会丢失**，调用时务必看清提示再确认
-
----
-
-## ⚡ 性能与缓存
-
-### Prompt Caching 优化
-
-- `system` 字段保持稳定（不混入动态摘要），最大化各家 API 的 prefix cache 命中率
-- 摘要由适配器自行注入到 messages 数组中（Anthropic: prepend 到首条 user；OpenAI: 作为 system message）
-- 多轮对话采用追加式历史，工具结果原样保留，前缀越积越长越省钱
-
-### 存储层
-
-- 默认使用 **IndexedDB**（异步落盘 + 同步代理 API，业务层无感知）
-- 大附件（>100KB 的图片/二进制）序列化时自动剥离 `data` 字段，防撑爆存储
-- 旧用户从 localStorage 自动迁移，无需手动操作
-
----
-
-## 🧰 开发约定
-
-- **纯前端零构建**：所有 JS 用 `<script>` 顺序加载，全局函数互调；不用 ESM、不打包
-- **持久化**：IndexedDB（保留同步 API 风格，内部异步落盘）
-- **后端**：仅依赖 Python 标准库 + `requests`（教务助手用）
-- **工具命名风格**：基础笔记类工具统一使用 `xxx_note` 命名
-- **可选工具组**：通过 `OPTIONAL_TOOL_NAMES` 白名单首次跳过自动注入，需用户手动启用
-
----
-
-## 📜 License
-
-仅供个人学习与研究使用。请遵守相关服务的使用条款。
+仅供个人学习与研究使用。使用第三方模型、搜索、论文、LMS 或代理服务时，请遵守对应服务条款。
