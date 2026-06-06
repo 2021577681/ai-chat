@@ -542,6 +542,16 @@ async function callAPI(roundLimit) {
       return;
     }
     
+    // ⭐ 关键修复：如果 roundLimit=0 但 API 仍返回了 tool_calls，
+    //   工具不会执行，但 assistant 消息中的 tool_calls 会被保留。
+    //   下次请求时 DeepSeek 会报 400：tool_calls must be followed by tool messages。
+    //   这里在保存前主动清除，从源头消灭问题。
+    if (msg.tool_calls && msg.tool_calls.length && roundLimit <= 0) {
+      console.warn('[callAPI] 工具轮次已用完但仍有 tool_calls，自动清除：',
+        msg.tool_calls.map(tc => tc.id || tc.function?.name).join(', '));
+      delete msg.tool_calls;
+    }
+    
     saveData();
     // ⭐ 完成时标记结束时间，并对当前消息节点做一次"完整"渲染（含 KaTeX）
     if (c.messages[lastIdx]) c.messages[lastIdx]._endTime = Date.now();
@@ -1178,13 +1188,25 @@ async function runAgentLoop({
     // 到了 maxRounds 仍想调工具，但已无 tools → 把这次 assistant 文本当作 final
     // （上面构造 body 时最后一轮已剥掉 tools，模型还硬要 call 极少见，但兜底）
     if (round >= maxRounds) {
+      // ⭐ 关键修复：剥离未执行的 tool_calls，避免污染 messages
+      if (assistantMsg.tool_calls) {
+        console.warn('[runAgentLoop] 工具轮次已用完但仍有 tool_calls，自动清除');
+        delete assistantMsg.tool_calls;
+      }
       finalText = assistantText || '(已达最大工具调用轮数，强制结束)';
       break;
     }
     
     // 执行每个工具
+    const executedIds = [];  // ⭐ 追踪已执行的 tool_call
     for (const tc of assistantToolCalls) {
       if (_isAborted()) {
+        // ⭐ 清理未执行的 tool_calls，避免残留
+        if (assistantMsg.tool_calls) {
+          assistantMsg.tool_calls = assistantMsg.tool_calls.filter(
+            t => executedIds.includes(t.id)
+          );
+        }
         const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
       }
       
@@ -1225,6 +1247,17 @@ async function runAgentLoop({
         name: tc.name,
         content: contentText
       });
+      executedIds.push(tc.id);  // ⭐ 记录已执行
+      
+      // ⭐ _stopAll / _userRejected → 清理未执行的 tool_calls 并退出工具循环
+      if (result.value && result.value._stopAll) {
+        if (assistantMsg.tool_calls) {
+          assistantMsg.tool_calls = assistantMsg.tool_calls.filter(
+            t => executedIds.includes(t.id)
+          );
+        }
+        break;
+      }
     }
     
     // 继续下一轮

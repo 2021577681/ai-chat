@@ -277,7 +277,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'ai_screenshot',
-    description: '截图工具，支持全屏截图或指定窗口截图，自动保存 PNG 到当前工作目录并返回文件路径。\n\n使用方式：\n- 全屏截图：不传窗口参数即可\n- 窗口截图：提供 window_title 或 process_name 定位窗口\n- 也可先用 list_windows 列出窗口，再传入 hwnd 精确截图\n\n窗口类型与截图方法：\n- 🔧 终端/命令行（cmd.exe / powershell.exe / WindowsTerminal.exe / 所有含 "cmd" "terminal" "powershell" "命令提示符" 的窗口）：传 use_printwindow=true，使用 PrintWindow 离屏渲染，即使窗口在后台也能完整截取\n- 🔧 传统 Win32 窗口（notepad.exe / regedit.exe / 资源管理器 / 大部分非浏览器的原生 Windows 程序）：同样传 use_printwindow=true，支持后台截图\n- 🌐 浏览器（chrome.exe / msedge.exe / firefox.exe）：不传 use_printwindow（默认 false），使用屏幕像素裁剪，窗口需在前台可见\n- ⚡ Electron / UWP 应用（如 VS Code / Discord / Slack）：不传 use_printwindow，使用屏幕裁剪\n\n截图自动保存到当前工作目录，无需额外步骤。',
+    description: '截图工具，支持全屏截图或指定窗口截图，自动保存 PNG 到当前工作目录并返回文件路径。\n\n使用方式：\n- 全屏截图：不传窗口参数即可\n- 窗口截图：提供 window_title 或 process_name 定位窗口\n- 也可先用 list_windows 列出窗口，再传入 hwnd 精确截图\n\n窗口类型与截图方法：\n- 🔧 终端/命令行（cmd.exe / powershell.exe / 所有含 "cmd" "powershell" "命令提示符" 的传统控制台窗口）：传 use_printwindow=true，使用 PrintWindow 离屏渲染，即使窗口在后台也能完整截取\n- 🔧 传统 Win32 窗口（notepad.exe / regedit.exe / 资源管理器 / 大部分非浏览器的原生 Windows 程序）：同样传 use_printwindow=true，支持后台截图\n- 🌐 浏览器（chrome.exe / msedge.exe / firefox.exe）：不传 use_printwindow（默认 false），使用屏幕像素裁剪，窗口需在前台可见\n- ⚡ Electron / UWP 应用（如 VS Code / Discord / Slack / WindowsTerminal.exe）：不传 use_printwindow，使用屏幕裁剪\n\n⚠️ WindowsTerminal 多标签页注意：当 execute_action 的 new_window=true 打开新终端时，可能不会创建新独立窗口，而是在已有 WindowsTerminal.exe 进程中新增标签页。应先用 list_windows（process_name=WindowsTerminal.exe 或按窗口标题搜索）找到主窗口 hwnd（标题如"AI 终端"），而不是内部标签页句柄（标题如 C:\\Windows\\system32\\cmd.exe）。内部标签页句柄只是宿主内的子句柄，截它只能截到单个标签页\n\n截图自动保存到当前工作目录，无需额外步骤。',
     parameters: {
       type: 'object',
       properties: {
@@ -286,7 +286,7 @@ const BUILTIN_TOOLS = [
         process_name: { type: 'string', description: '目标进程名关键词，可选，如 python.exe/chrome.exe' },
         hwnd: { type: 'number', description: '窗口句柄，可由 list_windows 获得，可选' },
         all_screens: { type: 'boolean', description: '全屏模式下是否覆盖多显示器，默认 true。' },
-        use_printwindow: { type: 'boolean', description: '是否使用 PrintWindow 离屏渲染。终端/命令行/传统 Win32 窗口设为 true（支持后台截图）；浏览器/Electron 设为 false 或不传（默认）。' }
+        use_printwindow: { type: 'boolean', description: '是否使用 PrintWindow 离屏渲染。传统 cmd/powershell 控制台和 Win32 窗口设为 true（支持后台截图）；浏览器/Electron/UWP/WindowsTerminal 设为 false 或不传（默认）。' }
       },
       required: []
     },
