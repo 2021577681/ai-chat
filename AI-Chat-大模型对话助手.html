@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -214,6 +214,7 @@
       <label>服务商预设</label>
       <select id="provider" onchange="onProviderChange()">
         <option value="openai">OpenAI</option>
+        <option value="openai_responses">OpenAI Responses</option>
         <option value="anthropic">Anthropic Claude</option>
         <option value="deepseek">DeepSeek</option>
         <option value="qwen">阿里通义千问</option>
@@ -225,19 +226,20 @@
     <div class="form-group">
       <label>API Base URL</label>
       <input type="text" id="baseUrl" oninput="updateUrlPreview()">
-      <div class="form-hint">基础地址，不含 /chat/completions 这部分</div>
+      <div class="form-hint">基础地址，不含 /chat/completions、/responses 这部分</div>
     </div>
     
     <div class="form-group">
       <label>API 路径</label>
       <input type="text" id="apiPath" oninput="updateUrlPreview()">
-      <div class="form-hint">OpenAI: <code>/chat/completions</code>；Claude: <code>/messages</code></div>
+      <div class="form-hint">OpenAI Chat: <code>/chat/completions</code>；OpenAI Responses: <code>/responses</code>；Claude: <code>/messages</code></div>
     </div>
     
     <div class="form-group">
       <label>API 格式</label>
       <select id="apiFormat" onchange="updateUrlPreview()">
         <option value="openai">OpenAI 兼容</option>
+        <option value="responses">OpenAI Responses</option>
         <option value="anthropic">Anthropic 原生</option>
       </select>
     </div>
@@ -771,10 +773,12 @@
     <!-- Tab 3: 自定义请求头 -->
     <div id="jsonTab-headers" style="display:none;">
       <div class="json-help">
-        💡 额外的请求头（JSON 格式）。默认会自动添加 Content-Type 和 Authorization。
+        💡 额外的请求头（JSON 格式）。默认会自动添加 Content-Type 和 Authorization。<br>
+        覆盖 <code>User-Agent</code> 这类浏览器禁止直连设置的请求头时，请开启「通过本地服务代理」。
       </div>
-      <textarea class="json-editor" id="jsonHeaders" style="min-height:200px;" placeholder='{"X-Custom-Header": "value"}'></textarea>
-      <div style="display:flex;gap:8px;margin-top:10px;">
+      <textarea class="json-editor" id="jsonHeaders" style="min-height:200px;" placeholder='{"User-Agent": "codex-tui/0.118.0 (Mac OS 26.3.1; arm64)"}'></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button class="btn" onclick="setCodexUserAgentHeader()">🧩 填入 Codex UA</button>
         <button class="btn btn-primary" onclick="saveJsonTemplate()">💾 保存</button>
       </div>
     </div>
@@ -1038,40 +1042,41 @@
 <!-- ============ JS 加载（顺序很重要！）============ -->
 <!-- ⭐ idb-store.js 必须最先加载：它提供 storage 同步 API 和 localStorage 垫片，
      后续所有 .js 中的 storage.xxx / localStorage.xxx 调用都依赖它 -->
-<script src="idb-store.js"></script>
-<script src="config.js"></script>
-<script src="state.js"></script>
-<script src="utils.js"></script>
-<script src="rate-limiter.js"></script> 
-<script src="markdown.js"></script>
-<script src="theme.js"></script>
-<script src="tokens.js"></script>
-<script src="pricing.js"></script>
-<script src="token-usage.js"></script>
-<script src="api-adapters.js"></script>
-<script src="api-core.js"></script>
-<script src="api-stream.js"></script>
-<script src="tools.js"></script>
-<script src="terminal.js"></script>
-<script src="git-panel.js"></script>
-<script src="reflection.js"></script>
-<script src="plan-core.js"></script>
-<script src="plan-ui.js"></script>
-<script src="outline-prompts.js"></script>
-<script src="outline-core.js"></script>
-<script src="outline-render.js"></script>
-<script src="settings.js"></script>
-<script src="api-profiles.js"></script>
-<script src="json-editor.js"></script>
-<script src="backup.js"></script>
-<script src="permissions.js"></script>
-<script src="trace.js"></script>
-<script src="lms.js"></script>
-<script src="lms_panel.js"></script>
-<script src="paper_tools.js"></script>
-<script src="beacon.js"></script>
-<script src="chat.js"></script>
-<script src="main.js"></script>
+<script src="js/idb-store.js"></script>
+<script src="js/config.js"></script>
+<script src="js/state.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/rate-limiter.js"></script> 
+<script src="js/markdown.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/tokens.js"></script>
+<script src="js/pricing.js"></script>
+<script src="js/token-usage.js"></script>
+<script src="js/api-adapters.js"></script>
+<script src="js/api-core.js"></script>
+<script src="js/api-stream.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/terminal.js"></script>
+<script src="js/git-panel.js"></script>
+<script src="js/reflection.js"></script>
+<script src="js/plan-core.js"></script>
+<script src="js/plan-ui.js"></script>
+<script src="js/outline-prompts.js"></script>
+<script src="js/outline-core.js"></script>
+<script src="js/outline-render.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/api-profiles.js"></script>
+<script src="js/json-editor.js"></script>
+<script src="js/backup.js"></script>
+<script src="js/permissions.js"></script>
+<script src="js/trace.js"></script>
+<script src="js/lms.js"></script>
+<script src="js/lms_panel.js"></script>
+<script src="js/paper_tools.js"></script>
+<script src="js/beacon.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/main.js"></script>
 
 </body>
 </html>
+
