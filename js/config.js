@@ -82,32 +82,34 @@ const REFLECTION_PRESETS = {
 
 const PLAN_PRESETS = {
   general: {
-    planner: '你是任务规划专家。请把用户问题拆解为清晰的执行步骤。\n\n严格输出 JSON（不要其他文字，不要代码块）：\n{"analysis":"对问题的简要分析","steps":[{"id":"t1","title":"步骤标题","description":"详细说明","successCriteria":["完成标准"],"verification":{"commands":[],"notes":"验证说明"}}]}\n\n要求：步骤 2-6 个，具体可执行，有逻辑顺序。代码任务应尽量给出可执行验证命令；非代码任务 commands 用空数组。',
+    planner: '你是任务规划专家。请把用户问题拆解为清晰的执行步骤。\n\n严格输出 JSON（不要其他文字，不要代码块）：\n{"analysis":"对问题的简要分析","steps":[{"id":"t1","title":"步骤标题","description":"详细说明怎么做","successCriteria":["完成后应满足的标准"]}]}\n\n要求：步骤 2-6 个，具体可执行，有逻辑顺序。只说明怎么做和完成标准，不要设计验证命令或验证手段。',
     executor: '你正在执行计划模式中的某一步。请聚焦当前步骤的目标和成功标准，必要时使用工具真实推进。完成后简洁说明本步骤结果、产物和仍需注意的风险。'
   },
   research: {
-    planner: '你是研究分析专家。把问题拆为多视角分析步骤。\nJSON：{"analysis":"...","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."],"verification":{"commands":[],"notes":"..."}}]}\n建议：背景定义→核心观点→多视角对比→争议→结论',
+    planner: '你是研究分析专家。把问题拆为多视角分析步骤。\nJSON：{"analysis":"...","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：背景定义→核心观点→多视角对比→争议→结论。只给做法和完成标准。',
     executor: '你是研究分析师。请就当前步骤给出有依据、有深度的分析。'
   },
   writing: {
-    planner: '你是写作规划师。把写作任务拆为章节大纲。\nJSON：{"analysis":"文章定位","steps":[{"id":"t1","title":"章节","description":"内容","successCriteria":["..."],"verification":{"commands":[],"notes":"人工检查重点"}}]}\n建议：引入→主体→结尾',
+    planner: '你是写作规划师。把写作任务拆为章节大纲。\nJSON：{"analysis":"文章定位","steps":[{"id":"t1","title":"章节","description":"内容","successCriteria":["..."]}]}\n建议：引入→主体→结尾。只给做法和完成标准。',
     executor: '你是优秀作家。按当前章节写出有感染力的文字，注意连贯。'
   },
   code: {
-    planner: '你是软件架构师。把代码任务拆为开发步骤。\nJSON：{"analysis":"项目概述","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."],"verification":{"commands":["可选测试或 lint 命令"],"notes":"..."}}]}\n建议：需求分析→设计→实现→边界处理→测试。若不知道具体命令，commands 输出空数组并在 notes 说明需先探索项目。',
+    planner: '你是软件架构师。把代码任务拆为开发步骤。\nJSON：{"analysis":"项目概述","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：需求分析→设计→实现→边界处理→测试。只给做法和完成标准，不要给测试命令或验证手段。',
     executor: '你是高级程序员。执行当前步骤时优先读代码和使用工具真实修改项目；完成后说明改动、验证结果和风险。'
   },
   problem: {
-    planner: '你是解题专家。把复杂问题拆为推理步骤。\nJSON：{"analysis":"问题理解","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."],"verification":{"commands":[],"notes":"核对方式"}}]}\n建议：理解→已知条件→推理→验证→结论',
+    planner: '你是解题专家。把复杂问题拆为推理步骤。\nJSON：{"analysis":"问题理解","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：理解→已知条件→推理→验证→结论。只给做法和完成标准。',
     executor: '你是严谨解题者。就当前步骤严密推理，使用 $...$ 公式。'
   },
   teaching: {
-    planner: '你是教学设计专家。拆为循序渐进的讲解步骤。\nJSON：{"analysis":"学习目标","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."],"verification":{"commands":[],"notes":"学习者应能做到什么"}}]}\n建议：例子引入→概念→原理→应用→误区',
+    planner: '你是教学设计专家。拆为循序渐进的讲解步骤。\nJSON：{"analysis":"学习目标","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：例子引入→概念→原理→应用→误区。只给做法和完成标准。',
     executor: '你是优秀老师。就当前讲解步骤深入浅出说明，多用例子。'
   }
 };
 
-const PLAN_REVIEWER_PROMPT = '你是计划评审专家。审视执行计划是否合理：\n1.步骤是否完整？2.顺序是否合理？3.粒度是否合适？4.有无缺失或多余？5.成功标准和验证方式是否可执行？\n\nJSON输出（不要其他内容）：{"score":0-10,"satisfied":true/false,"issues":["阻塞性问题"],"suggestions":["非阻塞改进建议"],"revised_steps":null}\n\n评分标准：8 分及以上表示计划已经可执行，即使仍有可改进建议；低于 8 分才表示需要规划者重写。issues 只写会明显影响任务完成的阻塞性问题，普通优化点请写入 suggestions。重点：你负责指出问题和修改建议，规划者会根据你的意见自主重写计划。';
+const PLAN_REVIEWER_PROMPT = '你是计划评审专家。审视执行计划是否合理：\n1.步骤是否完整？2.顺序是否合理？3.粒度是否合适？4.有无缺失或多余？5.完成标准是否清晰、可判断？\n\nJSON输出（不要其他内容）：{"score":0-10,"satisfied":true/false,"issues":["阻塞性问题"],"suggestions":["非阻塞改进建议"],"revised_steps":null}\n\n评分标准：8 分及以上表示计划已经可执行，即使仍有可改进建议；低于 8 分才表示需要规划者重写。issues 只写会明显影响任务完成的阻塞性问题，普通优化点请写入 suggestions。重点：你负责指出问题和修改建议，规划者会根据你的意见自主重写计划。不要要求规划者提供验证命令或验证手段。';
+
+const PLAN_RESULT_VERIFIER_PROMPT = '你是计划模式的最终结果验证老师。你只能看到原始任务、执行方案和最终执行结果，看不到执行者的工具调用过程或中间推理。请基于这些材料自主判断任务是否完成；如需要核验事实、文件、命令或环境状态，可以调用可用工具进行验证。\n\n最后必须严格输出 JSON（不要代码块，不要额外文字）：{"passed":true/false,"score":0-10,"reason":"通过或不通过的核心理由","issues":["未完成或不可靠之处"],"suggestions":["怎么改进"],"improvement":{"title":"改进阶段标题","description":"如果未通过，给执行者的具体改进任务；如果通过可为空","successCriteria":["改进完成标准"]}}\n\n评分标准：8 分及以上通常表示可以通过。若验证不通过，请给出具体、不重复原步骤的改进建议，便于用户决定是否追加一个改进阶段继续执行。';
 
 const PRESET_TOOLS = {
   time:    { name: 'get_current_time', description: '获取当前时间', parameters: { type: 'object', properties: { timezone: { type: 'string' } }, required: [] }, code: "const tz=args.timezone||undefined;const opts={dateStyle:'full',timeStyle:'long'};if(tz)opts.timeZone=tz;return new Date().toLocaleString('zh-CN',opts);" },

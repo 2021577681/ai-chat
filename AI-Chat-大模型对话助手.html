@@ -441,7 +441,7 @@
     <h2>📋 计划模式 <button class="modal-close" onclick="closePlanSettings()">×</button></h2>
     
     <div class="json-help">
-      💡 <strong>流程</strong>：① AI 生成执行计划（工具开启时可先侦察项目）→ ② 老师评审 → ③ 规划者根据意见修订 → ④ 按计划逐步执行 → ⑤ 整合输出。<br>
+      💡 <strong>流程</strong>：① AI 生成执行计划（工具开启时可先侦察项目）→ ② 老师评审计划 → ③ 规划者根据意见修订 → ④ 按计划逐步执行 → ⑤ 整合输出 → ⑥ 独立老师验证结果。<br>
       <strong>适合</strong>：复杂任务（写报告、研究、多步推理、代码项目等）。<br>
       ⚠️ 调用 LLM 多次，成本较高。
     </div>
@@ -460,6 +460,11 @@
       <div><label style="margin:0;">最终整合输出</label><div class="form-hint" style="margin-top:2px;">把步骤结果整合（关闭则直接拼接）</div></div>
       <label class="switch"><input type="checkbox" id="plan_synthesize"><span class="switch-slider"></span></label>
     </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">老师最终验证</label><div class="form-hint" style="margin-top:2px;">执行完成后由独立老师基于任务、方案和结果验证，可自主调用工具</div></div>
+      <label class="switch"><input type="checkbox" id="plan_verify"><span class="switch-slider"></span></label>
+    </div>
     
     <div class="form-group">
       <label>步骤数上限</label>
@@ -476,6 +481,15 @@
         <span class="slider-val" id="planReviewRoundsVal">2</span>
       </div>
     </div>
+
+    <div class="form-group">
+      <label>最终验证最大轮数</label>
+      <div class="slider-row">
+        <input type="range" id="plan_verifyRounds" min="1" max="5" step="1" oninput="document.getElementById('planVerifyRoundsVal').textContent=this.value">
+        <span class="slider-val" id="planVerifyRoundsVal">2</span>
+      </div>
+      <div class="form-hint">每轮未通过后，需要你手动决定是否追加改进阶段；不会自动重跑原步骤。</div>
+    </div>
     
     <div class="form-group">
       <label>规划模型</label>
@@ -485,6 +499,11 @@
     <div class="form-group">
       <label>执行模型</label>
       <input type="text" id="plan_executorModel" placeholder="留空用主模型">
+    </div>
+
+    <div class="form-group">
+      <label>最终验证模型</label>
+      <input type="text" id="plan_verifierModel" placeholder="留空用主模型">
     </div>
     
     <div class="form-group">

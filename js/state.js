@@ -37,6 +37,9 @@ let state = {
     planReviewRounds: 2,
     planPlannerModel: '',
     planExecutorModel: '',
+    planVerify: true,
+    planVerifyRounds: 2,
+    planVerifierModel: '',
     planPlannerPrompt: PLAN_PRESETS.general.planner,
     planExecutorPrompt: PLAN_PRESETS.general.executor,
     // 📑 大纲模式（动态规划）

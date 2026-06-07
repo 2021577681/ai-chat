@@ -41,8 +41,14 @@ function renderPlanPanel(m, idx) {
     statusBadge = '<span class="plan-status-badge pending">⏸ 待审批</span>';
   } else if (p.status === 'executing') {
     statusBadge = '<span class="plan-status-badge running">🔄 执行中</span>';
+  } else if (p.status === 'verifying') {
+    statusBadge = '<span class="plan-status-badge running">🧑‍🏫 验证中</span>';
   } else if (p.status === 'completed') {
     statusBadge = '<span class="plan-status-badge done">✅ 已完成</span>';
+  } else if (p.status === 'verification_failed') {
+    statusBadge = '<span class="plan-status-badge error">⚠️ 验证未通过</span>';
+  } else if (p.status === 'verification_exhausted') {
+    statusBadge = '<span class="plan-status-badge error">⛔ 验证结束</span>';
   } else if (p.status === 'cancelled') {
     statusBadge = '<span class="plan-status-badge cancelled">❌ 已取消</span>';
   } else if (p.status === 'paused') {
@@ -53,12 +59,13 @@ function renderPlanPanel(m, idx) {
   
   let statsText = totalSteps + ' 步';
   if (p.planScore !== null && p.planScore !== undefined) statsText += ` · 评分 ${p.planScore}/10`;
-  if (p.status === 'executing' || p.status === 'paused' || p.status === 'error') statsText += ` · ${doneSteps}/${totalSteps}`;
+  if (p.verifyScore !== null && p.verifyScore !== undefined) statsText += ` · 验证 ${p.verifyScore}/10`;
+  if (p.status === 'executing' || p.status === 'verifying' || p.status === 'paused' || p.status === 'error' || p.status === 'verification_failed' || p.status === 'verification_exhausted') statsText += ` · ${doneSteps}/${totalSteps}`;
   
   let stepsHtml = '';
   if (p.steps?.length) {
     stepsHtml = `<ol class="plan-step-list">${(p.steps || []).map((s, si) => {
-      const canEdit = p.status === 'pending_approval' || p.status === 'paused' || p.status === 'error';
+      const canEdit = p.status === 'pending_approval' || p.status === 'paused' || p.status === 'error' || p.status === 'verification_failed';
       const canStepAction = !p.inProgress && (p.status === 'paused' || p.status === 'error');
       const editBtns = canEdit ? `
         <div class="plan-step-actions">
@@ -73,22 +80,8 @@ function renderPlanPanel(m, idx) {
       const criteriaHtml = (s.successCriteria && s.successCriteria.length)
         ? `<div class="plan-step-meta"><div class="plan-step-meta-title">成功标准</div><ul>${s.successCriteria.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`
         : '';
-      const verifyCommands = typeof planVerificationCommands === 'function' ? planVerificationCommands(s) : [];
-      const verificationHtml = verifyCommands.length || (s.verification && s.verification.notes)
-        ? `<div class="plan-step-meta"><div class="plan-step-meta-title">验证</div>
-            ${verifyCommands.length ? `<div class="plan-command-list">${verifyCommands.map(x => `<code>${escapeHtml(x)}</code>`).join('')}</div>` : ''}
-            ${s.verification && s.verification.notes ? `<div class="plan-step-note">${escapeHtml(s.verification.notes)}</div>` : ''}
-          </div>`
-        : '';
-      const verificationRunsHtml = s.verificationRuns && s.verificationRuns.length
-        ? `<div class="plan-verification-runs">${s.verificationRuns.map(r => `
-            <div class="plan-verification-run ${r.status || 'running'}">
-              <div class="plan-verification-head">
-                <span>${r.status === 'running' ? '<span class="plan-tool-spin"></span>' : (r.ok ? '✓' : '✗')}</span>
-                <code>${escapeHtml(r.command || '')}</code>
-              </div>
-              ${r.output && r.status !== 'running' ? `<pre>${escapeHtml(r.output.slice(0, 1000))}${r.output.length > 1000 ? '\n...' : ''}</pre>` : ''}
-            </div>`).join('')}</div>`
+      const improvementHtml = s.kind === 'improvement'
+        ? `<div class="plan-step-meta"><div class="plan-step-meta-title">改进来源</div><div class="plan-step-note">第 ${escapeHtml(String(s.sourceVerificationRound || '?'))} 轮最终验证未通过后追加</div></div>`
         : '';
       const errorHtml = s.error
         ? `<div class="plan-step-error"><strong>失败原因：</strong>${escapeHtml(s.error)}</div>`
@@ -110,9 +103,8 @@ function renderPlanPanel(m, idx) {
             </div>
             <div class="plan-step-desc">${escapeHtml(s.description)}</div>
             ${criteriaHtml}
-            ${verificationHtml}
+            ${improvementHtml}
             ${toolCallsHtml}
-            ${verificationRunsHtml}
             ${errorHtml}
             ${s.result ? `<div class="plan-step-result"><div class="plan-step-result-label">✓ 执行结果</div><div>${renderMarkdown(s.result)}</div></div>` : ''}
           </div>
@@ -132,7 +124,7 @@ function renderPlanPanel(m, idx) {
         <div class="plan-section-body">
           ${p.analysis ? `<div style="margin-bottom:10px;font-size:13px;color:var(--text-secondary);"><strong>分析：</strong>${escapeHtml(p.analysis)}</div>` : ''}
           ${plannerToolsHtml}
-          ${totalSteps && (p.status === 'executing' || p.status === 'completed' || p.status === 'paused' || p.status === 'error') ? `<div class="plan-progress-bar"><div class="plan-progress-fill" style="width:${progressPct}%;"></div></div>` : ''}
+          ${totalSteps && (p.status === 'executing' || p.status === 'verifying' || p.status === 'completed' || p.status === 'paused' || p.status === 'error' || p.status === 'verification_failed' || p.status === 'verification_exhausted') ? `<div class="plan-progress-bar"><div class="plan-progress-fill" style="width:${progressPct}%;"></div></div>` : ''}
           ${stepsHtml}
         </div>
       </div>`;
@@ -162,6 +154,40 @@ function renderPlanPanel(m, idx) {
         </div>
       </div>`;
   }
+
+  let finalVerificationHtml = '';
+  const finalTurns = (typeof normalizePlanFinalVerification === 'function')
+    ? normalizePlanFinalVerification(p)
+    : (p.finalVerificationTurns || []);
+  if (finalTurns && finalTurns.length) {
+    finalVerificationHtml = `
+      <div class="plan-section reviewing">
+        <div class="plan-section-header">🧑‍🏫 最终结果验证</div>
+        <div class="plan-section-body">
+          ${finalTurns.map(t => {
+            const sc = t.score ?? 0;
+            const scClass = sc >= 8 ? 'good' : sc >= 5 ? 'mid' : 'bad';
+            const toolsHtml = t.toolCalls && t.toolCalls.length
+              ? `<div class="plan-step-meta"><div class="plan-step-meta-title">验证老师工具调用</div>${renderPlanToolCalls(t.toolCalls)}</div>`
+              : '';
+            const improvement = t.improvement || {};
+            return `
+              <div style="padding:8px;background:var(--bg-input);border-radius:6px;margin:6px 0;font-size:13px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                  <strong>第 ${t.round} 轮</strong>
+                  <span class="ref-score ${scClass}">评分 ${sc}/10</span>
+                  ${t.passed ? '<span style="color:var(--success);font-size:12px;">✅ 通过</span>' : '<span style="color:var(--warning);font-size:12px;">⚠️ 未通过</span>'}
+                </div>
+                ${t.reason ? `<div style="font-size:12px;color:var(--text-secondary);"><strong>理由：</strong>${escapeHtml(t.reason)}</div>` : ''}
+                ${(t.issues || []).length ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;"><strong>问题：</strong>${(t.issues || []).map(escapeHtml).join('；')}</div>` : ''}
+                ${(t.suggestions || []).length ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;"><strong>建议：</strong>${(t.suggestions || []).map(escapeHtml).join('；')}</div>` : ''}
+                ${!t.passed && improvement.description ? `<div class="plan-step-meta"><div class="plan-step-meta-title">建议追加的改进阶段</div><div class="plan-step-note"><strong>${escapeHtml(improvement.title || '改进阶段')}</strong><br>${escapeHtml(improvement.description)}</div>${(improvement.successCriteria || []).length ? `<ul>${improvement.successCriteria.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}</div>` : ''}
+                ${toolsHtml}
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }
   
   let approvalHtml = '';
   if (p.status === 'pending_approval') {
@@ -183,6 +209,25 @@ function renderPlanPanel(m, idx) {
           <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 放弃</button>
         </div>
       </div>`;
+  } else if (p.status === 'verification_failed') {
+    approvalHtml = `
+      <div class="plan-approval">
+        <div class="plan-approval-hint">⚠️ 最终结果验证未通过。可以根据老师建议追加一个改进阶段；原步骤不会重新执行。</div>
+        <div class="plan-approval-btns">
+          <button class="plan-btn approve" onclick="continuePlanImprovement(${idx})">➕ 新增改进阶段并继续</button>
+          <button class="plan-btn regenerate" onclick="acceptPlanWithFailedVerification(${idx})">✓ 接受当前结果</button>
+          <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 放弃</button>
+        </div>
+      </div>`;
+  } else if (p.status === 'verification_exhausted') {
+    approvalHtml = `
+      <div class="plan-approval">
+        <div class="plan-approval-hint">⛔ 最终验证未通过，且已达到验证轮数上限。可以接受当前结果或放弃。</div>
+        <div class="plan-approval-btns">
+          <button class="plan-btn regenerate" onclick="acceptPlanWithFailedVerification(${idx})">✓ 接受当前结果</button>
+          <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 放弃</button>
+        </div>
+      </div>`;
   }
   
   const progressHtml = p.inProgress
@@ -198,6 +243,7 @@ function renderPlanPanel(m, idx) {
       <div class="plan-body">
         ${planningHtml}
         ${reviewHtml}
+        ${finalVerificationHtml}
         ${approvalHtml}
         ${progressHtml}
       </div>
@@ -219,12 +265,16 @@ function openPlanSettings() {
   document.getElementById('plan_enabled').checked = s.usePlan;
   document.getElementById('plan_review').checked = s.planReview;
   document.getElementById('plan_synthesize').checked = s.planSynthesize;
+  document.getElementById('plan_verify').checked = s.planVerify !== false;
   document.getElementById('plan_maxSteps').value = s.planMaxSteps;
   document.getElementById('planMaxStepsVal').textContent = s.planMaxSteps;
   document.getElementById('plan_reviewRounds').value = s.planReviewRounds;
   document.getElementById('planReviewRoundsVal').textContent = s.planReviewRounds;
+  document.getElementById('plan_verifyRounds').value = s.planVerifyRounds || 2;
+  document.getElementById('planVerifyRoundsVal').textContent = s.planVerifyRounds || 2;
   document.getElementById('plan_plannerModel').value = s.planPlannerModel;
   document.getElementById('plan_executorModel').value = s.planExecutorModel;
+  document.getElementById('plan_verifierModel').value = s.planVerifierModel || '';
   document.getElementById('plan_plannerPrompt').value = s.planPlannerPrompt;
   document.getElementById('plan_executorPrompt').value = s.planExecutorPrompt;
 }
@@ -246,10 +296,13 @@ function savePlanSettings() {
   s.usePlan = document.getElementById('plan_enabled').checked;
   s.planReview = document.getElementById('plan_review').checked;
   s.planSynthesize = document.getElementById('plan_synthesize').checked;
+  s.planVerify = document.getElementById('plan_verify').checked;
   s.planMaxSteps = parseInt(document.getElementById('plan_maxSteps').value);
   s.planReviewRounds = parseInt(document.getElementById('plan_reviewRounds').value);
+  s.planVerifyRounds = parseInt(document.getElementById('plan_verifyRounds').value);
   s.planPlannerModel = document.getElementById('plan_plannerModel').value.trim();
   s.planExecutorModel = document.getElementById('plan_executorModel').value.trim();
+  s.planVerifierModel = document.getElementById('plan_verifierModel').value.trim();
   s.planPlannerPrompt = document.getElementById('plan_plannerPrompt').value;
   s.planExecutorPrompt = document.getElementById('plan_executorPrompt').value;
   // 互斥：保存时若启用计划模式，关闭师生 / 大纲

@@ -32,6 +32,8 @@ function normalizePlanStep(raw, idx) {
     maxAttempts: Number.isFinite(Number(s.maxAttempts)) ? Number(s.maxAttempts) : 2,
     result: s.result || '',
     error: s.error || '',
+    kind: s.kind || s.type || 'normal',
+    sourceVerificationRound: s.sourceVerificationRound || null,
     toolCalls: Array.isArray(s.toolCalls) ? s.toolCalls : [],
     verificationRuns: Array.isArray(s.verificationRuns) ? s.verificationRuns : [],
     verificationResult: s.verificationResult || null,
@@ -79,6 +81,7 @@ function normalizePlanObject(plan, opts = {}) {
     }
   }
   plan._executionResults = rebuildPlanExecutionResults(plan);
+  normalizePlanFinalVerification(plan);
   return plan;
 }
 
@@ -115,18 +118,57 @@ function planStepLabel(status) {
   }[status] || '待执行';
 }
 
-function planVerificationCommands(step) {
-  return (step && step.verification && Array.isArray(step.verification.commands))
-    ? step.verification.commands.map(c => String(c || '').trim()).filter(Boolean)
-    : [];
+function normalizePlanFinalVerificationTurn(raw, idx) {
+  const v = raw || {};
+  const score = Number.isFinite(Number(v.score)) ? Number(v.score) : 0;
+  return {
+    round: Number.isFinite(Number(v.round)) ? Number(v.round) : idx + 1,
+    passed: !!v.passed,
+    score,
+    reason: v.reason || '',
+    issues: Array.isArray(v.issues) ? v.issues.map(x => String(x || '').trim()).filter(Boolean) : [],
+    suggestions: Array.isArray(v.suggestions) ? v.suggestions.map(x => String(x || '').trim()).filter(Boolean) : [],
+    improvement: v.improvement && typeof v.improvement === 'object' ? {
+      title: String(v.improvement.title || ''),
+      description: String(v.improvement.description || ''),
+      successCriteria: Array.isArray(v.improvement.successCriteria)
+        ? v.improvement.successCriteria.map(x => String(x || '').trim()).filter(Boolean)
+        : []
+    } : { title: '', description: '', successCriteria: [] },
+    toolCalls: Array.isArray(v.toolCalls) ? v.toolCalls : [],
+    raw: v.raw || '',
+    ts: v.ts || Date.now()
+  };
 }
 
-function isPlanCommandOutputOk(output) {
-  const txt = String(output || '');
-  const m = txt.match(/退出码：\s*(-?\d+)/);
-  if (m) return Number(m[1]) === 0;
-  if (/^\s*❌/m.test(txt)) return false;
-  return true;
+function normalizePlanFinalVerification(plan) {
+  if (!plan) return [];
+  const turns = Array.isArray(plan.finalVerificationTurns)
+    ? plan.finalVerificationTurns
+    : (Array.isArray(plan.resultVerificationTurns) ? plan.resultVerificationTurns : []);
+  plan.finalVerificationTurns = turns.map((t, i) => {
+    const normalized = normalizePlanFinalVerificationTurn(t, i);
+    if (t && typeof t === 'object') {
+      Object.assign(t, normalized);
+      return t;
+    }
+    return normalized;
+  });
+  return plan.finalVerificationTurns;
+}
+
+function latestPlanFinalVerification(plan) {
+  const turns = normalizePlanFinalVerification(plan);
+  return turns.length ? turns[turns.length - 1] : null;
+}
+
+function planStepsForPrompt(plan) {
+  return (plan.steps || []).map(s => ({
+    id: s.id,
+    title: s.title,
+    description: s.description,
+    successCriteria: s.successCriteria || []
+  }));
 }
 
 async function callAPIWithPlan() {
@@ -153,7 +195,10 @@ async function callAPIWithPlan() {
       steps: [],
       reviewTurns: [],
       plannerToolCalls: [],
+      finalVerificationTurns: [],
+      pendingImprovement: null,
       planScore: null,
+      verifyScore: null,
       progressText: '📋 计划模式规划中...',
       expanded: true,
       inProgress: true,
@@ -314,30 +359,7 @@ async function approveAndExecutePlan(msgIdx) {
         );
 
         step.result = result;
-        plan.progressText = `🧪 验证第 ${i + 1}/${plan.steps.length} 步：${step.title}`;
-        updatePlanPanel(c.messages.indexOf(aiMsg));
-        saveData();
-
-        const vr = await verifyPlanStep(step, () => updatePlanPanel(c.messages.indexOf(aiMsg)));
-        step.verificationResult = vr;
         step.endedAt = Date.now();
-
-        if (!vr.ok) {
-          step.status = 'failed';
-          step.error = vr.summary || '验证失败';
-          currentRunningIdx = -1;
-          plan.status = 'error';
-          plan.stage = 'executing';
-          plan.inProgress = false;
-          aiMsg.content = `❌ 计划模式在第 ${i + 1} 步失败：${step.title}\n\n${step.error}\n\n已完成的步骤会保留，可在该步骤点击「重试」，或点击「继续执行」重新尝试。`;
-          delete plan.progressText;
-          updatePlanPanel(c.messages.indexOf(aiMsg));
-          renderIfVisible();
-          saveData();
-          toast('❌ 当前步骤验证失败，可重试', 4000);
-          return;
-        }
-
         step.status = 'done';
         currentRunningIdx = -1;
         stepResults = rebuildPlanExecutionResults(plan);
@@ -384,6 +406,46 @@ async function approveAndExecutePlan(msgIdx) {
     }
     
     aiMsg.content = finalAnswer;
+    const shouldVerify = s.planVerify !== false;
+    const maxVerifyRounds = Math.max(1, parseInt(s.planVerifyRounds) || 1);
+    const verifyTurns = normalizePlanFinalVerification(plan);
+    if (shouldVerify && verifyTurns.length < maxVerifyRounds) {
+      const verifyRound = verifyTurns.length + 1;
+      const verifierModel = (s.planVerifierModel || '').trim() || s.currentModel;
+      plan.stage = 'verifying';
+      plan.status = 'verifying';
+      plan.progressText = `🧑‍🏫 老师验证最终结果（第 ${verifyRound}/${maxVerifyRounds} 轮）...`;
+      updatePlanPanel(c.messages.indexOf(aiMsg));
+      renderIfVisible();
+      saveData();
+
+      const verification = await verifyFinalPlanResult(
+        userQuestion,
+        plan,
+        finalAnswer,
+        verifierModel,
+        verifyRound,
+        () => updatePlanPanel(c.messages.indexOf(aiMsg))
+      );
+      plan.finalVerificationTurns.push(verification);
+      plan.verifyScore = verification.score;
+      plan.pendingImprovement = verification.passed ? null : verification.improvement;
+
+      if (!verification.passed) {
+        const exhausted = plan.finalVerificationTurns.length >= maxVerifyRounds;
+        plan.stage = 'awaiting_improvement';
+        plan.status = exhausted ? 'verification_exhausted' : 'verification_failed';
+        plan.inProgress = false;
+        plan.expanded = true;
+        if (!aiMsg._endTime) aiMsg._endTime = Date.now();
+        delete plan.progressText;
+        renderIfVisible();
+        saveData();
+        toast(exhausted ? '⚠️ 验证未通过，已达到验证轮数上限' : '⚠️ 验证未通过，可选择新增改进阶段', 5000);
+        return;
+      }
+    }
+
     plan.stage = 'done';
     plan.status = 'completed';
     plan.inProgress = false;
@@ -392,7 +454,7 @@ async function approveAndExecutePlan(msgIdx) {
     delete plan.progressText;
     renderIfVisible();
     saveData();
-    toast('✅ 计划执行完成', 3000);
+    toast('✅ 计划执行完成并通过验证', 3000);
     
   } catch (e) {
     if (currentRunningIdx >= 0 && plan.steps[currentRunningIdx]) {
@@ -468,14 +530,10 @@ function editPlanStep(msgIdx, stepIdx) {
   if (newDesc === null) return;
   const newCriteria = prompt('成功标准（每行一条，可留空）：', (step.successCriteria || []).join('\n'));
   if (newCriteria === null) return;
-  const newCommands = prompt('验证命令（每行一条，可留空）：', planVerificationCommands(step).join('\n'));
-  if (newCommands === null) return;
   
   step.title = newTitle.trim() || step.title;
   step.description = newDesc.trim() || step.description;
   step.successCriteria = newCriteria.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-  step.verification = step.verification || {};
-  step.verification.commands = newCommands.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   saveData();
   renderMessages();
   toast('✓ 步骤已修改');
@@ -549,44 +607,73 @@ function markPlanStepDone(msgIdx, stepIdx) {
   toast('已标记完成');
 }
 
-async function verifyPlanStep(step, onUpdate) {
-  const commands = planVerificationCommands(step);
-  step.verificationRuns = [];
-  if (!commands.length) {
-    return { ok: true, skipped: true, summary: '未配置验证命令。' };
+async function continuePlanImprovement(msgIdx) {
+  const c = currentChat();
+  if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
+  if (state.isGenerating) { toast('请等当前任务完成'); return; }
+  const plan = c.messages[msgIdx].plan;
+  normalizePlanObject(plan);
+  const latest = latestPlanFinalVerification(plan);
+  if (!latest || latest.passed) {
+    toast('当前没有需要执行的改进建议');
+    return;
   }
-  if (!state.tools.some(t => t.name === 'execute_action')) {
-    return {
-      ok: false,
-      skipped: false,
-      summary: '该步骤配置了验证命令，但当前未启用 execute_action 工具，无法执行验证。'
-    };
+  const maxVerifyRounds = Math.max(1, parseInt(state.settings.planVerifyRounds) || 1);
+  if ((plan.finalVerificationTurns || []).length >= maxVerifyRounds) {
+    toast('已达到最终验证轮数上限，不能继续追加验证改进');
+    return;
   }
+  const imp = latest.improvement || {};
+  const title = (imp.title || `第 ${latest.round} 轮验证后的改进阶段`).trim();
+  const description = (imp.description || [
+    latest.reason,
+    (latest.issues || []).length ? `未通过原因：${latest.issues.join('；')}` : '',
+    (latest.suggestions || []).length ? `改进建议：${latest.suggestions.join('；')}` : ''
+  ].filter(Boolean).join('\n')).trim() || '根据最终验证意见补齐未完成内容。';
+  const step = normalizePlanStep({
+    id: `improve_${latest.round}_${Date.now().toString(36)}`,
+    title: title.startsWith('改进') ? title : `改进阶段：${title}`,
+    description,
+    successCriteria: (imp.successCriteria && imp.successCriteria.length)
+      ? imp.successCriteria
+      : ['修复最终验证指出的未完成或不可靠之处', '更新最终结果，使其能通过下一轮验证'],
+    status: 'pending',
+    kind: 'improvement',
+    sourceVerificationRound: latest.round
+  }, plan.steps.length);
+  plan.steps.push(step);
+  plan.pendingImprovement = null;
+  plan.status = 'paused';
+  plan.stage = 'executing';
+  plan.expanded = true;
+  if (c.messages[msgIdx]._endTime) delete c.messages[msgIdx]._endTime;
+  saveData();
+  renderMessages();
+  toast('已新增改进阶段，开始继续执行', 2500);
+  await approveAndExecutePlan(msgIdx);
+}
 
-  let allOk = true;
-  for (const command of commands) {
-    const run = { command, status: 'running', output: '', ok: null, ts: Date.now() };
-    step.verificationRuns.push(run);
-    if (onUpdate) onUpdate();
-    saveData();
-
-    const result = await executeTool('execute_action', { command, cwd: '', new_window: false });
-    const output = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
-    run.output = output;
-    run.ok = !!result.ok && isPlanCommandOutputOk(output);
-    run.status = run.ok ? 'success' : 'error';
-    run.endedAt = Date.now();
-    if (!run.ok) allOk = false;
-    if (onUpdate) onUpdate();
-    saveData();
-  }
-
-  if (allOk) {
-    return { ok: true, skipped: false, summary: `验证通过：${commands.length} 条命令均成功。` };
-  }
-  const failed = step.verificationRuns.filter(r => !r.ok);
-  const detail = failed.map(r => `命令：${r.command}\n${(r.output || '').slice(0, 1200)}`).join('\n\n---\n\n');
-  return { ok: false, skipped: false, summary: `验证失败：${failed.length}/${commands.length} 条命令失败。\n\n${detail}` };
+function acceptPlanWithFailedVerification(msgIdx) {
+  const c = currentChat();
+  if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
+  const aiMsg = c.messages[msgIdx];
+  const plan = aiMsg.plan;
+  normalizePlanObject(plan);
+  const latest = latestPlanFinalVerification(plan);
+  const warning = latest && !latest.passed
+    ? `最终验证未通过：${latest.reason || '老师认为结果仍需改进'}\n\n仍然接受当前结果并结束任务？`
+    : '接受当前结果并结束任务？';
+  if (!confirm(warning)) return;
+  plan.status = 'completed';
+  plan.stage = 'done';
+  plan.inProgress = false;
+  plan.expanded = false;
+  plan.pendingImprovement = null;
+  if (!aiMsg._endTime) aiMsg._endTime = Date.now();
+  delete plan.progressText;
+  saveData();
+  renderMessages();
+  toast('已接受当前结果');
 }
 
 // ============ 规划辅助 ============
@@ -646,16 +733,12 @@ async function generatePlan(history, model, prompt, maxSteps, planState, onUpdat
       "id": "t1",
       "title": "步骤标题",
       "description": "具体要做什么",
-      "successCriteria": ["完成后应满足的可检查标准"],
-      "verification": {
-        "commands": ["可选：用于验证本步骤的命令，例如 npm test"],
-        "notes": "可选：人工验证说明"
-      }
+      "successCriteria": ["完成后应满足的可检查标准"]
     }
   ]
 }
 
-如果任务不是代码或不需要命令验证，verification.commands 输出空数组。`;
+不要输出 verification、commands、测试命令或验证手段；验证由最终老师在执行完成后独立完成。`;
   const toolHint = (state.settings.useTools && state.tools.length)
     ? '当前规划阶段可以按需调用已启用工具。若需要先了解项目，请先调用目录、文件或搜索类工具，再输出最终 JSON 计划。'
     : '当前未启用工具调用。请仅基于用户问题输出计划。';
@@ -671,7 +754,7 @@ async function generatePlan(history, model, prompt, maxSteps, planState, onUpdat
 }
 
 async function revisePlanWithFeedback(userQuestion, plan, review, model, plannerPrompt, maxSteps, planState, onUpdate) {
-  const planJson = JSON.stringify({ analysis: plan.analysis, steps: plan.steps }, null, 2);
+  const planJson = JSON.stringify({ analysis: plan.analysis, steps: planStepsForPrompt(plan) }, null, 2);
   const reviewJson = JSON.stringify(review || {}, null, 2);
   const systemPrompt = plannerPrompt + `\n\n你现在是规划者，需要根据评审意见自主修改计划。
 严格输出 JSON（不要代码块、不要额外文字）：
@@ -682,13 +765,12 @@ async function revisePlanWithFeedback(userQuestion, plan, review, model, planner
       "id": "t1",
       "title": "步骤标题",
       "description": "具体要做什么",
-      "successCriteria": ["完成后应满足的可检查标准"],
-      "verification": { "commands": [], "notes": "验证说明" }
+      "successCriteria": ["完成后应满足的可检查标准"]
     }
   ]
 }
 
-要求：保留合理步骤，修复评审指出的问题；不要只复述意见。步骤数量不超过 ${maxSteps} 个。`;
+要求：保留合理步骤，修复评审指出的问题；不要只复述意见。步骤数量不超过 ${maxSteps} 个。不要输出验证命令或验证手段。`;
   const toolHint = (state.settings.useTools && state.tools.length)
     ? '如评审意见需要更多项目信息，你可以先调用工具查看目录、文件或搜索内容，再输出最终 JSON。'
     : '当前未启用工具调用，请只基于已有计划和评审意见修改。';
@@ -704,7 +786,7 @@ async function revisePlanWithFeedback(userQuestion, plan, review, model, planner
 }
 
 async function reviewPlan(userQuestion, plan, model) {
-  const planJson = JSON.stringify({ analysis: plan.analysis, steps: plan.steps }, null, 2);
+  const planJson = JSON.stringify({ analysis: plan.analysis, steps: planStepsForPrompt(plan) }, null, 2);
   const msgs = [{
     role: 'user',
     content: `【原始任务】\n${userQuestion}\n\n【待评审计划】\n${planJson}\n\n请按 JSON 格式输出评审结果。`
@@ -730,6 +812,102 @@ async function reviewPlan(userQuestion, plan, model) {
   }
 }
 
+function buildPlanVerifierSnapshot(plan, finalAnswer) {
+  let txt = `【执行方案分析】\n${plan.analysis || '（无）'}\n\n【步骤与执行结果】\n`;
+  (plan.steps || []).forEach((s, i) => {
+    const criteria = (s.successCriteria || []).length
+      ? s.successCriteria.map(x => `- ${x}`).join('\n')
+      : '（无）';
+    txt += `\n## ${i + 1}. ${s.title}\n`;
+    txt += `类型：${s.kind === 'improvement' ? '改进阶段' : '原计划步骤'}\n`;
+    txt += `状态：${planStepLabel(s.status)}\n`;
+    txt += `做法：${s.description || '（无）'}\n`;
+    txt += `完成标准：\n${criteria}\n`;
+    txt += `执行结果：\n${s.result || s.error || '（无结果）'}\n`;
+  });
+  txt += `\n【最终整合回答】\n${finalAnswer || '（无）'}\n`;
+  return txt;
+}
+
+function parseFinalVerificationJson(raw, round, toolCalls) {
+  const fallback = {
+    round,
+    passed: false,
+    score: 0,
+    reason: '验证老师未返回可解析的 JSON，无法确认任务已经完成。',
+    issues: ['验证结果格式不可解析'],
+    suggestions: ['请追加改进阶段，让执行者补充可验证的结果说明。'],
+    improvement: {
+      title: '补充可验证结果',
+      description: '根据原始任务和已有执行结果，补充缺失内容并给出更清晰、可核验的最终结果。',
+      successCriteria: ['最终结果能直接对应原始任务要求', '关键结论、文件或操作结果有明确说明']
+    },
+    toolCalls: toolCalls || [],
+    raw: String(raw || ''),
+    ts: Date.now()
+  };
+  try {
+    let txt = String(raw || '').trim();
+    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '');
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('missing json');
+    const j = JSON.parse(m[0]);
+    const score = typeof j.score === 'number' ? j.score : 0;
+    const explicitPassed = typeof j.passed === 'boolean'
+      ? j.passed
+      : (typeof j.satisfied === 'boolean' ? j.satisfied : null);
+    const passed = explicitPassed !== null ? explicitPassed : score >= 8;
+    const improvementRaw = j.improvement && typeof j.improvement === 'object' ? j.improvement : {};
+    const suggestions = Array.isArray(j.suggestions) ? j.suggestions : [];
+    const issues = Array.isArray(j.issues) ? j.issues : [];
+    const improvementString = typeof j.improvement === 'string' ? j.improvement : '';
+    const howToImprove = typeof j.how_to_improve === 'string' ? j.how_to_improve : '';
+    const improvementText = improvementRaw.description
+      || improvementString
+      || howToImprove
+      || suggestions.join('；')
+      || issues.join('；')
+      || '根据验证意见补齐未完成内容。';
+    return normalizePlanFinalVerificationTurn({
+      round,
+      passed,
+      score,
+      reason: j.reason || (passed ? '验证通过。' : '验证未通过。'),
+      issues,
+      suggestions,
+      improvement: {
+        title: improvementRaw.title || (passed ? '' : '根据验证意见改进结果'),
+        description: passed ? '' : improvementText,
+        successCriteria: Array.isArray(improvementRaw.successCriteria)
+          ? improvementRaw.successCriteria
+          : (Array.isArray(improvementRaw.success_criteria) ? improvementRaw.success_criteria : [])
+      },
+      toolCalls: toolCalls || [],
+      raw: String(raw || ''),
+      ts: Date.now()
+    }, round - 1);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+async function verifyFinalPlanResult(userQuestion, plan, finalAnswer, model, round, onUpdate) {
+  const traceStep = { toolCalls: [] };
+  const snapshot = buildPlanVerifierSnapshot(plan, finalAnswer);
+  const ctx = `【原始任务】\n${userQuestion}\n\n${snapshot}\n\n` +
+    `你现在需要验证最终结果是否已经完成原始任务。你看不到执行者的工具调用过程，只能基于上面的执行方案和结果判断；如需进一步核验，可以调用可用工具。\n` +
+    `请在必要的工具调用结束后，严格输出最终验证 JSON。`;
+  const raw = await runMiniAgent(
+    ctx,
+    model,
+    PLAN_RESULT_VERIFIER_PROMPT,
+    traceStep,
+    onUpdate,
+    `计划模式 · 最终验证第 ${round} 轮`
+  );
+  return parseFinalVerificationJson(raw, round, traceStep.toolCalls);
+}
+
 // ⭐ 执行单步：带工具循环（mini Agent）
 async function executeStepWithTools(userQuestion, plan, stepIdx, prevResults, model, executorPrompt) {
   const step = plan.steps[stepIdx];
@@ -753,17 +931,12 @@ async function executeStepWithTools(userQuestion, plan, stepIdx, prevResults, mo
   const criteria = (step.successCriteria || []).length
     ? step.successCriteria.map(x => `- ${x}`).join('\n')
     : '（未配置，按步骤描述判断）';
-  const commands = planVerificationCommands(step);
-  const verificationText = commands.length
-    ? commands.map(x => `- ${x}`).join('\n')
-    : (step.verification?.notes || '（未配置命令验证）');
   const retryHint = step.error
     ? `\n【上次失败信息】\n${step.error}\n\n`
     : '';
 
   ctx += `\n【当前需要执行的步骤】\n第 ${stepIdx + 1} 步：${step.title}\n${step.description}\n\n` +
          `【成功标准】\n${criteria}\n\n` +
-         `【后续验证】\n${verificationText}\n\n` +
          retryHint +
          `请使用可用的工具真正完成这一步骤。如果需要调用工具，请直接调用；不需要工具则直接回答。\n` +
          `完成后简洁汇报本步骤的结果、满足了哪些成功标准，以及仍需注意的问题。`;
@@ -1005,7 +1178,6 @@ async function synthesizeResults(userQuestion, plan, stepResults, model) {
   let summary = `【原始任务】\n${userQuestion}\n\n【执行计划】\n${plan.analysis}\n\n【各步骤结果】\n`;
   (plan.steps || []).forEach((s, i) => {
     summary += `\n## 步骤 ${i + 1}：${s.title}\n状态：${planStepLabel(s.status)}\n${s.result || s.error || ''}\n`;
-    if (s.verificationResult) summary += `验证：${s.verificationResult.summary || ''}\n`;
   });
   summary += `\n请基于上面所有结果，整合成一个连贯、完整、流畅的最终答案。要求：1.不要简单堆砌 2.保留所有重要信息 3.结构清晰用 Markdown 4.直接输出最终答案。`;
   return await callOnceWithRole(

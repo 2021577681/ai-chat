@@ -462,7 +462,7 @@ function tickMsgTimers() {
     //   且不在"等待用户介入"状态（如 plan 待审批、outline 暂停）→ 强制封冻
     if (!m._endTime && m.role === 'assistant' && idx === total - 1
         && typeof state !== 'undefined' && !state.isGenerating) {
-      const planWaiting    = m.plan    && ['pending_approval', 'paused', 'error'].includes(m.plan.status);
+      const planWaiting    = m.plan    && ['pending_approval', 'paused', 'error', 'verifying', 'verification_failed', 'verification_exhausted'].includes(m.plan.status);
       const outlinePending = m.outline && ['paused', 'error'].includes(m.outline.status);
       if (!planWaiting && !outlinePending) {
         m._endTime = Date.now();
@@ -650,7 +650,10 @@ async function onSend() {
         m.plan.status === 'pending_approval' || 
         m.plan.status === 'paused' || 
         m.plan.status === 'error' ||
-        m.plan.status === 'executing'
+        m.plan.status === 'executing' ||
+        m.plan.status === 'verifying' ||
+        m.plan.status === 'verification_failed' ||
+        m.plan.status === 'verification_exhausted'
       )
     );
     
