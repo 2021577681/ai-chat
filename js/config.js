@@ -60,23 +60,23 @@ const REFLECTION_PRESETS = {
   },
   code: {
     student: '你是经验丰富的程序员。请编写正确、高效、可读的代码。',
-    teacher: '你是资深代码审查专家。审视：1.正确性 2.性能 3.可读性 4.健壮性 5.最佳实践。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+    teacher: '你是资深代码审查专家。审视：1.正确性 2.性能 3.可读性 4.健壮性 5.最佳实践。严格输出 JSON（不要其他内容，不要代码块）：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
   },
   writing: {
     student: '你是优秀的作家。请创作有深度、有感染力的文字。',
-    teacher: '你是严苛的编辑。关注：1.逻辑 2.结构 3.文笔 4.表达 5.感染力。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+    teacher: '你是严苛的编辑。关注：1.逻辑 2.结构 3.文笔 4.表达 5.感染力。严格输出 JSON（不要其他内容，不要代码块）：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
   },
   math: {
     student: '你是严谨的解题者。请详细列出每步推导，使用 $...$ 数学公式。',
-    teacher: '你是严格的数学老师。逐步检查推理、公式、计算。JSON输出：{"score":0-10,"issues":["第几步出错"],"suggestions":["如何修正"],"satisfied":true/false}'
+    teacher: '你是严格的数学老师。逐步检查推理、公式、计算。严格输出 JSON（不要其他内容，不要代码块）：{"score":0-10,"issues":["第几步出错"],"suggestions":["如何修正"],"satisfied":true/false}'
   },
   analysis: {
     student: '你是深刻的分析者。请从多角度深入分析，挖掘本质。',
-    teacher: '你是思想评审者。关注：1.视角 2.深度 3.论证 4.平衡 5.洞察。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+    teacher: '你是思想评审者。关注：1.视角 2.深度 3.论证 4.平衡 5.洞察。严格输出 JSON（不要其他内容，不要代码块）：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
   },
   translation: {
     student: '你是资深翻译。追求信、达、雅。',
-    teacher: '你是翻译评审。关注：1.信 2.达 3.雅 4.专业术语。JSON输出：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
+    teacher: '你是翻译评审。关注：1.信 2.达 3.雅 4.专业术语。严格输出 JSON（不要其他内容，不要代码块）：{"score":0-10,"issues":[],"suggestions":[],"satisfied":true/false}'
   }
 };
 
@@ -86,28 +86,28 @@ const PLAN_PRESETS = {
     executor: '你正在执行计划模式中的某一步。请聚焦当前步骤的目标和成功标准，必要时使用工具真实推进。完成后简洁说明本步骤结果、产物和仍需注意的风险。'
   },
   research: {
-    planner: '你是研究分析专家。把问题拆为多视角分析步骤。\nJSON：{"analysis":"...","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：背景定义→核心观点→多视角对比→争议→结论。只给做法和完成标准。',
+    planner: '你是研究分析专家。把问题拆为多视角分析步骤。\n严格输出 JSON（不要其他文字，不要代码块）：{"analysis":"...","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：背景定义→核心观点→多视角对比→争议→结论。只给做法和完成标准。',
     executor: '你是研究分析师。请就当前步骤给出有依据、有深度的分析。'
   },
   writing: {
-    planner: '你是写作规划师。把写作任务拆为章节大纲。\nJSON：{"analysis":"文章定位","steps":[{"id":"t1","title":"章节","description":"内容","successCriteria":["..."]}]}\n建议：引入→主体→结尾。只给做法和完成标准。',
+    planner: '你是写作规划师。把写作任务拆为章节大纲。\n严格输出 JSON（不要其他文字，不要代码块）：{"analysis":"文章定位","steps":[{"id":"t1","title":"章节","description":"内容","successCriteria":["..."]}]}\n建议：引入→主体→结尾。只给做法和完成标准。',
     executor: '你是优秀作家。按当前章节写出有感染力的文字，注意连贯。'
   },
   code: {
-    planner: '你是软件架构师。把代码任务拆为开发步骤。\nJSON：{"analysis":"项目概述","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：需求分析→设计→实现→边界处理→测试。只给做法和完成标准，不要给测试命令或验证手段。',
+    planner: '你是软件架构师。把代码任务拆为开发步骤。\n严格输出 JSON（不要其他文字，不要代码块）：{"analysis":"项目概述","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：需求分析→设计→实现→边界处理→测试。只给做法和完成标准，不要给测试命令或验证手段。',
     executor: '你是高级程序员。执行当前步骤时优先读代码和使用工具真实修改项目；完成后说明改动、验证结果和风险。'
   },
   problem: {
-    planner: '你是解题专家。把复杂问题拆为推理步骤。\nJSON：{"analysis":"问题理解","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：理解→已知条件→推理→验证→结论。只给做法和完成标准。',
+    planner: '你是解题专家。把复杂问题拆为推理步骤。\n严格输出 JSON（不要其他文字，不要代码块）：{"analysis":"问题理解","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：理解→已知条件→推理→验证→结论。只给做法和完成标准。',
     executor: '你是严谨解题者。就当前步骤严密推理，使用 $...$ 公式。'
   },
   teaching: {
-    planner: '你是教学设计专家。拆为循序渐进的讲解步骤。\nJSON：{"analysis":"学习目标","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：例子引入→概念→原理→应用→误区。只给做法和完成标准。',
+    planner: '你是教学设计专家。拆为循序渐进的讲解步骤。\n严格输出 JSON（不要其他文字，不要代码块）：{"analysis":"学习目标","steps":[{"id":"t1","title":"...","description":"...","successCriteria":["..."]}]}\n建议：例子引入→概念→原理→应用→误区。只给做法和完成标准。',
     executor: '你是优秀老师。就当前讲解步骤深入浅出说明，多用例子。'
   }
 };
 
-const PLAN_REVIEWER_PROMPT = '你是计划评审专家。审视执行计划是否合理：\n1.步骤是否完整？2.顺序是否合理？3.粒度是否合适？4.有无缺失或多余？5.完成标准是否清晰、可判断？\n\nJSON输出（不要其他内容）：{"score":0-10,"satisfied":true/false,"issues":["阻塞性问题"],"suggestions":["非阻塞改进建议"],"revised_steps":null}\n\n评分标准：8 分及以上表示计划已经可执行，即使仍有可改进建议；低于 8 分才表示需要规划者重写。issues 只写会明显影响任务完成的阻塞性问题，普通优化点请写入 suggestions。重点：你负责指出问题和修改建议，规划者会根据你的意见自主重写计划。不要要求规划者提供验证命令或验证手段。';
+const PLAN_REVIEWER_PROMPT = '你是计划评审专家。审视执行计划是否合理：\n1.步骤是否完整？2.顺序是否合理？3.粒度是否合适？4.有无缺失或多余？5.完成标准是否清晰、可判断？\n\nJSON输出（不要其他内容，不要代码块）：{"score":0-10,"satisfied":true/false,"issues":["阻塞性问题"],"suggestions":["非阻塞改进建议"],"revised_steps":null}\n\n评分标准：8 分及以上表示计划已经可执行，即使仍有可改进建议；低于 8 分才表示需要规划者重写。issues 只写会明显影响任务完成的阻塞性问题，普通优化点请写入 suggestions。重点：你负责指出问题和修改建议，规划者会根据你的意见自主重写计划。不要要求规划者提供验证命令或验证手段。';
 
 const PLAN_RESULT_VERIFIER_PROMPT = '你是计划模式的最终结果验证老师。你只能看到原始任务、执行方案和最终执行结果，看不到执行者的工具调用过程或中间推理。请基于这些材料自主判断任务是否完成；如需要核验事实、文件、命令或环境状态，可以调用可用工具进行验证。\n\n最后必须严格输出 JSON（不要代码块，不要额外文字）：{"passed":true/false,"score":0-10,"reason":"通过或不通过的核心理由","issues":["未完成或不可靠之处"],"suggestions":["怎么改进"],"improvement":{"title":"改进阶段标题","description":"如果未通过，给执行者的具体改进任务；如果通过可为空","successCriteria":["改进完成标准"]}}\n\n评分标准：8 分及以上通常表示可以通过。若验证不通过，请给出具体、不重复原步骤的改进建议，便于用户决定是否追加一个改进阶段继续执行。';
 
@@ -136,7 +136,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'execute_action',
-    description: '在用户的本地文件夹中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。每次执行前会向用户征求确认。如果用户明确要求在新终端窗口中运行（如想看到实时输出、命令耗时很长不想阻塞），请设置 new_window: true。',
+    description: '在用户的本地工作区中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。命令只能在工作区沙箱内运行；cwd 可指定执行目录。单独执行 cd 会切换当前浏览器会话的后续工具目录，其他标签/任务不受影响；更推荐直接传 cwd 保持目录明确。每次执行前会向用户征求确认。如果用户明确要求在新终端窗口中运行（如想看到实时输出、命令耗时很长不想阻塞），请设置 new_window: true。',
     parameters: {
       type: 'object',
       properties: {
@@ -150,7 +150,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'read_note',
-    description: '加载并查看本地文件夹中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_file 工具。可指定行号范围。文档超过 1MB 需指定行号范围。',
+    description: '加载并查看本地文件夹中的笔记文档内容（支持 .py .md .txt .json .js 等文本格式）。⚠️ 图片、PDF 等二进制请用 attach_file 工具。可指定行号范围；文档超过 1MB 必须指定 start_line/end_line 分段读取。',
     parameters: {
       type: 'object',
       properties: {
@@ -177,7 +177,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'append_note',
-    description: '在已存在的笔记/文档末尾追加内容，不覆盖原有内容。适合写日志、累加数据、续写笔记等场景。',
+    description: '在笔记/文档末尾追加内容，不覆盖原有内容；文件不存在时会创建。适合写日志、累加数据、续写笔记等场景。',
     parameters: {
       type: 'object',
       properties: {
@@ -204,7 +204,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'list_notes',
-    description: '浏览本地文件夹下的所有文档和子目录。不提供 path 则浏览当前目录。',
+    description: '列出本地文件夹下一级文档和子目录。不提供 path 则浏览当前目录；需要看子目录时再传对应 path。',
     parameters: {
       type: 'object',
       properties: {
@@ -266,7 +266,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'attach_file',
-    description: '把本地文件夹里的多媒体文档（图片、PDF 等无法用 read_note 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在用户的附件区。但当前这一轮你还看不到内容，需要请用户再问一次（如"现在描述这张图"），才能真正查看。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 read_note 即可。',
+    description: '把本地文件夹里的多媒体文档（图片、PDF 等无法用 read_note 直接查看的二进制文档）加入对话。AI 在下一轮回复中可以查看图片内容。\n\n使用场景：\n- 用户让你"查看"图片、"分析"图表（.jpg .png .gif 等）\n- 用户让你"阅读" PDF 文档（仅 Claude 模型支持 PDF）\n- 任何需要多模态理解的二进制文档\n\n注意：调用此功能后，文档会出现在附件区；默认前端会自动触发一次隐藏后续消息，让你在下一轮看到附件内容。在大纲模式中，附件会由下一轮大纲循环消化。不要要求用户再发一句，除非工具返回明确要求。\n\n不要用于纯文本文档（.py .txt .md 等），那些用 read_note 即可。',
     parameters: {
       type: 'object',
       properties: {
@@ -309,7 +309,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'web_search',
-    description: '查询在线参考资料：根据关键词在公开资料库中检索，返回相关条目的标题、链接和摘要列表。\n\n使用场景：\n- 用户询问的内容超出已有知识范围或需要最新信息\n- 需要查找具体资料、文档、教程的来源链接\n- 作为 fetch_url 的前置：先找到链接，再加载详情\n\n建议工作流：先 web_search 拿到链接 → 再 fetch_url 加载详细内容。',
+    description: '查询在线参考资料：根据关键词通过在线搜索引擎检索公开网页，返回相关条目的标题、链接和摘要列表。\n\n使用场景：\n- 用户询问的内容超出已有知识范围或需要最新信息\n- 需要查找具体资料、文档、教程的来源链接\n- 作为 fetch_url 的前置：先找到链接，再加载详情\n\n建议工作流：先 web_search 拿到链接 → 再 fetch_url 加载详细内容。',
     parameters: {
       type: 'object',
       properties: {

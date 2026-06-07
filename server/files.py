@@ -32,20 +32,68 @@ class FilesMixin:
         if not os.path.isfile(path):
             return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
         try:
-            size = os.path.getsize(path)
-            if size > 1024 * 1024:
-                return self._send_json(200, {
-                    'ok': False,
-                    'error': f'文件过大（{size}字节）。如果是图片/PDF，请用 attach_file 工具。'
-                })
-            with open(path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
             start_line = body.get('start_line')
             end_line = body.get('end_line')
-            if start_line or end_line:
+            has_range = start_line is not None or end_line is not None
+            if has_range:
+                try:
+                    start = max(1, int(start_line or 1))
+                    end = int(end_line) if end_line is not None else None
+                except (TypeError, ValueError):
+                    return self._send_json(200, {'ok': False, 'error': 'start_line/end_line 必须是数字'})
+                if end is not None and end < start:
+                    return self._send_json(200, {'ok': False, 'error': 'end_line 不能小于 start_line'})
+            else:
+                start, end = 1, None
+
+            size = os.path.getsize(path)
+            max_read_chars = 1024 * 1024
+            if size > max_read_chars and not has_range:
+                return self._send_json(200, {
+                    'ok': False,
+                    'error': f'文件过大（{size}字节）。请指定 start_line/end_line 分段读取；如果是图片/PDF，请用 attach_file 工具。'
+                })
+
+            if has_range and size > max_read_chars:
+                parts = []
+                total = 0
+                truncated = False
+                with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                    for line_no, line in enumerate(f, 1):
+                        if line_no < start:
+                            continue
+                        if end is not None and line_no > end:
+                            break
+                        remaining = max_read_chars - total
+                        if remaining <= 0:
+                            truncated = True
+                            break
+                        if len(line) > remaining:
+                            parts.append(line[:remaining])
+                            total += remaining
+                            truncated = True
+                            break
+                        parts.append(line)
+                        total += len(line)
+                content = ''.join(parts)
+                if truncated:
+                    content += '\n\n[内容已截断：单次 read_note 最多返回约 1MB。请缩小 start_line/end_line 范围继续读取。]'
+                return self._send_json(200, {
+                    'ok': True,
+                    'path': path,
+                    'content': content,
+                    'size': size,
+                    'start_line': start,
+                    'end_line': end,
+                    'truncated': truncated
+                })
+
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            if has_range:
                 lines = content.split('\n')
-                s = max(1, int(start_line or 1)) - 1
-                e = min(len(lines), int(end_line or len(lines)))
+                s = start - 1
+                e = min(len(lines), end or len(lines))
                 content = '\n'.join(lines[s:e])
             self._send_json(200, {'ok': True, 'path': path, 'content': content, 'size': size})
         except Exception as e:

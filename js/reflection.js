@@ -329,7 +329,7 @@ const TEACHER_TOOL_SUFFIX = `
 
 【评审工具使用说明】
 - 你可以独立调用工具去验证学生的答案是否正确（如读取学生提到的文件、运行测试、检查事实等）
-- 验证完成后，**输出 JSON 格式的评审结果**（不要再调用工具）
+- 验证完成后，**只输出 JSON 格式的评审结果**（不要再调用工具，不要代码块，不要额外文字）
 - JSON 必须包含字段：score(0-10数字), issues(数组), suggestions(数组), satisfied(布尔)
 - 例如：{"score": 8, "issues": ["..."], "suggestions": ["..."], "satisfied": false}`;
 
