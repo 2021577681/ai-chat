@@ -29,6 +29,9 @@ async function init() {
 
   // 1. 加载本地数据
   loadData();
+  if (typeof loadTaskQueue === 'function') {
+    loadTaskQueue();
+  }
   
   // 2. 应用主题
   applyTheme();
@@ -156,7 +159,7 @@ async function init() {
       const modals = [
         'imgPreview', 'termConfirmMask',
         'toolEditModal', 'backupModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
-        'planModal', 'outlineModal', 'settingsModal', 'jsonEditorModal',
+        'planModal', 'outlineModal', 'taskQueueModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'
       ];
