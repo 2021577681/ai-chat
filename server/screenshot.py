@@ -14,6 +14,7 @@ import base64
 import os
 import sys
 import time
+import uuid
 from io import BytesIO
 
 
@@ -26,9 +27,9 @@ class ScreenshotMixin:
         from . import config
 
         ts = time.strftime('%Y%m%d_%H%M%S')
-        name = f'screenshot_{ts}_{source}.png'
+        name = f'screenshot_{ts}_{source}_{uuid.uuid4().hex[:8]}.png'
         # ⭐ 兜底：若 current_cwd 不是有效目录，回退到 os.getcwd()
-        save_dir = config.current_cwd
+        save_dir = config.get_current_cwd()
         if not os.path.isdir(save_dir):
             save_dir = os.getcwd()
         save_path = os.path.join(save_dir, name)

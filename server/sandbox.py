@@ -106,6 +106,11 @@ def is_dangerous_command(cmd):
 _WINDOWS_ABS_PATH_RE = re.compile(r'(?i)([a-z]:[\\/][^"\'<>\r\n&|]*)')
 _UNC_PATH_RE = re.compile(r'(\\\\[^\\/\s"\'<>|&]+[\\/][^"\'<>|&]+)')
 _PARENT_TRAVERSAL_RE = re.compile(r'(^|[\s"\'=])\.\.[\\/]')
+_CD_PARENT_RE = re.compile(
+    r'(?i)(^|[&|;]\s*|\b)'
+    r'(cd|chdir|pushd|set-location|sl|dir|ls|type|cat|more|get-content)\s+'
+    r'(?:/d\s+)?["\']?\.\.(?=$|[\s"\'&|;\\/])'
+)
 _USER_HOME_REF_RE = re.compile(
     r'(?i)(~[\\/]|'
     r'%\s*(userprofile|homepath|homedrive|appdata|localappdata|temp|tmp)\s*%|'
@@ -145,6 +150,9 @@ def command_workspace_violation(cmd: str):
 
     if _PARENT_TRAVERSAL_RE.search(masked):
         return True, '命令包含 ../ 或 ..\\ 父目录跳转，可能越出沙箱'
+
+    if _CD_PARENT_RE.search(masked):
+        return True, '命令把 .. 作为目录参数，可能越出沙箱'
 
     for m in _UNC_PATH_RE.finditer(masked):
         p = _trim_shell_path(m.group(1))
@@ -187,10 +195,10 @@ def is_inside_workspace(abs_path):
 def resolve_path(path):
     """解析路径：相对路径基于 current_cwd，并展开 ~"""
     if not path:
-        return config.current_cwd
+        return config.get_current_cwd()
     path = os.path.expanduser(path)
     if not os.path.isabs(path):
-        path = os.path.abspath(os.path.join(config.current_cwd, path))
+        path = os.path.abspath(os.path.join(config.get_current_cwd(), path))
     return path
 
 

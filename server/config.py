@@ -8,7 +8,9 @@
 # （直接 from .config import current_cwd 会拿到导入瞬间的快照，会读到旧值）。
 # ============================================================
 
+import contextvars
 import os
+import re
 import secrets
 import sys
 import threading
@@ -72,8 +74,13 @@ TOKEN = _load_or_create_token()
 WORKSPACE_ROOT = os.path.realpath(os.getcwd())
 
 # ---------- 可变状态 ----------
-# current_cwd 会被 cd 命令修改。访问时务必用 config.current_cwd，不要 from import
+# current_cwd 保留为默认会话的 cwd，兼容旧前端和公开状态接口。
+# 真正的工具请求通过 session_id 绑定到 SESSION_CWDS，避免多标签/多任务互相串目录。
 current_cwd = os.getcwd()
+_request_cwd = contextvars.ContextVar('request_cwd', default=None)
+SESSION_CWDS = {}
+SESSION_LOCK = threading.Lock()
+DEFAULT_SESSION_ID = 'default'
 
 # input() 锁（避免多个并发请求同时弹终端确认）
 INPUT_LOCK = threading.Lock()
@@ -90,10 +97,56 @@ def set_workspace(path: str) -> None:
         raise FileNotFoundError(f'workspace 目录不存在: {p}')
     WORKSPACE_ROOT = p
     current_cwd = p
+    with SESSION_LOCK:
+        SESSION_CWDS.clear()
     try:
         os.chdir(p)  # 让 subprocess 默认继承此 cwd
     except Exception:
         pass
+
+
+def normalize_session_id(session_id: str) -> str:
+    """把浏览器传来的 session_id 收敛成短的本地键名。"""
+    sid = str(session_id or '').strip()
+    if not sid:
+        return DEFAULT_SESSION_ID
+    sid = re.sub(r'[^A-Za-z0-9_.:-]+', '_', sid)
+    return sid[:160] or DEFAULT_SESSION_ID
+
+
+def get_session_cwd(session_id: str = '') -> str:
+    sid = normalize_session_id(session_id)
+    if sid == DEFAULT_SESSION_ID:
+        return current_cwd
+    with SESSION_LOCK:
+        return SESSION_CWDS.get(sid, WORKSPACE_ROOT)
+
+
+def set_session_cwd(session_id: str, cwd: str) -> None:
+    """更新指定会话 cwd；默认会话同步到旧的 current_cwd。"""
+    global current_cwd
+    sid = normalize_session_id(session_id)
+    if sid == DEFAULT_SESSION_ID:
+        current_cwd = cwd
+        return
+    with SESSION_LOCK:
+        SESSION_CWDS[sid] = cwd
+
+
+def bind_request_cwd(cwd: str):
+    """给当前请求线程/上下文绑定 cwd，供 sandbox.resolve_path 使用。"""
+    return _request_cwd.set(cwd or WORKSPACE_ROOT)
+
+
+def reset_request_cwd(token) -> None:
+    try:
+        _request_cwd.reset(token)
+    except Exception:
+        pass
+
+
+def get_current_cwd() -> str:
+    return _request_cwd.get() or current_cwd
 
 
 # ---------- CORS 策略 ----------

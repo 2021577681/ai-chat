@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler,
         """统一在响应里附加沙箱信息，前端可实时显示"""
         if isinstance(data, dict):
             data.setdefault('workspace', config.WORKSPACE_ROOT)
-            data.setdefault('cwd', config.current_cwd)
+            data.setdefault('cwd', config.get_current_cwd())
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler,
         # /health 显式健康检查
         if self.path == '/health':
             self._send_json(200, {'ok': True,
-                                  'cwd': config.current_cwd,
+                                  'cwd': config.get_current_cwd(),
                                   'workspace': config.WORKSPACE_ROOT})
             return
 
@@ -119,8 +119,11 @@ class Handler(BaseHTTPRequestHandler,
 
         # 调试日志
         action = body.get('action', 'execute')
+        session_id = body.get('session_id') or self.headers.get('X-Session-Id', '')
+        self.session_id = config.normalize_session_id(session_id)
+        _cwd_token = config.bind_request_cwd(config.get_session_cwd(self.session_id))
         print(f'\n{"="*60}')
-        print(f'📥 收到请求: action="{action}"')
+        print(f'📥 收到请求: action="{action}", session="{self.session_id}"')
         if action != 'read_file_binary':
             log_body = body
             if action in ('mcp_list_tools', 'mcp_call_tool'):
@@ -176,3 +179,6 @@ class Handler(BaseHTTPRequestHandler,
                 self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:
             self._send_json(500, {'ok': False, 'error': f'内部错误: {e}'})
+        finally:
+            config.reset_request_cwd(_cwd_token)
+            self.session_id = ''

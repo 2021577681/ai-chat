@@ -38,7 +38,7 @@ class ProxyMixin:
         if is_local_origin:
             print(f'🔑 [Token] 自动授权（来源={origin or "file://"}）')
             self._send_json(200, {'ok': True, 'token': config.TOKEN,
-                                  'cwd': config.current_cwd, 'workspace': config.WORKSPACE_ROOT})
+                                  'cwd': config.get_current_cwd(), 'workspace': config.WORKSPACE_ROOT})
             return
 
         # 非本机来源：保留终端确认
@@ -58,7 +58,7 @@ class ProxyMixin:
             self._send_json(403, {'ok': False, 'error': '用户在终端拒绝授权'})
             return
         self._send_json(200, {'ok': True, 'token': config.TOKEN,
-                              'cwd': config.current_cwd, 'workspace': config.WORKSPACE_ROOT})
+                              'cwd': config.get_current_cwd(), 'workspace': config.WORKSPACE_ROOT})
 
     # ============ GET /workspace ============
     def handle_workspace_info(self):
@@ -66,7 +66,7 @@ class ProxyMixin:
         self._send_json(200, {
             'ok': True,
             'workspace': config.WORKSPACE_ROOT,
-            'cwd': config.current_cwd
+            'cwd': config.get_current_cwd()
         })
 
     # ============ GET /xxx 静态文件 ============
@@ -94,7 +94,12 @@ class ProxyMixin:
             project_root = os.path.dirname(script_dir)
             target = os.path.realpath(os.path.join(project_root, rel))
             # 不能跳出项目根目录
-            if not target.startswith(os.path.realpath(project_root)):
+            project_root_real = os.path.realpath(project_root)
+            try:
+                inside_project = os.path.commonpath([target, project_root_real]) == project_root_real
+            except ValueError:
+                inside_project = False
+            if not inside_project:
                 self._send_json(403, {'ok': False, 'error': '路径越界'})
                 return
             base_dir = project_root
@@ -239,11 +244,11 @@ class ProxyMixin:
 
         print(f'   ✅ 上游 {status} | Content-Type: {up_ct} | 流式: {is_stream}')
 
-        self.send_response(status)
-        self.send_header('Content-Type', up_ct)
-        self.send_header('X-Upstream-Status', str(status))
-        self._write_cors_headers(origin)
         if is_stream:
+            self.send_response(status)
+            self.send_header('Content-Type', up_ct)
+            self.send_header('X-Upstream-Status', str(status))
+            self._write_cors_headers(origin)
             self.send_header('Cache-Control', 'no-cache')
             self.send_header('Connection', 'close')
             self.end_headers()
@@ -280,8 +285,17 @@ class ProxyMixin:
             try:
                 body = upstream.read()
             except Exception as e:
+                try: upstream.close()
+                except Exception: pass
                 self._send_json(502, {'ok': False, 'error': f'读取上游响应失败: {e}'})
                 return
+            finally:
+                try: upstream.close()
+                except Exception: pass
+            self.send_response(status)
+            self.send_header('Content-Type', up_ct)
+            self.send_header('X-Upstream-Status', str(status))
+            self._write_cors_headers(origin)
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             try: self.wfile.write(body)

@@ -79,7 +79,7 @@ def _print_banner():
     print('   （从这里打开页面，不再有任何 CORS 问题）')
     print()
     print(f'🏠 沙箱根目录: {config.WORKSPACE_ROOT}')
-    print(f'   工作目录 : {config.current_cwd}')
+    print(f'   工作目录 : {config.get_current_cwd()}')
     print(f'Token 文件  : {config.TOKEN_FILE}')
     print(f'\n🔑 Token: {config.TOKEN}\n')
     print('🛡️  沙箱防护:')

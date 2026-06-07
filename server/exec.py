@@ -19,7 +19,7 @@ class ExecMixin:
 
     def handle_execute(self, body):
         command = body.get('command', '').strip()
-        cwd = body.get('cwd') or config.current_cwd
+        cwd = body.get('cwd') or config.get_current_cwd()
         timeout = min(int(body.get('timeout', 30)), 300)
         if not command:
             return self._send_json(400, {'ok': False, 'error': '命令为空'})
@@ -113,8 +113,22 @@ class ExecMixin:
                 })
 
         # ⭐ L2: cd 拦截
-        if command.strip().startswith('cd '):
-            target = command.strip()[3:].strip().strip('"').strip("'")
+        cd_match = None
+        if not re.search(r'&&|\|\||[;&|]', command):
+            cd_match = re.fullmatch(
+                r'(?is)\s*(?:cd|chdir)(?:\s+/d)?(?:\s+(.+?))?\s*',
+                command
+            )
+        if cd_match:
+            target = (cd_match.group(1) or '').strip().strip('"').strip("'")
+            if not target:
+                return self._send_json(200, {
+                    'ok': True,
+                    'stdout': config.get_current_cwd(),
+                    'stderr': '',
+                    'returncode': 0,
+                    'cwd': config.get_current_cwd()
+                })
             new_cwd = resolve_path(target) if not os.path.isabs(target) else target
             new_cwd = os.path.expanduser(new_cwd)
             if not os.path.isdir(new_cwd):
@@ -129,8 +143,10 @@ class ExecMixin:
                         f'   你只能在沙箱内切换目录。'
                     )
                 })
-            # 修改全局 cwd（注意走 config 模块属性，不要 from config import current_cwd）
-            config.current_cwd = new_cwd
+            # 修改当前浏览器会话的 cwd，避免多标签/多任务互相影响。
+            new_cwd = os.path.realpath(new_cwd)
+            config.set_session_cwd(getattr(self, 'session_id', ''), new_cwd)
+            config.bind_request_cwd(new_cwd)
             return self._send_json(200, {
                 'ok': True,
                 'stdout': f'已切换到: {new_cwd}',

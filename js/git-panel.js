@@ -655,8 +655,8 @@ async function _toggleBranchMenu(evt) {
       ${b.upstream ? `<span class="git-branch-upstream">→ ${escapeHtml(b.upstream)}</span>` : ''}
       ${b.current ? `<span class="git-branch-tag">当前</span>` : `
         <span class="git-branch-row-actions">
-          <button class="git-btn-tiny" onclick="event.stopPropagation();_doBranchSwitch('${escapeHtml(b.name)}')">切换</button>
-          <button class="git-btn-tiny git-btn-danger" onclick="event.stopPropagation();_doBranchDelete('${escapeHtml(b.name)}', false)">删除</button>
+          <button class="git-btn-tiny git-branch-switch-btn" type="button">切换</button>
+          <button class="git-btn-tiny git-btn-danger git-branch-delete-btn" type="button">删除</button>
         </span>
       `}
     </div>
@@ -675,6 +675,20 @@ async function _toggleBranchMenu(evt) {
       // 按钮事件已 stopPropagation，这里走切换
       if (e.target.tagName === 'BUTTON') return;
       _doBranchSwitch(el.getAttribute('data-name'));
+    });
+  });
+  menu.querySelectorAll('.git-branch-switch-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = e.currentTarget.closest('.git-branch-item[data-name]');
+      if (item) _doBranchSwitch(item.getAttribute('data-name'));
+    });
+  });
+  menu.querySelectorAll('.git-branch-delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = e.currentTarget.closest('.git-branch-item[data-name]');
+      if (item) _doBranchDelete(item.getAttribute('data-name'), false);
     });
   });
 }
@@ -822,12 +836,12 @@ async function _refreshRemotePanel() {
         <table class="git-remote-table">
           <thead><tr><th>名称</th><th>URL</th><th></th></tr></thead>
           <tbody>${remotes.map(r => `
-            <tr>
+            <tr data-remote-name="${escapeHtml(r.name)}" data-remote-url="${escapeHtml(r.url)}">
               <td><code>${escapeHtml(r.name)}</code></td>
               <td><span class="git-remote-url" title="${escapeHtml(r.url)}">${escapeHtml(r.url)}</span></td>
               <td>
-                <button class="git-btn-tiny" onclick="_editRemoteUrl('${escapeHtml(r.name)}','${escapeHtml(r.url)}')">✏️</button>
-                <button class="git-btn-tiny git-btn-danger" onclick="_removeRemote('${escapeHtml(r.name)}')">🗑</button>
+                <button class="git-btn-tiny git-remote-edit-btn" type="button">✏️</button>
+                <button class="git-btn-tiny git-btn-danger git-remote-remove-btn" type="button">🗑</button>
               </td>
             </tr>
           `).join('')}</tbody>
@@ -872,6 +886,18 @@ async function _refreshRemotePanel() {
       </div>
     </section>
   `;
+  body.querySelectorAll('.git-remote-edit-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const row = e.currentTarget.closest('tr[data-remote-name]');
+      if (row) _editRemoteUrl(row.dataset.remoteName || '', row.dataset.remoteUrl || '');
+    });
+  });
+  body.querySelectorAll('.git-remote-remove-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const row = e.currentTarget.closest('tr[data-remote-name]');
+      if (row) _removeRemote(row.dataset.remoteName || '');
+    });
+  });
 }
 
 async function _savePanelUser() {

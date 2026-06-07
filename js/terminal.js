@@ -48,6 +48,7 @@ function savePermanentPerms(p) {
 const TERMINAL_CONFIG = {
   serverUrl: 'http://localhost:8765',
   token: storage.get(TERMINAL_STORAGE_KEY) || '',
+  sessionId: 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
   // ⭐ 本次任务级允许（按类别），任务结束自动清空
   taskAllow: {},
   // ⭐ 永久允许（按类别），存 localStorage，可在 UI 撤销
@@ -75,6 +76,11 @@ function clearTaskPermissions() {
 window.setPermanentPermission = setPermanentPermission;
 window.clearAllPermanentPermissions = clearAllPermanentPermissions;
 window.PERMISSION_CATEGORIES = PERMISSION_CATEGORIES;
+
+function getAgentSessionId() {
+  const chatId = (state && (state.activeTaskChatId || state.currentId)) || 'default';
+  return `${TERMINAL_CONFIG.sessionId}:${chatId}`;
+}
 
 // ⭐ Token 持久化辅助
 function saveTerminalToken(tk) {
@@ -288,7 +294,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand) {
     return await fetch(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
-      body: JSON.stringify({ action, ...params })
+      body: JSON.stringify({ action, ...params, session_id: getAgentSessionId() })
     });
   };
   
