@@ -132,7 +132,10 @@ function isPlanCommandOutputOk(output) {
 async function callAPIWithPlan() {
   const c = currentChat();
   const s = state.settings;
+  const taskChatId = c && c.id;
+  const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
   state.isGenerating = true;
+  state.activeTaskChatId = taskChatId || null;
   // ⭐ 创建 abortCtrl，让用户能中断规划/审批阶段
   state.abortCtrl = new AbortController();
   // ⭐ 清零软停止标志：新任务开始
@@ -159,7 +162,7 @@ async function callAPIWithPlan() {
     }
   };
   c.messages.push(aiMsg);
-  renderMessages();
+  renderIfVisible();
   
   const historyForUse = c.messages.slice(0, -1);
   const userQuestion = extractUserQuestion(historyForUse);
@@ -170,22 +173,22 @@ async function callAPIWithPlan() {
   try {
     aiMsg.plan.stage = 'planning';
     aiMsg.plan.progressText = '📋 计划模式分析任务...';
-    renderMessages();
+    renderIfVisible();
     
     let plan = await generatePlan(historyForUse, plannerModel, s.planPlannerPrompt, s.planMaxSteps, aiMsg.plan, () => updatePlanPanel(c.messages.indexOf(aiMsg)));
     aiMsg.plan.analysis = plan.analysis;
     aiMsg.plan.steps = plan.steps.map((st, i) => normalizePlanStep({ ...st, status: 'pending' }, i));
-    renderMessages();
+    renderIfVisible();
     
     if (s.planReview) {
       aiMsg.plan.stage = 'reviewing';
       for (let r = 1; r <= s.planReviewRounds; r++) {
         aiMsg.plan.progressText = `🎭 审查计划（第 ${r} 轮）...`;
-        renderMessages();
+        renderIfVisible();
         const rr = await reviewPlan(userQuestion, plan, plannerModel);
         aiMsg.plan.reviewTurns.push({ round: r, ...rr });
         aiMsg.plan.planScore = rr.score;
-        renderMessages();
+        renderIfVisible();
         if (rr.satisfied || rr.score >= 8) break;
         aiMsg.plan.progressText = `✏️ 规划者根据审查意见修改计划（第 ${r} 轮）...`;
         updatePlanPanel(c.messages.indexOf(aiMsg));
@@ -195,7 +198,7 @@ async function callAPIWithPlan() {
         );
         aiMsg.plan.analysis = plan.analysis;
         aiMsg.plan.steps = plan.steps.map((st, i) => normalizePlanStep({ ...st, status: 'pending' }, i));
-        renderMessages();
+        renderIfVisible();
         if (r === s.planReviewRounds) break;
       }
     }
@@ -214,7 +217,7 @@ async function callAPIWithPlan() {
                     plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n');
     
     saveData();
-    renderMessages();
+    renderIfVisible();
     toast('📋 计划已生成，请审批后执行', 3000);
     
   } catch (e) {
@@ -230,11 +233,12 @@ async function callAPIWithPlan() {
     // ⭐ 规划阶段失败/取消，任务已终结，固定计时
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.plan.progressText;
-    renderMessages();
+    renderIfVisible();
     saveData();
   } finally {
     state.isGenerating = false;
     state.abortCtrl = null;
+    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
     updateSendBtn();
   }
 }
@@ -243,6 +247,8 @@ async function callAPIWithPlan() {
 async function approveAndExecutePlan(msgIdx) {
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
+  const taskChatId = c.id;
+  const renderIfVisible = () => { if (isCurrentChat(taskChatId)) renderMessages(); };
   
   const aiMsg = c.messages[msgIdx];
   const plan = aiMsg.plan;
@@ -259,6 +265,7 @@ async function approveAndExecutePlan(msgIdx) {
   }
   
   state.isGenerating = true;
+  state.activeTaskChatId = taskChatId;
   // ⭐ 关键：标记计划模式正在执行，防止 onSend 触发新计划
   state._planExecuting = true;
   // ⭐ 创建 abortCtrl，让用户能中断执行
@@ -275,7 +282,7 @@ async function approveAndExecutePlan(msgIdx) {
   plan.stage = 'executing';
   plan.inProgress = true;
   plan.progressText = '🚀 开始执行计划模式任务...';
-  renderMessages();
+  renderIfVisible();
   
   const s = state.settings;
   const executorModel = s.planExecutorModel.trim() || s.currentModel;
@@ -325,7 +332,7 @@ async function approveAndExecutePlan(msgIdx) {
           aiMsg.content = `❌ 计划模式在第 ${i + 1} 步失败：${step.title}\n\n${step.error}\n\n已完成的步骤会保留，可在该步骤点击「重试」，或点击「继续执行」重新尝试。`;
           delete plan.progressText;
           updatePlanPanel(c.messages.indexOf(aiMsg));
-          renderMessages();
+          renderIfVisible();
           saveData();
           toast('❌ 当前步骤验证失败，可重试', 4000);
           return;
@@ -349,7 +356,7 @@ async function approveAndExecutePlan(msgIdx) {
         aiMsg.content = `❌ 计划模式在第 ${i + 1} 步失败：${step.title}\n\n${step.error}\n\n已完成的步骤会保留，可在该步骤点击「重试」，或点击「继续执行」重新尝试。`;
         delete plan.progressText;
         updatePlanPanel(c.messages.indexOf(aiMsg));
-        renderMessages();
+        renderIfVisible();
         saveData();
         toast('❌ 当前步骤失败，可重试', 4000);
         return;
@@ -370,7 +377,7 @@ async function approveAndExecutePlan(msgIdx) {
     if (s.planSynthesize) {
       plan.stage = 'synthesizing';
       plan.progressText = '✨ 整合结果...';
-      renderMessages();
+      renderIfVisible();
       finalAnswer = await synthesizeResults(userQuestion, plan, stepResults, executorModel);
     } else {
       finalAnswer = stepResults.map((r, i) => `## ${i + 1}. ${r.title}\n\n${r.result}`).join('\n\n');
@@ -383,7 +390,7 @@ async function approveAndExecutePlan(msgIdx) {
     plan.expanded = false;
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete plan.progressText;
-    renderMessages();
+    renderIfVisible();
     saveData();
     toast('✅ 计划执行完成', 3000);
     
@@ -406,11 +413,12 @@ async function approveAndExecutePlan(msgIdx) {
     // ⭐ 暂停/出错时固定计时；下次 approve 继续执行会清除 _endTime
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete plan.progressText;
-    renderMessages();
+    renderIfVisible();
     saveData();
   } finally {
     state.isGenerating = false;
     state.abortCtrl = null;
+    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
     // ⭐ 关键：无论成功失败都清除执行标记
     state._planExecuting = false;
     updateSendBtn();
@@ -762,7 +770,7 @@ async function executeStepWithTools(userQuestion, plan, stepIdx, prevResults, mo
   
   // ⭐ 把 step 传进去，runMiniAgent 实时写入 step.toolCalls
   // ⭐ 同时传入 onUpdate 回调，触发"只更新当前 plan 面板"的局部渲染
-  const c = currentChat();
+  const c = typeof activeTaskChat === 'function' ? activeTaskChat() : currentChat();
   const msgIdx = c ? c.messages.findIndex(m => m.plan === plan) : -1;
   const onUpdate = () => {
     if (msgIdx >= 0) updatePlanPanel(msgIdx);
@@ -905,7 +913,7 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
     
     // ⭐ 把计划模式执行步骤的 usage 计入当前对话统计
     if (j.usage && typeof recordUsageFromResponse === 'function') {
-      const _c = typeof currentChat === 'function' ? currentChat() : null;
+      const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
       if (_c) recordUsageFromResponse(_c, j.usage);
     }
     

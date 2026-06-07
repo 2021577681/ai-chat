@@ -79,6 +79,7 @@ let state = {
   },
   pendingAttachments: [],
   abortCtrl: null,
+  activeTaskChatId: null,
   isGenerating: false,
   editingToolIdx: -1
 };
@@ -309,7 +310,18 @@ function persistTools() {
   }
 }
 
-function currentChat() { return state.chats.find(c => c.id === state.currentId); }
+function chatById(id) { return state.chats.find(c => c && c.id === id); }
+
+function currentChat() { return chatById(state.currentId); }
+
+function isCurrentChat(chatOrId) {
+  const id = typeof chatOrId === 'string' ? chatOrId : (chatOrId && chatOrId.id);
+  return !!id && id === state.currentId;
+}
+
+function activeTaskChat() {
+  return (state.activeTaskChatId && chatById(state.activeTaskChatId)) || currentChat();
+}
 
 function resetBuiltinTools() {
   if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。\n\n注意：LMS、版本快照、论文工具不会自动加回，需要在工具面板里点专用按钮启用。')) return;

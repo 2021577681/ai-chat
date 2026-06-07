@@ -341,14 +341,17 @@ async function _apiFetchWithTimeout(url, init, externalSignal, timeoutMs) {
   });
 }
 
-async function callAPI(roundLimit) {
-  const c = currentChat();
+async function callAPI(roundLimit, options = {}) {
+  const requestedChatId = options && options.chatId;
+  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
   if (!c) {
     console.error('[callAPI] 没有当前对话');
     state.isGenerating = false;
     updateSendBtn();
     return;
   }
+  const taskChatId = c.id;
+  const isTaskVisible = () => isCurrentChat(taskChatId);
   
   const s = state.settings;
   
@@ -362,14 +365,15 @@ async function callAPI(roundLimit) {
   }
   
   state.isGenerating = true;
+  state.activeTaskChatId = taskChatId;
   updateSendBtn();
   
   c.messages.push({ role: 'assistant', content: '', _startTime: Date.now() });
   // ⭐ 增量追加新的 assistant 占位（不重建整个列表）
   if (typeof appendMsgNode === 'function') {
-    appendMsgNode(c.messages.length - 1);
+    appendMsgNode(c.messages.length - 1, c);
   } else {
-    renderMessages();
+    if (isTaskVisible()) renderMessages();
   }
   let lastIdx = c.messages.length - 1;
   
@@ -379,10 +383,11 @@ async function callAPI(roundLimit) {
     body = buildRequestBody(c.messages.slice(0, -1));
   } catch (e) {
     c.messages[lastIdx].content = `❌ 构造请求失败：${e.message}`;
-    renderMessages();
+    if (isTaskVisible()) renderMessages();
     saveData();
     state.isGenerating = false;
     state.abortCtrl = null;
+    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
     updateSendBtn();
     return;
   }
@@ -406,7 +411,7 @@ async function callAPI(roundLimit) {
           delete m.tool_calls;
           delete m._firstTokenAt;
           m._startTime = Date.now();
-          if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx);
+          if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx, c);
         }
       }
       
@@ -473,7 +478,7 @@ async function callAPI(roundLimit) {
         const m = c.messages[lastIdx];
         if (m) {
           m.content = `🔁 第 ${attempt} 次尝试失败，${Math.round(wait / 1000) || 1}s 后自动重试…\n\n_${attemptErr.message.split('\n')[0]}_`;
-          if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx);
+          if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx, c);
         }
         try {
           await _sleepAbortable(wait, state.abortCtrl.signal);
@@ -500,7 +505,7 @@ async function callAPI(roundLimit) {
       if (!msg._endTime) msg._endTime = Date.now();
       // ⭐ 清掉流式残留 + 光标
       if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
-      if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx);
+      if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx, c);
       
       let userStoppedAll = false;
       const executedToolCallIds = [];  // ⭐ 记录已执行完成的 tool_call_id
@@ -560,9 +565,9 @@ async function callAPI(roundLimit) {
         executedToolCallIds.push(tc.id);  // ⭐ 记录已执行
         // ⭐ 增量追加单条工具消息（不重建整个列表），避免闪烁
         if (typeof appendMsgNode === 'function') {
-          appendMsgNode(c.messages.length - 1);
+          appendMsgNode(c.messages.length - 1, c);
         } else {
-          renderMessages();
+          if (isTaskVisible()) renderMessages();
         }
         saveData();
         
@@ -589,9 +594,9 @@ async function callAPI(roundLimit) {
             _endTime: Date.now()
           });
           if (typeof appendMsgNode === 'function') {
-            appendMsgNode(c.messages.length - 1);
+            appendMsgNode(c.messages.length - 1, c);
           } else {
-            renderMessages();
+            if (isTaskVisible()) renderMessages();
           }
         }
         saveData();
@@ -599,9 +604,9 @@ async function callAPI(roundLimit) {
       }
       
       if (userStoppedAll) {
-        await callAPI(0);
+        await callAPI(0, { chatId: taskChatId });
       } else {
-        await callAPI(roundLimit - 1);
+        await callAPI(roundLimit - 1, { chatId: taskChatId });
       }
       return;
     }
@@ -622,11 +627,11 @@ async function callAPI(roundLimit) {
     // ⭐ 清掉任何待执行的流式刷新 + 残留光标，避免完成后还闪
     if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
     if (typeof refreshMsgNode === 'function') {
-      refreshMsgNode(lastIdx);
+      refreshMsgNode(lastIdx, c);
     } else {
-      renderMessages();
+      if (isTaskVisible()) renderMessages();
     }
-    if (typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount();
+    if (isTaskVisible() && typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount();
   } catch (e) {
     if (e.name === 'AbortError') c.messages[lastIdx].content += '\n\n*[已停止]*';
     else {
@@ -639,14 +644,15 @@ async function callAPI(roundLimit) {
     // ⭐ 错误/abort 时同样清掉残留光标
     if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
     if (typeof refreshMsgNode === 'function') {
-      refreshMsgNode(lastIdx);
+      refreshMsgNode(lastIdx, c);
     } else {
-      renderMessages();
+      if (isTaskVisible()) renderMessages();
     }
     saveData();
   } finally {
     state.isGenerating = false;
     state.abortCtrl = null;
+    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
     if (typeof updateSendBtn === 'function') updateSendBtn();
     
     const sendBtn = document.getElementById('sendBtn');
@@ -689,7 +695,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
             // ⭐ 立即标记首字时间（让 timer 立刻从"等待"切到"流式中"）
             if (!c.messages[lastIdx]._firstTokenAt) c.messages[lastIdx]._firstTokenAt = Date.now();
             c.messages[lastIdx].content += j.delta.text || '';
-            updateLastMsg();
+            updateLastMsg(c, lastIdx);
           }
           if (j.type === 'content_block_start' && j.content_block?.type === 'tool_use') {
             const idx = j.index ?? 0;
@@ -715,7 +721,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
           if (j.type === 'response.output_text.delta') {
             if (!c.messages[lastIdx]._firstTokenAt) c.messages[lastIdx]._firstTokenAt = Date.now();
             c.messages[lastIdx].content += j.delta || '';
-            updateLastMsg();
+            updateLastMsg(c, lastIdx);
           }
           if (j.type === 'response.output_item.added' && j.item?.type === 'function_call') {
             const key = responsesEventKey(j, j.item);
@@ -745,7 +751,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
             streamUsage = normalizeResponsesUsage(j.response.usage) || streamUsage;
             if (!c.messages[lastIdx].content) {
               c.messages[lastIdx].content = extractResponsesText(j.response);
-              updateLastMsg();
+              updateLastMsg(c, lastIdx);
             }
           }
         } else {
@@ -755,7 +761,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
               // ⭐ 立即标记首字时间
               if (!c.messages[lastIdx]._firstTokenAt) c.messages[lastIdx]._firstTokenAt = Date.now();
               c.messages[lastIdx].content += delta.content;
-              updateLastMsg();
+              updateLastMsg(c, lastIdx);
             }
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
@@ -1030,7 +1036,7 @@ async function callOnceWithRole(history, model, rolePrompt) {
         // 之前漏算导致 Plan/大纲/师生 模式的 token 都不进总账
         const usageForRecord = s.apiFormat === 'responses' ? normalizeResponsesUsage(j.usage) : j.usage;
         if (usageForRecord && typeof recordUsageFromResponse === 'function') {
-          const _c = typeof currentChat === 'function' ? currentChat() : null;
+          const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
           if (_c) recordUsageFromResponse(_c, usageForRecord);
         }
         
@@ -1387,7 +1393,7 @@ async function runAgentLoop({
     
     // 把 usage 累计到当前对话（让师生模式的 token 也进总账）
     if (usage && typeof recordUsageFromResponse === 'function') {
-      const _c = typeof currentChat === 'function' ? currentChat() : null;
+      const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
       if (_c) recordUsageFromResponse(_c, usage);
       totalUsage = totalUsage ? { ...totalUsage, ...usage } : usage;
     }

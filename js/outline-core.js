@@ -108,9 +108,11 @@ async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
 async function callAPIWithOutline(options = {}) {
   const c = currentChat();
   if (!c) return;
+  const taskChatId = c.id;
   const s = state.settings;
   
   state.isGenerating = true;
+  state.activeTaskChatId = taskChatId;
   state.abortCtrl = new AbortController();
   // ⭐ 清零软停止标志：本次任务是新的开始，不要被上次残留的停止意图误杀
   state.stopRequested = false;
@@ -128,6 +130,7 @@ async function callAPIWithOutline(options = {}) {
     if (!aiMsg || !aiMsg.outline || !aiMsg.outline._snap) {
       state.isGenerating = false;
       state.abortCtrl = null;
+      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
       state._outlineExecuting = false;
       if (typeof updateSendBtn === 'function') updateSendBtn();
       if (typeof toast === 'function') toast('❌ 该任务无法恢复（状态已丢失，请重新提问）', 4000);
@@ -165,7 +168,7 @@ async function callAPIWithOutline(options = {}) {
       aiMsg.content = aiMsg.content.replace(/\n*\*\[已停止\]\*$/, '');
     }
     delete aiMsg._endTime;
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     
   } else {
     // ===== 新建模式 =====
@@ -191,9 +194,9 @@ async function callAPIWithOutline(options = {}) {
     msgIdx = c.messages.length - 1;
     
     if (typeof appendMsgNode === 'function') {
-      appendMsgNode(msgIdx);
+      appendMsgNode(msgIdx, c);
     } else if (typeof renderMessages === 'function') {
-      renderMessages();
+      if (isCurrentChat(c)) renderMessages();
     }
     
     history = c.messages.slice(0, -1);
@@ -386,8 +389,7 @@ async function callAPIWithOutline(options = {}) {
       
       // ⭐ 把大纲模式每轮 usage 计入当前对话统计（之前漏算）
       if (j.usage && typeof recordUsageFromResponse === 'function') {
-        const _c = typeof currentChat === 'function' ? currentChat() : null;
-        if (_c) recordUsageFromResponse(_c, j.usage);
+        recordUsageFromResponse(c, j.usage);
       }
       
       // ----- 解析返回 -----
@@ -556,8 +558,8 @@ async function callAPIWithOutline(options = {}) {
     aiMsg.outline.expanded = false; // 完成后默认折叠大纲，突出最终答案
     aiMsg._endTime = Date.now();
     
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
-    else if (typeof renderMessages === 'function') renderMessages();
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
     saveData();
     if (typeof toast === 'function') {
       if (completedNaturally) toast('✅ 大纲任务完成', 3000);
@@ -621,12 +623,13 @@ async function callAPIWithOutline(options = {}) {
     aiMsg.outline.inProgress = false;
     delete aiMsg.outline.progressText;
     aiMsg._endTime = Date.now();
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
-    else if (typeof renderMessages === 'function') renderMessages();
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
     saveData();
   } finally {
     state.isGenerating = false;
     state.abortCtrl = null;
+    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
     state._outlineExecuting = false;
     state._outlineForceFinish = false;
     if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -775,7 +778,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   
   // ⭐ 保底收尾调用的 usage 也计入统计
   if (j.usage && typeof recordUsageFromResponse === 'function') {
-    const _c = typeof currentChat === 'function' ? currentChat() : null;
+    const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
     if (_c) recordUsageFromResponse(_c, j.usage);
   }
   

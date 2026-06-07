@@ -773,9 +773,12 @@ async function attachFileForAI(path, description) {
 function scheduleAutoResend(fileInfo, description) {
   if (!_pendingAutoResend) {
     _pendingAutoResend = {
+      chatId: state.activeTaskChatId || state.currentId,
       files: [],
       descriptions: []
     };
+  } else if (!_pendingAutoResend.chatId) {
+    _pendingAutoResend.chatId = state.activeTaskChatId || state.currentId;
   }
   _pendingAutoResend.files.push(fileInfo);
   if (description) _pendingAutoResend.descriptions.push(description);
@@ -868,7 +871,7 @@ async function tryAutoResend() {
   _autoResendInProgress = true;
   
   try {
-    await sendHiddenMessage(internalPrompt);
+    await sendHiddenMessage(internalPrompt, pending.chatId);
   } catch (e) {
     console.error('[自动重发] 出错:', e);
     // ⭐ 智能判断错误类型，存储错误不显示给用户
@@ -886,11 +889,11 @@ async function tryAutoResend() {
   }
 }
 
-async function sendHiddenMessage(text) {
+async function sendHiddenMessage(text, chatId) {
   console.log('[隐藏发送] === 开始 ===');
   console.log('[隐藏发送] 文本:', text);
   
-  const c = currentChat();
+  const c = chatId ? chatById(chatId) : currentChat();
   if (!c) {
     console.error('[隐藏发送] 没有当前对话');
     return;
@@ -932,7 +935,7 @@ async function sendHiddenMessage(text) {
   try {
     console.log('[隐藏发送] 调用普通 API（避免触发新 Plan/师生）...');
     // ⭐ 关键修复：永远用普通 callAPI，不要触发 Plan 或师生模式
-    await callAPI();
+    await callAPI(undefined, { chatId: c.id });
     console.log('[隐藏发送] ✓ API 调用完成');
   } catch (e) {
     console.error('[隐藏发送] API 出错:', e);

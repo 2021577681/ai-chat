@@ -1,8 +1,9 @@
 // ============ 对话管理 + 消息渲染 + 发送 ============
 
-// ⭐ 切换/新建对话前主动中止当前任务（不强制清状态，给 fetch 一个"温和退场"机会）
+// ⭐ 离开当前任务所在对话时，只有会破坏该对话内容的操作才主动中止任务。
 // 网络层不卡的情况下，这能让旧任务的 catch 分支正常跑完（保留 _snap 等）
 function _abortCurrentTaskIfAny() {
+  state.stopRequested = true;
   if (state.abortCtrl) {
     try { state.abortCtrl.abort(); } catch (e) {}
   }
@@ -10,14 +11,12 @@ function _abortCurrentTaskIfAny() {
     try { window._rateWaitAbort(); } catch (e) {}
   }
   // ⭐ 切断 attach_file 等工具的"自动重发"定时器
-  //   切换/新建/删除对话时如果不清，旧对话挂起的 3 秒定时器会在新对话上触发
+  //   删除/清空正在运行的对话时如果不清，旧对话挂起的 3 秒定时器会继续触发
   //   一次幽灵 callAPI（隐藏 user 消息 + 空 assistant 占位 + 计时器空转）
   if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
     try { window.cancelAutoResend(); } catch (e) {}
   }
-  // 状态旗标不清：让 catch finally 分支自己清理。如果 fetch 真卡死，
-  // 用户开新对话发消息时 onSend 里的 _outlineExecuting 检查仍会拦下来，
-  // 这是预期的——他们应该回去点"强制中断"。
+  // 其他运行态旗标不在这里硬清：让 catch/finally 分支自己收尾。
 }
 
 // ⭐ "一次性模式"消费：选定走哪条分支后立刻关闭对应开关 + 熄灭按钮
@@ -52,31 +51,27 @@ function _consumeOneShotMode() {
 }
 
 function newChat() {
-  _abortCurrentTaskIfAny();
   const id = 'c_' + Date.now();
   state.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
   state.currentId = id;
   saveData();
   renderChatList();
   renderMessages();
-  if (typeof resetTaskPermission === 'function') resetTaskPermission();
 }
 
 function switchChat(id) {
-  _abortCurrentTaskIfAny();
   state.currentId = id;
   saveData();
   renderChatList();
   renderMessages();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-  if (typeof resetTaskPermission === 'function') resetTaskPermission();
 }
 
 function deleteChat(id, e) {
   e.stopPropagation();
   if (!confirm('删除这个对话？')) return;
-  // ⭐ 若删除的是当前正在生成的对话，先中止后台任务，避免回调污染其他对话
-  if (id === state.currentId && typeof _abortCurrentTaskIfAny === 'function') {
+  // ⭐ 若删除的是正在生成的对话，先中止后台任务，避免回调写回已删除对象
+  if (id === state.activeTaskChatId && typeof _abortCurrentTaskIfAny === 'function') {
     _abortCurrentTaskIfAny();
   }
   state.chats = state.chats.filter(c => c.id !== id);
@@ -90,12 +85,17 @@ function clearCurrentChat() {
   const c = currentChat();
   if (!c) return;
   if (!confirm('清空当前对话？')) return;
+  if (c.id === state.activeTaskChatId && typeof _abortCurrentTaskIfAny === 'function') {
+    _abortCurrentTaskIfAny();
+  }
   c.messages = [];
   c.title = '新对话';
   saveData();
   renderChatList();
   renderMessages();
-  if (typeof resetTaskPermission === 'function') resetTaskPermission();
+  if ((!state.isGenerating || c.id === state.activeTaskChatId) && typeof resetTaskPermission === 'function') {
+    resetTaskPermission();
+  }
 }
 
 function renderChatList() {
@@ -145,8 +145,9 @@ function renderMessages() {
 
 // ⭐ 局部刷新：只重渲染某一条消息的整个节点，前后消息不动
 // 用于工具循环 push 新消息 / 完成后做最终高亮渲染，避免全量 renderMessages 闪烁
-function refreshMsgNode(idx) {
-  const c = currentChat();
+function refreshMsgNode(idx, targetChat) {
+  const c = targetChat || currentChat();
+  if (targetChat && !isCurrentChat(targetChat)) return false;
   if (!c || !c.messages[idx]) return false;
   const m = c.messages[idx];
   if (m._hiddenFromUI) return false;
@@ -186,8 +187,9 @@ function refreshMsgNode(idx) {
 
 // ⭐ 追加新消息到末尾（不动其它消息）
 // 适用于刚 push 一条新消息（如 tool 结果、新的 assistant 占位）时
-function appendMsgNode(idx) {
-  const c = currentChat();
+function appendMsgNode(idx, targetChat) {
+  const c = targetChat || currentChat();
+  if (targetChat && !isCurrentChat(targetChat)) return false;
   if (!c || !c.messages[idx]) return false;
   const m = c.messages[idx];
   if (m._hiddenFromUI) return false;
@@ -197,7 +199,7 @@ function appendMsgNode(idx) {
   
   // 已存在则走 refreshMsgNode
   const existing = inner.querySelector(`.message[data-idx="${idx}"]`);
-  if (existing) return refreshMsgNode(idx);
+  if (existing) return refreshMsgNode(idx, targetChat);
   
   // 如果之前是 welcome 状态，需要先清空
   if (inner.querySelector('.welcome')) {
@@ -221,6 +223,7 @@ function appendMsgNode(idx) {
 // ⭐ 局部更新：只重渲染指定消息的 plan 面板，避免整个消息列表重建
 // 解决：工具循环每秒数次 renderMessages 导致的卡顿、选中文本被清、滚动被踹的问题
 function updatePlanPanel(msgIdx) {
+  if (state.activeTaskChatId && state.activeTaskChatId !== state.currentId) return;
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   

@@ -3,19 +3,24 @@
 // 依赖：state.js / chat.js（renderMessages / scrollToBottom）
 // 加载顺序：随便，但建议放 api-core.js 之后保持习惯
 
-function updateLastMsg() {
+function updateLastMsg(targetChat, targetIdx) {
+  if (targetChat && !isCurrentChat(targetChat)) return;
   // ⭐ 节流：连续 chunk 一帧只渲染一次，避免每个 chunk 都重做 markdown 解析 + DOM 重建
   if (_updateLastMsgScheduled) return;
+  _updateLastMsgTarget = targetChat ? { chat: targetChat, idx: targetIdx } : null;
   _updateLastMsgScheduled = true;
   _updateLastMsgRafId = requestAnimationFrame(() => {
     _updateLastMsgScheduled = false;
     _updateLastMsgRafId = null;
-    _flushLastMsg();
+    const target = _updateLastMsgTarget;
+    _updateLastMsgTarget = null;
+    _flushLastMsg(target && target.chat, target && target.idx);
   });
 }
 
 let _updateLastMsgScheduled = false;
 let _updateLastMsgRafId = null;
+let _updateLastMsgTarget = null;
 
 // ⭐ 取消任何待执行的流式刷新，并清除残留光标
 // 必须在流式结束、错误、abort、refreshMsgNode 之前调用
@@ -25,14 +30,16 @@ function cancelPendingStreamFlush() {
     _updateLastMsgRafId = null;
   }
   _updateLastMsgScheduled = false;
+  _updateLastMsgTarget = null;
   // 清掉 DOM 里任何残留的 .cursor 节点（保险措施）
   document.querySelectorAll('.msg-content .cursor').forEach(el => el.remove());
 }
 
-function _flushLastMsg() {
-  const c = currentChat();
+function _flushLastMsg(targetChat, targetIdx) {
+  if (targetChat && !isCurrentChat(targetChat)) return;
+  const c = targetChat || currentChat();
   if (!c) return;
-  const lastIdx = c.messages.length - 1;
+  const lastIdx = (typeof targetIdx === 'number') ? targetIdx : c.messages.length - 1;
   const m = c.messages[lastIdx];
   if (!m) return;
   
@@ -95,6 +102,7 @@ function stopGenerate() {
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
   state.isGenerating = false;
   state.abortCtrl = null;
+  state.activeTaskChatId = null;
   if (typeof updateSendBtn === 'function') updateSendBtn();
 }
 

@@ -8,7 +8,10 @@
 async function callAPIWithReflection() {
   const c = currentChat();
   const s = state.settings;
+  const taskChatId = c && c.id;
+  const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
   state.isGenerating = true;
+  state.activeTaskChatId = taskChatId || null;
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
   state.abortCtrl = new AbortController();
   // ⭐ 清零软停止标志：新任务开始
@@ -28,7 +31,7 @@ async function callAPIWithReflection() {
     }
   };
   c.messages.push(aiMsg);
-  renderMessages();
+  renderIfVisible();
   
   const historyForUse = c.messages.slice(0, -1);
   const studentModel = s.refStudentModel.trim() || s.currentModel;
@@ -164,11 +167,10 @@ async function callAPIWithReflection() {
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.reflection.progressText;
     // ⭐ 完成时做一次完整的局部刷新（重渲染整个消息节点，让最终答案 + 折叠态都生效）
-    const c2 = currentChat();
-    if (c2) {
-      const finalIdx = c2.messages.indexOf(aiMsg);
-      if (finalIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(finalIdx);
-      else renderMessages();
+    if (c) {
+      const finalIdx = c.messages.indexOf(aiMsg);
+      if (finalIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(finalIdx, c);
+      else renderIfVisible();
     }
     saveData();
   } catch (e) {
@@ -187,16 +189,16 @@ async function callAPIWithReflection() {
     aiMsg.reflection.expanded = false;
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.reflection.progressText;
-    const c3 = currentChat();
-    if (c3) {
-      const errIdx = c3.messages.indexOf(aiMsg);
-      if (errIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(errIdx);
-      else renderMessages();
+    if (c) {
+      const errIdx = c.messages.indexOf(aiMsg);
+      if (errIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(errIdx, c);
+      else renderIfVisible();
     }
     saveData();
   } finally {
     state.isGenerating = false;
     state.abortCtrl = null;
+    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
     updateSendBtn();
   }
 }
@@ -266,6 +268,7 @@ function onTeacherProgress(ev, turn, aiMsg) {
 // ⭐ 只替换 .reflection-body 的内部 HTML，不动外层节点，不动其它消息
 // immediate=true 时绕过节流（用于工具卡片增删，确保不丢事件）
 function refreshReflectionLive(aiMsg, immediate) {
+  if (state.activeTaskChatId && state.activeTaskChatId !== state.currentId) return;
   const c = currentChat();
   if (!c) return;
   const idx = c.messages.indexOf(aiMsg);
@@ -273,10 +276,11 @@ function refreshReflectionLive(aiMsg, immediate) {
   
   const doUpdate = () => {
     refreshReflectionLive._t = null;
+    if (!isCurrentChat(c)) return;
     const panel = document.querySelector(`.reflection-panel[data-msg-idx="${idx}"]`);
     if (!panel) {
       // 面板还没创建（首次出现）：局部刷新这一条消息
-      if (typeof refreshMsgNode === 'function') refreshMsgNode(idx);
+      if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
       return;
     }
     const ref = aiMsg.reflection || {};

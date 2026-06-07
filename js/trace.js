@@ -90,7 +90,7 @@ function _fmtDur(ms) {
 function traceStart(opts) {
   const t = {
     id: _traceId(),
-    chatId: (typeof state !== 'undefined' && state.currentId) || null,
+    chatId: (typeof state !== 'undefined' && (state.activeTaskChatId || state.currentId)) || null,
     type: opts.type || 'misc',       // api | tool | plan | reflection | user | system
     role: opts.role || '',
     title: opts.title || '(untitled)',

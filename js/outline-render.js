@@ -181,6 +181,7 @@ function toggleOutlinePanel(idx) {
 
 // 局部刷新（避免整页重渲）
 function updateOutlinePanel(msgIdx) {
+  if (state.activeTaskChatId && state.activeTaskChatId !== state.currentId) return;
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return;
   
@@ -326,6 +327,7 @@ let _lastFinishClickTs = 0;
 async function finishOutlineNow(msgIdx) {
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return;
+  const taskChatId = c.id;
   const aiMsg = c.messages[msgIdx];
   const status = aiMsg.outline.status;
   
@@ -373,6 +375,7 @@ async function finishOutlineNow(msgIdx) {
     }
     
     state.isGenerating = true;
+    state.activeTaskChatId = taskChatId;
     state.abortCtrl = new AbortController();
     state._outlineExecuting = true;
     if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -381,7 +384,7 @@ async function finishOutlineNow(msgIdx) {
     aiMsg.outline.inProgress = true;
     aiMsg.outline.progressText = '🏁 正在整理最终回答...';
     aiMsg.outline.expanded = true;
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     
     const snap = aiMsg.outline._snap;
     
@@ -425,10 +428,11 @@ async function finishOutlineNow(msgIdx) {
       aiMsg._endTime = Date.now();
       state.isGenerating = false;
       state.abortCtrl = null;
+      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
       state._outlineExecuting = false;
       if (typeof updateSendBtn === 'function') updateSendBtn();
-      if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
-      else if (typeof renderMessages === 'function') renderMessages();
+      if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+      else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
       saveData();
     }
     return;
@@ -455,6 +459,7 @@ function _hardAbortOutline(msgIdx) {
   // 2) 强制清掉所有"任务进行中"标志
   state.isGenerating = false;
   state.abortCtrl = null;
+  state.activeTaskChatId = null;
   state._outlineExecuting = false;
   state._outlineForceFinish = false;
   state._planExecuting = false;
