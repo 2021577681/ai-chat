@@ -573,7 +573,8 @@ async function callAPIWithOutline(options = {}) {
     if (aiMsg.content && aiMsg.content.endsWith('*[已停止]*')) {
       aiMsg.content = aiMsg.content.replace(/\n*\*\[已停止\]\*$/, '');
     }
-    delete aiMsg._endTime;
+    if (typeof resumeMsgTimer === 'function') resumeMsgTimer(aiMsg);
+    else delete aiMsg._endTime;
     if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     
   } else {

@@ -95,10 +95,148 @@ let state = {
 let pendingImportData = null;
 
 function loadData() {
-  try { const d = storage.get(STORE_KEY); if (d) { const p = JSON.parse(d); state.chats = p.chats || []; state.currentId = p.currentId; } } catch (e) {}
+  try { const d = storage.get(STORE_KEY); if (d) { const p = JSON.parse(d); state.chats = p.chats || []; state.currentId = p.currentId; state._lastSavedAt = p.savedAt || null; } } catch (e) {}
   try { const s = storage.get(SETTINGS_KEY); if (s) state.settings = { ...state.settings, ...JSON.parse(s) }; } catch (e) {}
   try { const t = storage.get(TOOLS_KEY); if (t) state.tools = JSON.parse(t); } catch (e) {}
   injectBuiltinTools();
+}
+
+const MSG_TIMER_ORPHAN_FALLBACK_MS = 10 * 60 * 1000;
+let _msgTimerExitRecoveryRegistered = false;
+
+function _timerMs(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function markMsgTimerActivity(msg, at = Date.now()) {
+  if (!msg || msg.role === 'user') return;
+  msg._lastActivityAt = at;
+}
+
+function pauseMsgTimer(msg, endAt = Date.now()) {
+  if (!msg || msg.role === 'user') return false;
+  const start = _timerMs(msg._startTime);
+  if (!start || msg._endTime) return false;
+  const safeEnd = Math.max(start, _timerMs(endAt) || Date.now());
+  msg._endTime = safeEnd;
+  msg._lastActivityAt = safeEnd;
+  return true;
+}
+
+function resumeMsgTimer(msg) {
+  if (!msg || msg.role === 'user') return;
+  const now = Date.now();
+  const start = _timerMs(msg._startTime) || now;
+  const end = _timerMs(msg._endTime);
+  if (end) {
+    const elapsed = Math.max(0, end - start);
+    const firstOffset = msg._firstTokenAt ? Math.max(0, _timerMs(msg._firstTokenAt) - start) : 0;
+    msg._startTime = now - elapsed;
+    if (msg._firstTokenAt) msg._firstTokenAt = Math.min(now, msg._startTime + firstOffset);
+    delete msg._endTime;
+  } else if (!msg._startTime) {
+    msg._startTime = now;
+  }
+  msg._lastActivityAt = now;
+}
+
+function _fallbackTimerEndForRestore(msg, now) {
+  const start = _timerMs(msg && msg._startTime);
+  if (!start) return now;
+  const savedAt = _timerMs(state._lastSavedAt);
+  const candidates = [
+    _timerMs(msg._lastActivityAt),
+    savedAt && savedAt >= start ? savedAt : 0,
+    _timerMs(msg._firstTokenAt)
+  ].filter(t => t && t >= start && t <= now);
+  if (candidates.length) return Math.max(...candidates);
+  return Math.min(now, start + MSG_TIMER_ORPHAN_FALLBACK_MS);
+}
+
+function _cleanupRecoveredMessageProgress(msg) {
+  if (!msg || msg.role !== 'assistant') return;
+  let changed = false;
+  if (msg.plan && msg.plan.inProgress) {
+    msg.plan.inProgress = false;
+    changed = true;
+    if (['planning', 'reviewing', 'executing', 'verifying'].includes(msg.plan.stage)) {
+      msg.plan.status = msg.plan.status === 'completed' ? msg.plan.status : 'paused';
+    }
+    if (Array.isArray(msg.plan.steps)) {
+      msg.plan.steps.forEach(step => {
+        if (step && step.status === 'running') {
+          step.status = 'failed';
+          step.error = step.error || '页面关闭，任务已中断';
+          step.endedAt = step.endedAt || msg._endTime || Date.now();
+        }
+      });
+    }
+    delete msg.plan.progressText;
+  }
+  if (msg.outline && msg.outline.inProgress) {
+    msg.outline.inProgress = false;
+    changed = true;
+    if (msg.outline.status === 'running') msg.outline.status = 'paused';
+    delete msg.outline.progressText;
+  }
+  if (msg.reflection && msg.reflection.inProgress) {
+    msg.reflection.inProgress = false;
+    changed = true;
+    if (Array.isArray(msg.reflection.turns)) {
+      msg.reflection.turns.forEach(turn => {
+        if (turn) turn._running = false;
+        if (turn && Array.isArray(turn.toolCalls)) {
+          turn.toolCalls.forEach(tc => { if (tc) tc._running = false; });
+        }
+      });
+    }
+    delete msg.reflection.progressText;
+  }
+  return changed;
+}
+
+function recoverInterruptedMsgTimers() {
+  const now = Date.now();
+  let changed = false;
+  for (const chat of state.chats || []) {
+    for (const msg of chat.messages || []) {
+      if (!msg || msg.role !== 'assistant') continue;
+      if (msg._startTime && !msg._endTime) {
+        pauseMsgTimer(msg, _fallbackTimerEndForRestore(msg, now));
+        msg._timerRecovered = true;
+        changed = true;
+      }
+      if (_cleanupRecoveredMessageProgress(msg)) changed = true;
+    }
+  }
+  return changed;
+}
+
+function sealOpenMsgTimersForPageExit() {
+  let changed = false;
+  for (const chat of state.chats || []) {
+    for (const msg of chat.messages || []) {
+      if (pauseMsgTimer(msg, Date.now())) changed = true;
+      if (_cleanupRecoveredMessageProgress(msg)) changed = true;
+    }
+  }
+  if (changed && typeof saveData === 'function') {
+    saveData();
+    if (typeof storage !== 'undefined' && typeof storage.flush === 'function') {
+      try { storage.flush(); } catch (e) {}
+    }
+  }
+}
+
+function registerMsgTimerExitRecovery() {
+  if (_msgTimerExitRecoveryRegistered || typeof window === 'undefined') return;
+  _msgTimerExitRecoveryRegistered = true;
+  window.addEventListener('pagehide', event => {
+    if (event && event.persisted) return;
+    sealOpenMsgTimersForPageExit();
+  });
+  window.addEventListener('beforeunload', sealOpenMsgTimersForPageExit);
 }
 
 function injectBuiltinTools() {
@@ -187,7 +325,9 @@ function saveData() {
       })
     }));
     
-    const payload = JSON.stringify({ chats: chatsForSave, currentId: state.currentId });
+    const savedAt = Date.now();
+    state._lastSavedAt = savedAt;
+    const payload = JSON.stringify({ chats: chatsForSave, currentId: state.currentId, savedAt });
     
     try {
       storage.set(STORE_KEY, payload);

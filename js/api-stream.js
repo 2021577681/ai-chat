@@ -51,6 +51,7 @@ function _flushLastMsg(targetChat, targetIdx) {
   if (!m._firstTokenAt && (m.content || (m.tool_calls && m.tool_calls.length))) {
     m._firstTokenAt = Date.now();
   }
+  if (typeof markMsgTimerActivity === 'function') markMsgTimerActivity(m);
   
   const wrap = document.querySelector(`.message[data-idx="${lastIdx}"] .msg-content`);
   if (wrap) {

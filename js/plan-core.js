@@ -270,6 +270,7 @@ async function callAPIWithPlan() {
     aiMsg.plan.status = 'pending_approval';
     aiMsg.plan.inProgress = false;
     aiMsg.plan.progressText = '⏸ 计划已生成，等待您审批';
+    if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     
     aiMsg.content = `📋 **计划模式已生成任务序列**（共 ${plan.steps.length} 步）${aiMsg.plan.planScore !== null ? `· 评分 ${aiMsg.plan.planScore}/10` : ''}\n\n` +
                     `请审查下方的执行计划。如果满意，点击「▶️ 执行计划」按钮开始；\n` +
@@ -357,9 +358,12 @@ async function approveAndExecutePlan(msgIdx) {
   updateSendBtn();
   if (typeof renderChatList === 'function') renderChatList();
   
-  // ⭐ 计时：清除之前(pending_approval/paused/error)留下的 _endTime，让计时继续
-  delete aiMsg._endTime;
-  if (!aiMsg._startTime) aiMsg._startTime = Date.now();
+  // ⭐ 计时：保留暂停/审批前已用耗时，继续执行时从当前时间接着跑。
+  if (typeof resumeMsgTimer === 'function') resumeMsgTimer(aiMsg);
+  else {
+    delete aiMsg._endTime;
+    if (!aiMsg._startTime) aiMsg._startTime = Date.now();
+  }
   
   plan.status = 'executing';
   plan.stage = 'executing';
@@ -694,7 +698,8 @@ async function continuePlanImprovement(msgIdx) {
   plan.status = 'paused';
   plan.stage = 'executing';
   plan.expanded = true;
-  if (c.messages[msgIdx]._endTime) delete c.messages[msgIdx]._endTime;
+  if (typeof resumeMsgTimer === 'function') resumeMsgTimer(c.messages[msgIdx]);
+  else if (c.messages[msgIdx]._endTime) delete c.messages[msgIdx]._endTime;
   saveData();
   renderMessages();
   toast('已新增改进阶段，开始继续执行', 2500);

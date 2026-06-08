@@ -21,7 +21,9 @@ async function openGitPanel() {
     modal = _buildGitModal();
     document.body.appendChild(modal);
   }
-  modal.classList.add('show');
+  if (!window.__SETTINGS_PAGE_DOCKING__) {
+    modal.classList.add('show');
+  }
   await _refreshGitPanel();
 }
 

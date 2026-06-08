@@ -510,6 +510,7 @@ function tickMsgTimers() {
   if (frozenJustNow && typeof groupToolFlows === 'function') {
     try { groupToolFlows(); } catch (e) { /* 静默 */ }
   }
+  if (frozenJustNow && typeof saveData === 'function') saveData();
 }
 
 function onPickImages(e) {

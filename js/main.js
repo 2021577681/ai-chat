@@ -29,6 +29,9 @@ async function init() {
 
   // 1. 加载本地数据
   loadData();
+  const recoveredTimers = (typeof recoverInterruptedMsgTimers === 'function') ? recoverInterruptedMsgTimers() : false;
+  if (typeof registerMsgTimerExitRecovery === 'function') registerMsgTimerExitRecovery();
+  if (recoveredTimers && typeof saveData === 'function') saveData();
   if (typeof loadTaskQueue === 'function') {
     loadTaskQueue();
   }

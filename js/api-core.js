@@ -747,6 +747,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
             // ⭐ 立即标记首字时间（让 timer 立刻从"等待"切到"流式中"）
             if (!c.messages[lastIdx]._firstTokenAt) c.messages[lastIdx]._firstTokenAt = Date.now();
             c.messages[lastIdx].content += j.delta.text || '';
+            if (typeof markMsgTimerActivity === 'function') markMsgTimerActivity(c.messages[lastIdx]);
             updateLastMsg(c, lastIdx);
           }
           if (j.type === 'content_block_start' && j.content_block?.type === 'tool_use') {
@@ -773,6 +774,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
           if (j.type === 'response.output_text.delta') {
             if (!c.messages[lastIdx]._firstTokenAt) c.messages[lastIdx]._firstTokenAt = Date.now();
             c.messages[lastIdx].content += j.delta || '';
+            if (typeof markMsgTimerActivity === 'function') markMsgTimerActivity(c.messages[lastIdx]);
             updateLastMsg(c, lastIdx);
           }
           if (j.type === 'response.output_item.added' && j.item?.type === 'function_call') {
@@ -813,6 +815,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
               // ⭐ 立即标记首字时间
               if (!c.messages[lastIdx]._firstTokenAt) c.messages[lastIdx]._firstTokenAt = Date.now();
               c.messages[lastIdx].content += delta.content;
+              if (typeof markMsgTimerActivity === 'function') markMsgTimerActivity(c.messages[lastIdx]);
               updateLastMsg(c, lastIdx);
             }
             if (delta.tool_calls) {

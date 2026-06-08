@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="base.css">
 <link rel="stylesheet" href="lms.css">
 <link rel="stylesheet" href="git-panel.css">
+<link rel="stylesheet" href="gemini-theme.css">
 </head>
 <body>
 
@@ -33,64 +34,25 @@
       </div>
       <button class="sidebar-collapse-btn" onclick="collapseSidebar()" title="收起侧栏">◀</button>
     </div>
+
+    <!-- 沙箱信息：放在侧栏顶部，减少主对话区干扰 -->
+    <div class="workspace-bar sidebar-workspace" id="workspaceBar" title="AI 工具调用被限制在此目录内">
+      <div class="workspace-head">
+        <span class="workspace-icon">🛡️</span>
+        <span class="workspace-label">沙箱目录</span>
+        <span class="workspace-status" id="workspaceStatus">●</span>
+        <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
+      </div>
+      <span class="workspace-path" id="workspacePath">未连接</span>
+    </div>
     
     <button class="btn-new" onclick="newChat()">+ 新建对话</button>
     
     <div class="chat-list" id="chatList"></div>
     
-    <!-- 侧边栏底部：设置 + 悬浮"更多"菜单 + 主题 -->
+    <!-- 侧边栏底部：设置 + 主题 -->
     <div class="sidebar-footer">
       <button class="icon-btn" onclick="openSettings()">⚙ 设置</button>
-      
-      <div class="more-menu-wrap">
-        <button class="icon-btn more-btn">⋯ 更多</button>
-        <div class="more-menu">
-          <button class="more-menu-item" onclick="openPlanSettings()">
-            <span class="more-menu-icon">📋</span><span>计划模式</span>
-          </button>
-          <button class="more-menu-item" onclick="openOutlineSettings()">
-            <span class="more-menu-icon">📑</span><span>大纲模式</span>
-          </button>
-          <button class="more-menu-item" onclick="openReflectionSettings()">
-            <span class="more-menu-icon">🎭</span><span>师生讨论</span>
-          </button>
-          <button class="more-menu-item" onclick="openTools()">
-            <span class="more-menu-icon">🛠</span><span>工具管理</span>
-          </button>
-          <button class="more-menu-item" onclick="openTaskQueue()">
-            <span class="more-menu-icon">🧾</span><span>任务队列</span><span class="more-menu-badge" id="taskQueueMenuBadge"></span>
-          </button>
-          <button class="more-menu-item" onclick="openMcpSkillSettings()">
-            <span class="more-menu-icon">🔌</span><span>MCP / Skill</span>
-          </button>
-          <button class="more-menu-item" onclick="openProjectMemorySettings()">
-            <span class="more-menu-icon">🧠</span><span>项目记忆</span>
-          </button>
-          <button class="more-menu-item" onclick="openJsonEditor()">
-            <span class="more-menu-icon">{ }</span><span>JSON 查看器</span>
-          </button>
-          <button class="more-menu-item" onclick="openBackup()">
-            <span class="more-menu-icon">💾</span><span>备份恢复</span>
-          </button>
-          <button class="more-menu-item" onclick="openPermissions()">
-            <span class="more-menu-icon">🔐</span><span>权限管理</span>
-          </button>
-          <button class="more-menu-item" onclick="openPricingManager()">
-            <span class="more-menu-icon">💰</span><span>定价管理</span>
-          </button>
-          <button class="more-menu-item" onclick="openTokenUsageStats()">
-            <span class="more-menu-icon">📊</span><span>Token 统计</span>
-          </button>
-          <button class="more-menu-item" onclick="openContextLimitSettings()">
-            <span class="more-menu-icon">📐</span><span>上下文长度</span>
-          </button>
-          <button class="more-menu-item" onclick="openGitPanel()">
-            <span class="more-menu-icon">🌿</span><span>Git 管理</span>
-          </button>
-        </div>
-      </div>
-      
-      <button class="icon-btn" onclick="toggleTheme()" id="themeBtn">🌙</button>
     </div>
   </aside>
   
@@ -105,18 +67,8 @@
       <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）">📑 大纲</button>
       <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用">🛠 工具</button>
       <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手">🎓 学习</button>
-      <button class="topbar-btn" onclick="openGitPanel()" title="Git 版本管理（本地仓库）">🌿 Git</button>
       <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）">📜 Trace</button>
       <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话">🧪 体检</button>
-    </div>
-    
-    <!-- 沙箱信息栏（替代原 URL 预览栏） -->
-    <div class="workspace-bar" id="workspaceBar" title="AI 工具调用被限制在此目录内">
-      <span class="workspace-icon">🛡️</span>
-      <span class="workspace-label">沙箱目录：</span>
-      <span class="workspace-path" id="workspacePath">未连接</span>
-      <span class="workspace-status" id="workspaceStatus">●</span>
-      <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
     </div>
     
     <!-- Token + 频率统计栏（合并为单栏，左 Token 右 Rate） -->
@@ -1044,7 +996,7 @@
         </div>
       </div>
     </div>
-    <div class="modal-footer" style="margin-top:10px;justify-content:flex-start;">
+    <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
       <button class="btn btn-primary" onclick="exportConfig()">📥 下载</button>
       <button class="btn" onclick="copyConfigToClipboard()">📋 复制</button>
     </div>
@@ -1178,6 +1130,47 @@
 <!-- ============ Toast ============ -->
 <div class="toast" id="toast"></div>
 
+<!-- ============ 统一设置页 ============ -->
+<div class="settings-page" id="settingsPage" aria-hidden="true">
+  <aside class="settings-page-nav">
+    <div class="settings-page-brand">
+      <div class="logo-icon"></div>
+      <div>
+        <div class="settings-page-title">设置</div>
+        <div class="settings-page-sub">AI Chat</div>
+      </div>
+    </div>
+    <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、上下文、代理和本地授权。" onclick="openSettingsSection('main')"><span>⚙</span><span>主设置</span></button>
+    <button class="settings-nav-item" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。" onclick="openSettingsSection('plan')"><span>📋</span><span>计划模式</span></button>
+    <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span>📑</span><span>大纲模式</span></button>
+    <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span>🎭</span><span>师生讨论</span></button>
+    <button class="settings-nav-item" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。" onclick="openSettingsSection('tools')"><span>🛠</span><span>工具管理</span></button>
+    <button class="settings-nav-item" data-settings-section="taskQueue" data-desc="管理自动任务、依赖关系和队列执行。" onclick="openSettingsSection('taskQueue')"><span>🧾</span><span>任务队列</span></button>
+    <button class="settings-nav-item" data-settings-section="mcpSkill" data-desc="管理可注入的 Skill 根目录和 MCP 工具摘要。" onclick="openSettingsSection('mcpSkill')"><span>🔌</span><span>MCP / Skill</span></button>
+    <button class="settings-nav-item" data-settings-section="projectMemory" data-desc="管理当前项目的长期记忆文件和注入策略。" onclick="openSettingsSection('projectMemory')"><span>🧠</span><span>项目记忆</span></button>
+    <button class="settings-nav-item" data-settings-section="jsonEditor" data-desc="查看实际请求、响应、模板、请求头和历史。" onclick="openSettingsSection('jsonEditor')"><span>{ }</span><span>JSON 查看器</span></button>
+    <button class="settings-nav-item" data-settings-section="backup" data-desc="导出和导入配置、工具、归档和模式设置。" onclick="openSettingsSection('backup')"><span>💾</span><span>备份恢复</span></button>
+    <button class="settings-nav-item" data-settings-section="permissions" data-desc="管理工具调用授权、临时权限和本地敏感凭证。" onclick="openSettingsSection('permissions')"><span>🔐</span><span>权限管理</span></button>
+    <button class="settings-nav-item" data-settings-section="pricing" data-desc="配置模型 token 单价和费用估算规则。" onclick="openSettingsSection('pricing')"><span>💰</span><span>定价管理</span></button>
+    <button class="settings-nav-item" data-settings-section="tokenUsage" data-desc="查看全局 token 使用、费用估算和历史账本。" onclick="openSettingsSection('tokenUsage')"><span>📊</span><span>Token 统计</span></button>
+    <button class="settings-nav-item" data-settings-section="contextLimit" data-desc="快速定位到主设置中的模型上下文和自动压缩配置。" onclick="openSettingsSection('contextLimit')"><span>📐</span><span>上下文长度</span></button>
+    <button class="settings-nav-item" data-settings-section="git" data-desc="查看仓库状态、提交历史、文件 diff 和提交操作。" onclick="openSettingsSection('git')"><span>🌿</span><span>Git 管理</span></button>
+  </aside>
+  <main class="settings-page-main">
+    <div class="settings-page-top">
+      <div>
+        <h1 id="settingsPageHeading">主设置</h1>
+        <p id="settingsPageDesc">管理 API、模型、上下文、代理和本地授权。</p>
+      </div>
+      <div class="settings-page-actions">
+        <button class="settings-theme-btn" onclick="toggleTheme()" id="themeBtn" title="切换主题">🌙</button>
+        <button class="settings-page-close" onclick="closeSettingsPage()" title="关闭">×</button>
+      </div>
+    </div>
+    <div class="settings-page-content" id="settingsPageContent"></div>
+  </main>
+</div>
+
 <!-- ============ 🎓 LMS 学习面板（抽屉式） ============ -->
 <aside class="lms-panel" id="lmsPanel">
   <div class="lms-panel-header">
@@ -1286,6 +1279,7 @@
 <script src="js/beacon.js"></script>
 <script src="js/chat.js"></script>
 <script src="js/task-queue.js"></script>
+<script src="js/settings-page.js"></script>
 <script src="js/main.js"></script>
 
 </body>
