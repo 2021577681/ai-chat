@@ -307,6 +307,23 @@
       <div><label style="margin:0;">流式输出</label></div>
       <label class="switch"><input type="checkbox" id="streamMode"><span class="switch-slider"></span></label>
     </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <label style="margin:0;">AI 完成提示音</label>
+        <div class="form-hint" style="margin-top:2px;">普通对话中 AI 完整回答后播放提示音；任务队列自动任务不播放。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="completionSoundEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group">
+      <label>提示音音量</label>
+      <div class="slider-row">
+        <input type="range" id="completionSoundVolume" min="0" max="100" step="5" oninput="document.getElementById('completionSoundVolumeVal').textContent=this.value + '%'">
+        <span class="slider-val" id="completionSoundVolumeVal">80%</span>
+      </div>
+      <div class="form-hint">只影响 AI 完成提示音，不影响浏览器或系统音量。</div>
+    </div>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div>

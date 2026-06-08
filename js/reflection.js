@@ -12,6 +12,7 @@ async function callAPIWithReflection(options = {}) {
   const taskChatId = c && c.id;
   const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
+  const suppressCompletionSound = !!options.suppressCompletionSound;
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
   const abortCtrl = new AbortController();
   const task = (typeof beginChatTask === 'function')
@@ -192,6 +193,7 @@ async function callAPIWithReflection(options = {}) {
       else renderIfVisible();
     }
     saveData();
+    if (!suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
   } catch (e) {
     if (e.name === 'AbortError') aiMsg.content = (aiMsg.content || '') + '\n\n*[已停止]*';
     else aiMsg.content = `❌ 师生模式出错：${e.message}`;

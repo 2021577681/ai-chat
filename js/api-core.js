@@ -356,6 +356,7 @@ async function callAPI(roundLimit, options = {}) {
   const taskChatId = c.id;
   const isTaskVisible = () => isCurrentChat(taskChatId);
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!state.settings.useTools;
+  const suppressCompletionSound = !!options.suppressCompletionSound;
   
   const s = state.settings;
   
@@ -619,9 +620,9 @@ async function callAPI(roundLimit, options = {}) {
       }
       
       if (userStoppedAll) {
-        await callAPI(0, { chatId: taskChatId, useTools: taskUseTools });
+        await callAPI(0, { chatId: taskChatId, useTools: taskUseTools, suppressCompletionSound });
       } else {
-        await callAPI(roundLimit - 1, { chatId: taskChatId, useTools: taskUseTools });
+        await callAPI(roundLimit - 1, { chatId: taskChatId, useTools: taskUseTools, suppressCompletionSound });
       }
       return;
     }
@@ -647,6 +648,7 @@ async function callAPI(roundLimit, options = {}) {
       if (isTaskVisible()) renderMessages();
     }
     if (isTaskVisible() && typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount(taskChatId);
+    if (!suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
   } catch (e) {
     if (e.name === 'AbortError') c.messages[lastIdx].content += '\n\n*[已停止]*';
     else {

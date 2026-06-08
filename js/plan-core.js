@@ -314,6 +314,7 @@ async function callAPIWithPlan() {
 async function approveAndExecutePlan(msgIdx) {
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
+  if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   const taskChatId = c.id;
   const renderIfVisible = () => { if (isCurrentChat(taskChatId)) renderMessages(); };
   
@@ -494,6 +495,7 @@ async function approveAndExecutePlan(msgIdx) {
     renderIfVisible();
     saveData();
     toast('✅ 计划执行完成并通过验证', 3000);
+    if (typeof playCompletionSound === 'function') playCompletionSound();
     
   } catch (e) {
     if (currentRunningIdx >= 0 && plan.steps[currentRunningIdx]) {
@@ -720,6 +722,7 @@ function acceptPlanWithFailedVerification(msgIdx) {
   saveData();
   renderMessages();
   toast('已接受当前结果');
+  if (typeof playCompletionSound === 'function') playCompletionSound();
 }
 
 // ============ 规划辅助 ============

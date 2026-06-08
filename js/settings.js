@@ -16,6 +16,16 @@ function openSettings() {
   document.getElementById('tempVal').textContent = s.temperature;
   document.getElementById('maxTokens').value = s.maxTokens;
   document.getElementById('streamMode').checked = s.stream;
+  const completionSoundEl = document.getElementById('completionSoundEnabled');
+  if (completionSoundEl) completionSoundEl.checked = !!s.completionSoundEnabled;
+  const completionVolumeEl = document.getElementById('completionSoundVolume');
+  const completionVolumeValEl = document.getElementById('completionSoundVolumeVal');
+  if (completionVolumeEl) {
+    const rawVolume = parseInt(s.completionSoundVolume);
+    const v = isNaN(rawVolume) ? 80 : Math.max(0, Math.min(100, rawVolume));
+    completionVolumeEl.value = v;
+    if (completionVolumeValEl) completionVolumeValEl.textContent = v + '%';
+  }
   // ⭐ 本地代理开关
   const proxyEl = document.getElementById('useLocalProxy');
   if (proxyEl) proxyEl.checked = !!s.useLocalProxy;
@@ -85,6 +95,14 @@ function saveAndClose() {
   s.temperature = parseFloat(document.getElementById('temperature').value);
   s.maxTokens = parseInt(document.getElementById('maxTokens').value);
   s.stream = document.getElementById('streamMode').checked;
+  const completionSoundEl = document.getElementById('completionSoundEnabled');
+  if (completionSoundEl) s.completionSoundEnabled = completionSoundEl.checked;
+  const completionVolumeEl = document.getElementById('completionSoundVolume');
+  if (completionVolumeEl) {
+    const v = parseInt(completionVolumeEl.value);
+    s.completionSoundVolume = isNaN(v) ? 80 : Math.max(0, Math.min(100, v));
+  }
+  if (s.completionSoundEnabled && typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   // ⭐ 本地代理开关
   const proxyEl = document.getElementById('useLocalProxy');
   if (proxyEl) s.useLocalProxy = proxyEl.checked;

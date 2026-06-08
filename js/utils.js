@@ -24,6 +24,59 @@ function scrollBottom() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+let _completionSoundAudioCtx = null;
+
+function ensureCompletionSoundReady() {
+  try {
+    if (!state.settings || !state.settings.completionSoundEnabled) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!_completionSoundAudioCtx) _completionSoundAudioCtx = new AudioCtx();
+    if (_completionSoundAudioCtx.state === 'suspended') {
+      _completionSoundAudioCtx.resume().catch(() => {});
+    }
+  } catch (e) {}
+}
+
+function playCompletionSound(options = {}) {
+  try {
+    if (!state.settings || !state.settings.completionSoundEnabled) return;
+    if (options && options.suppress) return;
+    const rawVolume = parseInt(state.settings.completionSoundVolume);
+    const volumePct = isNaN(rawVolume) ? 80 : Math.max(0, Math.min(100, rawVolume));
+    if (volumePct <= 0) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = _completionSoundAudioCtx || (_completionSoundAudioCtx = new AudioCtx());
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
+    const volume = volumePct / 100;
+    const peak = 0.08 + 0.67 * volume;
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(peak, now + 0.012);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+    master.connect(ctx.destination);
+
+    [880, 1175].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = now + idx * 0.07;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(idx ? 0.55 : 0.65, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+      osc.connect(gain).connect(master);
+      osc.start(start);
+      osc.stop(start + 0.18);
+    });
+  } catch (e) {}
+}
+
 // ⭐ 判断用户是否在消息列表底部附近（默认 120px 容差）
 // 用于实现"用户在底部时自动跟随；用户翻看历史时不打扰"
 function isNearBottom(threshold = 120) {

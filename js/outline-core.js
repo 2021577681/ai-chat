@@ -112,6 +112,7 @@ async function callAPIWithOutline(options = {}) {
   const taskChatId = c.id;
   const s = state.settings;
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
+  const suppressCompletionSound = !!options.suppressCompletionSound;
   
   let abortCtrl = new AbortController();
   const task = (typeof beginChatTask === 'function')
@@ -581,15 +582,18 @@ async function callAPIWithOutline(options = {}) {
       if (completedNaturally) toast('✅ 大纲任务完成', 3000);
       else toast('⚠️ 已达轮数上限，已强制收尾', 4000);
     }
+    if (!suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
     
   } catch (e) {
     // ⭐ TimeoutError 视同 AbortError 处理：把任务挂起为 paused 并保留 _snap，让用户能继续
     const isAbortLike = (e.name === 'AbortError' || e.name === 'TimeoutError');
+    let completedByForceFinish = false;
     
     if (isAbortLike) {
       // 检查是否是"立即收尾"信号
       const forceFinish = task ? !!task.outlineForceFinish : !!state._outlineForceFinish;
         if (forceFinish) {
+          completedByForceFinish = true;
           if (task) task.outlineForceFinish = false;
           state._outlineForceFinish = false;
           // 走保底收尾流程
@@ -650,6 +654,7 @@ async function callAPIWithOutline(options = {}) {
     if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
     saveData();
+    if (completedByForceFinish && !suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
   } finally {
     if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
     else {

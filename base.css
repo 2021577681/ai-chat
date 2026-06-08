@@ -355,11 +355,42 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .task-queue-status.skipped{background:rgba(107,114,128,.12);color:var(--text-secondary)}
 .task-queue-order{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);white-space:nowrap}
 .task-queue-order input{width:56px;padding:5px 6px;border:1px solid var(--border);border-radius:7px;background:var(--bg-sidebar);color:var(--text);font-size:13px}
+.task-queue-expose{white-space:nowrap}
+.task-queue-depends{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-secondary);white-space:nowrap}
+.task-queue-depends input{width:92px;padding:6px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg-sidebar);color:var(--text);font-size:13px}
+.task-queue-output-badge{font-size:11px;border-radius:999px;padding:2px 7px;background:rgba(34,197,94,.12);color:var(--success);white-space:nowrap}
+.task-queue-output-badge.building{background:rgba(59,130,246,.12);color:var(--primary)}
 .task-queue-item textarea{width:100%;min-height:58px;resize:vertical;border:1px solid var(--border);border-radius:8px;background:var(--bg-sidebar);color:var(--text);padding:8px;font-family:inherit;font-size:13px;line-height:1.45}
 .task-queue-item textarea:disabled{opacity:.78}
 .task-queue-item-options{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .task-queue-item-options .btn{padding:6px 9px;font-size:12px}
 .task-queue-error{font-size:12px;color:var(--danger);line-height:1.4}
+.task-queue-output-warning{font-size:12px;color:var(--warning);line-height:1.4}
+.task-queue-tree-modal .modal{width:min(1120px,96vw)}
+.task-queue-tree-toolbar{display:flex;align-items:center;gap:10px;margin:8px 0 12px}
+.task-queue-tree-hint{margin-right:auto;color:var(--text-secondary);font-size:13px}
+.task-queue-tree-wrap{position:relative;max-height:68vh;overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:16px}
+.task-queue-tree-empty{padding:24px;border:1px dashed var(--border);border-radius:10px;color:var(--text-secondary);text-align:center;background:var(--bg-input)}
+.task-queue-tree-canvas{position:relative;display:inline-block;min-width:100%;padding:4px 8px 12px}
+.task-queue-tree-cols{position:relative;z-index:2;display:flex;align-items:flex-start;gap:86px}
+.task-queue-tree-col{width:230px;flex:0 0 230px}
+.task-queue-tree-col-title{font-size:12px;font-weight:700;color:var(--text-secondary);margin:0 0 10px;padding-left:2px}
+.task-queue-tree-nodes{display:flex;flex-direction:column;gap:12px}
+.task-queue-tree-node{min-height:86px;border:1px solid var(--border);border-radius:8px;background:var(--bg-sidebar);padding:9px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.task-queue-tree-node.running{border-color:var(--primary)}
+.task-queue-tree-node.done{border-color:rgba(34,197,94,.45)}
+.task-queue-tree-node.error{border-color:var(--danger)}
+.task-queue-tree-node.paused,.task-queue-tree-node.stopped{border-color:var(--warning)}
+.task-queue-tree-node-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.task-queue-tree-status,.task-queue-tree-order,.task-queue-tree-chip{font-size:11px;border-radius:999px;padding:2px 7px;background:var(--bg-hover);color:var(--text-secondary);white-space:nowrap}
+.task-queue-tree-order{margin-left:auto}
+.task-queue-tree-text{font-size:13px;font-weight:600;line-height:1.35;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.task-queue-tree-foot{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;min-height:18px}
+.task-queue-tree-chip.output{background:rgba(34,197,94,.12);color:var(--success)}
+.task-queue-tree-chip.blocked{background:rgba(245,158,11,.14);color:var(--warning)}
+.task-queue-tree-edges{position:absolute;left:0;top:0;z-index:1;pointer-events:none;overflow:visible}
+.task-queue-tree-edges path{fill:none;stroke:rgba(148,163,184,.58);stroke-width:1.6}
+.task-queue-tree-edges path.dependency{stroke:var(--primary);stroke-width:2}
 
 /* 🗂️ API 配置档案 */
 .api-profile-box{

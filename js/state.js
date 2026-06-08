@@ -15,6 +15,8 @@ let state = {
     temperature: 0.7,
     maxTokens: 2048,
     stream: true,
+    completionSoundEnabled: false,
+    completionSoundVolume: 80,
     maxToolRounds: 15,
     theme: 'light',
     useTools: false,

@@ -642,6 +642,7 @@ async function onSend() {
     openSettings();
     return;
   }
+  if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   if (!currentChat()) newChat();
   
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
@@ -760,6 +761,7 @@ function copyMsg(idx) {
 async function regenerate(idx) {
   const c = currentChat();
   if (!c) return;
+  if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   
   // ⭐ 关键修复：必须先中止任何正在跑的旧请求，否则会出现：
   //   1) 旧 SSE 流继续往新插入的占位消息写字符 → 内容错乱

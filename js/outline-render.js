@@ -305,6 +305,7 @@ function resetOutlinePrompt() {
 async function resumeOutline(msgIdx) {
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return;
+  if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   
   if ((typeof isChatGenerating === 'function' ? isChatGenerating(c.id) : state.isGenerating)) {
     if (typeof toast === 'function') toast('⏳ 已有任务在执行中', 3000);

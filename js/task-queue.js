@@ -41,12 +41,25 @@ function _taskQueueNormalizeItem(raw) {
   let status = TASK_QUEUE_ITEM_STATUSES.includes(item.status) ? item.status : 'pending';
   if (status === 'running') status = 'pending';
   if (status === 'canceled') status = 'stopped';
+  const dependsText = typeof item.dependsOnTasksText === 'string'
+    ? item.dependsOnTasksText
+    : (typeof item.dependsOnOrdersText === 'string'
+      ? item.dependsOnOrdersText
+      : _taskQueueFormatIndexList(item.dependsOnTaskIndexes || item.dependsOnOrders || item.dependsOn || []));
   return {
     id: item.id || _taskQueueNewId(),
     text: String(item.text || '').trim(),
     order: _taskQueuePositiveInt(item.order, 1),
     mode,
     useTools: !!item.useTools,
+    exposeOutput: !!item.exposeOutput,
+    dependsOnTaskIds: Array.isArray(item.dependsOnTaskIds) ? item.dependsOnTaskIds.filter(Boolean) : [],
+    dependsOnTaskIndexes: [],
+    dependsOnTasksText: dependsText,
+    outputPackage: _taskQueueNormalizeOutputPackage(item.outputPackage),
+    outputUpdatedAt: item.outputUpdatedAt || null,
+    outputWarning: item.outputWarning || '',
+    promptHash: item.promptHash || '',
     status,
     chatId: item.chatId || null,
     error: item.error || '',
@@ -67,6 +80,7 @@ function loadTaskQueue() {
       q.items = Array.isArray(parsed.items) ? parsed.items.map(_taskQueueNormalizeItem).filter(it => it.text) : [];
       q.defaultMode = ['normal', 'outline', 'reflection'].includes(parsed.defaultMode) ? parsed.defaultMode : 'normal';
       q.defaultUseTools = !!parsed.defaultUseTools;
+      _taskQueueNormalizeDependencyRefs(q);
     }
   } catch (e) {
     console.warn('[task-queue] 加载失败:', e);
@@ -89,6 +103,16 @@ function saveTaskQueue() {
         order: _taskQueuePositiveInt(it.order, 1),
         mode: it.mode,
         useTools: !!it.useTools,
+        exposeOutput: !!it.exposeOutput,
+        dependsOnTaskIds: Array.isArray(it.dependsOnTaskIds) ? it.dependsOnTaskIds.filter(Boolean) : [],
+        dependsOnTaskIndexes: Array.isArray(it.dependsOnTaskIndexes) ? it.dependsOnTaskIndexes : [],
+        dependsOnTasksText: typeof it.dependsOnTasksText === 'string'
+          ? it.dependsOnTasksText
+          : _taskQueueFormatIndexList(it.dependsOnTaskIndexes || []),
+        outputPackage: _taskQueueNormalizeOutputPackage(it.outputPackage),
+        outputUpdatedAt: it.outputUpdatedAt || null,
+        outputWarning: it.outputWarning || '',
+        promptHash: it.promptHash || '',
         status: it.status,
         chatId: it.chatId || null,
         error: it.error || '',
@@ -168,12 +192,13 @@ function _taskQueueEnsureModal() {
         <button class="btn btn-primary" id="taskQueueStartBtn" onclick="startTaskQueue()">按顺序开始执行</button>
         <button class="btn" id="taskQueuePauseAllBtn" onclick="taskQueueTogglePauseAll()">暂停所有任务</button>
         <button class="btn btn-warning" id="taskQueueStopAllBtn" onclick="taskQueueStopAll()">停止所有任务</button>
+        <button class="btn" onclick="openTaskQueueTree()">生成树形图</button>
         <button class="btn" onclick="taskQueueClearSettled()">清除已结束</button>
         <button class="btn" onclick="taskQueueClearAll()">清空队列</button>
       </div>
       <div class="task-queue-list" id="taskQueueList"></div>
       <div class="form-hint" style="margin-top:12px;">
-        执行规则：先执行全部序号 1，序号 1 全部完成或跳过后才执行序号 2。若某序号存在暂停、停止、失败或待处理任务，后续序号不会执行。
+        执行规则：先执行全部序号 1，序号 1 全部完成或跳过后才执行序号 2。勾选“供后续引用”的任务会保存结构化输出包；后续任务可在“依赖任务”中填写 #1、#2 这类任务卡片编号读取输出。
       </div>
     </div>
   `;
@@ -181,6 +206,50 @@ function _taskQueueEnsureModal() {
     if (e.target === modal) closeTaskQueue();
   });
   document.body.appendChild(modal);
+}
+
+function _taskQueueEnsureTreeModal() {
+  if (document.getElementById('taskQueueTreeModal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'taskQueueTreeModal';
+  modal.className = 'modal-mask task-queue-tree-modal';
+  modal.innerHTML = `
+    <div class="modal wide">
+      <h2>任务树形图 <button class="modal-close" onclick="closeTaskQueueTree()">×</button></h2>
+      <div class="task-queue-tree-toolbar">
+        <div class="task-queue-tree-hint">从左到右按序号展开；同一列内为并行任务。</div>
+        <button class="btn" onclick="renderTaskQueueTree()">刷新</button>
+      </div>
+      <div class="task-queue-tree-wrap" id="taskQueueTreeWrap"></div>
+    </div>
+  `;
+  modal.addEventListener('click', e => {
+    if (e.target === modal) closeTaskQueueTree();
+  });
+  document.body.appendChild(modal);
+  const wrap = modal.querySelector('#taskQueueTreeWrap');
+  if (wrap) wrap.addEventListener('scroll', () => _taskQueueDrawTreeEdges(wrap), { passive: true });
+  if (typeof window !== 'undefined' && !window._taskQueueTreeResizeBound) {
+    window._taskQueueTreeResizeBound = true;
+    window.addEventListener('resize', () => {
+      const currentWrap = document.getElementById('taskQueueTreeWrap');
+      const treeModal = document.getElementById('taskQueueTreeModal');
+      if (currentWrap && treeModal && treeModal.classList.contains('show')) _taskQueueDrawTreeEdges(currentWrap);
+    });
+  }
+}
+
+function openTaskQueueTree() {
+  const q = ensureTaskQueue();
+  if (!q.loaded) loadTaskQueue();
+  _taskQueueEnsureTreeModal();
+  renderTaskQueueTree();
+  document.getElementById('taskQueueTreeModal').classList.add('show');
+}
+
+function closeTaskQueueTree() {
+  const modal = document.getElementById('taskQueueTreeModal');
+  if (modal) modal.classList.remove('show');
 }
 
 function _taskQueueFillControls() {
@@ -220,6 +289,7 @@ function renderTaskQueueBadge() {
 
 function renderTaskQueueModal() {
   const q = ensureTaskQueue();
+  _taskQueueNormalizeDependencyRefs(q);
   renderTaskQueueBadge();
   const statsEl = document.getElementById('taskQueueStats');
   const listEl = document.getElementById('taskQueueList');
@@ -229,9 +299,10 @@ function renderTaskQueueModal() {
     acc[it.status] = (acc[it.status] || 0) + 1;
     return acc;
   }, {});
+  const outputCount = q.items.filter(it => it.outputPackage).length;
   const activeText = q.activeOrder ? ` · 当前序号 ${q.activeOrder}` : '';
   const pausedText = q.paused ? ' · 已暂停' : '';
-  statsEl.textContent = `共 ${q.items.length} 条 · 待运行 ${counts.pending || 0} · 运行中 ${counts.running || 0} · 暂停 ${counts.paused || 0} · 停止 ${counts.stopped || 0} · 跳过 ${counts.skipped || 0} · 完成 ${counts.done || 0} · 失败 ${counts.error || 0}${activeText}${pausedText}`;
+  statsEl.textContent = `共 ${q.items.length} 条 · 待运行 ${counts.pending || 0} · 运行中 ${counts.running || 0} · 暂停 ${counts.paused || 0} · 停止 ${counts.stopped || 0} · 跳过 ${counts.skipped || 0} · 完成 ${counts.done || 0} · 失败 ${counts.error || 0} · 输出包 ${outputCount}${activeText}${pausedText}`;
 
   const startBtn = document.getElementById('taskQueueStartBtn');
   const pauseAllBtn = document.getElementById('taskQueuePauseAllBtn');
@@ -263,9 +334,15 @@ function renderTaskQueueModal() {
 
 function _taskQueueRenderItem(item, idx) {
   const editable = ['pending', 'paused', 'stopped', 'error'].includes(item.status);
+  const configEditable = item.status !== 'running';
   const canPause = item.status === 'running' || item.status === 'pending';
   const canStop = item.status === 'running' || item.status === 'pending' || item.status === 'paused';
   const canSkip = !TASK_QUEUE_DONE_STATUSES.has(item.status);
+  const exposeChecked = item.exposeOutput ? 'checked' : '';
+  const dependsValue = _taskQueueDisplayDependencyIndexes(item);
+  const outputBadge = item.outputPackage
+    ? `<span class="task-queue-output-badge" title="已保存结构化输出包">输出包</span>`
+    : (item.outputBuilding ? `<span class="task-queue-output-badge building" title="正在生成结构化输出包">生成输出包...</span>` : '');
   const chatBtn = item.chatId
     ? `<button class="btn" onclick="taskQueueOpenChat('${item.id}')">打开对话</button>`
     : '';
@@ -282,8 +359,11 @@ function _taskQueueRenderItem(item, idx) {
         <label class="task-queue-order">序号
           <input type="number" min="1" step="1" value="${_taskQueuePositiveInt(item.order, 1)}" ${item.status === 'running' ? 'disabled' : ''} onchange="taskQueueUpdateItemOrder('${item.id}', this.value)">
         </label>
+        <label class="task-queue-check task-queue-expose" title="完成后保存结构化输出包，供后续任务按 #编号 引用">
+          <input type="checkbox" ${exposeChecked} ${configEditable ? '' : 'disabled'} onchange="taskQueueUpdateItemExpose('${item.id}', this.checked)"> 供后续引用
+        </label>
         <span class="task-queue-title">#${idx + 1} ${escapeHtml(_taskQueueItemTitle(item))}</span>
-        <span class="task-queue-meta">${_taskQueueModeText(item)}${item.chatId ? ' · 已建对话' : ''}</span>
+        <span class="task-queue-meta">${_taskQueueModeText(item)}${item.chatId ? ' · 已建对话' : ''}${dependsValue ? ` · 依赖 #${escapeHtml(dependsValue.replace(/,/g, ',#'))}` : ''}</span>
       </div>
       <textarea ${editable ? '' : 'disabled'} oninput="taskQueueUpdateItemText('${item.id}', this.value)">${escapeHtml(item.text)}</textarea>
       <div class="task-queue-item-options">
@@ -297,14 +377,165 @@ function _taskQueueRenderItem(item, idx) {
         <label class="task-queue-check">
           <input type="checkbox" ${item.useTools ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="taskQueueUpdateItemTools('${item.id}', this.checked)"> 启用工具
         </label>
+        <label class="task-queue-depends">依赖任务
+          <input type="text" value="${escapeHtml(dependsValue)}" placeholder="如 1,2" ${configEditable ? '' : 'disabled'} onchange="taskQueueUpdateItemDepends('${item.id}', this.value)">
+        </label>
+        ${outputBadge}
         <button class="btn" ${canPause ? '' : 'disabled'} onclick="taskQueuePauseItem('${item.id}')">暂停</button>
         <button class="btn btn-warning" ${canStop ? '' : 'disabled'} onclick="taskQueueStopItem('${item.id}')">停止</button>
         <button class="btn" ${canSkip ? '' : 'disabled'} onclick="taskQueueSkipItem('${item.id}')">跳过</button>
         ${chatBtn}${retryBtn}${removeBtn}
       </div>
       ${item.error ? `<div class="task-queue-error">${escapeHtml(item.error)}</div>` : ''}
+      ${item.outputWarning ? `<div class="task-queue-output-warning">${escapeHtml(item.outputWarning)}</div>` : ''}
     </div>
   `;
+}
+
+function renderTaskQueueTree() {
+  const q = ensureTaskQueue();
+  const wrap = document.getElementById('taskQueueTreeWrap');
+  if (!wrap) return;
+  const validation = _taskQueueValidateOrders(q);
+  if (!validation.ok) {
+    wrap.innerHTML = `<div class="task-queue-tree-empty">${escapeHtml(validation.error)}</div>`;
+    return;
+  }
+  if (!q.items.length) {
+    wrap.innerHTML = '<div class="task-queue-tree-empty">还没有任务。</div>';
+    return;
+  }
+  wrap.innerHTML = _taskQueueBuildTreeHtml(q);
+  requestAnimationFrame(() => _taskQueueDrawTreeEdges(wrap));
+}
+
+function _taskQueueBuildTreeHtml(q) {
+  const items = q.items
+    .map((item, idx) => ({ item, idx }))
+    .sort((a, b) => (_taskQueuePositiveInt(a.item.order, 1) - _taskQueuePositiveInt(b.item.order, 1))
+      || ((a.item.createdAt || 0) - (b.item.createdAt || 0))
+      || (a.idx - b.idx));
+  const orders = Array.from(new Set(items.map(({ item }) => _taskQueuePositiveInt(item.order, 1)))).sort((a, b) => a - b);
+  const columns = orders.map(order => {
+    const nodes = items.filter(({ item }) => _taskQueuePositiveInt(item.order, 1) === order);
+    return `
+      <div class="task-queue-tree-col" data-order="${order}">
+        <div class="task-queue-tree-col-title">序号 ${order}</div>
+        <div class="task-queue-tree-nodes">
+          ${nodes.map(({ item, idx }) => _taskQueueRenderTreeNode(item, idx)).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="task-queue-tree-canvas" id="taskQueueTreeCanvas">
+      <svg class="task-queue-tree-edges" id="taskQueueTreeEdges" aria-hidden="true"></svg>
+      <div class="task-queue-tree-cols">${columns}</div>
+    </div>
+  `;
+}
+
+function _taskQueueRenderTreeNode(item, idx) {
+  const depText = _taskQueueDisplayDependencyIndexes(item);
+  const expose = item.exposeOutput ? '<span class="task-queue-tree-chip output">输出</span>' : '';
+  const blocked = ['paused', 'stopped', 'error'].includes(item.status) ? '<span class="task-queue-tree-chip blocked">阻塞</span>' : '';
+  return `
+    <div class="task-queue-tree-node ${escapeHtml(item.status)}" data-task-id="${escapeHtml(item.id)}" data-order="${_taskQueuePositiveInt(item.order, 1)}">
+      <div class="task-queue-tree-node-head">
+        <span class="task-queue-tree-status">${_taskQueueStatusText(item.status)}</span>
+        <span class="task-queue-tree-order">序号 ${_taskQueuePositiveInt(item.order, 1)}</span>
+      </div>
+      <div class="task-queue-tree-text">${escapeHtml(_taskQueueTreeNodeText(item, idx))}</div>
+      <div class="task-queue-tree-foot">
+        ${expose}${blocked}${depText ? `<span class="task-queue-tree-chip">依赖 #${escapeHtml(depText.replace(/,/g, ',#'))}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function _taskQueueTreeNodeText(item, idx) {
+  const text = String(item.text || '').replace(/\s+/g, ' ').trim();
+  const prefix = `#${idx + 1} `;
+  const max = 120;
+  return prefix + (text.length > max ? text.slice(0, max) + '...' : text || '空任务');
+}
+
+function _taskQueueDrawTreeEdges(wrap) {
+  const canvas = wrap.querySelector('#taskQueueTreeCanvas');
+  const svg = wrap.querySelector('#taskQueueTreeEdges');
+  if (!canvas || !svg) return;
+  const q = ensureTaskQueue();
+  const canvasRect = canvas.getBoundingClientRect();
+  const width = Math.max(canvas.scrollWidth, canvasRect.width);
+  const height = Math.max(canvas.scrollHeight, canvasRect.height);
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.innerHTML = '';
+  const edges = _taskQueueTreeEdges(q);
+  const frag = document.createDocumentFragment();
+  for (const edge of edges) {
+    const from = canvas.querySelector(`[data-task-id="${_taskQueueCssEscape(edge.from)}"]`);
+    const to = canvas.querySelector(`[data-task-id="${_taskQueueCssEscape(edge.to)}"]`);
+    if (!from || !to) continue;
+    const a = from.getBoundingClientRect();
+    const b = to.getBoundingClientRect();
+    const x1 = a.right - canvasRect.left + canvas.scrollLeft;
+    const y1 = a.top - canvasRect.top + canvas.scrollTop + a.height / 2;
+    const x2 = b.left - canvasRect.left + canvas.scrollLeft;
+    const y2 = b.top - canvasRect.top + canvas.scrollTop + b.height / 2;
+    const dx = Math.max(48, (x2 - x1) / 2);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+    path.setAttribute('class', edge.type === 'dependency' ? 'dependency' : 'sequence');
+    frag.appendChild(path);
+  }
+  svg.appendChild(frag);
+}
+
+function _taskQueueTreeEdges(q) {
+  const items = (q.items || []).filter(Boolean);
+  _taskQueueNormalizeDependencyRefs(q);
+  const byOrder = new Map();
+  for (const item of items) {
+    const order = _taskQueuePositiveInt(item.order, 1);
+    if (!byOrder.has(order)) byOrder.set(order, []);
+    byOrder.get(order).push(item);
+  }
+  const orders = Array.from(byOrder.keys()).sort((a, b) => a - b);
+  const edges = [];
+  const seen = new Set();
+  const addEdge = (from, to, type) => {
+    if (!from || !to || from.id === to.id) return;
+    const key = `${from.id}->${to.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    edges.push({ from: from.id, to: to.id, type });
+  };
+  for (const item of items) {
+    const deps = item.dependsOnTaskIds || [];
+    if (deps.length) {
+      for (const depId of deps) {
+        const source = items.find(it => it.id === depId);
+        if (source) addEdge(source, item, 'dependency');
+      }
+    }
+  }
+  for (let i = 1; i < orders.length; i++) {
+    const prev = byOrder.get(orders[i - 1]) || [];
+    const curr = byOrder.get(orders[i]) || [];
+    for (const target of curr) {
+      if (target.dependsOnTaskIds && target.dependsOnTaskIds.length) continue;
+      for (const source of prev) addEdge(source, target, 'sequence');
+    }
+  }
+  return edges;
+}
+
+function _taskQueueCssEscape(value) {
+  const s = String(value || '');
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(s);
+  return s.replace(/["\\]/g, '\\$&');
 }
 
 function _taskQueueStatusText(status) {
@@ -333,6 +564,105 @@ function _taskQueueItemTitle(item) {
   return text.length > 48 ? text.slice(0, 48) + '...' : text || '空任务';
 }
 
+function _taskQueueParseIndexList(value) {
+  if (Array.isArray(value)) {
+    const indexes = [];
+    for (const raw of value) {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1) {
+        return { ok: false, indexes: [], error: '依赖任务编号必须是正整数' };
+      }
+      indexes.push(n);
+    }
+    return { ok: true, indexes: Array.from(new Set(indexes)).sort((a, b) => a - b), error: '' };
+  }
+  const text = String(value || '').trim();
+  if (!text) return { ok: true, indexes: [], error: '' };
+  const parts = text.split(/[,，;；、\s]+/).map(s => s.trim()).filter(Boolean);
+  const indexes = [];
+  for (const part of parts) {
+    const clean = part.replace(/^#/g, '');
+    if (!/^\d+$/.test(clean)) {
+      return { ok: false, indexes: [], error: `无法识别依赖任务编号「${part}」` };
+    }
+    const n = Number(clean);
+    if (!Number.isInteger(n) || n < 1) {
+      return { ok: false, indexes: [], error: '依赖任务编号必须是正整数' };
+    }
+    indexes.push(n);
+  }
+  return { ok: true, indexes: Array.from(new Set(indexes)).sort((a, b) => a - b), error: '' };
+}
+
+function _taskQueueFormatIndexList(value) {
+  const parsed = _taskQueueParseIndexList(value);
+  return parsed.ok ? parsed.indexes.join(',') : String(value || '');
+}
+
+function _taskQueuePruneMissingDepends(q) {
+  const existing = new Set((q.items || []).map(it => it.id));
+  for (const item of q.items || []) {
+    item.dependsOnTaskIds = (item.dependsOnTaskIds || []).filter(id => existing.has(id));
+    item.dependsOnTaskIndexes = _taskQueueTaskIdsToIndexes(q, item.dependsOnTaskIds);
+    item.dependsOnTasksText = _taskQueueFormatIndexList(item.dependsOnTaskIndexes);
+  }
+}
+
+function _taskQueueOrderedItems(q = ensureTaskQueue()) {
+  return (q.items || [])
+    .map((item, idx) => ({ item, idx }))
+    .sort((a, b) => (_taskQueuePositiveInt(a.item.order, 1) - _taskQueuePositiveInt(b.item.order, 1))
+      || ((a.item.createdAt || 0) - (b.item.createdAt || 0))
+      || (a.idx - b.idx));
+}
+
+function _taskQueueTaskIndexMap(q = ensureTaskQueue()) {
+  const map = new Map();
+  _taskQueueOrderedItems(q).forEach(({ item }, idx) => map.set(item.id, idx + 1));
+  return map;
+}
+
+function _taskQueueTaskAtIndex(q, index) {
+  const entry = _taskQueueOrderedItems(q)[index - 1];
+  return entry ? entry.item : null;
+}
+
+function _taskQueueTaskIdsToIndexes(q, ids) {
+  const map = _taskQueueTaskIndexMap(q);
+  return (ids || []).map(id => map.get(id)).filter(n => Number.isInteger(n));
+}
+
+function _taskQueueDisplayDependencyIndexes(item) {
+  const q = ensureTaskQueue();
+  if (!Array.isArray(item.dependsOnTaskIds) || !item.dependsOnTaskIds.length) return '';
+  return _taskQueueFormatIndexList(_taskQueueTaskIdsToIndexes(q, item.dependsOnTaskIds));
+}
+
+function _taskQueueNormalizeDependencyRefs(q) {
+  const items = q.items || [];
+  const existingIds = new Set(items.map(it => it.id));
+  for (const item of items) {
+    const ids = Array.isArray(item.dependsOnTaskIds) ? item.dependsOnTaskIds.filter(id => existingIds.has(id)) : [];
+    if (!ids.length && item.dependsOnTasksText) {
+      const parsed = _taskQueueParseIndexList(item.dependsOnTasksText);
+      if (parsed.ok) {
+        for (const index of parsed.indexes) {
+          const dep = _taskQueueTaskAtIndex(q, index);
+          if (dep && dep.id !== item.id) ids.push(dep.id);
+        }
+      }
+    }
+    item.dependsOnTaskIds = Array.from(new Set(ids));
+    item.dependsOnTaskIndexes = _taskQueueTaskIdsToIndexes(q, item.dependsOnTaskIds);
+    if (item.dependsOnTaskIds.length || !item.dependsOnTasksText) {
+      item.dependsOnTasksText = _taskQueueFormatIndexList(item.dependsOnTaskIndexes);
+    } else {
+      const parsed = _taskQueueParseIndexList(item.dependsOnTasksText);
+      item.dependsOnTaskIndexes = parsed.ok ? parsed.indexes : [];
+    }
+  }
+}
+
 function taskQueueAddTasks() {
   const q = ensureTaskQueue();
   taskQueueSaveDefaults();
@@ -354,6 +684,14 @@ function taskQueueAddTasks() {
       order: 1,
       mode: q.defaultMode,
       useTools: !!q.defaultUseTools,
+      exposeOutput: false,
+      dependsOnTaskIds: [],
+      dependsOnTaskIndexes: [],
+      dependsOnTasksText: '',
+      outputPackage: null,
+      outputUpdatedAt: null,
+      outputWarning: '',
+      promptHash: '',
       status: 'pending',
       chatId: null,
       error: '',
@@ -386,14 +724,29 @@ function taskQueueUpdateItemText(id, value) {
   const item = _taskQueueFindItem(id);
   if (!item || !['pending', 'paused', 'stopped', 'error'].includes(item.status)) return;
   item.text = String(value || '').trim();
+  item.promptHash = '';
   saveTaskQueue();
   renderTaskQueueBadge();
 }
 
-function taskQueueUpdateItemOrder(id, value) {
+async function taskQueueUpdateItemOrder(id, value) {
   const item = _taskQueueFindItem(id);
   if (!item || item.status === 'running') return;
   item.order = _taskQueuePositiveInt(value, 1);
+  if (item.exposeOutput && item.status === 'done' && item.chatId) {
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputWarning = '';
+    _taskQueueNormalizeDependencyRefs(ensureTaskQueue());
+    saveTaskQueue();
+    renderTaskQueueModal();
+    await _taskQueueRefreshOutputPackage(item);
+  } else {
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputWarning = '';
+  }
+  _taskQueueNormalizeDependencyRefs(ensureTaskQueue());
   saveTaskQueue();
   renderTaskQueueModal();
 }
@@ -414,11 +767,60 @@ function taskQueueUpdateItemTools(id, checked) {
   renderTaskQueueModal();
 }
 
+async function taskQueueUpdateItemExpose(id, checked) {
+  const item = _taskQueueFindItem(id);
+  if (!item || item.status === 'running') return;
+  item.exposeOutput = !!checked;
+  if (!item.exposeOutput) {
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputWarning = '';
+  } else if (item.status === 'done' && item.chatId) {
+    saveTaskQueue();
+    renderTaskQueueModal();
+    await _taskQueueRefreshOutputPackage(item);
+  }
+  saveTaskQueue();
+  renderTaskQueueModal();
+}
+
+function taskQueueUpdateItemDepends(id, value) {
+  const item = _taskQueueFindItem(id);
+  if (!item || item.status === 'running') return;
+  const raw = String(value || '').trim();
+  item.dependsOnTasksText = raw;
+  const parsed = _taskQueueParseIndexList(raw);
+  if (parsed.ok) {
+    const q = ensureTaskQueue();
+    const ids = [];
+    for (const index of parsed.indexes) {
+      const dep = _taskQueueTaskAtIndex(q, index);
+      if (dep && dep.id !== item.id) ids.push(dep.id);
+    }
+    if (ids.length === parsed.indexes.length) {
+      item.dependsOnTaskIds = Array.from(new Set(ids));
+      item.dependsOnTaskIndexes = _taskQueueTaskIdsToIndexes(q, item.dependsOnTaskIds);
+      item.dependsOnTasksText = _taskQueueFormatIndexList(item.dependsOnTaskIndexes);
+    } else {
+      item.dependsOnTaskIds = [];
+      item.dependsOnTaskIndexes = parsed.indexes;
+    }
+  } else {
+    item.dependsOnTaskIds = [];
+    item.dependsOnTaskIndexes = [];
+  }
+  item.promptHash = '';
+  saveTaskQueue();
+  renderTaskQueueModal();
+  if (!parsed.ok && typeof toast === 'function') toast(parsed.error, 3000);
+}
+
 function taskQueueRemoveItem(id) {
   const q = ensureTaskQueue();
   const item = _taskQueueFindItem(id);
   if (!item || item.status === 'running') return;
   q.items = q.items.filter(it => it.id !== id);
+  _taskQueuePruneMissingDepends(q);
   saveTaskQueue();
   renderTaskQueueModal();
 }
@@ -428,6 +830,10 @@ function taskQueueRetryItem(id) {
   if (!item || item.status === 'running') return;
   item.status = 'pending';
   item.error = '';
+  item.outputPackage = null;
+  item.outputUpdatedAt = null;
+  item.outputWarning = '';
+  item.promptHash = '';
   item.startedAt = null;
   item.finishedAt = null;
   item.pausedAt = null;
@@ -446,6 +852,7 @@ function taskQueueOpenChat(id) {
 function taskQueueClearSettled() {
   const q = ensureTaskQueue();
   q.items = q.items.filter(it => !TASK_QUEUE_DONE_STATUSES.has(it.status) && it.status !== 'error' && it.status !== 'stopped');
+  _taskQueuePruneMissingDepends(q);
   saveTaskQueue();
   renderTaskQueueModal();
 }
@@ -634,6 +1041,9 @@ async function _taskQueueRunItem(item) {
   if (item.status !== 'pending') return;
   item.status = 'running';
   item.error = '';
+  item.outputPackage = null;
+  item.outputUpdatedAt = null;
+  item.outputWarning = '';
   item.startedAt = Date.now();
   item.finishedAt = null;
   item.pausedAt = null;
@@ -643,24 +1053,26 @@ async function _taskQueueRunItem(item) {
 
   try {
     if (typeof callAPI !== 'function') throw new Error('API 函数尚未加载');
-    const c = _taskQueueEnsureChatForItem(item);
+    const dependencyContext = await _taskQueueBuildDependencyContext(item);
+    const c = _taskQueueEnsureChatForItem(item, dependencyContext);
     item.chatId = c.id;
     saveTaskQueue();
     renderTaskQueueModal();
 
     if (typeof clearPendingAIAttachments === 'function') clearPendingAIAttachments(c.id);
     if (item.mode === 'outline') {
-      await callAPIWithOutline({ chatId: c.id, useTools: item.useTools });
+      await callAPIWithOutline({ chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
     } else if (item.mode === 'reflection') {
-      await callAPIWithReflection({ chatId: c.id, useTools: item.useTools });
+      await callAPIWithReflection({ chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
     } else {
-      await callAPI(undefined, { chatId: c.id, useTools: item.useTools });
+      await callAPI(undefined, { chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
     }
 
     if (item.status === 'running') {
       const result = _taskQueueInspectResult(item.chatId);
       _taskQueueApplyRequestedOrResult(item, result);
       item.finishedAt = Date.now();
+      await _taskQueueRefreshOutputPackage(item);
     }
   } catch (e) {
     if (item._requestedStatus) {
@@ -675,29 +1087,44 @@ async function _taskQueueRunItem(item) {
       item.status = 'error';
       item.error = e && e.message ? e.message : String(e);
     }
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
     item.finishedAt = Date.now();
   } finally {
     if (item.status === 'running') {
       const result = _taskQueueInspectResult(item.chatId);
       _taskQueueApplyRequestedOrResult(item, result);
       item.finishedAt = Date.now();
+      await _taskQueueRefreshOutputPackage(item);
     }
     saveTaskQueue();
     renderTaskQueueModal();
   }
 }
 
-function _taskQueueEnsureChatForItem(item) {
+function _taskQueueEnsureChatForItem(item, dependencyContext = '') {
   let c = item.chatId && typeof chatById === 'function' ? chatById(item.chatId) : null;
-  if (c) return c;
+  const userContent = _taskQueueComposeTaskPrompt(item, dependencyContext);
+  const promptHash = _taskQueueStringHash(userContent);
+  if (c) {
+    const lastUser = (Array.isArray(c.messages) ? c.messages.slice().reverse().find(m => m.role === 'user') : null);
+    const lastUserSame = lastUser && String(lastUser.content || '') === userContent;
+    if (item.promptHash !== promptHash && !lastUserSame) {
+      c.messages.push({ role: 'user', content: userContent });
+      saveData();
+    }
+    item.promptHash = promptHash;
+    return c;
+  }
   c = {
     id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
     title: _taskQueueItemTitle(item).slice(0, 30) || '队列任务',
-    messages: [{ role: 'user', content: item.text }],
+    messages: [{ role: 'user', content: userContent }],
     createdAt: Date.now()
   };
   state.chats.unshift(c);
   item.chatId = c.id;
+  item.promptHash = promptHash;
   saveData();
   if (typeof renderChatList === 'function') renderChatList();
   return c;
@@ -715,6 +1142,255 @@ function _taskQueueInspectResult(chatId) {
   return { status: 'done', error: '' };
 }
 
+function _taskQueueNormalizeOutputPackage(pkg) {
+  if (!pkg || typeof pkg !== 'object') return null;
+  return {
+    taskId: pkg.taskId || '',
+    taskNo: pkg.taskNo || '',
+    title: String(pkg.title || '').slice(0, 120),
+    status: pkg.status || '',
+    summary: _taskQueueClipText(pkg.summary || '', 1200),
+    result: _taskQueueClipText(pkg.result || '', 3000),
+    evidence: Array.isArray(pkg.evidence) ? pkg.evidence.slice(0, 5).map(x => _taskQueueClipText(x, 500)) : [],
+    warnings: Array.isArray(pkg.warnings) ? pkg.warnings.slice(0, 5).map(x => _taskQueueClipText(x, 500)) : []
+  };
+}
+
+async function _taskQueueRefreshOutputPackage(item) {
+  if (!item.exposeOutput) {
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputBuilding = false;
+    return;
+  }
+  if (item.status !== 'done') {
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputBuilding = false;
+    return;
+  }
+  try {
+    item.outputBuilding = true;
+    saveTaskQueue();
+    renderTaskQueueModal();
+    item.outputPackage = await _taskQueueGenerateOutputPackage(item);
+    item.outputWarning = '';
+  } catch (e) {
+    console.warn('[task-queue] 输出包生成失败，使用 fallback:', e);
+    item.outputPackage = _taskQueueBuildFallbackOutputPackage(item, e);
+    item.outputWarning = '输出包生成失败，已使用简化输出包';
+  } finally {
+    item.outputBuilding = false;
+  }
+  item.outputUpdatedAt = Date.now();
+}
+
+async function _taskQueueGenerateOutputPackage(item) {
+  if (typeof callOnceWithRole !== 'function') throw new Error('辅助 API 函数尚未加载');
+  const c = item.chatId && typeof chatById === 'function' ? chatById(item.chatId) : null;
+  if (!c || !Array.isArray(c.messages)) throw new Error('找不到任务对话');
+  const finalAnswer = _taskQueueFinalAssistantText(c);
+  if (!finalAnswer) throw new Error('没有可用于生成输出包的最终回答');
+  const q = ensureTaskQueue();
+  const taskNo = '#' + (_taskQueueTaskIndexMap(q).get(item.id) || '?');
+  const rolePrompt = [
+    '你是任务队列的结果打包器。你只负责把一个已完成 Agent 任务的结果压缩成固定 JSON。',
+    '必须只输出合法 JSON，不要输出 Markdown、解释、代码块或额外文本。',
+    'JSON schema:',
+    '{',
+    '  "taskNo": "string，任务卡片编号，例如 #1",',
+    '  "taskId": "string",',
+    '  "title": "string，任务内容短标题",',
+    '  "status": "done",',
+    '  "summary": "string，核心结果摘要，尽量 200-500 字",',
+    '  "result": "string，最终可复用结论/答案，尽量 300-1200 字",',
+    '  "evidence": ["string，关键依据，最多 5 条"],',
+    '  "warnings": ["string，失败、限制、未完成事项，最多 5 条"]',
+    '}',
+    '字段必须完整存在。evidence 或 warnings 没有内容时返回空数组。'
+  ].join('\n');
+  const history = [{
+    role: 'user',
+    content: [
+      `任务编号: ${taskNo}`,
+      `taskId: ${item.id}`,
+      `任务标题: ${_taskQueueItemTitle(item)}`,
+      `任务状态: ${item.status}`,
+      '',
+      '任务最终回答:',
+      _taskQueueClipText(finalAnswer, 20000)
+    ].join('\n')
+  }];
+  const raw = await callOnceWithRole(history, state.settings.currentModel, rolePrompt, {
+    chatId: item.chatId,
+    sourceLabel: '任务队列输出包生成',
+    isStopped: () => {
+      const task = typeof chatTaskById === 'function' ? chatTaskById(item.chatId) : null;
+      return !!(task && task.stopRequested) || item.status === 'paused' || item.status === 'stopped';
+    }
+  });
+  const parsed = _taskQueueParseOutputPackageJson(raw);
+  parsed.taskNo = taskNo;
+  parsed.taskId = item.id;
+  parsed.title = parsed.title || _taskQueueItemTitle(item);
+  parsed.status = parsed.status || item.status;
+  return _taskQueueNormalizeOutputPackage(parsed);
+}
+
+function _taskQueueBuildFallbackOutputPackage(item, cause) {
+  const c = item.chatId && typeof chatById === 'function' ? chatById(item.chatId) : null;
+  const finalAnswer = c ? _taskQueueFinalAssistantText(c) : '';
+  const q = ensureTaskQueue();
+  const taskNo = '#' + (_taskQueueTaskIndexMap(q).get(item.id) || '?');
+  const warning = cause && cause.message ? `模型输出包生成失败：${cause.message}` : '模型输出包生成失败，使用简化输出包';
+  return _taskQueueNormalizeOutputPackage({
+    taskId: item.id,
+    taskNo,
+    title: _taskQueueItemTitle(item),
+    status: item.status,
+    summary: _taskQueueMakeSummary(finalAnswer),
+    result: _taskQueueClipText(finalAnswer, 3000),
+    evidence: _taskQueueExtractKeyFindings(finalAnswer).slice(0, 5),
+    warnings: [warning]
+  });
+}
+
+function _taskQueueFinalAssistantText(chat) {
+  const messages = chat && Array.isArray(chat.messages) ? chat.messages : [];
+  const finalMsg = messages.slice().reverse().find(m =>
+    m.role === 'assistant' &&
+    !m._hiddenFromUI &&
+    String(m.content || '').trim() &&
+    !String(m.content || '').includes('[已停止]')
+  );
+  return finalMsg ? String(finalMsg.content || '').trim() : '';
+}
+
+function _taskQueueParseOutputPackageJson(raw) {
+  const text = String(raw || '').trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    const parsed = JSON.parse(text);
+    return _taskQueueCoerceOutputPackage(parsed);
+  } catch (e) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return _taskQueueCoerceOutputPackage(JSON.parse(match[0]));
+    throw new Error('输出包不是合法 JSON');
+  }
+}
+
+function _taskQueueCoerceOutputPackage(value) {
+  const obj = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    taskNo: String(obj.taskNo || ''),
+    taskId: String(obj.taskId || ''),
+    title: String(obj.title || ''),
+    status: String(obj.status || ''),
+    summary: String(obj.summary || ''),
+    result: String(obj.result || ''),
+    evidence: Array.isArray(obj.evidence) ? obj.evidence.map(String) : [],
+    warnings: Array.isArray(obj.warnings) ? obj.warnings.map(String) : []
+  };
+}
+
+function _taskQueueMakeSummary(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  return _taskQueueClipText(clean, 900);
+}
+
+function _taskQueueExtractKeyFindings(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map(s => s.replace(/^[-*+•\d.、\s]+/, '').trim())
+    .filter(s => s.length >= 8 && s.length <= 260);
+  const picked = [];
+  for (const line of lines) {
+    if (picked.includes(line)) continue;
+    if (/^(#{1,6}|```|---)$/.test(line)) continue;
+    picked.push(line);
+    if (picked.length >= 8) break;
+  }
+  return picked;
+}
+
+async function _taskQueueBuildDependencyContext(item) {
+  const depIds = item.dependsOnTaskIds || [];
+  if (!depIds.length) return '';
+  const q = ensureTaskQueue();
+  _taskQueueNormalizeDependencyRefs(q);
+  const packages = [];
+  const indexMap = _taskQueueTaskIndexMap(q);
+  for (const depId of depIds) {
+    const dep = q.items.find(it => it.id === depId);
+    const index = indexMap.get(depId) || '?';
+    if (!dep) throw new Error(`依赖任务 #${index} 不存在`);
+    if (!dep.exposeOutput) throw new Error(`依赖任务 #${index}「${_taskQueueItemTitle(dep)}」没有勾选“供后续引用”`);
+    if (dep.status === 'skipped') throw new Error(`依赖任务 #${index}「${_taskQueueItemTitle(dep)}」已跳过，没有输出包`);
+    if (dep.status !== 'done') throw new Error(`依赖任务 #${index}「${_taskQueueItemTitle(dep)}」还没有完成输出包`);
+    if (!dep.outputPackage && dep.chatId) {
+      try {
+        dep.outputPackage = await _taskQueueGenerateOutputPackage(dep);
+        dep.outputWarning = '';
+      } catch (e) {
+        dep.outputPackage = _taskQueueBuildFallbackOutputPackage(dep, e);
+        dep.outputWarning = '输出包生成失败，已使用简化输出包';
+      }
+      dep.outputUpdatedAt = Date.now();
+    }
+    if (!dep.outputPackage) throw new Error(`依赖任务 #${index}「${_taskQueueItemTitle(dep)}」缺少输出包`);
+    packages.push(dep.outputPackage);
+  }
+  if (!packages.length) return '';
+  return _taskQueueFormatDependencyContext(packages);
+}
+
+function _taskQueueFormatDependencyContext(packages) {
+  const blocks = packages.map((pkg, idx) => {
+    const evidence = pkg.evidence && pkg.evidence.length
+      ? `\n依据:\n${pkg.evidence.map(x => `- ${x}`).join('\n')}`
+      : '';
+    const warnings = pkg.warnings && pkg.warnings.length
+      ? `\n注意:\n${pkg.warnings.map(x => `- ${x}`).join('\n')}`
+      : '';
+    return [
+      `## 依赖输出 ${idx + 1}: ${pkg.taskNo || '#' + (idx + 1)} / ${pkg.title || pkg.taskId}`,
+      `状态: ${pkg.status || 'done'}`,
+      pkg.summary ? `摘要:\n${pkg.summary}` : '',
+      pkg.result ? `结果:\n${pkg.result}` : '',
+      evidence,
+      warnings
+    ].filter(Boolean).join('\n');
+  });
+  return [
+    '以下是任务队列中前序 Agent 的结构化输出包。它们只作为当前任务的背景资料；不要继承前序任务的工具权限、暂停状态、大纲状态或运行状态。',
+    '',
+    blocks.join('\n\n')
+  ].join('\n');
+}
+
+function _taskQueueComposeTaskPrompt(item, dependencyContext) {
+  const taskText = String(item.text || '').trim();
+  if (!dependencyContext) return taskText;
+  return `${dependencyContext}\n\n---\n\n当前任务：\n${taskText}`;
+}
+
+function _taskQueueClipText(value, maxLen) {
+  const text = String(value || '').trim();
+  if (!maxLen || text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + `\n\n...[已截断，原长度 ${text.length} 字符]`;
+}
+
+function _taskQueueStringHash(value) {
+  const s = String(value || '');
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+  }
+  return `${s.length}:${hash}`;
+}
+
 function _taskQueueAbortItem(item, nextStatus) {
   item._requestedStatus = nextStatus;
   if (item.chatId && typeof requestStopChatTask === 'function') requestStopChatTask(item.chatId);
@@ -730,6 +1406,9 @@ function _taskQueueAbortItem(item, nextStatus) {
   } else {
     item.status = 'stopped';
     item.error = '已停止';
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputWarning = '';
     item.finishedAt = Date.now();
   }
 }
@@ -744,10 +1423,18 @@ function _taskQueueApplyRequestedOrResult(item, result) {
   } else if (item._requestedStatus === 'stopped') {
     item.status = 'stopped';
     item.error = '已停止';
+    item.outputPackage = null;
+    item.outputUpdatedAt = null;
+    item.outputWarning = '';
     item.finishedAt = item.finishedAt || Date.now();
   } else if (result) {
     item.status = result.status;
     item.error = result.error || '';
+    if (result.status !== 'done') {
+      item.outputPackage = null;
+      item.outputUpdatedAt = null;
+      item.outputWarning = '';
+    }
   }
   delete item._requestedStatus;
 }
@@ -755,11 +1442,15 @@ function _taskQueueApplyRequestedOrResult(item, result) {
 function _taskQueueMarkSkipped(item) {
   item.status = 'skipped';
   item.error = '';
+  item.outputPackage = null;
+  item.outputUpdatedAt = null;
+  item.outputWarning = '';
   item.skippedAt = Date.now();
   item.finishedAt = Date.now();
 }
 
 function _taskQueueValidateOrders(q) {
+  _taskQueueNormalizeDependencyRefs(q);
   for (const item of q.items) {
     const order = Number(item.order);
     if (!Number.isInteger(order) || order < 1) {
@@ -773,6 +1464,26 @@ function _taskQueueValidateOrders(q) {
     if (orders[i] !== expected) {
       return { ok: false, error: `任务序号不连续：缺少序号 ${expected}` };
     }
+  }
+  for (const item of q.items) {
+    const parsed = _taskQueueParseIndexList(item.dependsOnTasksText || item.dependsOnTaskIndexes || []);
+    if (!parsed.ok) return { ok: false, error: `任务「${_taskQueueItemTitle(item)}」依赖任务错误：${parsed.error}` };
+    const ids = [];
+    for (const index of parsed.indexes) {
+      const dep = _taskQueueTaskAtIndex(q, index);
+      if (!dep) return { ok: false, error: `任务「${_taskQueueItemTitle(item)}」依赖了不存在的任务 #${index}` };
+      if (dep.id === item.id) return { ok: false, error: `任务「${_taskQueueItemTitle(item)}」不能依赖自己 #${index}` };
+      if (_taskQueuePositiveInt(dep.order, 1) >= _taskQueuePositiveInt(item.order, 1)) {
+        return { ok: false, error: `任务「${_taskQueueItemTitle(item)}」只能依赖更早执行顺序里的任务，不能依赖 #${index}` };
+      }
+      if (!dep.exposeOutput) {
+        return { ok: false, error: `任务「${_taskQueueItemTitle(item)}」依赖 #${index}，但该任务没有勾选“供后续引用”` };
+      }
+      ids.push(dep.id);
+    }
+    item.dependsOnTaskIds = Array.from(new Set(ids));
+    item.dependsOnTaskIndexes = _taskQueueTaskIdsToIndexes(q, item.dependsOnTaskIds);
+    item.dependsOnTasksText = _taskQueueFormatIndexList(item.dependsOnTaskIndexes);
   }
   return { ok: true };
 }

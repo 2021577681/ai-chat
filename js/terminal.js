@@ -1001,7 +1001,7 @@ async function sendHiddenMessage(text, chatId) {
   try {
     console.log('[隐藏发送] 调用普通 API（避免触发新 Plan/师生）...');
     // ⭐ 关键修复：永远用普通 callAPI，不要触发 Plan 或师生模式
-    await callAPI(undefined, { chatId: c.id });
+    await callAPI(undefined, { chatId: c.id, suppressCompletionSound: true });
     console.log('[隐藏发送] ✓ API 调用完成');
   } catch (e) {
     console.error('[隐藏发送] API 出错:', e);
