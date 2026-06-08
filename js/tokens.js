@@ -115,7 +115,9 @@ function getChatTokenStats(chat) {
 }
 
 let _tokenFetchTimer = null;
+let _tokenFetchTimersByChat = {};
 let _tokenFetchInflight = false;
+let _tokenFetchInflightByChat = {};
 
 // ============ 独立 Token 使用账本 ============
 // 与对话数据分开保存：删除对话不会影响这里的历史统计。
@@ -211,7 +213,7 @@ function migrateChatTokenStatsToLedger() {
  * 从响应的 usage 字段记录详细 token 信息
  * 支持 OpenAI 和 Anthropic 两种格式
  */
-function recordUsageFromResponse(chat, usage) {
+function recordUsageFromResponse(chat, usage, meta = {}) {
   if (!chat || !usage) return;
   const stats = getChatTokenStats(chat);
   
@@ -234,7 +236,7 @@ function recordUsageFromResponse(chat, usage) {
     || 0;
   
   const now = Date.now();
-  const model = state.settings.currentModel || 'unknown';
+  const model = meta.model || state.settings.currentModel || 'unknown';
   
   // 累计统计（注意：累加，不是覆盖）
   stats.msgCount = chat.messages.length;
@@ -246,7 +248,7 @@ function recordUsageFromResponse(chat, usage) {
   stats.cacheCreateTokens += cacheCreate;
   stats.thinkingTokens += thinking;
   stats.totalRequests += 1;
-  stats.source = state.settings.apiFormat === 'anthropic' ? 'anthropic' : 'openai';
+  stats.source = meta.source || (state.settings.apiFormat === 'anthropic' ? 'anthropic' : 'openai');
   stats.time = now;
   const usageEvent = {
     id: `usage_${now}_${Math.random().toString(36).slice(2, 10)}`,
@@ -254,8 +256,8 @@ function recordUsageFromResponse(chat, usage) {
     chatTitle: chat.title || '未命名对话',
     ts: now,
     model,
-    provider: state.settings.provider || '',
-    format: state.settings.apiFormat || '',
+    provider: meta.provider || state.settings.provider || '',
+    format: meta.format || state.settings.apiFormat || '',
     inputTokens,
     outputTokens,
     cacheReadTokens: cacheRead,
@@ -323,16 +325,17 @@ async function fetchAnthropicTokenCount(chat) {
   }
 }
 
-async function refreshAccurateTokenCount(force = false) {
-  const c = currentChat();
+async function refreshAccurateTokenCount(force = false, chatId) {
+  const c = chatId && typeof chatById === 'function' ? chatById(chatId) : currentChat();
   if (!c || !c.messages.length) return;
+  const targetChatId = c.id || chatId || state.currentId || 'default';
   const stats = getChatTokenStats(c);
   if (!force && stats.msgCount === c.messages.length
       && Date.now() - stats.time < 30000) return;
-  if (_tokenFetchInflight) return;
+  if (_tokenFetchInflightByChat[targetChatId]) return;
   if (state.settings.apiFormat !== 'anthropic') return;
   
-  _tokenFetchInflight = true;
+  _tokenFetchInflightByChat[targetChatId] = true;
   try {
     const tokens = await fetchAnthropicTokenCount(c);
     if (tokens !== null) {
@@ -341,17 +344,24 @@ async function refreshAccurateTokenCount(force = false) {
       stats.msgCount = c.messages.length;
       stats.time = Date.now();
       if (!stats.source) stats.source = 'anthropic_count_api';
-      updateTokenDisplay();
+      if (typeof isCurrentChat === 'function' ? isCurrentChat(c) : c === currentChat()) {
+        updateTokenDisplay();
+      }
     }
   } finally {
-    _tokenFetchInflight = false;
+    delete _tokenFetchInflightByChat[targetChatId];
   }
 }
 
-function scheduleAccurateTokenCount() {
+function scheduleAccurateTokenCount(chatId) {
   if (state.settings.apiFormat !== 'anthropic') return;
-  clearTimeout(_tokenFetchTimer);
-  _tokenFetchTimer = setTimeout(() => refreshAccurateTokenCount(false), 1500);
+  const targetChatId = chatId || state.currentId;
+  if (!targetChatId) return;
+  if (_tokenFetchTimersByChat[targetChatId]) clearTimeout(_tokenFetchTimersByChat[targetChatId]);
+  _tokenFetchTimersByChat[targetChatId] = setTimeout(() => {
+    delete _tokenFetchTimersByChat[targetChatId];
+    refreshAccurateTokenCount(false, targetChatId);
+  }, 1500);
 }
 
 // ============ 显示 Token 统计 ============
@@ -705,7 +715,7 @@ ${conversationText}
     saveData();
     renderMessages();
     updateTokenDisplay();
-    scheduleAccurateTokenCount();
+    scheduleAccurateTokenCount(chat.id);
     toast(`✓ 已压缩 ${toCompress.length} 条消息为摘要`);
   } catch (e) {
     removeCompressingPlaceholder();

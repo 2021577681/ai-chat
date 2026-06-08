@@ -79,7 +79,7 @@ async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
       lastErr = e;
       if (e.name === 'AbortError' || (abortSignal && abortSignal.aborted)) throw e;
       const retryable = (typeof _isRetryableError === 'function')
-        ? _isRetryableError(e, httpStatus || e.httpStatus)
+        ? _isRetryableError(e, httpStatus || e.httpStatus, abortSignal)
         : false;
       const remaining = maxAttempts - attempt;
       if (!retryable || remaining <= 0) throw e;
@@ -111,13 +111,23 @@ async function callAPIWithOutline(options = {}) {
   const taskChatId = c.id;
   const s = state.settings;
   
-  state.isGenerating = true;
-  state.activeTaskChatId = taskChatId;
-  state.abortCtrl = new AbortController();
+  let abortCtrl = new AbortController();
+  const task = (typeof beginChatTask === 'function')
+    ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
+    : null;
+  if (task && typeof setChatTaskMode === 'function') {
+    setChatTaskMode(taskChatId, 'outline', { outlineForceFinish: false });
+    if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+  } else {
+    state.isGenerating = true;
+    state.activeTaskChatId = taskChatId;
+    state.abortCtrl = abortCtrl;
+    state._outlineExecuting = true;
+  }
   // ⭐ 清零软停止标志：本次任务是新的开始，不要被上次残留的停止意图误杀
   state.stopRequested = false;
-  state._outlineExecuting = true;
   if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof renderChatList === 'function') renderChatList();
   
   let aiMsg, msgIdx;
   let conversationMessages, finalAnswer, completedNaturally;
@@ -128,10 +138,13 @@ async function callAPIWithOutline(options = {}) {
     msgIdx = options.resumeFromMsgIdx;
     aiMsg = c.messages[msgIdx];
     if (!aiMsg || !aiMsg.outline || !aiMsg.outline._snap) {
-      state.isGenerating = false;
-      state.abortCtrl = null;
-      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-      state._outlineExecuting = false;
+      if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+      else {
+        state.isGenerating = false;
+        state.abortCtrl = null;
+        if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+        state._outlineExecuting = false;
+      }
       if (typeof updateSendBtn === 'function') updateSendBtn();
       if (typeof toast === 'function') toast('❌ 该任务无法恢复（状态已丢失，请重新提问）', 4000);
       return;
@@ -210,16 +223,17 @@ async function callAPIWithOutline(options = {}) {
   }
   
   const onUpdate = () => {
-    if (typeof updateOutlinePanel === 'function') updateOutlinePanel(msgIdx);
+    if (typeof updateOutlinePanel === 'function') updateOutlinePanel(msgIdx, c);
   };
   
-  const abortSignal = state.abortCtrl.signal;
+  let abortSignal = abortCtrl.signal;
   const throwIfAborted = () => {
     // ⭐ 同时检查两种停止信号：
     //   - abortSignal.aborted：fetch / sleep 等异步操作的标准中断
     //   - state.stopRequested：跨 abortCtrl 重建边界的"软停止"，
     //     用户点暂停后即使本轮 fetch 已经结束，下一轮也能立刻退出
-    if (abortSignal.aborted || state.stopRequested) {
+    const stopRequested = task ? task.stopRequested : state.stopRequested;
+    if (abortSignal.aborted || stopRequested) {
       const err = new Error('用户中断');
       err.name = 'AbortError';
       throw err;
@@ -355,7 +369,7 @@ async function callAPIWithOutline(options = {}) {
       if (typeof applyRateLimit === 'function') {
         aiMsg.outline.progressText = `⏳ 第 ${loop + 1}/${maxRounds} 轮 · 等待 API 配额...`;
         onUpdate();
-        await applyRateLimit();
+        await applyRateLimit(abortSignal);
       }
       
       throwIfAborted();
@@ -389,7 +403,7 @@ async function callAPIWithOutline(options = {}) {
       
       // ⭐ 把大纲模式每轮 usage 计入当前对话统计（之前漏算）
       if (j.usage && typeof recordUsageFromResponse === 'function') {
-        recordUsageFromResponse(c, j.usage);
+        recordUsageFromResponse(c, j.usage, { model });
       }
       
       // ----- 解析返回 -----
@@ -468,7 +482,7 @@ async function callAPIWithOutline(options = {}) {
           }
           onUpdate();
           
-          result = await executeTool(fname, args);
+          result = await executeTool(fname, args, { chatId: taskChatId, chat: c });
           anyExternalToolCalled = true;
           
           const content = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
@@ -505,7 +519,7 @@ async function callAPIWithOutline(options = {}) {
       // ⭐ 消化由 attach_file 等工具产生的待处理附件
       // 把它们转成 user 消息注入到 conversationMessages，下一轮 LLM 就能直接"看到"
       // 否则 terminal.js 的 autoResend 会在大纲结束后另起一段新 AI 回复
-      consumePendingAttachments(conversationMessages, aiMsg.outline);
+      consumePendingAttachments(conversationMessages, aiMsg.outline, taskChatId);
       
       // 保存快照（方便暂停后恢复）
       saveSnap(loop + 1);
@@ -527,7 +541,7 @@ async function callAPIWithOutline(options = {}) {
       let fallbackAnswer = '';
       try {
         fallbackAnswer = await doFinalSummaryCall(
-          conversationMessages, history, systemPrompt, model, aiMsg.outline, abortSignal
+          conversationMessages, history, systemPrompt, model, aiMsg.outline, abortSignal, c
         );
       } catch (fe) {
         if (fe.name === 'AbortError') throw fe;
@@ -572,21 +586,26 @@ async function callAPIWithOutline(options = {}) {
     
     if (isAbortLike) {
       // 检查是否是"立即收尾"信号
-      if (state._outlineForceFinish) {
-        state._outlineForceFinish = false;
-        // 走保底收尾流程
-        aiMsg.outline.status = 'truncated';
-        aiMsg.outline.progressText = '🏁 用户请求立即收尾，正在整理最终回答...';
-        onUpdate();
+      const forceFinish = task ? !!task.outlineForceFinish : !!state._outlineForceFinish;
+        if (forceFinish) {
+          if (task) task.outlineForceFinish = false;
+          state._outlineForceFinish = false;
+          // 走保底收尾流程
+          aiMsg.outline.status = 'truncated';
+          aiMsg.outline.finishRequested = true;
+          aiMsg.outline.progressText = '🏁 用户请求立即收尾，正在整理最终回答...';
+          onUpdate();
         
         // 重建 abortCtrl（因为已经被 abort 了）
-        state.abortCtrl = new AbortController();
-        const newSignal = state.abortCtrl.signal;
+        abortCtrl = new AbortController();
+        if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+        else state.abortCtrl = abortCtrl;
+        const newSignal = abortCtrl.signal;
         
         let fallbackAnswer = '';
         try {
           fallbackAnswer = await doFinalSummaryCall(
-            conversationMessages, history, systemPrompt, model, aiMsg.outline, newSignal
+            conversationMessages, history, systemPrompt, model, aiMsg.outline, newSignal, c
           );
         } catch (fe) {
           console.warn('[outline] 立即收尾失败:', fe);
@@ -606,8 +625,10 @@ async function callAPIWithOutline(options = {}) {
         }
         
         if (typeof toast === 'function') toast('🏁 已收尾', 3000);
+        delete aiMsg.outline.finishRequested;
       } else {
         aiMsg.outline.status = 'paused';
+        delete aiMsg.outline.finishRequested;
         // 保留 _snap，让"继续执行"可以恢复
         // ⭐ 超时情况：在 content 加一行提示，让用户知道原因
         if (e.name === 'TimeoutError') {
@@ -617,6 +638,7 @@ async function callAPIWithOutline(options = {}) {
       }
     } else {
       aiMsg.outline.status = 'error';
+      delete aiMsg.outline.finishRequested;
       aiMsg.content = `❌ 出错：${e.message}` + (finalAnswer ? '\n\n**部分输出：**\n' + finalAnswer : '');
       delete aiMsg.outline._snap;
     }
@@ -627,18 +649,22 @@ async function callAPIWithOutline(options = {}) {
     else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
     saveData();
   } finally {
-    state.isGenerating = false;
-    state.abortCtrl = null;
-    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-    state._outlineExecuting = false;
-    state._outlineForceFinish = false;
+    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+      state._outlineExecuting = false;
+      state._outlineForceFinish = false;
+    }
     if (typeof updateSendBtn === 'function') updateSendBtn();
+    if (typeof renderChatList === 'function') renderChatList();
   }
 }
 
 // ============ 🛡️ 第三层保护：保底收尾调用 ============
 // 当达到轮数上限但 AI 还在调工具时，额外发一次"无工具"请求逼出最终文字答案
-async function doFinalSummaryCall(conversationMessages, history, systemPrompt, model, outlineObj, abortSignal) {
+async function doFinalSummaryCall(conversationMessages, history, systemPrompt, model, outlineObj, abortSignal, recordChat) {
   const s = state.settings;
   
   const finalSystemPrompt = (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt) + 
@@ -746,7 +772,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   }
   
   // ----- 限速 -----
-  if (typeof applyRateLimit === 'function') await applyRateLimit();
+  if (typeof applyRateLimit === 'function') await applyRateLimit(abortSignal);
   
   if (abortSignal && abortSignal.aborted) {
     const err = new Error('用户中断');
@@ -778,8 +804,8 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   
   // ⭐ 保底收尾调用的 usage 也计入统计
   if (j.usage && typeof recordUsageFromResponse === 'function') {
-    const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
-    if (_c) recordUsageFromResponse(_c, j.usage);
+    const _c = recordChat || (typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null));
+    if (_c) recordUsageFromResponse(_c, j.usage, { model });
   }
   
   // ----- 解析 -----
@@ -796,16 +822,21 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
 // ⭐ 消化由 attach_file 等工具产生的待处理附件
 // 把 state.pendingAIAttachments 中的项目转换为 user 消息注入到对话上下文，
 // 然后清空 pendingAIAttachments（防止 autoResend 在大纲结束后再触发新对话）
-function consumePendingAttachments(conversationMessages, outlineObj) {
-  if (!state.pendingAIAttachments || state.pendingAIAttachments.length === 0) return;
-  
-  const atts = state.pendingAIAttachments.splice(0);  // 取出并清空
+function consumePendingAttachments(conversationMessages, outlineObj, chatId) {
+  const targetChatId = chatId || (typeof resolveToolChatId === 'function' ? resolveToolChatId() : state.currentId);
+  const atts = typeof takePendingAIAttachments === 'function'
+    ? takePendingAIAttachments(targetChatId)
+    : ((state.pendingAIAttachments || []).splice(0));
+  if (!atts.length) return;
   const s = state.settings;
   
   // 同时取消任何待执行的 autoResend 定时器（双重保险）
   if (typeof window !== 'undefined') {
     if (window._autoResendTimer) {
       try { clearTimeout(window._autoResendTimer); } catch (e) {}
+    }
+    if (typeof window.cancelAutoResend === 'function') {
+      try { window.cancelAutoResend(targetChatId); } catch (e) {}
     }
   }
   

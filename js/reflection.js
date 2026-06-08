@@ -10,13 +10,23 @@ async function callAPIWithReflection() {
   const s = state.settings;
   const taskChatId = c && c.id;
   const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
-  state.isGenerating = true;
-  state.activeTaskChatId = taskChatId || null;
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
-  state.abortCtrl = new AbortController();
+  const abortCtrl = new AbortController();
+  const task = (typeof beginChatTask === 'function')
+    ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
+    : null;
+  if (task && typeof setChatTaskMode === 'function') {
+    setChatTaskMode(taskChatId, 'reflection');
+    if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+  } else if (!task) {
+    state.isGenerating = true;
+    state.activeTaskChatId = taskChatId || null;
+    state.abortCtrl = abortCtrl;
+  }
   // ⭐ 清零软停止标志：新任务开始
   state.stopRequested = false;
   updateSendBtn();
+  if (typeof renderChatList === 'function') renderChatList();
   
   const aiMsg = {
     role: 'assistant',
@@ -44,7 +54,8 @@ async function callAPIWithReflection() {
   const studentMaxRounds = parseInt(s.refStudentMaxToolRounds) || 15;
   const teacherMaxRounds = parseInt(s.refTeacherMaxToolRounds) || 5;
   
-  const signal = state.abortCtrl.signal;
+  const signal = abortCtrl.signal;
+  const isStopped = () => task ? !!task.stopRequested : !!state.stopRequested;
   
   try {
     let currentAnswer = '';
@@ -82,7 +93,7 @@ async function callAPIWithReflection() {
         _running: true
       };
       aiMsg.reflection.turns.push(studentTurn);
-      refreshReflectionLive(aiMsg, true);
+      refreshReflectionLive(aiMsg, true, c);
       
       const studentSystemPrompt = s.refStudentPrompt + (studentUseTools ? STUDENT_TOOL_SUFFIX : '');
       
@@ -92,15 +103,18 @@ async function callAPIWithReflection() {
         model: studentModel,
         maxRounds: studentMaxRounds,
         signal,
+        isStopped,
+        chat: c,
+        chatId: taskChatId,
         stream: true,
         useTools: studentUseTools && state.settings.useTools && state.tools.length > 0,
-        onProgress: (ev) => onStudentProgress(ev, studentTurn, aiMsg)
+        onProgress: (ev) => onStudentProgress(ev, studentTurn, aiMsg, c)
       });
       
       currentAnswer = studentResult.finalText;
       studentTurn.content = currentAnswer;
       studentTurn._running = false;
-      refreshReflectionLive(aiMsg, true);
+      refreshReflectionLive(aiMsg, true, c);
       
       // ===== 2. 老师评审（只看最终答案，可调工具验证）=====
       aiMsg.reflection.progressText = `👨‍🏫 老师评审中（第 ${round} 轮）...`;
@@ -121,7 +135,7 @@ async function callAPIWithReflection() {
         _running: true
       };
       aiMsg.reflection.turns.push(teacherTurn);
-      refreshReflectionLive(aiMsg, true);
+      refreshReflectionLive(aiMsg, true, c);
       
       const teacherSystemPrompt = s.refTeacherPrompt + (teacherUseTools ? TEACHER_TOOL_SUFFIX : '');
       
@@ -131,9 +145,12 @@ async function callAPIWithReflection() {
         model: teacherModel,
         maxRounds: teacherMaxRounds,
         signal,
+        isStopped,
+        chat: c,
+        chatId: taskChatId,
         stream: true,
         useTools: teacherUseTools && state.settings.useTools && state.tools.length > 0,
-        onProgress: (ev) => onTeacherProgress(ev, teacherTurn, aiMsg)
+        onProgress: (ev) => onTeacherProgress(ev, teacherTurn, aiMsg, c)
       });
       
       const critique = parseCritique(teacherResult.finalText);
@@ -145,7 +162,7 @@ async function callAPIWithReflection() {
         _running: false
       });
       aiMsg.reflection.finalScore = critique.score;
-      refreshReflectionLive(aiMsg, true);
+      refreshReflectionLive(aiMsg, true, c);
       
       teacherFeedback = critique;
       
@@ -196,25 +213,29 @@ async function callAPIWithReflection() {
     }
     saveData();
   } finally {
-    state.isGenerating = false;
-    state.abortCtrl = null;
-    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    }
     updateSendBtn();
+    if (typeof renderChatList === 'function') renderChatList();
   }
 }
 
 // 学生进度回调：把 runAgentLoop 的事件投影到 studentTurn
 // ⭐ 所有事件都走 refreshReflectionLive（局部刷新），不调全量 renderMessages，避免闪烁
-function onStudentProgress(ev, turn, aiMsg) {
+function onStudentProgress(ev, turn, aiMsg, targetChat) {
   if (ev.type === 'text_delta') {
     turn.content = (turn.content || '') + ev.text;
-    refreshReflectionLive(aiMsg);
+    refreshReflectionLive(aiMsg, false, targetChat);
   } else if (ev.type === 'tool_call') {
     turn.toolCalls.push({
       id: ev.id, name: ev.name, args: ev.args,
       result: '', ok: null, _running: true
     });
-    refreshReflectionLive(aiMsg, true);  // 工具卡片增减立刻刷
+    refreshReflectionLive(aiMsg, true, targetChat);  // 工具卡片增减立刻刷
   } else if (ev.type === 'tool_result') {
     const card = turn.toolCalls.find(tc => tc.id === ev.id && tc._running);
     if (card) {
@@ -222,12 +243,12 @@ function onStudentProgress(ev, turn, aiMsg) {
       card.ok = ev.ok;
       card._running = false;
     }
-    refreshReflectionLive(aiMsg, true);
+    refreshReflectionLive(aiMsg, true, targetChat);
   } else if (ev.type === 'round_start') {
     if (turn._nextRoundClearText) {
       turn.content = '';
       turn._nextRoundClearText = false;
-      refreshReflectionLive(aiMsg);
+      refreshReflectionLive(aiMsg, false, targetChat);
     }
   } else if (ev.type === 'round_end') {
     if (ev.hasToolCalls) turn._nextRoundClearText = true;
@@ -235,16 +256,16 @@ function onStudentProgress(ev, turn, aiMsg) {
 }
 
 // 老师进度回调：同上
-function onTeacherProgress(ev, turn, aiMsg) {
+function onTeacherProgress(ev, turn, aiMsg, targetChat) {
   if (ev.type === 'text_delta') {
     turn._streamingText = (turn._streamingText || '') + ev.text;
-    refreshReflectionLive(aiMsg);
+    refreshReflectionLive(aiMsg, false, targetChat);
   } else if (ev.type === 'tool_call') {
     turn.toolCalls.push({
       id: ev.id, name: ev.name, args: ev.args,
       result: '', ok: null, _running: true
     });
-    refreshReflectionLive(aiMsg, true);
+    refreshReflectionLive(aiMsg, true, targetChat);
   } else if (ev.type === 'tool_result') {
     const card = turn.toolCalls.find(tc => tc.id === ev.id && tc._running);
     if (card) {
@@ -252,12 +273,12 @@ function onTeacherProgress(ev, turn, aiMsg) {
       card.ok = ev.ok;
       card._running = false;
     }
-    refreshReflectionLive(aiMsg, true);
+    refreshReflectionLive(aiMsg, true, targetChat);
   } else if (ev.type === 'round_start') {
     if (turn._nextRoundClearText) {
       turn._streamingText = '';
       turn._nextRoundClearText = false;
-      refreshReflectionLive(aiMsg);
+      refreshReflectionLive(aiMsg, false, targetChat);
     }
   } else if (ev.type === 'round_end') {
     if (ev.hasToolCalls) turn._nextRoundClearText = true;
@@ -267,10 +288,9 @@ function onTeacherProgress(ev, turn, aiMsg) {
 // 增量刷新 reflection 面板（用于流式文本 / 工具卡片变化）
 // ⭐ 只替换 .reflection-body 的内部 HTML，不动外层节点，不动其它消息
 // immediate=true 时绕过节流（用于工具卡片增删，确保不丢事件）
-function refreshReflectionLive(aiMsg, immediate) {
-  if (state.activeTaskChatId && state.activeTaskChatId !== state.currentId) return;
-  const c = currentChat();
-  if (!c) return;
+function refreshReflectionLive(aiMsg, immediate, targetChat) {
+  const c = targetChat || currentChat();
+  if (!c || (targetChat && !isCurrentChat(targetChat))) return;
   const idx = c.messages.indexOf(aiMsg);
   if (idx < 0) return;
   

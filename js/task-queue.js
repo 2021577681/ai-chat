@@ -476,7 +476,10 @@ function stopCurrentTaskAndPauseQueue() {
   const q = ensureTaskQueue();
   if (!q.running) return;
   q.stopAfterCurrent = true;
-  if (typeof stopGenerate === 'function' && state.isGenerating) {
+  const runningItem = q.items.find(it => it.status === 'running' && it.chatId);
+  if (runningItem && typeof requestStopChatTask === 'function') {
+    requestStopChatTask(runningItem.chatId);
+  } else if (typeof stopGenerate === 'function' && ((typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : state.isGenerating)) {
     stopGenerate();
   }
   saveTaskQueue();
@@ -485,14 +488,17 @@ function stopCurrentTaskAndPauseQueue() {
 }
 
 async function _taskQueueWaitUntilIdle(q) {
-  if (!state.isGenerating && !state.abortCtrl) {
+  const anyGenerating = () => (typeof isAnyChatGenerating === 'function')
+    ? isAnyChatGenerating()
+    : !!(state.isGenerating || state.abortCtrl);
+  if (!anyGenerating()) {
     q.waiting = false;
     return;
   }
   q.waiting = true;
   saveTaskQueue();
   renderTaskQueueModal();
-  while (q.running && !q.stopAfterCurrent && (state.isGenerating || state.abortCtrl)) {
+  while (q.running && !q.stopAfterCurrent && anyGenerating()) {
     await new Promise(r => setTimeout(r, 800));
   }
   q.waiting = false;
@@ -531,6 +537,7 @@ async function _taskQueueRunItem(item) {
     
     state.pendingAttachments = [];
     state.pendingAIAttachments = [];
+    if (typeof clearPendingAIAttachments === 'function') clearPendingAIAttachments(c.id);
     if (typeof renderPendingAtts === 'function') renderPendingAtts();
     
     const input = document.getElementById('input');

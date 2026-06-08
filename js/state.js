@@ -84,6 +84,7 @@ let state = {
   abortCtrl: null,
   activeTaskChatId: null,
   isGenerating: false,
+  chatTasks: {},
   editingToolIdx: -1
 };
 
@@ -320,6 +321,116 @@ function currentChat() { return chatById(state.currentId); }
 function isCurrentChat(chatOrId) {
   const id = typeof chatOrId === 'string' ? chatOrId : (chatOrId && chatOrId.id);
   return !!id && id === state.currentId;
+}
+
+function ensureChatTasks() {
+  if (!state.chatTasks || typeof state.chatTasks !== 'object') state.chatTasks = {};
+  return state.chatTasks;
+}
+
+function chatTaskById(chatId) {
+  if (!chatId) return null;
+  return ensureChatTasks()[chatId] || null;
+}
+
+function isChatGenerating(chatOrId) {
+  const id = typeof chatOrId === 'string' ? chatOrId : (chatOrId && chatOrId.id);
+  const task = chatTaskById(id);
+  return !!(task && task.isGenerating);
+}
+
+function isCurrentChatGenerating() {
+  return isChatGenerating(state.currentId);
+}
+
+function isAnyChatGenerating() {
+  return Object.values(ensureChatTasks()).some(t => t && t.isGenerating);
+}
+
+function beginChatTask(chatId, abortCtrl, opts = {}) {
+  if (!chatId) return null;
+  const tasks = ensureChatTasks();
+  const existing = tasks[chatId] || {};
+  const task = {
+    chatId,
+    isGenerating: true,
+    abortCtrl: abortCtrl || existing.abortCtrl || null,
+    stopRequested: opts.resetStop ? false : !!existing.stopRequested,
+    startedAt: existing.startedAt || Date.now()
+  };
+  tasks[chatId] = task;
+  syncGlobalTaskState(chatId);
+  return task;
+}
+
+function updateChatTaskController(chatId, abortCtrl) {
+  if (!chatId) return null;
+  const tasks = ensureChatTasks();
+  const task = tasks[chatId] || beginChatTask(chatId, null);
+  if (!task) return null;
+  task.isGenerating = true;
+  task.abortCtrl = abortCtrl || null;
+  tasks[chatId] = task;
+  syncGlobalTaskState(chatId);
+  return task;
+}
+
+function requestStopChatTask(chatId) {
+  const task = chatTaskById(chatId);
+  if (!task) return false;
+  task.stopRequested = true;
+  if (task.abortCtrl) {
+    try { task.abortCtrl.abort(); } catch (e) {}
+  }
+  syncGlobalTaskState(chatId);
+  return true;
+}
+
+function clearChatTask(chatId) {
+  if (!chatId) return;
+  const tasks = ensureChatTasks();
+  delete tasks[chatId];
+  syncGlobalTaskState();
+}
+
+function setChatTaskMode(chatId, mode, props = {}) {
+  const task = chatTaskById(chatId);
+  if (!task) return null;
+  task.mode = mode || task.mode || 'chat';
+  Object.assign(task, props);
+  syncGlobalTaskState(chatId);
+  refreshLegacyModeFlags();
+  return task;
+}
+
+function isChatTaskMode(chatId, mode) {
+  const task = chatTaskById(chatId);
+  return !!(task && task.isGenerating && task.mode === mode);
+}
+
+function isAnyChatTaskMode(mode) {
+  return Object.values(ensureChatTasks()).some(t => t && t.isGenerating && t.mode === mode);
+}
+
+function refreshLegacyModeFlags() {
+  state._outlineExecuting = isAnyChatTaskMode('outline');
+  state._planExecuting = isAnyChatTaskMode('plan');
+  state._outlineForceFinish = Object.values(ensureChatTasks()).some(t => t && t.isGenerating && t.mode === 'outline' && t.outlineForceFinish);
+}
+
+function syncGlobalTaskState(preferredChatId) {
+  const tasks = ensureChatTasks();
+  const currentTask = tasks[state.currentId] || null;
+  const preferredTask = preferredChatId ? (tasks[preferredChatId] || null) : null;
+  const fallbackTask = preferredTask || currentTask || Object.values(tasks).find(t => t && t.isGenerating) || null;
+
+  // 兼容旧模块：全局字段镜像当前对话任务；当前对话空闲时镜像任意后台任务。
+  const mirrorTask = currentTask || fallbackTask;
+  state.isGenerating = !!(currentTask && currentTask.isGenerating);
+  state.activeTaskChatId = mirrorTask ? mirrorTask.chatId : null;
+  state.abortCtrl = mirrorTask ? mirrorTask.abortCtrl : null;
+  state.stopRequested = mirrorTask ? !!mirrorTask.stopRequested : false;
+  refreshLegacyModeFlags();
 }
 
 function activeTaskChat() {

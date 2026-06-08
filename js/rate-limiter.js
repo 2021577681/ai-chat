@@ -43,21 +43,38 @@ function saveRateLimiter() {
 }
 
 // ⭐ 中断等待用：可监听用户点"停止"
-let _rateWaitAbort = null;
+// 多对话并行时必须按 AbortSignal 精确中断，否则停止 A 会误伤正在限速等待的 B。
+let _rateWaitAborters = new Map();
+let _rateWaitAbort = function(signalOverride) {
+  if (signalOverride && _rateWaitAborters.has(signalOverride)) {
+    _rateWaitAborters.get(signalOverride)();
+    return;
+  }
+  if (!signalOverride) {
+    for (const aborter of Array.from(_rateWaitAborters.values())) aborter();
+  }
+};
+if (typeof window !== 'undefined') window._rateWaitAbort = _rateWaitAbort;
 
 // ⭐ 等待倒计时显示 + 可中断的 sleep
-function _interruptibleSleep(ms, onTick) {
+function _interruptibleSleep(ms, onTick, signalOverride) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     let cancelled = false;
-    
+
+    const signal = signalOverride || ((typeof state !== 'undefined' && state.abortCtrl) ? state.abortCtrl.signal : null);
+    const waitKey = signal || Symbol('rate-wait');
+
     const cleanup = () => {
       clearInterval(tickTimer);
       clearTimeout(endTimer);
-      _rateWaitAbort = null;
+      if (_rateWaitAborters.get(waitKey) === abortWait) _rateWaitAborters.delete(waitKey);
+      if (signal) {
+        try { signal.removeEventListener('abort', onAbort); } catch (e) {}
+      }
     };
     
-    _rateWaitAbort = () => {
+    const abortWait = () => {
       if (cancelled) return;
       cancelled = true;
       cleanup();
@@ -65,9 +82,9 @@ function _interruptibleSleep(ms, onTick) {
       err.name = 'AbortError';
       reject(err);
     };
+    _rateWaitAborters.set(waitKey, abortWait);
     
     // 同时监听 state.abortCtrl（用户点"停止生成"按钮）
-    const signal = (typeof state !== 'undefined' && state.abortCtrl) ? state.abortCtrl.signal : null;
     const onAbort = () => {
       if (cancelled) return;
       cancelled = true;
@@ -99,7 +116,7 @@ function _interruptibleSleep(ms, onTick) {
 }
 
 // ⭐ 每次发请求前调用：检查频率 + 应用延迟（超限时自动等待，不再抛错）
-async function applyRateLimit() {
+async function applyRateLimit(signalOverride) {
   const s = state.settings;
   
   if (_requestLog.paused) {
@@ -133,7 +150,7 @@ async function applyRateLimit() {
     try {
       await _interruptibleSleep(waitMs, (remain) => {
         updateRateDisplay(`🚦 已达上限 ${recentCount}/${maxPerMinute}，等待 ${remain}s…`);
-      });
+      }, signalOverride);
     } catch (e) {
       updateRateDisplay();
       throw e;
@@ -152,7 +169,7 @@ async function applyRateLimit() {
       try {
         await _interruptibleSleep(wait, (remain) => {
           updateRateDisplay(`⏳ 节流等待 ${remain}s…`);
-        });
+        }, signalOverride);
       } catch (e) { updateRateDisplay(); throw e; }
     }
   }
@@ -167,7 +184,7 @@ async function applyRateLimit() {
       try {
         await _interruptibleSleep(delay, (remain) => {
           updateRateDisplay(`🎲 随机延迟 ${remain}s…`);
-        });
+        }, signalOverride);
       } catch (e) { updateRateDisplay(); throw e; }
     }
   }

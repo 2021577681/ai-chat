@@ -41,7 +41,9 @@ function renderPermissionsList() {
 function renderTaskPermissionsList() {
   const container = document.getElementById('taskPermissionsList');
   if (!container) return;
-  const taskAllow = (TERMINAL_CONFIG && TERMINAL_CONFIG.taskAllow) || {};
+  const taskAllow = (typeof getTaskAllowForChat === 'function')
+    ? getTaskAllowForChat(state.currentId)
+    : ((TERMINAL_CONFIG && TERMINAL_CONFIG.taskAllow) || {});
   const keys = Object.keys(taskAllow);
   
   if (keys.length === 0) {
@@ -81,7 +83,8 @@ function onClearAllPerms() {
 
 function onClearTaskPerms() {
   if (typeof TERMINAL_CONFIG === 'undefined') return;
-  TERMINAL_CONFIG.taskAllow = {};
+  if (typeof clearTaskPermissions === 'function') clearTaskPermissions();
+  else TERMINAL_CONFIG.taskAllow = {};
   toast('🗑️ 任务级授权已清除', 1800);
   renderTaskPermissionsList();
 }

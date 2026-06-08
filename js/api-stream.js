@@ -80,36 +80,44 @@ function stopGenerate() {
   //   - 这些场景会在某些时刻把 abortCtrl 重建甚至清空，单靠 signal.aborted 检查会漏
   //   - 各模式在工具循环、递归 callAPI 之前都应主动检查这个标志，及时退出
   //   - 由 callAPI / Plan / Outline / Reflection 的"首次进入"分支负责清零
-  state.stopRequested = true;
-  if (state.abortCtrl) {
+  const c = typeof currentChat === 'function' ? currentChat() : null;
+  const chatId = (c && c.id) || state.activeTaskChatId;
+  const task = (typeof chatTaskById === 'function' && chatId) ? chatTaskById(chatId) : null;
+  if (typeof requestStopChatTask === 'function' && requestStopChatTask(chatId)) {
+    // requestStopChatTask 已经标记 stopRequested 并 abort 对应 controller
+  } else {
+    state.stopRequested = true;
+  }
+  const ctrl = task ? (task.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  if (ctrl) {
     try {
-      state.abortCtrl.abort();
+      ctrl.abort();
     } catch (e) {
       console.error('[stopGenerate] 错误:', e);
     }
   }
   // ⭐ 同时打断"频率限制等待"，避免点了停止但仍卡在 rate-limiter 的 sleep 里
   if (typeof window !== 'undefined' && window._rateWaitAbort) {
-    try { window._rateWaitAbort(); } catch (e) {}
+    try { window._rateWaitAbort(ctrl && ctrl.signal); } catch (e) {}
   }
   // ⭐ 切断 attach_file 等工具留下的"自动重发"定时器链路
   //   否则点了暂停后 3 秒，tryAutoResend 仍会用隐藏 user 消息触发一次 callAPI，
   //   表现为"莫名其妙又开一轮对话、AI 不回答、计时器空转"（幽灵对话 bug）
   if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
-    try { window.cancelAutoResend(); } catch (e) {}
+    try { window.cancelAutoResend(chatId); } catch (e) {}
   }
   // ⭐ 清掉流式刷新与残留光标
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
-  state.isGenerating = false;
-  state.abortCtrl = null;
-  state.activeTaskChatId = null;
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
   if (typeof updateSendBtn === 'function') updateSendBtn();
 }
 
 function updateSendBtn() {
   const btn = document.getElementById('sendBtn');
   if (!btn) return;
-  if (state.isGenerating) {
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  const currentGenerating = (typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : !!state.isGenerating;
+  if (currentGenerating) {
     btn.textContent = '■';
     btn.classList.add('stop');
     document.getElementById('inputInfo').textContent = '生成中...';
@@ -122,6 +130,7 @@ function updateSendBtn() {
     if (state.settings.useOutline) info += ` · 📑 大纲(${state.settings.outlineMaxRounds || 30}轮)`;
     if (state.settings.useTools && state.tools.length) info += ` · 🛠 ${state.tools.length}工具`;
     if (state.settings.compressAutoEnabled) info += ` · 🗜️ 自动压缩`;
+    if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
     document.getElementById('inputInfo').textContent = info;
   }
 }

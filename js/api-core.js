@@ -199,11 +199,12 @@ const API_FETCH_TIMEOUT_MS = 5 * 60 * 1000;  // 5 分钟
 
 // ============ 🔁 自动重试机制 ============
 // 判定一个错误是否值得重试
-function _isRetryableError(e, httpStatus) {
+function _isRetryableError(e, httpStatus, signal) {
   if (!e && !httpStatus) return false;
   // 用户主动中止：绝不重试
   if (e && e.name === 'AbortError') return false;
-  if (state.abortCtrl && state.abortCtrl.signal && state.abortCtrl.signal.aborted) return false;
+  if (signal && signal.aborted) return false;
+  if (!signal && state.abortCtrl && state.abortCtrl.signal && state.abortCtrl.signal.aborted) return false;
   // Token 拿不到这种本地配置错，重试也没用
   if (e && e.name === 'LocalProxyAuthError') return false;
   
@@ -346,7 +347,8 @@ async function callAPI(roundLimit, options = {}) {
   const c = requestedChatId ? chatById(requestedChatId) : currentChat();
   if (!c) {
     console.error('[callAPI] 没有当前对话');
-    state.isGenerating = false;
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+    else state.isGenerating = false;
     updateSendBtn();
     return;
   }
@@ -364,9 +366,15 @@ async function callAPI(roundLimit, options = {}) {
     state.stopRequested = false;
   }
   
-  state.isGenerating = true;
-  state.activeTaskChatId = taskChatId;
+  const task = (typeof beginChatTask === 'function')
+    ? beginChatTask(taskChatId, null, { resetStop: isFirstCall })
+    : null;
+  if (!task) {
+    state.isGenerating = true;
+    state.activeTaskChatId = taskChatId;
+  }
   updateSendBtn();
+  if (typeof renderChatList === 'function') renderChatList();
   
   c.messages.push({ role: 'assistant', content: '', _startTime: Date.now() });
   // ⭐ 增量追加新的 assistant 占位（不重建整个列表）
@@ -385,15 +393,20 @@ async function callAPI(roundLimit, options = {}) {
     c.messages[lastIdx].content = `❌ 构造请求失败：${e.message}`;
     if (isTaskVisible()) renderMessages();
     saveData();
-    state.isGenerating = false;
-    state.abortCtrl = null;
-    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    }
     updateSendBtn();
     return;
   }
   
   const requestHeaders = buildHeaders();
-  state.abortCtrl = new AbortController();
+  const abortCtrl = new AbortController();
+  if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+  else state.abortCtrl = abortCtrl;
   
   // ⭐ 自动重试：把"发请求 + 读响应"包成可重试单元
   const maxAttempts = Math.max(1, (parseInt(s.retryMaxAttempts) || 3) + 1);  // 总尝试次数 = 重试次数+1
@@ -419,14 +432,14 @@ async function callAPI(roundLimit, options = {}) {
       let retryAfter = null;
       try {
         if (typeof applyRateLimit === 'function') {
-          await applyRateLimit();
+          await applyRateLimit(abortCtrl.signal);
         }
         
         const resp = await _apiFetchWithTimeout(url, {
           method: 'POST',
           headers: requestHeaders,
           body: JSON.stringify(body)
-        }, state.abortCtrl.signal, API_FETCH_TIMEOUT_MS);
+        }, abortCtrl.signal, API_FETCH_TIMEOUT_MS);
         
         if (typeof recordRequest === 'function') {
           recordRequest();
@@ -464,10 +477,10 @@ async function callAPI(roundLimit, options = {}) {
       } catch (attemptErr) {
         lastError = attemptErr;
         // 用户主动 abort：不重试，让外层 catch 处理
-        if (attemptErr.name === 'AbortError' || (state.abortCtrl && state.abortCtrl.signal.aborted)) {
+        if (attemptErr.name === 'AbortError' || abortCtrl.signal.aborted) {
           throw attemptErr;
         }
-        const retryable = _isRetryableError(attemptErr, httpStatus || attemptErr.httpStatus);
+        const retryable = _isRetryableError(attemptErr, httpStatus || attemptErr.httpStatus, abortCtrl.signal);
         const remaining = maxAttempts - attempt;
         if (!retryable || remaining <= 0) {
           throw attemptErr;
@@ -481,7 +494,7 @@ async function callAPI(roundLimit, options = {}) {
           if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx, c);
         }
         try {
-          await _sleepAbortable(wait, state.abortCtrl.signal);
+          await _sleepAbortable(wait, abortCtrl.signal);
         } catch (sleepErr) {
           // sleep 被 abort 中断
           throw sleepErr;
@@ -513,7 +526,7 @@ async function callAPI(roundLimit, options = {}) {
       for (const tc of msg.tool_calls) {
         // ⭐ 用户点了"停止"：立刻退出工具循环，不再执行后续工具
         //   即使当前轮的 fetch 已结束、abortCtrl 已 null，stopRequested 仍能拦住
-        if (state.stopRequested) {
+        if (task ? task.stopRequested : state.stopRequested) {
           userStoppedAll = true;
           // ⭐ 关键修复：去掉未执行的 tool_calls，避免下次请求时
           //   DeepSeek/OpenAI 报 400："tool_calls must be followed by tool messages"
@@ -523,7 +536,7 @@ async function callAPI(roundLimit, options = {}) {
         const fname = tc.function?.name || '';
         let args = {};
         try { args = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
-        const result = await executeTool(fname, args);
+        const result = await executeTool(fname, args, { chatId: taskChatId, chat: c });
         
         let contentText;
         let isError = false;
@@ -578,11 +591,11 @@ async function callAPI(roundLimit, options = {}) {
         }
       }
       
-      state.isGenerating = false;
+      if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(taskChatId);
       
       // ⭐ 用户点了"停止"：不再递归发下一轮请求
       //   关键修复：避免"工具执行完后照样再发一轮 API"的死循环
-      if (state.stopRequested) {
+      if (task ? task.stopRequested : state.stopRequested) {
         // 在最后一条 assistant 消息上留个标记，让用户看清楚是被停了
         const lastMsg = c.messages[c.messages.length - 1];
         if (lastMsg && lastMsg.role === 'tool') {
@@ -631,7 +644,7 @@ async function callAPI(roundLimit, options = {}) {
     } else {
       if (isTaskVisible()) renderMessages();
     }
-    if (isTaskVisible() && typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount();
+    if (isTaskVisible() && typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount(taskChatId);
   } catch (e) {
     if (e.name === 'AbortError') c.messages[lastIdx].content += '\n\n*[已停止]*';
     else {
@@ -650,13 +663,18 @@ async function callAPI(roundLimit, options = {}) {
     }
     saveData();
   } finally {
-    state.isGenerating = false;
-    state.abortCtrl = null;
-    if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    }
     if (typeof updateSendBtn === 'function') updateSendBtn();
+    if (typeof renderChatList === 'function') renderChatList();
     
     const sendBtn = document.getElementById('sendBtn');
-    if (sendBtn) {
+    const currentGenerating = (typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : !!state.isGenerating;
+    if (sendBtn && !currentGenerating) {
       sendBtn.textContent = '↑';
       sendBtn.classList.remove('stop');
     }
@@ -824,7 +842,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
   }
   
   if (streamUsage && typeof recordUsageFromResponse === 'function') {
-    recordUsageFromResponse(c, streamUsage);
+    recordUsageFromResponse(c, streamUsage, { model: reqCtx?.body?.model });
   }
   
   // ⭐ 保存原始响应到全局（仅本会话，刷新失效）
@@ -888,7 +906,7 @@ async function handleNonStream(txt, c, lastIdx, ct, reqCtx) {
       }));
     }
     if (j.usage && typeof recordUsageFromResponse === 'function') {
-      recordUsageFromResponse(c, j.usage);
+      recordUsageFromResponse(c, j.usage, { model: reqCtx?.body?.model });
     }
   } else if (s.apiFormat === 'responses') {
     c.messages[lastIdx].content = extractResponsesText(j) || '';
@@ -906,7 +924,7 @@ async function handleNonStream(txt, c, lastIdx, ct, reqCtx) {
     }
     const usage = normalizeResponsesUsage(j.usage);
     if (usage && typeof recordUsageFromResponse === 'function') {
-      recordUsageFromResponse(c, usage);
+      recordUsageFromResponse(c, usage, { model: reqCtx?.body?.model });
     }
   } else {
     const msg = j.choices?.[0]?.message;
@@ -917,12 +935,12 @@ async function handleNonStream(txt, c, lastIdx, ct, reqCtx) {
       c.messages[lastIdx].content = '(无响应)';
     }
     if (j.usage && typeof recordUsageFromResponse === 'function') {
-      recordUsageFromResponse(c, j.usage);
+      recordUsageFromResponse(c, j.usage, { model: reqCtx?.body?.model });
     }
   }
 }
 
-async function callOnceWithRole(history, model, rolePrompt) {
+async function callOnceWithRole(history, model, rolePrompt, options = {}) {
   const s = state.settings;
   // ⭐ 使用独立的 AbortController，避免：
   //   1) 抢占主对话 state.abortCtrl（用户点"停止"想停主对话，结果连带停掉辅助调用）
@@ -931,9 +949,16 @@ async function callOnceWithRole(history, model, rolePrompt) {
   const localCtrl = new AbortController();
   const signal = localCtrl.signal;
   let _bridgeOuterAbort = null;
-  if (state.abortCtrl && state.abortCtrl.signal && !state.abortCtrl.signal.aborted) {
+  const outerSignal = options && options.signal
+    ? options.signal
+    : (state.abortCtrl && state.abortCtrl.signal ? state.abortCtrl.signal : null);
+  const isStopped = (options && typeof options.isStopped === 'function')
+    ? options.isStopped
+    : () => !!state.stopRequested;
+  if (outerSignal) {
     _bridgeOuterAbort = () => { try { localCtrl.abort(); } catch (_) {} };
-    state.abortCtrl.signal.addEventListener('abort', _bridgeOuterAbort);
+    if (outerSignal.aborted) _bridgeOuterAbort();
+    else outerSignal.addEventListener('abort', _bridgeOuterAbort, { once: true });
   }
   const tempMessages = history.filter(m => m.role !== 'system' && m.role !== 'tool');
   let body;
@@ -981,8 +1006,13 @@ async function callOnceWithRole(history, model, rolePrompt) {
       let httpStatus = 0;
       let retryAfter = null;
       try {
+        if (isStopped()) {
+          const err = new Error('用户中断');
+          err.name = 'AbortError';
+          throw err;
+        }
         if (typeof applyRateLimit === 'function') {
-          await applyRateLimit();
+          await applyRateLimit(signal);
         }
         
         const resp = await _apiFetchWithTimeout(url, {
@@ -1028,7 +1058,7 @@ async function callOnceWithRole(history, model, rolePrompt) {
             parsedJson: j,
             usage: j.usage || null,
             request: { url, method: 'POST', headers: reqHeaders, body },
-            _source: '辅助调用 (callOnceWithRole)'
+            _source: options.sourceLabel || '辅助调用 (callOnceWithRole)'
           });
         }
         
@@ -1036,8 +1066,10 @@ async function callOnceWithRole(history, model, rolePrompt) {
         // 之前漏算导致 Plan/大纲/师生 模式的 token 都不进总账
         const usageForRecord = s.apiFormat === 'responses' ? normalizeResponsesUsage(j.usage) : j.usage;
         if (usageForRecord && typeof recordUsageFromResponse === 'function') {
-          const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
-          if (_c) recordUsageFromResponse(_c, usageForRecord);
+          const _c = options.chat
+            || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null)
+            || (typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null));
+          if (_c) recordUsageFromResponse(_c, usageForRecord, { model });
         }
         
         if (s.apiFormat === 'anthropic') return (j.content || []).filter(p => p.type === 'text').map(p => p.text).join('') || '';
@@ -1049,7 +1081,7 @@ async function callOnceWithRole(history, model, rolePrompt) {
         if (attemptErr.name === 'AbortError' || signal.aborted) throw attemptErr;
         
         const retryable = (typeof _isRetryableError === 'function')
-          ? _isRetryableError(attemptErr, httpStatus || attemptErr.httpStatus)
+          ? _isRetryableError(attemptErr, httpStatus || attemptErr.httpStatus, signal)
           : false;
         const remaining = maxAttempts - attempt;
         if (!retryable || remaining <= 0) throw attemptErr;
@@ -1074,8 +1106,8 @@ async function callOnceWithRole(history, model, rolePrompt) {
     throw lastErr || new Error('callOnceWithRole 未知错误');
   } finally {
     // 解绑桥接监听器，避免外层 controller 累积闭包引用
-    if (_bridgeOuterAbort && state.abortCtrl && state.abortCtrl.signal) {
-      try { state.abortCtrl.signal.removeEventListener('abort', _bridgeOuterAbort); } catch (_) {}
+    if (_bridgeOuterAbort && outerSignal) {
+      try { outerSignal.removeEventListener('abort', _bridgeOuterAbort); } catch (_) {}
     }
   }
 }
@@ -1100,7 +1132,10 @@ async function runAgentLoop({
   useTools = true,     // 是否启用工具
   stream = true,       // 是否流式
   temperature,         // 可选，默认从 settings 取
-  maxTokens            // 可选，默认从 settings 取
+  maxTokens,           // 可选，默认从 settings 取
+  isStopped,           // 可选，任务级软停止检查
+  chatId,              // 可选，usage 归属对话
+  chat                 // 可选，usage 归属对话对象
 }) {
   const s = state.settings;
   const _temp = temperature !== undefined ? temperature : parseFloat(s.temperature);
@@ -1120,7 +1155,8 @@ async function runAgentLoop({
   
   // ⭐ 统一的中止检查：同时看传入的 signal 和全局 stopRequested
   // 后者用于跨越 abortCtrl 重建边界的"软停止"（例如用户在等待 API 时点了暂停）
-  const _isAborted = () => (signal && signal.aborted) || state.stopRequested;
+  const _isStopped = typeof isStopped === 'function' ? isStopped : () => !!state.stopRequested;
+  const _isAborted = () => (signal && signal.aborted) || _isStopped();
   
   for (let round = 0; round < maxRounds + 1; round++) {
     // 中断检查
@@ -1172,7 +1208,7 @@ async function runAgentLoop({
       if (stream) body.stream_options = { include_usage: true };
     }
     
-    if (typeof applyRateLimit === 'function') await applyRateLimit();
+    if (typeof applyRateLimit === 'function') await applyRateLimit(signal);
     
     const url = buildFullUrl(s.baseUrl, s.apiPath);
     const headers = buildHeaders();
@@ -1393,8 +1429,10 @@ async function runAgentLoop({
     
     // 把 usage 累计到当前对话（让师生模式的 token 也进总账）
     if (usage && typeof recordUsageFromResponse === 'function') {
-      const _c = typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null);
-      if (_c) recordUsageFromResponse(_c, usage);
+      const _c = chat
+        || (chatId && typeof chatById === 'function' ? chatById(chatId) : null)
+        || (typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null));
+      if (_c) recordUsageFromResponse(_c, usage, { model });
       totalUsage = totalUsage ? { ...totalUsage, ...usage } : usage;
     }
     
@@ -1447,7 +1485,7 @@ async function runAgentLoop({
       
       _emit({ type: 'tool_call', id: tc.id, name: tc.name, args });
       
-      const result = await executeTool(tc.name, args);
+      const result = await executeTool(tc.name, args, { chatId, chat: chat || (chatId && typeof chatById === 'function' ? chatById(chatId) : null) });
       
       let contentText;
       let isError = false;

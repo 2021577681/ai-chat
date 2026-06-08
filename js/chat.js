@@ -2,19 +2,26 @@
 
 // ⭐ 离开当前任务所在对话时，只有会破坏该对话内容的操作才主动中止任务。
 // 网络层不卡的情况下，这能让旧任务的 catch 分支正常跑完（保留 _snap 等）
-function _abortCurrentTaskIfAny() {
-  state.stopRequested = true;
-  if (state.abortCtrl) {
-    try { state.abortCtrl.abort(); } catch (e) {}
+function _abortCurrentTaskIfAny(chatId) {
+  const targetChatId = chatId || state.activeTaskChatId || state.currentId;
+  const task = (typeof chatTaskById === 'function') ? chatTaskById(targetChatId) : null;
+  const ctrl = task ? (task.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  if (typeof requestStopChatTask === 'function' && requestStopChatTask(targetChatId)) {
+    // 已按对话中止
+  } else {
+    state.stopRequested = true;
+    if (ctrl) {
+      try { ctrl.abort(); } catch (e) {}
+    }
   }
   if (typeof window !== 'undefined' && window._rateWaitAbort) {
-    try { window._rateWaitAbort(); } catch (e) {}
+    try { window._rateWaitAbort(ctrl && ctrl.signal); } catch (e) {}
   }
   // ⭐ 切断 attach_file 等工具的"自动重发"定时器
   //   删除/清空正在运行的对话时如果不清，旧对话挂起的 3 秒定时器会继续触发
   //   一次幽灵 callAPI（隐藏 user 消息 + 空 assistant 占位 + 计时器空转）
   if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
-    try { window.cancelAutoResend(); } catch (e) {}
+    try { window.cancelAutoResend(targetChatId); } catch (e) {}
   }
   // 其他运行态旗标不在这里硬清：让 catch/finally 分支自己收尾。
 }
@@ -54,16 +61,21 @@ function newChat() {
   const id = 'c_' + Date.now();
   state.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
   state.currentId = id;
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
   saveData();
   renderChatList();
   renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
 function switchChat(id) {
   state.currentId = id;
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
   saveData();
   renderChatList();
   renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
@@ -71,37 +83,44 @@ function deleteChat(id, e) {
   e.stopPropagation();
   if (!confirm('删除这个对话？')) return;
   // ⭐ 若删除的是正在生成的对话，先中止后台任务，避免回调写回已删除对象
-  if (id === state.activeTaskChatId && typeof _abortCurrentTaskIfAny === 'function') {
-    _abortCurrentTaskIfAny();
+  if (typeof isChatGenerating === 'function' && isChatGenerating(id) && typeof _abortCurrentTaskIfAny === 'function') {
+    _abortCurrentTaskIfAny(id);
   }
   state.chats = state.chats.filter(c => c.id !== id);
   if (state.currentId === id) state.currentId = state.chats[0]?.id || null;
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
   saveData();
   renderChatList();
   renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
 function clearCurrentChat() {
   const c = currentChat();
   if (!c) return;
   if (!confirm('清空当前对话？')) return;
-  if (c.id === state.activeTaskChatId && typeof _abortCurrentTaskIfAny === 'function') {
-    _abortCurrentTaskIfAny();
+  if (typeof isChatGenerating === 'function' && isChatGenerating(c.id) && typeof _abortCurrentTaskIfAny === 'function') {
+    _abortCurrentTaskIfAny(c.id);
   }
   c.messages = [];
   c.title = '新对话';
   saveData();
   renderChatList();
   renderMessages();
-  if ((!state.isGenerating || c.id === state.activeTaskChatId) && typeof resetTaskPermission === 'function') {
-    resetTaskPermission();
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  const chatGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating;
+  if (!chatGenerating && typeof resetTaskPermission === 'function') {
+    resetTaskPermission(c.id);
   }
 }
 
 function renderChatList() {
   document.getElementById('chatList').innerHTML = state.chats.map(c => `
     <div class="chat-item ${c.id === state.currentId ? 'active' : ''}" onclick="switchChat('${c.id}')">
-      <span class="chat-item-title">💬 ${escapeHtml(c.title)}</span>
+      <span class="chat-item-title">${(typeof isChatGenerating === 'function' && isChatGenerating(c.id)) ? '⏳' : '💬'} ${escapeHtml(c.title)}</span>
       <button class="chat-item-del" onclick="deleteChat('${c.id}', event)">×</button>
     </div>`).join('');
 }
@@ -222,16 +241,16 @@ function appendMsgNode(idx, targetChat) {
 
 // ⭐ 局部更新：只重渲染指定消息的 plan 面板，避免整个消息列表重建
 // 解决：工具循环每秒数次 renderMessages 导致的卡顿、选中文本被清、滚动被踹的问题
-function updatePlanPanel(msgIdx) {
-  if (state.activeTaskChatId && state.activeTaskChatId !== state.currentId) return;
-  const c = currentChat();
-  if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
+function updatePlanPanel(msgIdx, targetChat) {
+  const c = targetChat || currentChat();
+  if (targetChat && !isCurrentChat(targetChat)) return false;
+  if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return false;
   
   const msgEl = document.querySelector(`.message[data-idx="${msgIdx}"]`);
   if (!msgEl) {
     // 消息节点不存在（如刚 push 完还没渲染），回退到全量渲染
-    renderMessages();
-    return;
+    if (isCurrentChat(c)) renderMessages();
+    return false;
   }
   
   const stickToBottom = isNearBottom();
@@ -248,13 +267,14 @@ function updatePlanPanel(msgIdx) {
       oldPanel.replaceWith(newPanel);
       postRender(newPanel);
     }
-  } else {
+    } else {
     // 旧节点不存在（比如第一次出现 plan），全量重渲一次
-    renderMessages();
-    return;
+    if (isCurrentChat(c)) renderMessages();
+    return false;
   }
   
   if (stickToBottom) scrollBottom();
+  return true;
 }
 
 function renderMsg(m, idx) {
@@ -545,6 +565,9 @@ function removeAttachment(id) {
   if (state.pendingAIAttachments) {
     state.pendingAIAttachments = state.pendingAIAttachments.filter(a => a.id !== id);
   }
+  if (state.pendingAIAttachmentsByChat && state.currentId && state.pendingAIAttachmentsByChat[state.currentId]) {
+    state.pendingAIAttachmentsByChat[state.currentId] = state.pendingAIAttachmentsByChat[state.currentId].filter(a => a.id !== id);
+  }
   renderPendingAtts();
 }
 
@@ -601,28 +624,16 @@ function setupPaste() {
 
 async function onSend() {
   // 状态保护
-  if (state.isGenerating) {
-    console.log('[onSend] 当前正在生成，先停止...');
+  const currentId = state.currentId;
+  const currentGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(currentId) : !!state.isGenerating;
+  if (currentGenerating) {
+    console.log('[onSend] 当前对话正在生成，先停止...');
     stopGenerate();
     await new Promise(r => setTimeout(r, 200));
-    state.isGenerating = false;
-    state.abortCtrl = null;
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(currentId);
     if (typeof updateSendBtn === 'function') updateSendBtn();
     return;
   }
-  
-  // ⭐ 计划模式执行中拒绝任何新消息
-  if (state._planExecuting) {
-    toast('⏳ 当前计划模式任务正在执行中。如已卡死，请先停止当前任务或刷新后处理未完成计划', 5000);
-    return;
-  }
-  
-  // ⭐ 大纲模式执行中拒绝任何新消息
-  if (state._outlineExecuting) {
-    toast('⏳ 当前大纲任务正在执行中。如已卡死：在对应消息点「立即收尾」5 秒内再点一次=强制中断', 5000);
-    return;
-  }
-  
   const input = document.getElementById('input');
   const text = input.value.trim();
   if (!text && !state.pendingAttachments.length) return;
@@ -678,13 +689,15 @@ async function onSend() {
   const userMsg = { role: 'user', content: text };
   
   const allAttachments = [...state.pendingAttachments];
-  if (state.pendingAIAttachments && state.pendingAIAttachments.length) {
-    for (const a of state.pendingAIAttachments) {
+  const pendingAIForChat = (typeof takePendingAIAttachments === 'function')
+    ? takePendingAIAttachments(c.id)
+    : (state.pendingAIAttachments || []).splice(0);
+  if (pendingAIForChat && pendingAIForChat.length) {
+    for (const a of pendingAIForChat) {
       if (!allAttachments.some(ex => ex.id === a.id)) {
         allAttachments.push(a);
       }
     }
-    state.pendingAIAttachments = [];
   }
   if (allAttachments.length) userMsg.attachments = allAttachments.map(a => ({ ...a }));
   
@@ -730,8 +743,11 @@ async function onSend() {
     console.error('[onSend] 错误:', e);
     toast('❌ 发送失败：' + e.message, 3000);
   } finally {
-    state.isGenerating = false;
-    state.abortCtrl = null;
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+    }
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
@@ -750,12 +766,16 @@ async function regenerate(idx) {
   //   2) 同时两条 API 流并发 → 用户被双倍计费
   //   3) 两个 Promise 互相覆盖 saveData → 可能丢消息
   // 与 onSend 的处理保持一致：abort → 等一拍让 catch finally 跑完 → 再继续
-  if (state.isGenerating || state.abortCtrl) {
-    if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny();
+  const sameChatGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating;
+  if (sameChatGenerating || (typeof chatTaskById === 'function' && chatTaskById(c.id)?.abortCtrl)) {
+    if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny(c.id);
     else if (state.abortCtrl) { try { state.abortCtrl.abort(); } catch (_) {} }
     await new Promise(r => setTimeout(r, 200));
-    state.isGenerating = false;
-    state.abortCtrl = null;
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+    }
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
   
@@ -765,9 +785,13 @@ async function regenerate(idx) {
   // 1. 任务级临时授权 + 自动重发定时器（与 newChat/onSend 行为一致）
   // 2. 计划模式 / 大纲的执行中标志（防止旧标志卡住 onSend）
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
-  state._planExecuting = false;
-  state._outlineExecuting = false;
-  state._outlineForceFinish = false;
+  if (typeof refreshLegacyModeFlags === 'function') {
+    refreshLegacyModeFlags();
+  } else {
+    state._planExecuting = false;
+    state._outlineExecuting = false;
+    state._outlineForceFinish = false;
+  }
   renderMessages();
   saveData();
   // ⭐ 与 onSend 行为一致：消费"一次性模式"

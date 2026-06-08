@@ -360,13 +360,44 @@ function buildToolsArray() {
   }
 }
 
-async function executeTool(name, args) {
+function _toolContextChatId(context = {}) {
+  if (typeof context === 'string') return context;
+  if (context && context.chatId) return context.chatId;
+  if (context && context.chat && context.chat.id) return context.chat.id;
+  return (state && (state.activeTaskChatId || state.currentId)) || '';
+}
+
+function _ctxToolFn(name, context) {
+  return (...fnArgs) => {
+    const root = typeof window !== 'undefined' ? window : globalThis;
+    const fn = root && root[name];
+    if (typeof fn !== 'function') throw new Error(`tool function not loaded: ${name}`);
+    return fn(...fnArgs, context);
+  };
+}
+
+async function executeTool(name, args, context = {}) {
   const tool = state.tools.find(t => t.name === name);
   if (!tool) return { ok: false, value: `未找到工具：${name}` };
   try {
-    const fn = new Function('args', `return (async () => { ${tool.code} })();`);
-    return { ok: true, value: await fn(args) };
+    const toolContext = {
+      ...(context && typeof context === 'object' ? context : {}),
+      chatId: _toolContextChatId(context)
+    };
+    if (typeof window !== 'undefined') window.__currentToolContext = toolContext;
+    const scopedNames = [
+      'callAgentBackend',
+      'executeTerminalCommand', 'readFile', 'writeFile', 'appendFile', 'editFile', 'deleteFile',
+      'listDir', 'searchInFiles', 'webSearch', 'fetchUrl', 'aiScreenshot', 'attachFileForAI',
+      'callGit', 'aiGitStatus', 'aiGitHistory', 'aiGitDiff', 'aiGitSnapshot', 'aiGitRestore'
+    ];
+    const scopedFns = scopedNames.map(n => _ctxToolFn(n, toolContext));
+    const fn = new Function('args', 'toolContext', ...scopedNames, `return (async () => { ${tool.code} })();`);
+    const value = await fn(args, toolContext, ...scopedFns);
+    if (typeof window !== 'undefined' && window.__currentToolContext === toolContext) delete window.__currentToolContext;
+    return { ok: true, value };
   } catch (e) {
+    if (typeof window !== 'undefined') delete window.__currentToolContext;
     return { ok: false, value: `工具出错：${e.message}` };
   }
 }

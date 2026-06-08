@@ -51,6 +51,7 @@ const TERMINAL_CONFIG = {
   sessionId: 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
   // ⭐ 本次任务级允许（按类别），任务结束自动清空
   taskAllow: {},
+  taskAllowByChat: {},
   // ⭐ 永久允许（按类别），存 localStorage，可在 UI 撤销
   permanentAllow: loadPermanentPerms(),
   autoAnalyzeAfterAttach: true
@@ -70,16 +71,93 @@ function clearAllPermanentPermissions() {
   TERMINAL_CONFIG.permanentAllow = {};
   savePermanentPerms({});
 }
-function clearTaskPermissions() {
+function clearTaskPermissions(chatId) {
+  const id = chatId || (typeof state !== 'undefined' ? state.currentId : '');
+  if (id && TERMINAL_CONFIG.taskAllowByChat) delete TERMINAL_CONFIG.taskAllowByChat[id];
+  else TERMINAL_CONFIG.taskAllowByChat = {};
   TERMINAL_CONFIG.taskAllow = {};
 }
 window.setPermanentPermission = setPermanentPermission;
 window.clearAllPermanentPermissions = clearAllPermanentPermissions;
 window.PERMISSION_CATEGORIES = PERMISSION_CATEGORIES;
 
-function getAgentSessionId() {
-  const chatId = (state && (state.activeTaskChatId || state.currentId)) || 'default';
+function resolveToolChatId(context) {
+  if (typeof context === 'string') return context;
+  if (context && context.chatId) return context.chatId;
+  if (context && context.chat && context.chat.id) return context.chat.id;
+  if (typeof window !== 'undefined' && window.__currentToolContext) {
+    const ctx = window.__currentToolContext;
+    if (ctx.chatId) return ctx.chatId;
+    if (ctx.chat && ctx.chat.id) return ctx.chat.id;
+  }
+  return (state && (state.currentId || state.activeTaskChatId)) || '';
+}
+
+function getTaskAllowForChat(chatId) {
+  const id = chatId || 'default';
+  if (!TERMINAL_CONFIG.taskAllowByChat || typeof TERMINAL_CONFIG.taskAllowByChat !== 'object') {
+    TERMINAL_CONFIG.taskAllowByChat = {};
+  }
+  if (!TERMINAL_CONFIG.taskAllowByChat[id]) TERMINAL_CONFIG.taskAllowByChat[id] = {};
+  return TERMINAL_CONFIG.taskAllowByChat[id];
+}
+
+function getAgentSessionId(context) {
+  const chatId = resolveToolChatId(context) || 'default';
   return `${TERMINAL_CONFIG.sessionId}:${chatId}`;
+}
+
+function ensurePendingAIAttachmentBuckets() {
+  if (!state.pendingAIAttachmentsByChat || typeof state.pendingAIAttachmentsByChat !== 'object') {
+    state.pendingAIAttachmentsByChat = {};
+  }
+  return state.pendingAIAttachmentsByChat;
+}
+
+function pendingAIAttachmentsForChat(chatId, create = true) {
+  const id = chatId || resolveToolChatId() || 'default';
+  const buckets = ensurePendingAIAttachmentBuckets();
+  if (!buckets[id] && create) buckets[id] = [];
+  return buckets[id] || [];
+}
+
+function pushPendingAIAttachment(chatId, attachment) {
+  pendingAIAttachmentsForChat(chatId, true).push(attachment);
+}
+
+function takePendingAIAttachments(chatId) {
+  const id = chatId || resolveToolChatId() || 'default';
+  const buckets = ensurePendingAIAttachmentBuckets();
+  const scoped = Array.isArray(buckets[id]) ? buckets[id].splice(0) : [];
+  if (buckets[id] && buckets[id].length === 0) delete buckets[id];
+  if (id === (state.currentId || '') && Array.isArray(state.pendingAIAttachments) && state.pendingAIAttachments.length) {
+    const legacy = state.pendingAIAttachments.splice(0);
+    return scoped.concat(legacy);
+  }
+  return scoped;
+}
+
+function clearPendingAIAttachments(chatId) {
+  const buckets = ensurePendingAIAttachmentBuckets();
+  if (chatId) {
+    delete buckets[chatId];
+    if (chatId === state.currentId) state.pendingAIAttachments = [];
+  } else {
+    state.pendingAIAttachmentsByChat = {};
+    state.pendingAIAttachments = [];
+  }
+}
+
+function cancelAutoResendForChat(chatId, clearAttachments = true) {
+  const id = chatId || resolveToolChatId() || 'default';
+  _autoResendCancelSeqByChat[id] = (_autoResendCancelSeqByChat[id] || 0) + 1;
+  if (_autoResendTimersByChat[id]) {
+    try { clearTimeout(_autoResendTimersByChat[id]); } catch (e) {}
+    delete _autoResendTimersByChat[id];
+  }
+  delete _pendingAutoResendByChat[id];
+  delete _autoResendInProgressByChat[id];
+  if (clearAttachments) clearPendingAIAttachments(id);
 }
 
 // ⭐ Token 持久化辅助
@@ -139,18 +217,24 @@ window.saveTerminalToken = saveTerminalToken;
 
 let _termConfirmResolve = null;
 let _currentConfirmCategory = '';
+let _currentConfirmChatId = '';
 let _pendingAutoResend = null;
+let _pendingAutoResendByChat = {};
 let _autoResendTimer = null;
+let _autoResendTimersByChat = {};
 let _autoResendInProgress = false;
+let _autoResendInProgressByChat = {};
 // ⭐ 自动重发取消版本号：每次取消/重置时递增。
 // 已经进入 tryAutoResend 等待循环的旧任务醒来后会发现版本不一致并退出，
 // 防止"暂停后下一次正常对话结束才冒出幽灵等待"。
 let _autoResendCancelSeq = 0;
+let _autoResendCancelSeqByChat = {};
 
-function termAskConfirm(title, detail, command, category) {
+function termAskConfirm(title, detail, command, category, context) {
   return new Promise(resolve => {
     _termConfirmResolve = resolve;
     _currentConfirmCategory = category || '';
+    _currentConfirmChatId = resolveToolChatId(context);
     
     document.getElementById('termConfirmCmd').textContent = command;
     document.getElementById('termConfirmCwd').textContent = detail || '(默认目录)';
@@ -212,6 +296,7 @@ function termConfirmAccept() {
     _termConfirmResolve({ allowed: true, rejectAll: false });
     _termConfirmResolve = null;
   }
+  _currentConfirmChatId = '';
 }
 
 function termConfirmAcceptAll() {
@@ -219,7 +304,7 @@ function termConfirmAcceptAll() {
   // ⭐ 改为"本任务后续允许此类操作"（按类别）
   const cat = _currentConfirmCategory;
   if (cat) {
-    TERMINAL_CONFIG.taskAllow[cat] = true;
+    getTaskAllowForChat(_currentConfirmChatId)[cat] = true;
     const info = PERMISSION_CATEGORIES[cat];
     toast(`⚡ 本任务后续将自动允许「${info ? info.label : cat}」`, 2500);
   }
@@ -229,6 +314,7 @@ function termConfirmAcceptAll() {
     _termConfirmResolve({ allowed: true, rejectAll: false });
     _termConfirmResolve = null;
   }
+  _currentConfirmChatId = '';
 }
 
 function termConfirmReject() {
@@ -239,6 +325,7 @@ function termConfirmReject() {
     _termConfirmResolve({ allowed: false, rejectAll: false });
     _termConfirmResolve = null;
   }
+  _currentConfirmChatId = '';
 }
 
 function termConfirmRejectAll() {
@@ -249,9 +336,19 @@ function termConfirmRejectAll() {
     _termConfirmResolve({ allowed: false, rejectAll: true });
     _termConfirmResolve = null;
   }
+  _currentConfirmChatId = '';
 }
 
-async function callAgentBackend(action, params, confirmTitle, confirmCommand) {
+async function callAgentBackend(action, params, confirmTitle, confirmCommand, context) {
+  if (!context && confirmTitle && typeof confirmTitle === 'object' && (confirmTitle.chatId || confirmTitle.chat)) {
+    context = confirmTitle;
+    confirmTitle = undefined;
+  }
+  if (!context && confirmCommand && typeof confirmCommand === 'object' && (confirmCommand.chatId || confirmCommand.chat)) {
+    context = confirmCommand;
+    confirmCommand = undefined;
+  }
+  const chatId = resolveToolChatId(context);
   // ⭐ 没有 token？自动拉取一次
   if (!TERMINAL_CONFIG.token) {
     const tk = await fetchTerminalToken(false);
@@ -264,12 +361,13 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand) {
   const needConfirm = !!category;  // 有类别即需要确认；没类别（read_file/list_dir/search/file_info）放行
   
   if (needConfirm) {
+    const taskAllow = getTaskAllowForChat(chatId);
     const alreadyAllowed =
       TERMINAL_CONFIG.permanentAllow[category] ||
-      TERMINAL_CONFIG.taskAllow[category];
+      taskAllow[category];
     
     if (!alreadyAllowed) {
-      const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category);
+      const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, { chatId });
       
       if (!result.allowed) {
         if (result.rejectAll) {
@@ -294,7 +392,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand) {
     return await fetch(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
-      body: JSON.stringify({ action, ...params, session_id: getAgentSessionId() })
+      body: JSON.stringify({ action, ...params, session_id: getAgentSessionId({ chatId }) })
     });
   };
   
@@ -332,9 +430,9 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand) {
   }
 }
 
-async function executeTerminalCommand(command, cwd, newWindow) {
+async function executeTerminalCommand(command, cwd, newWindow, context) {
   const r = await callAgentBackend('execute', { command, cwd, timeout: 60, new_window: !!newWindow },
-    'AI 想执行任务指令', command);
+    'AI 想执行任务指令', command, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   let output = `📂 目录：${r.cwd}\n💻 指令：${command}\n📤 退出码：${r.returncode}\n`;
@@ -344,47 +442,47 @@ async function executeTerminalCommand(command, cwd, newWindow) {
   return output;
 }
 
-async function readFile(path, startLine, endLine) {
-  const r = await callAgentBackend('read_file', { path, start_line: startLine, end_line: endLine });
+async function readFile(path, startLine, endLine, context) {
+  const r = await callAgentBackend('read_file', { path, start_line: startLine, end_line: endLine }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `📖 文档：${r.path}\n大小：${r.size} 字节\n\n--- 内容 ---\n${r.content}`;
 }
 
-async function writeFile(path, content) {
+async function writeFile(path, content, context) {
   const r = await callAgentBackend('write_file', { path, content },
-    'AI 想保存文档', `[写入文档] ${path}\n\n内容预览（${content.length} 字符）:\n${content.slice(0, 300)}${content.length > 300 ? '\n...(已截断)' : ''}`);
+    'AI 想保存文档', `[写入文档] ${path}\n\n内容预览（${content.length} 字符）:\n${content.slice(0, 300)}${content.length > 300 ? '\n...(已截断)' : ''}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `✅ ${r.action}文档：${r.path}（写入 ${r.bytes_written} 字节）`;
 }
 
-async function appendFile(path, content) {
+async function appendFile(path, content, context) {
   const r = await callAgentBackend('append_file', { path, content },
-    'AI 想追加内容到文档', `[追加到] ${path}\n\n追加内容（${content.length} 字符）:\n${content.slice(0, 300)}${content.length > 300 ? '\n...' : ''}`);
+    'AI 想追加内容到文档', `[追加到] ${path}\n\n追加内容（${content.length} 字符）:\n${content.slice(0, 300)}${content.length > 300 ? '\n...' : ''}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `✅ 已追加 ${r.bytes_appended} 字节到 ${r.path}`;
 }
 
-async function editFile(path, oldText, newText) {
+async function editFile(path, oldText, newText, context) {
   const r = await callAgentBackend('edit_file', { path, old_text: oldText, new_text: newText },
-    'AI 想更新文档', `[更新文档] ${path}\n\n[替换前]\n${oldText.slice(0, 200)}\n\n[替换后]\n${newText.slice(0, 200)}`);
+    'AI 想更新文档', `[更新文档] ${path}\n\n[替换前]\n${oldText.slice(0, 200)}\n\n[替换后]\n${newText.slice(0, 200)}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `✅ 已更新文档：${r.path}`;
 }
 
-async function deleteFile(path) {
+async function deleteFile(path, context) {
   const r = await callAgentBackend('delete_file', { path },
-    'AI 想移除文档', `[移除] ${path}`);
+    'AI 想移除文档', `[移除] ${path}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `✅ 已移除${r.type === 'dir' ? '目录' : '文档'}：${r.path}`;
 }
 
-async function listDir(path) {
-  const r = await callAgentBackend('list_dir', { path });
+async function listDir(path, context) {
+  const r = await callAgentBackend('list_dir', { path }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   let output = `📁 目录：${r.path}\n共 ${r.entries.length} 项\n\n`;
@@ -396,8 +494,8 @@ async function listDir(path) {
   return output;
 }
 
-async function searchInFiles(path, pattern, fileGlob) {
-  const r = await callAgentBackend('search', { path, pattern, file_glob: fileGlob || '*' });
+async function searchInFiles(path, pattern, fileGlob, context) {
+  const r = await callAgentBackend('search', { path, pattern, file_glob: fileGlob || '*' }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   if (!r.results.length) return `🔍 在 "${path}" 中未找到 "${pattern}"`;
@@ -409,12 +507,12 @@ async function searchInFiles(path, pattern, fileGlob) {
 }
 
 // ⭐ 网络搜索（通过本地后端 → DuckDuckGo/Bing）
-async function webSearch(query, maxResults, region) {
+async function webSearch(query, maxResults, region, context) {
   const r = await callAgentBackend('web_search', {
     query,
     max_results: maxResults || 8,
     region: region || 'wt-wt'
-  });
+  }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ 搜索失败：${r.error}`;
   let output = `🌐 搜索 "${r.query}"（来源：${r.engine}，共 ${r.count} 条）：\n\n`;
@@ -425,12 +523,12 @@ async function webSearch(query, maxResults, region) {
 }
 
 // ⭐ 抓取网页正文（通过本地后端，自动识别编码 + 去除 HTML）
-async function fetchUrl(url, extractText, maxChars) {
+async function fetchUrl(url, extractText, maxChars, context) {
   const r = await callAgentBackend('fetch_url', {
     url,
     extract_text: extractText !== false,
     max_chars: maxChars || 8000
-  });
+  }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ 抓取失败：${r.error}`;
   let output = '';
@@ -443,7 +541,7 @@ async function fetchUrl(url, extractText, maxChars) {
 }
 
 // 📸 AI 截图工具：指定窗口优先 → 全屏兜底 → 用户置前提示
-async function aiScreenshot(args) {
+async function aiScreenshot(args, context) {
   args = args || {};
   const mode = args.mode || 'auto';
   const params = {
@@ -461,7 +559,7 @@ async function aiScreenshot(args) {
     params.hwnd ? `HWND：${params.hwnd}` : '',
     '截图范围：' + (params.window_title || params.process_name || params.hwnd ? '指定窗口' : '全屏')
   ].filter(Boolean).join('\n');
-  const r = await callAgentBackend('screenshot', params, 'AI 想截取屏幕/窗口图像', summary);
+  const r = await callAgentBackend('screenshot', params, 'AI 想截取屏幕/窗口图像', summary, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}${r.fallback ? '\n💡 ' + r.fallback : ''}`;
 
@@ -475,11 +573,11 @@ async function aiScreenshot(args) {
 }
 
 
-async function aiListWindows(windowTitle, processName) {
+async function aiListWindows(windowTitle, processName, context) {
   const r = await callAgentBackend('list_windows', {
     window_title: windowTitle || '',
     process_name: processName || ''
-  }, 'AI 想查看当前窗口列表', `[list_windows]\n标题过滤：${windowTitle || '(无)'}\n进程过滤：${processName || '(无)'}`);
+  }, 'AI 想查看当前窗口列表', `[list_windows]\n标题过滤：${windowTitle || '(无)'}\n进程过滤：${processName || '(无)'}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   if (!r.windows || !r.windows.length) return `🪟 未找到匹配窗口（平台：${r.platform}）。可改用 ai_screenshot mode=fullscreen 获取全屏预览。`;
@@ -532,12 +630,14 @@ window.callGit = callGit;
 // 复用 termAskConfirm 弹窗机制 → 用户可以"永久允许"/"本任务允许"
 
 // 公共权限检查（与 callAgentBackend 同款，仅类别不同）
-async function _aiGitCheckPermission(category, title, summary) {
+async function _aiGitCheckPermission(category, title, summary, context) {
+  const chatId = resolveToolChatId(context);
+  const taskAllow = getTaskAllowForChat(chatId);
   const alreadyAllowed =
     TERMINAL_CONFIG.permanentAllow[category] ||
-    TERMINAL_CONFIG.taskAllow[category];
+    taskAllow[category];
   if (alreadyAllowed) return { ok: true };
-  const result = await termAskConfirm(title, '工作区', summary, category);
+  const result = await termAskConfirm(title, '工作区', summary, category, { chatId });
   if (!result.allowed) {
     if (result.rejectAll) {
       return { ok: false, error: '🛑 用户拒绝并停止后续 Git 操作。', _stopAll: true };
@@ -563,10 +663,10 @@ async function _aiGitEnsureRepo() {
 }
 
 // 🔍 note_status — 查看当前工作区改动概览
-async function aiGitStatus() {
+async function aiGitStatus(context) {
   const repo = await _aiGitEnsureRepo();
   if (!repo.ok) return repo.error;
-  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看版本状态', '[note_status] 列出当前未提交的改动文件');
+  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看版本状态', '[note_status] 列出当前未提交的改动文件', context);
   if (!perm.ok) return perm.error;
   const r = await callGit('status', {});
   if (!r.ok) return `❌ ${r.error}`;
@@ -598,10 +698,10 @@ async function aiGitStatus() {
 }
 
 // 📜 note_history — 查看历史快照
-async function aiGitHistory(limit) {
+async function aiGitHistory(limit, context) {
   const repo = await _aiGitEnsureRepo();
   if (!repo.ok) return repo.error;
-  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看历史快照', `[note_history] 列出最近 ${limit || 20} 个版本`);
+  const perm = await _aiGitCheckPermission('git_read', 'AI 想查看历史快照', `[note_history] 列出最近 ${limit || 20} 个版本`, context);
   if (!perm.ok) return perm.error;
   const r = await callGit('log', { limit: Math.min(Math.max(limit || 20, 1), 100) });
   if (!r.ok) return `❌ ${r.error}`;
@@ -620,11 +720,11 @@ async function aiGitHistory(limit) {
 }
 
 // 🔬 note_diff — 查看某次快照或当前工作区的具体改动
-async function aiGitDiff(commit, path) {
+async function aiGitDiff(commit, path, context) {
   const repo = await _aiGitEnsureRepo();
   if (!repo.ok) return repo.error;
   const perm = await _aiGitCheckPermission('git_read', 'AI 想查看版本差异',
-    `[note_diff] ${commit ? '快照 ' + commit.slice(0, 7) : '当前工作区改动'}${path ? '  文件：' + path : ''}`);
+    `[note_diff] ${commit ? '快照 ' + commit.slice(0, 7) : '当前工作区改动'}${path ? '  文件：' + path : ''}`, context);
   if (!perm.ok) return perm.error;
   const params = {};
   if (commit) {
@@ -646,7 +746,7 @@ async function aiGitDiff(commit, path) {
 }
 
 // 💾 note_snapshot — 保存当前工作区为一个新快照（git add . + git commit）
-async function aiGitSnapshot(message) {
+async function aiGitSnapshot(message, context) {
   const repo = await _aiGitEnsureRepo();
   if (!repo.ok) return repo.error;
   // 先看有没有改动可提交
@@ -664,7 +764,7 @@ async function aiGitSnapshot(message) {
   const more = all.length > 8 ? `\n... 共 ${all.length} 个文件` : '';
   
   const perm = await _aiGitCheckPermission('git_write', 'AI 想保存当前进度为版本快照',
-    `[note_snapshot]\n📝 信息：${msg}\n\n📋 包含改动：\n${fileSummary}${more}`);
+    `[note_snapshot]\n📝 信息：${msg}\n\n📋 包含改动：\n${fileSummary}${more}`, context);
   if (!perm.ok) return perm.error;
   
   // 后端 add 接受 files 数组；用 ['.'] 等价 git add .
@@ -676,7 +776,7 @@ async function aiGitSnapshot(message) {
 }
 
 // ⏪ note_restore — 将某个文件恢复到历史版本（高危：覆盖工作区）
-async function aiGitRestore(commit, path) {
+async function aiGitRestore(commit, path, context) {
   if (!commit || !path) return '❌ 必须同时提供 commit（快照 hash）和 path（要恢复的文件）。';
   if (!/^[0-9a-fA-F]{4,40}$/.test(commit)) return '❌ commit 必须是 4-40 位的十六进制 hash。';
   const repo = await _aiGitEnsureRepo();
@@ -690,7 +790,8 @@ async function aiGitRestore(commit, path) {
   
   // ⭐ note_restore 是危险操作（覆盖工作区文件），优先使用 _confirmDangerous（输入"我确定"）
   // 如果用户已永久授权 git_restore 类别，则跳过弹窗
-  const preauthed = TERMINAL_CONFIG.permanentAllow['git_restore'] || TERMINAL_CONFIG.taskAllow['git_restore'];
+  const taskAllow = getTaskAllowForChat(resolveToolChatId(context));
+  const preauthed = TERMINAL_CONFIG.permanentAllow['git_restore'] || taskAllow['git_restore'];
   if (!preauthed) {
     if (typeof _confirmDangerous === 'function') {
       const ok = await _confirmDangerous({
@@ -707,7 +808,7 @@ async function aiGitRestore(commit, path) {
     } else {
       // fallback：普通确认弹窗
       const perm = await _aiGitCheckPermission('git_restore', '⚠️ AI 想恢复文件到历史版本',
-        `[note_restore]\n🔴 这将覆盖工作区文件！\n\n文件：${path}\n恢复到快照：${commit.slice(0, 7)}\n\n注意：当前文件中尚未提交的改动会丢失。`);
+        `[note_restore]\n🔴 这将覆盖工作区文件！\n\n文件：${path}\n恢复到快照：${commit.slice(0, 7)}\n\n注意：当前文件中尚未提交的改动会丢失。`, context);
       if (!perm.ok) return perm.error;
     }
   }
@@ -724,7 +825,8 @@ window.aiGitDiff = aiGitDiff;
 window.aiGitSnapshot = aiGitSnapshot;
 window.aiGitRestore = aiGitRestore;
 
-async function attachFileForAI(path, description) {
+async function attachFileForAI(path, description, context) {
+  const chatId = resolveToolChatId(context);
   const r = await callAgentBackend('read_file_binary', { path },
     'AI 想加载文档作为附件',
     `[加载文档] ${path}\n\n${description ? '说明：' + description + '\n\n' : ''}加载后 AI 将立即查看内容。`);
@@ -748,8 +850,7 @@ async function attachFileForAI(path, description) {
     _aiDescription: description || ''
   };
   
-  if (!state.pendingAIAttachments) state.pendingAIAttachments = [];
-  state.pendingAIAttachments.push(attachment);
+  pushPendingAIAttachment(chatId, attachment);
   
   if (r.is_image) {
     toast(`✓ 已加载图片 ${r.name}`, 1500);
@@ -760,141 +861,103 @@ async function attachFileForAI(path, description) {
   if (TERMINAL_CONFIG.autoAnalyzeAfterAttach) {
     // ⭐ 大纲模式：附件由大纲循环内部消化，跳过 autoResend
     // 否则 autoResend 会在大纲结束后另起一段新 AI 回复
-    if (state._outlineExecuting) {
+    const outlineTask = typeof isChatTaskMode === 'function' ? isChatTaskMode(chatId, 'outline') : state._outlineExecuting;
+    if (outlineTask) {
       // 附件已存到 state.pendingAIAttachments，大纲循环下一轮会读取并注入到上下文
       return `✅ 已加载 ${r.name}（${(r.size / 1024).toFixed(1)} KB）\n\n` +
              `📌 系统：附件已加入对话上下文。如还需加载其他文件请继续调用 attach_file，否则继续推进任务。`;
     }
-    scheduleAutoResend(r, description);
+    scheduleAutoResend(r, description, { chatId });
     return `✅ 已加载 ${r.name}（${(r.size / 1024).toFixed(1)} KB）\n\n` +
            `📌 系统：附件已加入。如果还要加载其他文件，请继续调用 attach_file；否则简短回复完成。前端会自动重发让你看到附件。`;
   } else {
     attachment._hidden = false;
-    state.pendingAttachments.push(attachment);
-    renderPendingAtts();
+    if (chatId === state.currentId) {
+      state.pendingAttachments.push(attachment);
+      renderPendingAtts();
+    }
     return `✅ 已加载 ${r.name}\n请告诉用户："已加载 ${r.name}，请再发一句话我就能看到了。"`;
   }
 }
 
-function scheduleAutoResend(fileInfo, description) {
-  if (!_pendingAutoResend) {
-    _pendingAutoResend = {
-      chatId: state.activeTaskChatId || state.currentId,
+function scheduleAutoResend(fileInfo, description, context) {
+  const chatId = resolveToolChatId(context) || 'default';
+  if (!_pendingAutoResendByChat[chatId]) {
+    _pendingAutoResendByChat[chatId] = {
+      chatId,
       files: [],
       descriptions: []
     };
-  } else if (!_pendingAutoResend.chatId) {
-    _pendingAutoResend.chatId = state.activeTaskChatId || state.currentId;
   }
-  _pendingAutoResend.files.push(fileInfo);
-  if (description) _pendingAutoResend.descriptions.push(description);
+  const pending = _pendingAutoResendByChat[chatId];
+  pending.files.push(fileInfo);
+  if (description) pending.descriptions.push(description);
   
-  if (_autoResendTimer) {
-    clearTimeout(_autoResendTimer);
-    _autoResendTimer = null;
+  if (_autoResendTimersByChat[chatId]) {
+    clearTimeout(_autoResendTimersByChat[chatId]);
+    delete _autoResendTimersByChat[chatId];
   }
   
-  _autoResendTimer = setTimeout(() => {
-    _autoResendTimer = null;
-    tryAutoResend();
+  _autoResendTimersByChat[chatId] = setTimeout(() => {
+    delete _autoResendTimersByChat[chatId];
+    tryAutoResend(chatId);
   }, 3000);
 }
 
-async function tryAutoResend() {
-  // ⭐ 捕获当前版本。cancelAutoResend()/resetTaskPermission() 会递增版本号，
-  // 让已经启动并在 while(state.isGenerating) 中等待的旧任务醒来后自动失效。
-  const mySeq = _autoResendCancelSeq;
-  const isCancelled = () => mySeq !== _autoResendCancelSeq || state.stopRequested;
-  
-  if (_autoResendInProgress) {
-    console.log('[自动重发] 已有重发正在进行，跳过');
+async function tryAutoResend(chatId) {
+  chatId = chatId || resolveToolChatId() || 'default';
+  const mySeq = _autoResendCancelSeqByChat[chatId] || 0;
+  const isCancelled = () => mySeq !== (_autoResendCancelSeqByChat[chatId] || 0)
+    || !!(typeof chatTaskById === 'function' && chatTaskById(chatId)?.stopRequested);
+  const isGenerating = () => (typeof isChatGenerating === 'function')
+    ? isChatGenerating(chatId)
+    : (state.currentId === chatId && state.isGenerating);
+
+  if (_autoResendInProgressByChat[chatId]) {
+    console.log('[auto-resend] already running for chat:', chatId);
     return;
   }
-  
-  if (isCancelled()) {
-    console.log('[自动重发] 已取消，跳过');
-    return;
-  }
-  
-  if (!_pendingAutoResend) {
-    console.log('[自动重发] 没有待重发任务');
-    return;
-  }
-  
-  // ⭐ 等待时间从 20s 延长到 120s，覆盖思考模型（Claude Opus / GPT-o1 / DeepSeek-R1）的长回复
-  // 超时后不再强制重置 state.isGenerating（会导致正在跑的流式回复 UI 错乱），
-  // 改为放弃本次自动重发，把附件保留在 pending 队列，等下一次时机再触发
+  if (isCancelled()) return;
+  if (!_pendingAutoResendByChat[chatId]) return;
+
   let waitCount = 0;
-  const MAX_WAIT = 240;   // 240 * 500ms = 120 秒
-  while (state.isGenerating && waitCount < MAX_WAIT) {
-    if (isCancelled()) {
-      console.log('[自动重发] 等待期间已取消，退出');
-      return;
-    }
-    if (waitCount % 20 === 0) {
-      console.log(`[自动重发] AI 还在生成（${waitCount + 1}/${MAX_WAIT}），等待 500ms...`);
-    }
+  const MAX_WAIT = 240;
+  while (isGenerating() && waitCount < MAX_WAIT) {
+    if (isCancelled()) return;
     await new Promise(r => setTimeout(r, 500));
     waitCount++;
   }
-  
-  if (isCancelled()) {
-    console.log('[自动重发] 发送前已取消，退出');
+  if (isCancelled()) return;
+  if (isGenerating()) return;
+  if (!_pendingAutoResendByChat[chatId]) return;
+  if (!pendingAIAttachmentsForChat(chatId, false).length) {
+    delete _pendingAutoResendByChat[chatId];
     return;
   }
-  
-  if (state.isGenerating) {
-    console.warn('[自动重发] AI 超过 120s 仍未完成，本次放弃自动重发（保留待发任务，下次再触发）');
-    // 不重置 state.isGenerating —— 让真正在跑的回复自然完成
-    // _autoResendInProgress 仍是 false，下次 scheduleAutoResend 调用时会重新尝试
-    return;
-  }
-  
-  if (!_pendingAutoResend) {
-    console.log('[自动重发] 任务已被清空');
-    return;
-  }
-  
-  if (!state.pendingAIAttachments || state.pendingAIAttachments.length === 0) {
-    console.log('[自动重发] 没有附件可发送');
-    _pendingAutoResend = null;
-    return;
-  }
-  
-  const pending = _pendingAutoResend;
-  _pendingAutoResend = null;
-  
+
+  const pending = _pendingAutoResendByChat[chatId];
+  delete _pendingAutoResendByChat[chatId];
   const fileCount = pending.files.length;
   const fileNames = pending.files.map(f => f.name).join('、');
   const description = pending.descriptions.join('；');
-  
   const internalPrompt = description
-    ? `[系统：${fileCount} 个附件已加载（${fileNames}）] ${description}`
-    : `[系统：${fileCount} 个附件已加载（${fileNames}）] 请基于已加载的附件继续完成用户的任务。`;
-  
-  console.log('[自动重发] 派发隐藏消息:', internalPrompt);
-  
-  _autoResendInProgress = true;
-  
+    ? `[系统：${fileCount} 个附件已加载：${fileNames}] ${description}`
+    : `[系统：${fileCount} 个附件已加载：${fileNames}] 请基于已加载的附件继续完成用户的任务。`;
+
+  _autoResendInProgressByChat[chatId] = true;
   try {
     await sendHiddenMessage(internalPrompt, pending.chatId);
   } catch (e) {
-    console.error('[自动重发] 出错:', e);
-    // ⭐ 智能判断错误类型，存储错误不显示给用户
-    if (e.name === 'QuotaExceededError' || (e.message && e.message.includes('quota'))) {
-      console.warn('[自动重发] 存储超限（不影响 AI 回复）');
-      // 不弹 toast
-    } else {
-      toast('❌ 自动重发失败：' + e.message, 3000);
+    console.error('[auto-resend] failed:', e);
+    if (!(e.name === 'QuotaExceededError' || (e.message && e.message.includes('quota')))) {
+      toast('自动重发失败：' + e.message, 3000);
     }
   } finally {
-    _autoResendInProgress = false;
-    state.isGenerating = false;
-    state.abortCtrl = null;
+    delete _autoResendInProgressByChat[chatId];
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
-
 async function sendHiddenMessage(text, chatId) {
   console.log('[隐藏发送] === 开始 ===');
   console.log('[隐藏发送] 文本:', text);
@@ -911,10 +974,7 @@ async function sendHiddenMessage(text, chatId) {
     return;
   }
   
-  const attachments = state.pendingAIAttachments
-    ? state.pendingAIAttachments.map(a => ({ ...a }))
-    : [];
-  state.pendingAIAttachments = [];
+  const attachments = takePendingAIAttachments(c.id).map(a => ({ ...a }));
   
   console.log('[隐藏发送] 待发送附件数:', attachments.length);
   
@@ -960,11 +1020,17 @@ function toggleAutoAnalyze() {
     : '✓ 自动分析模式已关闭', 3000);
 }
 
-function resetTaskPermission() {
+function resetTaskPermission(chatId) {
+  chatId = chatId || (typeof state !== 'undefined' ? state.currentId : '') || resolveToolChatId();
   // ⭐ 任务级权限按类别清空（永久权限不动）
-  TERMINAL_CONFIG.taskAllow = {};
+  if (chatId) delete TERMINAL_CONFIG.taskAllowByChat[chatId];
+  else {
+    TERMINAL_CONFIG.taskAllow = {};
+    TERMINAL_CONFIG.taskAllowByChat = {};
+  }
   // ⭐ 递增取消版本，让已经启动但正在等待的 tryAutoResend 失效
-  _autoResendCancelSeq++;
+  if (chatId) cancelAutoResendForChat(chatId, false);
+  else _autoResendCancelSeq++;
   
   if (_autoResendTimer) {
     clearTimeout(_autoResendTimer);
@@ -978,7 +1044,12 @@ function resetTaskPermission() {
 // 暴露给 stopGenerate() / 用户手动中止流程调用，防止 attach_file 触发的
 // 3 秒定时器在用户暂停后继续把附件以隐藏消息形式重新发出去（幽灵对话 bug）。
 // 同时清掉 pendingAIAttachments，避免下一次正常对话被脏附件污染。
-function cancelAutoResend() {
+function cancelAutoResend(chatId) {
+  chatId = chatId || resolveToolChatId();
+  if (chatId) {
+    cancelAutoResendForChat(chatId, true);
+    return;
+  }
   // ⭐ 递增取消版本，让已经启动但正在等待 state.isGenerating=false 的 tryAutoResend 失效
   _autoResendCancelSeq++;
   if (_autoResendTimer) {
@@ -991,6 +1062,7 @@ function cancelAutoResend() {
   if (typeof state !== 'undefined' && Array.isArray(state.pendingAIAttachments)) {
     state.pendingAIAttachments = [];
   }
+  if (typeof state !== 'undefined') state.pendingAIAttachmentsByChat = {};
 }
 window.cancelAutoResend = cancelAutoResend;
 
@@ -998,10 +1070,12 @@ function forceUnstuck() {
   console.log('[紧急恢复] 强制重置所有状态');
   // ⭐ 让任何已经启动的自动重发等待循环立即失效
   _autoResendCancelSeq++;
+  _autoResendCancelSeqByChat = {};
   
   state.isGenerating = false;
   state.abortCtrl = null;
   state.pendingAIAttachments = [];
+  state.pendingAIAttachmentsByChat = {};
   // ⭐ 之前漏了这俩，导致 forceUnstuck 后大纲/Plan 仍然卡住 onSend
   state._outlineExecuting = false;
   state._planExecuting = false;
@@ -1012,7 +1086,11 @@ function forceUnstuck() {
     _autoResendTimer = null;
   }
   _pendingAutoResend = null;
+  _pendingAutoResendByChat = {};
   _autoResendInProgress = false;
+  _autoResendInProgressByChat = {};
+  Object.values(_autoResendTimersByChat).forEach(t => { try { clearTimeout(t); } catch (e) {} });
+  _autoResendTimersByChat = {};
   
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof renderPendingAtts === 'function') renderPendingAtts();

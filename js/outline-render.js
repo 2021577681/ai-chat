@@ -13,7 +13,8 @@ function renderOutlinePanel(m, idx) {
   const pct = total ? Math.round(done / total * 100) : 0;
   
   let statusBadge = '';
-  if (o.status === 'running') statusBadge = '<span class="outline-status-badge running">🔄 进行中</span>';
+  if (o.status === 'running' && o.finishRequested) statusBadge = '<span class="outline-status-badge running">🏁 收尾中</span>';
+  else if (o.status === 'running') statusBadge = '<span class="outline-status-badge running">🔄 进行中</span>';
   else if (o.status === 'completed') statusBadge = '<span class="outline-status-badge done">✅ 已完成</span>';
   else if (o.status === 'truncated') statusBadge = '<span class="outline-status-badge truncated">⚠️ 轮数耗尽</span>';
   else if (o.status === 'paused') statusBadge = '<span class="outline-status-badge paused">⏸ 已停止</span>';
@@ -100,14 +101,24 @@ function renderOutlinePanel(m, idx) {
   // 操作区
   let actionHtml = '';
   if (o.status === 'running') {
-    // 执行中：仅提供"立即收尾"（停止按钮在顶栏已有）
-    actionHtml = `
-      <div class="outline-actions">
-        <div class="outline-actions-hint">🔄 任务执行中。需要停止可点击右上角顶栏的「停止」按钮，或：</div>
-        <div class="outline-actions-btns">
-          <button class="outline-btn finish" onclick="finishOutlineNow(${idx})" title="立即停止当前轮并要求 AI 给最终回答（5 秒内连按两次=强制中断）">🏁 立即收尾</button>
-        </div>
-      </div>`;
+    // 执行中：第一次点收尾只发出收尾请求；请求后按钮切换为强制中断逃生口。
+    if (o.finishRequested) {
+      actionHtml = `
+        <div class="outline-actions">
+          <div class="outline-actions-hint">🏁 已收到收尾请求，正在停止当前轮并整理最终回答。</div>
+          <div class="outline-actions-btns">
+            <button class="outline-btn cancel" onclick="finishOutlineNow(${idx})" title="当前轮长时间无响应时强制中断">🛑 强制中断</button>
+          </div>
+        </div>`;
+    } else {
+      actionHtml = `
+        <div class="outline-actions">
+          <div class="outline-actions-hint">🔄 任务执行中。需要停止可点击右上角顶栏的「停止」按钮，或：</div>
+          <div class="outline-actions-btns">
+            <button class="outline-btn finish" onclick="finishOutlineNow(${idx})" title="立即停止当前轮并要求 AI 给最终回答；再次点击强制中断">🏁 立即收尾</button>
+          </div>
+        </div>`;
+    }
   } else if (o.status === 'truncated' && o.inProgress) {
     // ⭐ 正在保底收尾中：万一这次 fetch 也卡了，给用户一个"强制中断"逃生通道
     actionHtml = `
@@ -180,15 +191,15 @@ function toggleOutlinePanel(idx) {
 }
 
 // 局部刷新（避免整页重渲）
-function updateOutlinePanel(msgIdx) {
-  if (state.activeTaskChatId && state.activeTaskChatId !== state.currentId) return;
-  const c = currentChat();
-  if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return;
+function updateOutlinePanel(msgIdx, targetChat) {
+  const c = targetChat || currentChat();
+  if (targetChat && !isCurrentChat(targetChat)) return false;
+  if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return false;
   
   const msgEl = document.querySelector(`.message[data-idx="${msgIdx}"]`);
   if (!msgEl) {
-    if (typeof renderMessages === 'function') renderMessages();
-    return;
+    if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
+    return false;
   }
   
   const stickToBottom = (typeof isNearBottom === 'function') ? isNearBottom() : false;
@@ -218,11 +229,12 @@ function updateOutlinePanel(msgIdx) {
       }
     }
   } else {
-    if (typeof renderMessages === 'function') renderMessages();
-    return;
+    if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
+    return false;
   }
   
   if (stickToBottom && typeof scrollBottom === 'function') scrollBottom();
+  return true;
 }
 
 // ============ 设置面板 ============
@@ -294,7 +306,7 @@ async function resumeOutline(msgIdx) {
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return;
   
-  if (state.isGenerating) {
+  if ((typeof isChatGenerating === 'function' ? isChatGenerating(c.id) : state.isGenerating)) {
     if (typeof toast === 'function') toast('⏳ 已有任务在执行中', 3000);
     return;
   }
@@ -321,8 +333,7 @@ async function resumeOutline(msgIdx) {
 }
 
 // 🏁 立即收尾（执行中 / 暂停中 都可用）
-// ⭐ 如果在 5 秒内连按两次，会触发"硬中断"：强制把状态清零，不再等 fetch 响应 abort
-let _lastFinishClickTs = 0;
+// ⭐ 第一次点击发出收尾请求；请求后再次点击会触发"硬中断"，不再等 fetch 响应 abort。
 
 async function finishOutlineNow(msgIdx) {
   const c = currentChat();
@@ -331,34 +342,48 @@ async function finishOutlineNow(msgIdx) {
   const aiMsg = c.messages[msgIdx];
   const status = aiMsg.outline.status;
   
-  // ⭐ 硬中断逃生通道：5 秒内点第二次 = 强制脱困
+  // ⭐ 硬中断逃生通道：已请求收尾后再次点击 = 强制脱困
   // 用于网络层卡死、abort 信号被忽略等极端情况
-  const now = Date.now();
-  if (now - _lastFinishClickTs < 5000 && state._outlineExecuting) {
-    _lastFinishClickTs = 0;
+  const outlineRunning = (typeof isChatTaskMode === 'function') ? isChatTaskMode(taskChatId, 'outline') : !!state._outlineExecuting;
+  if (aiMsg.outline.finishRequested && outlineRunning) {
     if (confirm('⚠️ 检测到任务似乎卡住了。\n\n是否强制中断？\n（将丢弃当前轮的回复，但保留已完成的大纲条目）')) {
       return _hardAbortOutline(msgIdx);
     }
     return;
   }
-  _lastFinishClickTs = now;
   
   if (status === 'running' || status === 'truncated') {
     // ⭐ 执行中 / 正在收尾：都允许触发"再来一次收尾"
     // truncated 状态下如果保底收尾 fetch 卡住，也走这里
     if (status === 'running') {
-      if (!confirm('立即停止当前轮并要求 AI 直接给出最终回答？\n\n（如果 5 秒内再次点击此按钮，将强制中断）')) {
-        _lastFinishClickTs = 0;
+      if (!confirm('立即停止当前轮并要求 AI 直接给出最终回答？\n\n（请求后再次点击此按钮，将强制中断）')) {
         return;
       }
     }
-    state._outlineForceFinish = true;
-    if (state.abortCtrl) {
+    const task = (typeof chatTaskById === 'function') ? chatTaskById(taskChatId) : null;
+    if (task) {
+      task.outlineForceFinish = true;
+      if (typeof refreshLegacyModeFlags === 'function') refreshLegacyModeFlags();
+    } else {
+      state._outlineForceFinish = true;
+    }
+    aiMsg.outline.finishRequested = true;
+    aiMsg.outline.inProgress = true;
+    aiMsg.outline.progressText = '🏁 已请求立即收尾，正在停止当前轮...';
+    aiMsg.outline.expanded = true;
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
+    saveData();
+    if (typeof toast === 'function') toast('🏁 已请求收尾，正在停止当前轮并整理最终回答', 3000);
+    if (typeof requestStopChatTask === 'function' && requestStopChatTask(taskChatId)) {
+      // 已按对话中止当前轮，catch 分支会进入收尾
+    } else if (state.abortCtrl) {
       try { state.abortCtrl.abort(); } catch (e) {}
     }
     // 同时通知 rate-limiter 取消等待
     if (typeof window !== 'undefined' && window._rateWaitAbort) {
-      try { window._rateWaitAbort(); } catch (e) {}
+      const ctrl = task ? task.abortCtrl : state.abortCtrl;
+      try { window._rateWaitAbort(ctrl && ctrl.signal); } catch (e) {}
     }
     return;
   }
@@ -366,7 +391,6 @@ async function finishOutlineNow(msgIdx) {
   if (status === 'paused') {
     // 暂停中：直接发起一次保底收尾调用
     if (!confirm('要求 AI 基于已有信息直接给出最终回答？')) {
-      _lastFinishClickTs = 0;
       return;
     }
     if (!aiMsg.outline._snap) {
@@ -374,14 +398,25 @@ async function finishOutlineNow(msgIdx) {
       return;
     }
     
-    state.isGenerating = true;
-    state.activeTaskChatId = taskChatId;
-    state.abortCtrl = new AbortController();
-    state._outlineExecuting = true;
+    const abortCtrl = new AbortController();
+    const task = (typeof beginChatTask === 'function')
+      ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
+      : null;
+    if (task && typeof setChatTaskMode === 'function') {
+      setChatTaskMode(taskChatId, 'outline', { outlineForceFinish: false });
+      if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+    } else {
+      state.isGenerating = true;
+      state.activeTaskChatId = taskChatId;
+      state.abortCtrl = abortCtrl;
+      state._outlineExecuting = true;
+    }
     if (typeof updateSendBtn === 'function') updateSendBtn();
+    if (typeof renderChatList === 'function') renderChatList();
     
     aiMsg.outline.status = 'truncated';
     aiMsg.outline.inProgress = true;
+    aiMsg.outline.finishRequested = true;
     aiMsg.outline.progressText = '🏁 正在整理最终回答...';
     aiMsg.outline.expanded = true;
     if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
@@ -395,7 +430,8 @@ async function finishOutlineNow(msgIdx) {
         snap.systemPrompt,
         snap.model,
         aiMsg.outline,
-        state.abortCtrl.signal
+        abortCtrl.signal,
+        c
       );
       
       const finishNote = `\n\n---\n\n> 🏁 **用户请求立即收尾，AI 基于已有信息给出本回答。**`;
@@ -412,13 +448,16 @@ async function finishOutlineNow(msgIdx) {
       }
       
       aiMsg.outline.expanded = false;
+      delete aiMsg.outline.finishRequested;
       if (typeof toast === 'function') toast('🏁 已收尾', 3000);
     } catch (e) {
       if (e.name === 'AbortError') {
         aiMsg.outline.status = 'paused';  // 收尾过程被中断 → 回退到暂停
+        delete aiMsg.outline.finishRequested;
         if (typeof toast === 'function') toast('⏹ 收尾被中断', 3000);
       } else {
         aiMsg.outline.status = 'error';
+        delete aiMsg.outline.finishRequested;
         aiMsg.content = `❌ 收尾失败：${e.message}` + (aiMsg.content ? '\n\n' + aiMsg.content : '');
       }
     } finally {
@@ -426,11 +465,15 @@ async function finishOutlineNow(msgIdx) {
       delete aiMsg.outline.progressText;
       delete aiMsg.outline._snap;
       aiMsg._endTime = Date.now();
-      state.isGenerating = false;
-      state.abortCtrl = null;
-      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-      state._outlineExecuting = false;
+      if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+      else {
+        state.isGenerating = false;
+        state.abortCtrl = null;
+        if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+        state._outlineExecuting = false;
+      }
       if (typeof updateSendBtn === 'function') updateSendBtn();
+      if (typeof renderChatList === 'function') renderChatList();
       if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
       else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
       saveData();
@@ -449,25 +492,32 @@ function _hardAbortOutline(msgIdx) {
   const aiMsg = c.messages[msgIdx];
   
   // 1) 触发 abort（即使没用也试一次）
-  if (state.abortCtrl) {
+  if (typeof requestStopChatTask === 'function' && requestStopChatTask(c.id)) {
+    // 已按对话中止
+  } else if (state.abortCtrl) {
     try { state.abortCtrl.abort(); } catch (e) {}
   }
   if (typeof window !== 'undefined' && window._rateWaitAbort) {
-    try { window._rateWaitAbort(); } catch (e) {}
+    const task = (typeof chatTaskById === 'function') ? chatTaskById(c.id) : null;
+    const ctrl = task ? task.abortCtrl : state.abortCtrl;
+    try { window._rateWaitAbort(ctrl && ctrl.signal); } catch (e) {}
   }
   
-  // 2) 强制清掉所有"任务进行中"标志
-  state.isGenerating = false;
-  state.abortCtrl = null;
-  state.activeTaskChatId = null;
-  state._outlineExecuting = false;
-  state._outlineForceFinish = false;
-  state._planExecuting = false;
+  // 2) 强制清掉当前对话的"任务进行中"标志
+  if (typeof clearChatTask === 'function') clearChatTask(c.id);
+  else {
+    state.isGenerating = false;
+    state.abortCtrl = null;
+    state.activeTaskChatId = null;
+    state._outlineExecuting = false;
+    state._outlineForceFinish = false;
+  }
   
   // 3) 标记此条消息为 error 状态，保留 _snap 让用户还能"继续执行"重试
   if (aiMsg.outline) {
     aiMsg.outline.status = 'error';
     aiMsg.outline.inProgress = false;
+    delete aiMsg.outline.finishRequested;
     delete aiMsg.outline.progressText;
     const note = '\n\n---\n\n> ⚠️ **任务被强制中断**（网络挂死或 abort 信号失效）。可点击「继续执行」重试，或开始新对话。';
     aiMsg.content = (aiMsg.content || '(任务被中断)') + note;
