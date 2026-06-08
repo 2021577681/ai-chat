@@ -181,6 +181,53 @@ function renderOutlineToolCalls(calls) {
   }).join('')}</div>`;
 }
 
+function renderOutlineDiffSummary(m, idx) {
+  const summary = m && m.outline && m.outline.diffSummary;
+  if (!summary || !Array.isArray(summary.files) || !summary.files.length) return '';
+  const expanded = !!summary.expanded;
+  const visible = expanded ? summary.files : summary.files.slice(0, 3);
+  const hiddenCount = Math.max(0, summary.files.length - visible.length);
+  const totalAdded = parseInt(summary.totalAdded) || 0;
+  const totalRemoved = parseInt(summary.totalRemoved) || 0;
+  const rows = visible.map(f => {
+    const added = parseInt(f.added) || 0;
+    const removed = parseInt(f.removed) || 0;
+    return `
+      <div class="outline-diff-row">
+        <span class="outline-diff-path" title="${escapeHtml(f.path || '')}">${escapeHtml(f.path || '(unknown)')}</span>
+        <span class="outline-diff-stat">
+          ${added ? `<span class="outline-diff-add">+${added}</span>` : ''}
+          ${removed ? `<span class="outline-diff-del">-${removed}</span>` : ''}
+          ${(!added && !removed) ? '<span class="outline-diff-unknown">已修改</span>' : ''}
+        </span>
+      </div>`;
+  }).join('');
+  return `
+    <div class="outline-diff-card">
+      <div class="outline-diff-head">
+        <span class="outline-diff-icon">⊞</span>
+        <div class="outline-diff-title">
+          <div>已编辑 ${summary.totalFiles || summary.files.length} 个文件</div>
+          <div class="outline-diff-total">
+            ${totalAdded ? `<span class="outline-diff-add">+${totalAdded}</span>` : '<span class="outline-diff-muted">+0</span>'}
+            ${totalRemoved ? `<span class="outline-diff-del">-${totalRemoved}</span>` : '<span class="outline-diff-muted">-0</span>'}
+          </div>
+        </div>
+      </div>
+      <div class="outline-diff-list">${rows}</div>
+      ${hiddenCount ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">再显示 ${hiddenCount} 个文件⌄</button>` : (summary.files.length > 3 ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">收起⌃</button>` : '')}
+    </div>`;
+}
+
+function toggleOutlineDiffSummary(idx) {
+  const c = currentChat();
+  if (!c || !c.messages[idx] || !c.messages[idx].outline || !c.messages[idx].outline.diffSummary) return;
+  c.messages[idx].outline.diffSummary.expanded = !c.messages[idx].outline.diffSummary.expanded;
+  if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
+  else if (typeof renderMessages === 'function') renderMessages();
+  saveData();
+}
+
 function toggleOutlinePanel(idx) {
   const c = currentChat();
   if (!c || !c.messages[idx] || !c.messages[idx].outline) return;
@@ -247,9 +294,7 @@ function openOutlineSettings() {
   const e = id => document.getElementById(id);
   if (e('outline_enabled')) e('outline_enabled').checked = !!s.useOutline;
   if (e('outline_maxRounds')) {
-    e('outline_maxRounds').value = s.outlineMaxRounds || 30;
-    const valEl = e('outlineMaxRoundsVal');
-    if (valEl) valEl.textContent = s.outlineMaxRounds || 30;
+    e('outline_maxRounds').value = Math.max(1, parseInt(s.outlineMaxRounds) || 30);
   }
   if (e('outline_model')) e('outline_model').value = s.outlineModel || '';
   if (e('outline_systemPrompt')) e('outline_systemPrompt').value = s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
@@ -264,7 +309,10 @@ function saveOutlineSettings() {
   const s = state.settings;
   const e = id => document.getElementById(id);
   if (e('outline_enabled')) s.useOutline = e('outline_enabled').checked;
-  if (e('outline_maxRounds')) s.outlineMaxRounds = parseInt(e('outline_maxRounds').value) || 30;
+  if (e('outline_maxRounds')) {
+    const rounds = parseInt(e('outline_maxRounds').value);
+    s.outlineMaxRounds = (isNaN(rounds) || rounds < 1) ? 30 : rounds;
+  }
   if (e('outline_model')) s.outlineModel = e('outline_model').value.trim();
   if (e('outline_systemPrompt')) s.outlineSystemPrompt = e('outline_systemPrompt').value;
   
@@ -446,6 +494,9 @@ async function finishOutlineNow(msgIdx) {
         let summary = `任务被用户提前收尾。\n\n`;
         if (doneItems.length) summary += `**已完成的部分：**\n${doneItems.map(it => `- ${it.title}${it.note ? '：' + it.note : ''}`).join('\n')}\n`;
         aiMsg.content = summary + finishNote;
+      }
+      if (typeof outlineBuildDiffSummary === 'function') {
+        aiMsg.outline.diffSummary = outlineBuildDiffSummary(aiMsg.outline);
       }
       
       aiMsg.outline.expanded = false;

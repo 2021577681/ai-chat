@@ -164,7 +164,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'save_note',
-    description: '创建新文档或覆盖已存在文档的全部内容。可创建 .py .md .txt .json .html .css .js 等任何文本格式。父目录自动创建。每次保存会向用户确认。',
+    description: '创建新文档或覆盖已存在文档的全部内容。更适合新建文档、说明文件或小文件整体生成；代码修改优先使用 apply_patch，避免误覆盖。父目录自动创建。每次保存会向用户确认。',
     parameters: {
       type: 'object',
       properties: {
@@ -174,6 +174,25 @@ const BUILTIN_TOOLS = [
       required: ['path', 'content']
     },
     code: 'return await writeFile(args.path, args.content);'
+  },
+  {
+    name: 'apply_patch',
+    description: '按 unified diff / patch 修改代码文件。适合代码任务和多文件小范围修改：先生成带 --- / +++ / @@ 的补丁，可 dry_run 预检，确认能应用后再 dry_run=false 真正写入。相比 save_note/edit_note 更适合代码修改、重构和测试失败后的迭代。当前不支持删除文件，删除请用 delete_note。',
+    parameters: {
+      type: 'object',
+      properties: {
+        patch: {
+          type: 'string',
+          description: 'unified diff 文本，必须包含文件头 --- a/path、+++ b/path 和 @@ hunk。路径必须在工作区内。'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: '是否只预检不写入。建议第一次传 true，预检通过后再传 false 应用。'
+        }
+      },
+      required: ['patch']
+    },
+    code: 'return await applyPatch(args.patch, args.dry_run === true);'
   },
   {
     name: 'append_note',
@@ -190,7 +209,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'edit_note',
-    description: '精确查找并替换文档中的内容：在文档里找到 old_text 替换为 new_text。old_text 必须在文档中唯一存在。适合小范围修改笔记或文档。',
+    description: '精确查找并替换文档中的内容：在文档里找到 old_text 替换为 new_text。old_text 必须在文档中唯一存在。适合小范围修改笔记或文档；代码修改优先使用 apply_patch。',
     parameters: {
       type: 'object',
       properties: {

@@ -149,6 +149,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_append_file(body)
             elif action == 'edit_file':
                 self.handle_edit_file(body)
+            elif action == 'apply_patch':
+                self.handle_apply_patch(body)
             elif action == 'delete_file':
                 self.handle_delete_file(body)
             elif action == 'list_dir':

@@ -383,6 +383,8 @@ function renderMsg(m, idx) {
   
   let outlineHtml = '';
   if (m.outline && typeof renderOutlinePanel === 'function') outlineHtml = renderOutlinePanel(m, idx);
+  let outlineDiffHtml = '';
+  if (m.outline && typeof renderOutlineDiffSummary === 'function') outlineDiffHtml = renderOutlineDiffSummary(m, idx);
   
   const hasRefBadge = m.reflection && m.reflection.turns && m.reflection.turns.length > 0;
   const hasPlanBadge = m.plan && m.plan.steps && m.plan.steps.length > 0;
@@ -406,6 +408,7 @@ function renderMsg(m, idx) {
         ${reflectionHtml}
         ${m.plan ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${m.outline ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
+        ${outlineDiffHtml}
         ${m.reflection ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         <div class="msg-actions">
           <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>

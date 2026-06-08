@@ -19,6 +19,122 @@ import re
 from .sandbox import check_path_or_error
 
 
+def _strip_patch_path(path):
+    path = (path or '').strip()
+    if not path or path == '/dev/null':
+        return path
+    if path.startswith('"') and path.endswith('"'):
+        path = path[1:-1]
+    if path.startswith('a/') or path.startswith('b/'):
+        path = path[2:]
+    return path
+
+
+def _parse_hunk_header(line):
+    m = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', line)
+    if not m:
+        raise ValueError(f'无效 hunk 头: {line}')
+    return {
+        'old_start': int(m.group(1)),
+        'old_count': int(m.group(2) or '1'),
+        'new_start': int(m.group(3)),
+        'new_count': int(m.group(4) or '1'),
+        'lines': []
+    }
+
+
+def _parse_unified_patch(patch_text):
+    lines = patch_text.splitlines()
+    files = []
+    current = None
+    hunk = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith('diff --git '):
+            i += 1
+            continue
+        if line.startswith('--- '):
+            old_path = _strip_patch_path(line[4:].split('\t', 1)[0].strip())
+            if i + 1 >= len(lines) or not lines[i + 1].startswith('+++ '):
+                raise ValueError(f'缺少 +++ 文件头: {line}')
+            new_path = _strip_patch_path(lines[i + 1][4:].split('\t', 1)[0].strip())
+            current = {
+                'old_path': old_path,
+                'new_path': new_path,
+                'hunks': []
+            }
+            files.append(current)
+            hunk = None
+            i += 2
+            continue
+        if line.startswith('@@ '):
+            if current is None:
+                raise ValueError('hunk 出现在文件头之前')
+            hunk = _parse_hunk_header(line)
+            current['hunks'].append(hunk)
+            i += 1
+            continue
+        if hunk is not None:
+            if line.startswith((' ', '+', '-')):
+                hunk['lines'].append(line)
+            elif line.startswith('\\ No newline at end of file'):
+                pass
+            elif line.startswith(('index ', 'new file mode ', 'deleted file mode ', 'similarity index ')):
+                pass
+            else:
+                raise ValueError(f'无法解析 patch 行: {line}')
+        i += 1
+    if not files:
+        raise ValueError('未找到 unified diff 文件头（需要 --- / +++ / @@）')
+    return files
+
+
+def _find_hunk_position(content_lines, expected_old, expected_idx):
+    if content_lines[expected_idx:expected_idx + len(expected_old)] == expected_old:
+        return expected_idx
+    matches = []
+    max_start = len(content_lines) - len(expected_old)
+    for start in range(max_start + 1):
+        if content_lines[start:start + len(expected_old)] == expected_old:
+            matches.append(start)
+            if len(matches) > 1:
+                break
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError('hunk 上下文不匹配，文件可能已变化')
+    raise ValueError('hunk 上下文在文件中匹配多处，请提供更多上下文')
+
+
+def _apply_file_patch(abs_path, file_patch):
+    if file_patch['old_path'] == '/dev/null':
+        content_lines = []
+        existed = False
+    else:
+        if not os.path.exists(abs_path):
+            raise ValueError(f'文件不存在: {abs_path}')
+        with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+            content_lines = f.read().splitlines(keepends=True)
+        existed = True
+
+    out = list(content_lines)
+    offset = 0
+    added = 0
+    removed = 0
+    for hunk in file_patch['hunks']:
+        old_lines = [(ln[1:] + '\n') for ln in hunk['lines'] if ln.startswith((' ', '-'))]
+        new_lines = [(ln[1:] + '\n') for ln in hunk['lines'] if ln.startswith((' ', '+'))]
+        expected_idx = max(0, hunk['old_start'] - 1 + offset)
+        pos = _find_hunk_position(out, old_lines, expected_idx)
+        out[pos:pos + len(old_lines)] = new_lines
+        offset += len(new_lines) - len(old_lines)
+        added += sum(1 for ln in hunk['lines'] if ln.startswith('+'))
+        removed += sum(1 for ln in hunk['lines'] if ln.startswith('-'))
+
+    return ''.join(out), {'existed': existed, 'added': added, 'removed': removed, 'hunks': len(file_patch['hunks'])}
+
+
 class FilesMixin:
     """Handler mixin：所有文件 CRUD 和搜索"""
 
@@ -249,6 +365,55 @@ class FilesMixin:
             self._send_json(200, {'ok': True, 'path': path})
         except Exception as e:
             self._send_json(200, {'ok': False, 'error': str(e)})
+
+    # ============ Patch 编辑 ============
+    def handle_apply_patch(self, body):
+        patch_text = body.get('patch', '')
+        dry_run = bool(body.get('dry_run', False))
+        if not patch_text.strip():
+            return self._send_json(200, {'ok': False, 'error': 'patch 不能为空'})
+        print(f'🧩 [Apply Patch] dry_run={dry_run}, {len(patch_text)} 字符')
+        try:
+            file_patches = _parse_unified_patch(patch_text)
+            prepared = []
+            for fp in file_patches:
+                target_rel = fp['new_path'] if fp['new_path'] != '/dev/null' else fp['old_path']
+                target, err = check_path_or_error(target_rel, must_exist=False)
+                if err:
+                    return self._send_json(200, {'ok': False, 'error': err})
+                if fp['new_path'] == '/dev/null':
+                    return self._send_json(200, {'ok': False, 'error': '当前 apply_patch 暂不支持删除文件，请使用 delete_note'})
+                new_content, stats = _apply_file_patch(target, fp)
+                prepared.append({
+                    'path': target,
+                    'rel_path': target_rel,
+                    'content': new_content,
+                    'stats': stats
+                })
+
+            if not dry_run:
+                for item in prepared:
+                    parent = os.path.dirname(item['path'])
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    with open(item['path'], 'w', encoding='utf-8') as f:
+                        f.write(item['content'])
+
+            files = [{
+                'path': item['path'],
+                'added': item['stats']['added'],
+                'removed': item['stats']['removed'],
+                'hunks': item['stats']['hunks'],
+                'action': '修改' if item['stats']['existed'] else '创建'
+            } for item in prepared]
+            return self._send_json(200, {
+                'ok': True,
+                'dry_run': dry_run,
+                'files': files,
+                'message': ('Patch 预检通过' if dry_run else 'Patch 已应用')
+            })
+        except Exception as e:
+            return self._send_json(200, {'ok': False, 'error': str(e)})
 
     # ============ 删除 ============
     def handle_delete_file(self, body):

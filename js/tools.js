@@ -388,7 +388,7 @@ async function executeTool(name, args, context = {}) {
     if (typeof window !== 'undefined') window.__currentToolContext = toolContext;
     const scopedNames = [
       'callAgentBackend',
-      'executeTerminalCommand', 'readFile', 'writeFile', 'appendFile', 'editFile', 'deleteFile',
+      'executeTerminalCommand', 'readFile', 'writeFile', 'appendFile', 'editFile', 'applyPatch', 'deleteFile',
       'listDir', 'searchInFiles', 'webSearch', 'fetchUrl', 'aiScreenshot', 'attachFileForAI',
       'callGit', 'aiGitStatus', 'aiGitHistory', 'aiGitDiff', 'aiGitSnapshot', 'aiGitRestore'
     ];

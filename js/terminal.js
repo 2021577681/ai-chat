@@ -24,6 +24,7 @@ const ACTION_TO_CATEGORY = {
   write_file: 'write',
   append_file: 'append',
   edit_file: 'edit',
+  apply_patch: 'edit',
   delete_file: 'delete',
   read_file_binary: 'attach',
   screenshot: 'screenshot',
@@ -413,6 +414,8 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     const r = await resp.json();
     // ⭐ 如果响应里带了 workspace/cwd，顺手刷新顶部沙箱栏显示
     if (r && (r.workspace || r.cwd)) {
+      if (r.workspace) TERMINAL_CONFIG.workspace = r.workspace;
+      if (r.cwd) TERMINAL_CONFIG.cwd = r.cwd;
       const pathEl = document.getElementById('workspacePath');
       const statusEl = document.getElementById('workspaceStatus');
       if (pathEl && r.workspace) {
@@ -471,6 +474,25 @@ async function editFile(path, oldText, newText, context) {
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `✅ 已更新文档：${r.path}`;
+}
+
+async function applyPatch(patch, dryRun, context) {
+  const preview = String(patch || '').slice(0, 1200);
+  const r = await callAgentBackend('apply_patch', { patch, dry_run: !!dryRun },
+    dryRun ? 'AI 想预检代码补丁' : 'AI 想应用代码补丁',
+    `[apply_patch ${dryRun ? 'dry-run' : 'apply'}]\n\n${preview}${String(patch || '').length > 1200 ? '\n...(已截断)' : ''}`,
+    context);
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `❌ ${r.error}`;
+  const files = (r.files || []).map(f =>
+    `- ${f.action || '修改'} ${f.path}（+${f.added || 0}/-${f.removed || 0}，${f.hunks || 0} hunks）`
+  ).join('\n') || '- （无文件）';
+  return {
+    ok: true,
+    dry_run: !!r.dry_run,
+    files: r.files || [],
+    text: `${r.dry_run ? '✅ Patch 预检通过' : '✅ Patch 已应用'}\n${files}`
+  };
 }
 
 async function deleteFile(path, context) {

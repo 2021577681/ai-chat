@@ -574,10 +574,7 @@
     
     <div class="form-group">
       <label>最大执行轮数</label>
-      <div class="slider-row">
-        <input type="range" id="outline_maxRounds" min="5" max="60" step="1" oninput="document.getElementById('outlineMaxRoundsVal').textContent=this.value">
-        <span class="slider-val" id="outlineMaxRoundsVal">30</span>
-      </div>
+      <input type="number" id="outline_maxRounds" min="1" step="1" placeholder="30">
       <div class="form-hint">每次 LLM 调用算一轮。受您的请求频率限制保护，超限自动等待。</div>
     </div>
     

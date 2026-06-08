@@ -8,6 +8,127 @@
 // 5 分钟够长（推理模型也能跑完），但能兜住"网络层死锁"导致的永久挂起
 const OUTLINE_FETCH_TIMEOUT_MS = 5 * 60 * 1000;
 
+function outlineExtractTaskText(history) {
+  return (history || [])
+    .filter(m => m && m.role === 'user')
+    .map(m => {
+      if (typeof m.content === 'string') return m.content;
+      try { return JSON.stringify(m.content); } catch (e) { return ''; }
+    })
+    .join('\n\n')
+    .slice(-12000);
+}
+
+function outlineLooksLikeCodeTask(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return false;
+  return /(?:代码|项目|仓库|文件|脚本|函数|类|接口|组件|页面|测试|单测|构建|编译|运行|报错|错误|异常|修复|bug|实现|重构|依赖|配置|启动|调试|code|repo|project|file|script|function|class|component|test|pytest|unittest|jest|vitest|npm|pnpm|yarn|mvn|gradle|cargo|go test|build|compile|run|error|exception|traceback|fix|bug|implement|refactor|dependency|config|debug)/i.test(t);
+}
+
+function buildOutlineSystemPrompt(basePrompt, history) {
+  const prompt = basePrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
+  if (!outlineLooksLikeCodeTask(outlineExtractTaskText(history))) return prompt;
+  return prompt + (typeof CODE_TASK_OUTLINE_PROFILE_PROMPT === 'string' ? CODE_TASK_OUTLINE_PROFILE_PROMPT : '');
+}
+
+function outlineToolCallEntries(outlineObj) {
+  const entries = [];
+  const collect = arr => {
+    if (Array.isArray(arr)) {
+      for (const x of arr) if (x && typeof x === 'object') entries.push(x);
+    }
+  };
+  collect(outlineObj && outlineObj.globalToolCalls);
+  for (const item of ((outlineObj && outlineObj.items) || [])) collect(item.toolCalls);
+  return entries;
+}
+
+function outlineHasExecuteAction(outlineObj) {
+  return outlineToolCallEntries(outlineObj).some(tc => tc.name === 'execute_action');
+}
+
+function outlineHasCodeMutation(outlineObj) {
+  return outlineToolCallEntries(outlineObj).some(tc => {
+    if (!tc || !tc.name) return false;
+    if (['apply_patch', 'save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
+      if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) return false;
+      return true;
+    }
+    if (tc.name !== 'execute_action') return false;
+    const cmd = String((tc.args && tc.args.command) || '');
+    return /\b(npm|pnpm|yarn|pip|python|node|mvn|gradle|cargo|go|git)\b.*\b(add|install|write|format|lint|fix|build|test|run|commit)\b/i.test(cmd)
+      || /\b(sed|perl|powershell|python)\b.*\b(-i|set-content|out-file|writealltext|replace)\b/i.test(cmd);
+  });
+}
+
+function outlineHasVerificationBlocker(outlineObj) {
+  const text = ((outlineObj && outlineObj.items) || [])
+    .map(it => `${it.title || ''}\n${it.note || ''}`)
+    .join('\n')
+    .toLowerCase();
+  return /(?:无法运行|不能运行|未能运行|无法执行|不能执行|缺少依赖|缺依赖|缺少配置|缺配置|权限不足|环境限制|没有测试|无测试|阻塞|blocked|cannot run|can't run|unable to run|missing dependency|missing config|permission denied|environment limitation|no test)/i.test(text);
+}
+
+function outlineCodeGateNeedsVerification(outlineObj, isCodeTask) {
+  return !!isCodeTask
+    && outlineHasCodeMutation(outlineObj)
+    && !outlineHasExecuteAction(outlineObj)
+    && !outlineHasVerificationBlocker(outlineObj);
+}
+
+function outlineNormalizePatchPath(path) {
+  let p = String(path || '').replace(/\\/g, '/');
+  const root = (typeof window !== 'undefined' && window.TERMINAL_CONFIG && window.TERMINAL_CONFIG.workspace) || '';
+  if (root) {
+    const normRoot = String(root).replace(/\\/g, '/').replace(/\/+$/, '');
+    if (p.toLowerCase().startsWith(normRoot.toLowerCase() + '/')) {
+      p = p.slice(normRoot.length + 1);
+    }
+  }
+  p = p.replace(/^[a-z]:\//i, '').replace(/^\/+/, '');
+  const idx = p.lastIndexOf('/agent/');
+  if (idx >= 0) p = p.slice(idx + '/agent/'.length);
+  return p || String(path || '');
+}
+
+function outlineBuildDiffSummary(outlineObj) {
+  const map = new Map();
+  const addFile = (path, added, removed, source) => {
+    if (!path) return;
+    const key = outlineNormalizePatchPath(path);
+    const cur = map.get(key) || { path: key, added: 0, removed: 0, sources: new Set() };
+    cur.added += Math.max(0, parseInt(added) || 0);
+    cur.removed += Math.max(0, parseInt(removed) || 0);
+    if (source) cur.sources.add(source);
+    map.set(key, cur);
+  };
+
+  for (const tc of outlineToolCallEntries(outlineObj)) {
+    if (!tc || tc.ok === false || tc._running) continue;
+    if (tc.name === 'apply_patch' && !(tc.args && tc.args.dry_run === true)) {
+      const files = (tc.rawResult && Array.isArray(tc.rawResult.files)) ? tc.rawResult.files : [];
+      for (const f of files) addFile(f.path, f.added, f.removed, 'apply_patch');
+    } else if (['save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
+      const path = (tc.args && tc.args.path) || '';
+      addFile(path, 0, 0, tc.name);
+    }
+  }
+
+  const files = Array.from(map.values()).map(x => ({
+    path: x.path,
+    added: x.added,
+    removed: x.removed,
+    sources: Array.from(x.sources)
+  })).sort((a, b) => a.path.localeCompare(b.path));
+  if (!files.length) return null;
+  return {
+    files,
+    totalFiles: files.length,
+    totalAdded: files.reduce((sum, f) => sum + f.added, 0),
+    totalRemoved: files.reduce((sum, f) => sum + f.removed, 0)
+  };
+}
+
 // ⭐ 直接复用 api-core.js 的 _apiFetchWithTimeout —— 这样大纲模式自动享受：
 //    ① 本地代理（绕过 CORS）
 //    ② TypeError → 人话错误的翻译
@@ -133,7 +254,7 @@ async function callAPIWithOutline(options = {}) {
   if (typeof renderChatList === 'function') renderChatList();
   
   let aiMsg, msgIdx;
-  let conversationMessages, finalAnswer, completedNaturally;
+  let conversationMessages, finalAnswer, completedNaturally, isCodeTask;
   let startLoop, model, systemPrompt, maxRounds, history;
   
   if (options.resumeFromMsgIdx !== undefined) {
@@ -160,6 +281,7 @@ async function callAPIWithOutline(options = {}) {
     systemPrompt = snap.systemPrompt;
     maxRounds = snap.maxRounds;
     history = snap.history;
+    isCodeTask = !!snap.isCodeTask;
     completedNaturally = false;
     
     // 注入用户留言
@@ -217,7 +339,8 @@ async function callAPIWithOutline(options = {}) {
     
     history = c.messages.slice(0, -1);
     model = (s.outlineModel || '').trim() || s.currentModel;
-    systemPrompt = s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
+    isCodeTask = outlineLooksLikeCodeTask(outlineExtractTaskText(history));
+    systemPrompt = buildOutlineSystemPrompt(s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, history);
     maxRounds = aiMsg.outline.maxRounds;
     conversationMessages = [];
     finalAnswer = '';
@@ -252,7 +375,8 @@ async function callAPIWithOutline(options = {}) {
       model,
       systemPrompt,
       maxRounds,
-      history
+      history,
+      isCodeTask
     };
   };
   
@@ -287,8 +411,9 @@ async function callAPIWithOutline(options = {}) {
         aiMsg.outline._lastBudgetWarn = warnLevel;
       }
       
-      // 🛡️ 第二层加强：最后 1 轮强制禁用工具
-      const forceNoTools = (remaining <= 1);
+      // 🛡️ 第二层加强：最后 1 轮强制禁用工具；代码验证门禁未满足时仍允许工具。
+      const verificationGateOpen = outlineCodeGateNeedsVerification(aiMsg.outline, isCodeTask);
+      const forceNoTools = (remaining <= 1 && !verificationGateOpen);
       
       // ----- 构造请求 -----
       const tools = forceNoTools ? [] : buildOutlineTools({ useTools: taskUseTools });
@@ -443,6 +568,18 @@ async function callAPIWithOutline(options = {}) {
       
       // ----- 没工具调用：完成 -----
       if (!toolCalls || !toolCalls.length) {
+        if (outlineCodeGateNeedsVerification(aiMsg.outline, isCodeTask)) {
+          conversationMessages.push({
+            role: 'user',
+            content: '【系统门禁】这是代码任务，且你已经修改过代码，但还没有调用 execute_action 运行任何测试、构建、lint、启动检查或最小复现命令。不要最终总结。请继续调用工具：优先运行最相关的验证命令；如果确实无法运行，必须调用 update_outline 记录阻塞原因，然后再总结。'
+          });
+          aiMsg.outline.status = 'running';
+          aiMsg.outline.progressText = '🧪 代码任务需要执行验证命令...';
+          onUpdate();
+          saveSnap(loop + 1);
+          saveData();
+          continue;
+        }
         completedNaturally = true;
         break;
       }
@@ -491,6 +628,7 @@ async function callAPIWithOutline(options = {}) {
           const content = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
           liveEntry.result = content.slice(0, 500);
           liveEntry.ok = result.ok;
+          liveEntry.rawResult = result.value && typeof result.value === 'object' ? result.value : null;
           liveEntry._running = false;
           onUpdate();
         }
@@ -535,6 +673,7 @@ async function callAPIWithOutline(options = {}) {
       // ✅ 正常情况：AI 主动停止调用工具
       aiMsg.outline.status = 'completed';
       aiMsg.content = finalAnswer || '(任务已完成，但未生成文本回复)';
+      aiMsg.outline.diffSummary = outlineBuildDiffSummary(aiMsg.outline);
     } else {
       // 🛡️ 第三层保护：达到轮数上限但 AI 仍在调工具 → 强制收尾调用
       aiMsg.outline.status = 'truncated';
@@ -567,6 +706,7 @@ async function callAPIWithOutline(options = {}) {
         if (pendingItems.length) summary += `**未完成：**\n${pendingItems.map(it => `- ${it.title}`).join('\n')}\n`;
         aiMsg.content = summary + truncatedNote;
       }
+      aiMsg.outline.diffSummary = outlineBuildDiffSummary(aiMsg.outline);
     }
     
     aiMsg.outline.inProgress = false;
@@ -629,6 +769,7 @@ async function callAPIWithOutline(options = {}) {
           if (doneItems.length) summary += `**已完成的部分：**\n${doneItems.map(it => `- ${it.title}${it.note ? '：' + it.note : ''}`).join('\n')}\n`;
           aiMsg.content = summary + finishNote;
         }
+        aiMsg.outline.diffSummary = outlineBuildDiffSummary(aiMsg.outline);
         
         if (typeof toast === 'function') toast('🏁 已收尾', 3000);
         delete aiMsg.outline.finishRequested;
