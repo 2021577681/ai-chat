@@ -307,6 +307,94 @@ function outlineBuildDiffSummary(outlineObj) {
   };
 }
 
+function outlineResponsesUserContentParts(content) {
+  const parts = [];
+  const addText = (text) => {
+    const value = String(text || '');
+    if (value) parts.push({ type: 'input_text', text: value });
+  };
+  for (const part of (Array.isArray(content) ? content : [])) {
+    if (!part) continue;
+    if (typeof part === 'string') {
+      addText(part);
+    } else if (part.type === 'input_text') {
+      addText(part.text);
+    } else if (part.type === 'text') {
+      addText(part.text);
+    } else if (part.type === 'image_url') {
+      const url = part.image_url && (part.image_url.url || part.image_url);
+      if (url) parts.push({ type: 'input_image', image_url: url });
+    } else if (part.type === 'input_image' || part.type === 'input_file') {
+      parts.push(part);
+    } else if (part.type === 'image' && part.source && part.source.type === 'base64') {
+      const mediaType = part.source.media_type || 'image/png';
+      const data = part.source.data || '';
+      if (data) parts.push({ type: 'input_image', image_url: `data:${mediaType};base64,${data}` });
+    } else if (part.text) {
+      addText(part.text);
+    } else {
+      try { addText(JSON.stringify(part)); } catch (e) {}
+    }
+  }
+  return parts;
+}
+
+function outlineBuildResponsesInput(history, conversationMessages) {
+  const out = [];
+  const appendViaAdapter = (msg) => {
+    if (!msg) return;
+    if (typeof buildOpenAIResponsesInput === 'function') {
+      out.push(...buildOpenAIResponsesInput([msg]));
+    } else {
+      out.push(msg);
+    }
+  };
+  const all = [...(history || []), ...(conversationMessages || [])];
+  for (const msg of all) {
+    if (!msg || typeof msg !== 'object' || msg._isCompressing) continue;
+    if (msg.role === 'user' && Array.isArray(msg.content)) {
+      const parts = outlineResponsesUserContentParts(msg.content);
+      out.push({ role: 'user', content: parts.length ? parts : '' });
+    } else {
+      appendViaAdapter(msg);
+    }
+  }
+  return out;
+}
+
+function outlineNormalizeUsage(usage) {
+  return state.settings.apiFormat === 'responses' && typeof normalizeResponsesUsage === 'function'
+    ? normalizeResponsesUsage(usage)
+    : usage;
+}
+
+function outlineToolResultText(result) {
+  const value = result && result.value;
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.error === 'string') return value.error;
+    try { return JSON.stringify(value); } catch (e) { return String(value); }
+  }
+  return value === undefined ? '' : String(value);
+}
+
+function outlineToolResultOutcome(result, content) {
+  const value = result && result.value;
+  const isObject = value && typeof value === 'object';
+  const text = String(content || '');
+  const stopAll = !!(isObject && value._stopAll)
+    || /(?:🛑|用户拒绝).*?(?:停止|后续|所有)/.test(text);
+  const userRejected = !!(isObject && value._userRejected)
+    || /(?:⏭️|用户拒绝此次|用户拒绝此操作|用户拒绝了此操作)/.test(text);
+  const valueFailed = !!(isObject && value.ok === false);
+  return {
+    ok: !!(result && result.ok) && !stopAll && !userRejected && !valueFailed,
+    stopAll,
+    userRejected
+  };
+}
+
 // ⭐ 直接复用 api-core.js 的 _apiFetchWithTimeout —— 这样大纲模式自动享受：
 //    ① 本地代理（绕过 CORS）
 //    ② TypeError → 人话错误的翻译
@@ -434,6 +522,7 @@ async function callAPIWithOutline(options = {}) {
   let aiMsg, msgIdx;
   let conversationMessages, finalAnswer, completedNaturally, taskProfile;
   let startLoop, model, systemPrompt, maxRounds, history;
+  let stoppedByToolPolicy = false;
   
   if (options.resumeFromMsgIdx !== undefined) {
     // ===== 恢复模式 =====
@@ -679,6 +768,16 @@ async function callAPIWithOutline(options = {}) {
           system: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt)
         };
         if (tools.length) body.tools = tools;
+      } else if (s.apiFormat === 'responses') {
+        body = {
+          model,
+          input: outlineBuildResponsesInput(history, conversationMessages),
+          instructions: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt),
+          temperature: parseFloat(s.temperature),
+          max_output_tokens: parseInt(s.maxTokens),
+          stream: false
+        };
+        if (tools.length) body.tools = tools;
       } else {
         const baseMsgs = (typeof buildOpenAIMessages === 'function')
           ? buildOpenAIMessages(history).filter(m => m.role !== 'system') : [];
@@ -734,8 +833,9 @@ async function callAPIWithOutline(options = {}) {
       }
       
       // ⭐ 把大纲模式每轮 usage 计入当前对话统计（之前漏算）
-      if (j.usage && typeof recordUsageFromResponse === 'function') {
-        recordUsageFromResponse(c, j.usage, { model });
+      const usageForRecord = outlineNormalizeUsage(j.usage);
+      if (usageForRecord && typeof recordUsageFromResponse === 'function') {
+        recordUsageFromResponse(c, usageForRecord, { model });
       }
       
       // ----- 解析返回 -----
@@ -751,6 +851,20 @@ async function callAPIWithOutline(options = {}) {
           toolCalls = toolUses.map(tu => ({
             id: tu.id, type: 'function',
             function: { name: tu.name, arguments: JSON.stringify(tu.input || {}) }
+          }));
+          assistantMsg.tool_calls = toolCalls;
+        }
+      } else if (s.apiFormat === 'responses') {
+        const text = (typeof extractResponsesText === 'function') ? extractResponsesText(j) : '';
+        const responseToolCalls = (typeof extractResponsesToolCalls === 'function')
+          ? extractResponsesToolCalls(j.output)
+          : [];
+        assistantMsg = { role: 'assistant', content: text };
+        if (Array.isArray(j.output)) assistantMsg._responsesOutput = j.output;
+        if (responseToolCalls.length) {
+          toolCalls = responseToolCalls.map(tc => ({
+            id: tc.id, type: 'function',
+            function: { name: tc.name, arguments: tc.arguments || '{}' }
           }));
           assistantMsg.tool_calls = toolCalls;
         }
@@ -791,6 +905,8 @@ async function callAPIWithOutline(options = {}) {
       // ----- 执行工具 -----
       let anyOutlineChanged = false;
       let anyExternalToolCalled = false;
+      const executedToolCallIds = [];
+      let userStoppedAll = false;
       
       for (const tc of toolCalls) {
         throwIfAborted();
@@ -829,11 +945,10 @@ async function callAPIWithOutline(options = {}) {
           result = await executeTool(fname, args, { chatId: taskChatId, chat: c, outline: aiMsg.outline });
           anyExternalToolCalled = true;
           
-          const content = typeof result.value === 'string'
-            ? result.value
-            : ((result.value && result.value.text) ? result.value.text : JSON.stringify(result.value));
+          const content = outlineToolResultText(result);
+          const outcome = outlineToolResultOutcome(result, content);
           liveEntry.result = content.slice(0, 500);
-          liveEntry.ok = result.ok;
+          liveEntry.ok = outcome.ok;
           liveEntry.rawResult = result.value && typeof result.value === 'object' ? result.value : null;
           if (liveEntry.rawResult && liveEntry.rawResult.checkpoint_id) {
             liveEntry.checkpointId = liveEntry.rawResult.checkpoint_id;
@@ -855,16 +970,35 @@ async function callAPIWithOutline(options = {}) {
           onUpdate();
         }
         
-        const content = typeof result.value === 'string'
-          ? result.value
-          : ((result.value && result.value.text) ? result.value.text : JSON.stringify(result.value));
+        const content = outlineToolResultText(result);
+        const outcome = outlineToolResultOutcome(result, content);
         conversationMessages.push({
           role: 'tool',
           tool_call_id: tc.id,
           name: fname,
           content: content,
-          status: result.ok ? 'success' : 'error'
+          status: outcome.ok ? 'success' : 'error'
         });
+        executedToolCallIds.push(tc.id);
+        
+        if (outcome.stopAll || outcome.userRejected) {
+          if (outcome.stopAll) userStoppedAll = true;
+          assistantMsg.tool_calls = assistantMsg.tool_calls.filter(t => executedToolCallIds.includes(t.id));
+          toolCalls = assistantMsg.tool_calls;
+          conversationMessages.push({
+            role: 'user',
+            content: outcome.stopAll
+              ? '【系统提示】用户拒绝了该工具操作，并要求停止所有后续工具调用。请不要再调用工具，基于已完成内容直接给出简短说明。'
+              : '【系统提示】用户拒绝了该工具操作。请不要重复同一操作；如任务还能继续，请改用无需该权限的路径，否则直接说明受限情况。'
+          });
+          break;
+        }
+      }
+      
+      if (userStoppedAll) {
+        stoppedByToolPolicy = true;
+        completedNaturally = false;
+        break;
       }
       
       // ----- 检测卡住（连续 3 轮无任何变化）-----
@@ -899,9 +1033,11 @@ async function callAPIWithOutline(options = {}) {
       aiMsg.content = finalAnswer || '(任务已完成，但未生成文本回复)';
       aiMsg.outline.diffSummary = outlineBuildDiffSummary(aiMsg.outline);
     } else {
-      // 🛡️ 第三层保护：达到轮数上限但 AI 仍在调工具 → 强制收尾调用
+      // 🛡️ 第三层保护：达到轮数上限或用户拒绝继续工具 → 强制收尾调用
       aiMsg.outline.status = 'truncated';
-      aiMsg.outline.progressText = '🏁 已达轮数上限，正在整理最终回答...';
+      aiMsg.outline.progressText = stoppedByToolPolicy
+        ? '🏁 用户拒绝继续工具调用，正在整理最终回答...'
+        : '🏁 已达轮数上限，正在整理最终回答...';
       onUpdate();
       
       let fallbackAnswer = '';
@@ -915,7 +1051,9 @@ async function callAPIWithOutline(options = {}) {
         fallbackAnswer = '';
       }
       
-      const truncatedNote = `\n\n---\n\n> ⚠️ **执行已达轮数上限（${maxRounds} 轮），任务被强制收尾。** 如需更深入的结果，请提高"最大执行轮数"设置后重试。`;
+      const truncatedNote = stoppedByToolPolicy
+        ? `\n\n---\n\n> 🛑 **用户拒绝继续工具调用，任务已基于当前信息收尾。**`
+        : `\n\n---\n\n> ⚠️ **执行已达轮数上限（${maxRounds} 轮），任务被强制收尾。** 如需更深入的结果，请提高"最大执行轮数"设置后重试。`;
       
       if (fallbackAnswer) {
         aiMsg.content = fallbackAnswer + truncatedNote;
@@ -1124,6 +1262,21 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
       system: finalSystemPrompt
       // 🔑 关键：不传 tools 字段
     };
+  } else if (s.apiFormat === 'responses') {
+    const allMessages = [
+      ...(history || []),
+      ...(conversationMessages || []),
+      { role: 'user', content: finalUserMsg }
+    ];
+    body = {
+      model,
+      input: outlineBuildResponsesInput(allMessages, []),
+      instructions: finalSystemPrompt,
+      temperature: parseFloat(s.temperature),
+      max_output_tokens: parseInt(s.maxTokens),
+      stream: false
+      // 🔑 关键：不传 tools 字段
+    };
   } else {
     const baseMsgs = (typeof buildOpenAIMessages === 'function')
       ? buildOpenAIMessages(history).filter(m => m.role !== 'system') : [];
@@ -1175,15 +1328,18 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   }
   
   // ⭐ 保底收尾调用的 usage 也计入统计
-  if (j.usage && typeof recordUsageFromResponse === 'function') {
+  const usageForRecord = outlineNormalizeUsage(j.usage);
+  if (usageForRecord && typeof recordUsageFromResponse === 'function') {
     const _c = recordChat || (typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null));
-    if (_c) recordUsageFromResponse(_c, j.usage, { model });
+    if (_c) recordUsageFromResponse(_c, usageForRecord, { model });
   }
   
   // ----- 解析 -----
   if (s.apiFormat === 'anthropic') {
     const contents = j.content || [];
     return contents.filter(p => p.type === 'text').map(p => p.text).join('') || '';
+  } else if (s.apiFormat === 'responses') {
+    return (typeof extractResponsesText === 'function' ? extractResponsesText(j) : '') || '';
   } else {
     return j.choices?.[0]?.message?.content || '';
   }
@@ -1355,6 +1511,13 @@ function buildOutlineTools(options = {}) {
       name: t.name,
       description: t.description,
       input_schema: t.parameters
+    }));
+  } else if (s.apiFormat === 'responses') {
+    outlineToolsConverted = OUTLINE_TOOLS.map(t => ({
+      type: 'function',
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters
     }));
   } else {
     outlineToolsConverted = OUTLINE_TOOLS.map(t => ({
