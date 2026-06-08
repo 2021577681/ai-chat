@@ -1012,33 +1012,36 @@
   <div class="modal wide">
     <h2>💾 备份与恢复 <button class="modal-close" onclick="closeBackup()">×</button></h2>
     
-    <div class="json-help">💡 导出当前配置为 JSON 文件，下次导入即可恢复，免去重新填写 API。</div>
+    <div class="backup-lede">
+      <div>
+        <strong>备份范围</strong>
+        <span>导出为 JSON，用于迁移配置、恢复工具和保留长工具输出归档。</span>
+      </div>
+      <div class="backup-lede-note">API Key 和对话历史可能包含敏感信息。</div>
+    </div>
     
     <h3 style="font-size:15px;margin:18px 0 10px;">📤 导出</h3>
     <div class="form-group">
       <label>导出内容</label>
-      <div style="display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg-input);border-radius:8px;">
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_settings" checked> <span>⚙️ 基础设置</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_apiKey" checked> <span style="color:var(--warning);">🔑 API Key（敏感）</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_plan" checked> <span>📋 计划模式设置</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_reflection" checked> <span>🎭 师生设置</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_outline" checked> <span>📑 大纲设置</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_tools" checked> <span>🛠 工具</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="exp_chats"> <span>💬 对话历史</span>
-        </label>
+      <div class="backup-options">
+        <div class="backup-option-section">
+          <div class="backup-section-title">配置</div>
+          <label class="backup-check"><input type="checkbox" id="exp_settings" checked><span><strong>基础设置</strong><em>当前 API、模型、上下文、压缩和全局偏好</em></span></label>
+          <label class="backup-check sensitive"><input type="checkbox" id="exp_apiKey" checked><span><strong>API Key</strong><em>敏感；不勾选会清空导出的 key</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_apiProfiles" checked><span><strong>API 配置档案</strong><em>多套 API Profile、当前激活档案</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">Agent 数据</div>
+          <label class="backup-check"><input type="checkbox" id="exp_tools" checked><span><strong>工具</strong><em>自定义工具 schema 和执行代码</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_toolArtifacts" checked><span><strong>工具输出归档</strong><em>长 tool 输出全文；用于恢复 artifact_id 可读性</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_chats"><span><strong>对话历史</strong><em>默认关闭，可能很大且含隐私内容</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">模式设置</div>
+          <label class="backup-check compact"><input type="checkbox" id="exp_plan" checked><span><strong>计划模式</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_reflection" checked><span><strong>师生设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_outline" checked><span><strong>大纲设置</strong></span></label>
+        </div>
       </div>
     </div>
     <div class="modal-footer" style="margin-top:10px;justify-content:flex-start;">
@@ -1059,25 +1062,24 @@
     </div>
     <div class="form-group">
       <label>导入选项</label>
-      <div style="display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg-input);border-radius:8px;">
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_settings" checked> <span>⚙️ 基础设置</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_plan" checked> <span>📋 计划模式</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_reflection" checked> <span>🎭 师生</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_outline" checked> <span>📑 大纲</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_tools" checked> <span>🛠 工具</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:normal;cursor:pointer;">
-          <input type="checkbox" id="imp_chats"> <span>💬 对话</span>
-        </label>
+      <div class="backup-options">
+        <div class="backup-option-section">
+          <div class="backup-section-title">配置</div>
+          <label class="backup-check"><input type="checkbox" id="imp_settings" checked><span><strong>基础设置</strong><em>合并到当前设置，保留当前主题</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_apiProfiles" checked><span><strong>API 配置档案</strong><em>新增档案；已有 id 跳过，同名自动重命名</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">Agent 数据</div>
+          <label class="backup-check"><input type="checkbox" id="imp_tools" checked><span><strong>工具</strong><em>新增需确认；同名可覆盖、跳过或逐个询问</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_toolArtifacts" checked><span><strong>工具输出归档</strong><em>按 artifact_id 合并，已有归档跳过</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_chats"><span><strong>对话</strong><em>插入到当前对话列表前面</em></span></label>
+        </div>
+        <div class="backup-option-section">
+          <div class="backup-section-title">模式设置</div>
+          <label class="backup-check compact"><input type="checkbox" id="imp_plan" checked><span><strong>计划模式</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_reflection" checked><span><strong>师生</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_outline" checked><span><strong>大纲</strong></span></label>
+        </div>
       </div>
     </div>
     <div id="importPreview" class="test-result"></div>

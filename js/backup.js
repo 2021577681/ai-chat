@@ -13,19 +13,104 @@ function closeBackup() {
   document.getElementById('backupModal').classList.remove('show');
 }
 
+function backupJsonClone(value) {
+  try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
+}
+
+function backupReadChecked(id, fallback = false) {
+  const el = document.getElementById(id);
+  return el ? !!el.checked : fallback;
+}
+
+function buildApiProfilesBackup(includeApiKey) {
+  if (typeof loadApiProfiles !== 'function') {
+    return { version: 1, activeProfileId: '', profiles: [] };
+  }
+  const profiles = backupJsonClone(loadApiProfiles()) || [];
+  for (const p of profiles) {
+    if (!includeApiKey && p && p.settings) p.settings.apiKey = '';
+  }
+  return {
+    version: 1,
+    activeProfileId: typeof getActiveProfileId === 'function' ? getActiveProfileId() : '',
+    profiles
+  };
+}
+
+function uniqueImportedProfileName(baseName, usedNames) {
+  const base = String(baseName || '导入配置').trim() || '导入配置';
+  if (!usedNames.has(base)) return base;
+  let i = 2;
+  while (usedNames.has(`${base}（导入 ${i}）`)) i++;
+  return `${base}（导入 ${i}）`;
+}
+
+function importApiProfilesFromBackup(payload) {
+  const incoming = Array.isArray(payload)
+    ? payload
+    : (Array.isArray(payload?.profiles) ? payload.profiles : []);
+  if (typeof loadApiProfiles !== 'function' || typeof saveApiProfiles !== 'function') {
+    return { imported: 0, skipped: 0, renamed: 0, invalid: incoming.length, activated: false };
+  }
+  
+  const profiles = loadApiProfiles();
+  const existingIds = new Set(profiles.map(p => p && p.id).filter(Boolean));
+  const usedNames = new Set(profiles.map(p => p && p.name).filter(Boolean));
+  let imported = 0;
+  let skipped = 0;
+  let renamed = 0;
+  let invalid = 0;
+  
+  for (const raw of incoming) {
+    const p = backupJsonClone(raw);
+    if (!p || typeof p !== 'object' || !p.settings || typeof p.settings !== 'object') {
+      invalid++;
+      continue;
+    }
+    if (!p.id) p.id = 'prof_import_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    if (!p.name) p.name = '导入配置';
+    if (existingIds.has(p.id)) {
+      skipped++;
+      continue;
+    }
+    const finalName = uniqueImportedProfileName(p.name, usedNames);
+    if (finalName !== p.name) renamed++;
+    p.name = finalName;
+    p.createdAt = p.createdAt || Date.now();
+    p.updatedAt = Date.now();
+    profiles.push(p);
+    existingIds.add(p.id);
+    usedNames.add(p.name);
+    imported++;
+  }
+  
+  saveApiProfiles(profiles);
+  
+  let activated = false;
+  const activeId = payload && !Array.isArray(payload) ? payload.activeProfileId : '';
+  if (activeId && typeof setActiveProfileId === 'function' && profiles.some(p => p && p.id === activeId)) {
+    setActiveProfileId(activeId);
+    activated = true;
+  }
+  if (typeof renderApiProfileSelect === 'function') renderApiProfileSelect();
+  return { imported, skipped, renamed, invalid, activated };
+}
+
 function buildExportData() {
   const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt'];
   const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
   const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
 
   const inc = {
-    settings: document.getElementById('exp_settings').checked,
-    apiKey: document.getElementById('exp_apiKey').checked,
-    plan: document.getElementById('exp_plan').checked,
-    reflection: document.getElementById('exp_reflection').checked,
-    outline: document.getElementById('exp_outline') ? document.getElementById('exp_outline').checked : false,
-    tools: document.getElementById('exp_tools').checked,
-    chats: document.getElementById('exp_chats').checked
+    settings: backupReadChecked('exp_settings', true),
+    apiKey: backupReadChecked('exp_apiKey', true),
+    apiProfiles: backupReadChecked('exp_apiProfiles', true),
+    plan: backupReadChecked('exp_plan', true),
+    reflection: backupReadChecked('exp_reflection', true),
+    outline: backupReadChecked('exp_outline', true),
+    tools: backupReadChecked('exp_tools', true),
+    toolArtifacts: backupReadChecked('exp_toolArtifacts', true),
+    chats: backupReadChecked('exp_chats', false)
   };
   
   const data = {
@@ -53,6 +138,10 @@ function buildExportData() {
   }
   
   if (inc.tools) data.tools = state.tools;
+  if (inc.apiProfiles) data.apiProfiles = buildApiProfilesBackup(inc.apiKey);
+  if (inc.toolArtifacts && typeof exportToolArtifactsForBackup === 'function') {
+    data.toolArtifacts = exportToolArtifactsForBackup();
+  }
   if (inc.chats) data.chats = state.chats;
   
   return data;
@@ -128,6 +217,27 @@ function parseAndPreviewImport() {
           + '</div>';
       }
     }
+    if (data.apiProfiles) {
+      const profiles = Array.isArray(data.apiProfiles)
+        ? data.apiProfiles
+        : (Array.isArray(data.apiProfiles.profiles) ? data.apiProfiles.profiles : []);
+      const existingIds = typeof loadApiProfiles === 'function'
+        ? new Set(loadApiProfiles().map(p => p && p.id).filter(Boolean))
+        : new Set();
+      const newCount = profiles.filter(p => p && p.id && !existingIds.has(p.id)).length;
+      summary += `- 🗂️ API 配置档案 ${profiles.length} 个`;
+      if (newCount) summary += `（其中 ${newCount} 个为新增）`;
+      summary += '<br>';
+    }
+    if (data.toolArtifacts) {
+      const items = Array.isArray(data.toolArtifacts)
+        ? data.toolArtifacts
+        : (Array.isArray(data.toolArtifacts.items) ? data.toolArtifacts.items : []);
+      const totalChars = data.toolArtifacts.totalChars || items.reduce((sum, item) => sum + String(item?.content || '').length, 0);
+      summary += `- 🗄️ 工具输出归档 ${items.length} 个`;
+      if (typeof formatSize === 'function') summary += `（约 ${formatSize(totalChars)}）`;
+      summary += '<br>';
+    }
     if (data.chats && Array.isArray(data.chats)) summary += `- 💬 对话 ${data.chats.length} 个<br>`;
     preview.className = 'test-result success';
     preview.innerHTML = summary;
@@ -149,12 +259,14 @@ function applyImport() {
 
   const data = pendingImportData;
   const opts = {
-    settings: document.getElementById('imp_settings').checked,
-    plan: document.getElementById('imp_plan').checked,
-    reflection: document.getElementById('imp_reflection').checked,
-    outline: document.getElementById('imp_outline') ? document.getElementById('imp_outline').checked : false,
-    tools: document.getElementById('imp_tools').checked,
-    chats: document.getElementById('imp_chats').checked
+    settings: backupReadChecked('imp_settings', true),
+    apiProfiles: backupReadChecked('imp_apiProfiles', true),
+    plan: backupReadChecked('imp_plan', true),
+    reflection: backupReadChecked('imp_reflection', true),
+    outline: backupReadChecked('imp_outline', true),
+    tools: backupReadChecked('imp_tools', true),
+    toolArtifacts: backupReadChecked('imp_toolArtifacts', true),
+    chats: backupReadChecked('imp_chats', false)
   };
   
   let imported = [];
@@ -188,6 +300,11 @@ function applyImport() {
         imported.push('大纲');
       }
     }
+  }
+  
+  if (opts.apiProfiles && data.apiProfiles) {
+    const result = importApiProfilesFromBackup(data.apiProfiles);
+    imported.push(`API档案 ${result.imported} 新增${result.skipped ? `/${result.skipped} 已存在` : ''}${result.renamed ? `/${result.renamed} 重命名` : ''}`);
   }
   
   if (opts.tools && Array.isArray(data.tools)) {
@@ -268,6 +385,15 @@ function applyImport() {
     }
   }
   
+  if (opts.toolArtifacts && data.toolArtifacts) {
+    if (typeof importToolArtifactsFromBackup === 'function') {
+      const result = importToolArtifactsFromBackup(data.toolArtifacts);
+      imported.push(`归档 ${result.imported} 新增${result.skipped ? `/${result.skipped} 已存在` : ''}${result.invalid ? `/${result.invalid} 无效` : ''}`);
+    } else {
+      imported.push('归档未导入(模块不可用)');
+    }
+  }
+  
   if (opts.chats && Array.isArray(data.chats)) {
     state.chats = [...data.chats, ...state.chats];
     imported.push(`${data.chats.length} 对话`);
@@ -279,6 +405,7 @@ function applyImport() {
   refreshModelSelect();
   applyTheme();
   updateTopUrlPreview();
+  if (typeof renderApiProfileSelect === 'function') renderApiProfileSelect();
   renderChatList();
   renderMessages();
   updateSendBtn();

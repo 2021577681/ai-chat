@@ -497,6 +497,98 @@ function saveToolArtifact({ chatId, toolCallId, toolName, args, status, content 
   return meta;
 }
 
+function exportToolArtifactsForBackup() {
+  const store = _toolArtifactStore();
+  const index = _loadToolArtifactIndex();
+  const items = [];
+  let totalChars = 0;
+  let missing = 0;
+  
+  for (const meta of index) {
+    if (!meta || !meta.id) continue;
+    try {
+      const raw = store.get(TOOL_ARTIFACT_ITEM_PREFIX + meta.id);
+      if (!raw) {
+        missing++;
+        continue;
+      }
+      const item = JSON.parse(raw);
+      const content = _toolArtifactString(item.content);
+      totalChars += content.length;
+      items.push({ ...item, id: item.id || meta.id, content });
+    } catch (e) {
+      missing++;
+    }
+  }
+  
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    totalChars,
+    missing,
+    index: items.map(item => _toolArtifactMetaFromStoredItem(item)),
+    items
+  };
+}
+
+function _toolArtifactMetaFromStoredItem(item) {
+  const content = _toolArtifactString(item && item.content);
+  const lines = _toolArtifactLines(content);
+  return {
+    id: item.id,
+    chatId: item.chatId || '',
+    toolCallId: item.toolCallId || '',
+    toolName: item.toolName || 'tool',
+    status: item.status || 'success',
+    sizeChars: Number(item.sizeChars || content.length || 0),
+    lineCount: Number(item.lineCount || lines.length || 0),
+    createdAt: Number(item.createdAt || Date.now()),
+    argsPreview: item.argsPreview || _clipToolText(item.args || '', 1200)
+  };
+}
+
+function importToolArtifactsFromBackup(payload) {
+  const items = Array.isArray(payload)
+    ? payload
+    : (Array.isArray(payload?.items) ? payload.items : []);
+  const store = _toolArtifactStore();
+  let index = _loadToolArtifactIndex();
+  const indexedIds = new Set(index.map(item => item && item.id).filter(Boolean));
+  
+  let imported = 0;
+  let skipped = 0;
+  let invalid = 0;
+  let totalChars = 0;
+  
+  for (const rawItem of items) {
+    const item = rawItem && rawItem.item ? rawItem.item : rawItem;
+    const id = String(item?.id || '').trim();
+    if (!id || item?.content === undefined || item.content === null) {
+      invalid++;
+      continue;
+    }
+    const key = TOOL_ARTIFACT_ITEM_PREFIX + id;
+    if (indexedIds.has(id) || store.get(key)) {
+      skipped++;
+      indexedIds.add(id);
+      continue;
+    }
+    
+    const content = _toolArtifactString(item.content);
+    const stored = { ...item, id, content };
+    const meta = _toolArtifactMetaFromStoredItem(stored);
+    store.set(key, JSON.stringify({ ...meta, content }));
+    index = [meta, ...index.filter(x => x && x.id !== id)];
+    indexedIds.add(id);
+    imported++;
+    totalChars += content.length;
+  }
+  
+  index.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  _saveToolArtifactIndex(index);
+  return { imported, skipped, invalid, totalChars, total: items.length };
+}
+
 function formatArchivedToolResult(meta, content) {
   const lines = _toolArtifactLines(content);
   const head = _toolArtifactPreview(lines, 0, 80, 3200);
