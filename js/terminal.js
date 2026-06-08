@@ -352,6 +352,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     confirmCommand = undefined;
   }
   const chatId = resolveToolChatId(context);
+  const forceConfirm = !!(context && typeof context === 'object' && context.forceConfirm);
   // ⭐ 没有 token？自动拉取一次
   if (!TERMINAL_CONFIG.token) {
     const tk = await fetchTerminalToken(false);
@@ -370,7 +371,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       TERMINAL_CONFIG.permanentAllow[category] ||
       taskAllow[category];
     
-    if (!alreadyAllowed) {
+    if (forceConfirm || !alreadyAllowed) {
       const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, { chatId });
       
       if (!result.allowed) {
@@ -470,9 +471,128 @@ function bindCheckpointToToolContext(response, context) {
   }
 }
 
+function tokenizeShellLikeCommand(command) {
+  const tokens = [];
+  let cur = '';
+  let quote = '';
+  let escaped = false;
+  for (const ch of String(command || '')) {
+    if (escaped) {
+      cur += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = '';
+      else cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (cur) {
+        tokens.push(cur);
+        cur = '';
+      }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) tokens.push(cur);
+  return tokens;
+}
+
+function commandHasShellOperators(command) {
+  return /(?:&&|\|\||[|;<>`])/.test(String(command || ''));
+}
+
+function splitGitPathspec(tokens) {
+  const idx = tokens.indexOf('--');
+  return idx >= 0 ? tokens.slice(idx + 1).filter(Boolean) : [];
+}
+
+function gitCommitFromTokens(tokens) {
+  return tokens.find(t => /^[0-9a-fA-F]{4,40}$/.test(t)) || '';
+}
+
+function gitCommitMessageFromTokens(tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    if ((tokens[i] === '-m' || tokens[i] === '--message') && tokens[i + 1]) return tokens[i + 1];
+    if (tokens[i].startsWith('-m') && tokens[i].length > 2) return tokens[i].slice(2);
+    if (tokens[i].startsWith('--message=')) return tokens[i].slice('--message='.length);
+  }
+  return '';
+}
+
+function aiGitToolsAvailable() {
+  if (typeof gitToolsEnabled === 'function') return gitToolsEnabled();
+  if (!state || !Array.isArray(state.tools)) return false;
+  const names = new Set(['note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore']);
+  return state.tools.some(t => t && names.has(t.name));
+}
+
+async function routeGitExecuteCommand(command, context) {
+  const tokens = tokenizeShellLikeCommand(command);
+  if (!tokens.length || String(tokens[0]).toLowerCase() !== 'git') return null;
+  if (!aiGitToolsAvailable()) return { passthrough: true, forceConfirm: true };
+  if (commandHasShellOperators(command)) {
+    return '❌ 检测到包含 shell 控制符的 git 命令。为避免绕过 Git/回滚权限，请改用 note_status、note_history、note_diff、note_snapshot、note_restore 或 restore_checkpoint。';
+  }
+  const sub = String(tokens[1] || '').toLowerCase();
+  const rest = tokens.slice(2);
+  
+  if (!sub || ['status', 'st'].includes(sub)) {
+    return await aiGitStatus(context);
+  }
+  if (['log', 'history'].includes(sub)) {
+    const nIdx = rest.findIndex(t => /^-\d+$/.test(t));
+    const limit = nIdx >= 0 ? Math.abs(parseInt(rest[nIdx])) : 20;
+    return await aiGitHistory(limit, context);
+  }
+  if (sub === 'diff') {
+    const paths = splitGitPathspec(rest);
+    const file = paths.length === 1 ? paths[0] : '';
+    return await aiGitDiff('', file, context);
+  }
+  if (sub === 'show') {
+    const commit = gitCommitFromTokens(rest);
+    const paths = splitGitPathspec(rest);
+    if (commit) return await aiGitDiff(commit, paths.length === 1 ? paths[0] : '', context);
+    return '❌ git show 无法安全映射。请改用 note_diff，并提供 commit 参数。';
+  }
+  if (sub === 'commit') {
+    return await aiGitSnapshot(gitCommitMessageFromTokens(rest), context);
+  }
+  if (sub === 'add') {
+    return '❌ git add 不允许通过 execute_action 执行。请改用 note_snapshot，它会在用户确认后保存当前工作区快照。';
+  }
+  if (['restore', 'reset', 'clean', 'checkout', 'switch', 'revert'].includes(sub)) {
+    const commit = gitCommitFromTokens(rest);
+    const paths = splitGitPathspec(rest);
+    if ((sub === 'checkout' || sub === 'restore') && commit && paths.length === 1) {
+      return await aiGitRestore(commit, paths[0], context);
+    }
+    return '❌ 检测到 Git 恢复/重置类命令。为避免绕过权限，请改用 note_restore（历史文件恢复）或 restore_checkpoint（大纲修改前 checkpoint 回滚）。';
+  }
+  
+  return '❌ git 命令不允许通过 execute_action 执行。请改用专用 Git 工具：note_status、note_history、note_diff、note_snapshot、note_restore。';
+}
+
 async function executeTerminalCommand(command, cwd, newWindow, context) {
+  let gitRouted = await routeGitExecuteCommand(command, context);
+  const forceConfirm = gitRouted && typeof gitRouted === 'object' && gitRouted.forceConfirm;
+  if (gitRouted && typeof gitRouted === 'object' && gitRouted.passthrough) gitRouted = null;
+  if (gitRouted !== null) return gitRouted;
   const r = await callAgentBackend('execute', { command, cwd, timeout: 60, new_window: !!newWindow },
-    'AI 想执行任务指令', command, context);
+    forceConfirm ? 'AI 想执行 Git 命令（快照工具未启用）' : 'AI 想执行任务指令',
+    command,
+    { ...(context && typeof context === 'object' ? context : {}), forceConfirm });
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   let output = `📂 目录：${r.cwd}\n💻 指令：${command}\n📤 退出码：${r.returncode}\n`;
