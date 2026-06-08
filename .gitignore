@@ -2,6 +2,13 @@
 ~/.aichat_terminal_token
 .aichat_terminal_token
 lms_tool/.lms_cookie
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
 .agent/checkpoints/
 .agent/
 
@@ -45,3 +52,14 @@ Thumbs.db
 *.tmp
 *.log
 backup-*.json
+aichat-backup-*.json
+request-history*.json
+request_history*.json
+*.local
+*.local.*
+*.db
+*.sqlite
+*.sqlite3
+*.pid
+*.seed
+*.cache
