@@ -26,6 +26,16 @@ function renderOutlinePanel(m, idx) {
   if (total && (o.status === 'running' || o.status === 'paused')) {
     statsText += ` · ${done}/${total}`;
   }
+  if (o.taskProfile && o.taskProfile.domain) {
+    const domainLabel = {
+      coding: '代码',
+      research: '研究',
+      writing: '写作',
+      file_ops: '文件',
+      general: '通用'
+    }[o.taskProfile.domain] || o.taskProfile.domain;
+    statsText += ` · ${domainLabel}`;
+  }
   
   // 条目列表
   let itemsHtml = '';
@@ -67,6 +77,20 @@ function renderOutlinePanel(m, idx) {
   const progressHtml = o.inProgress
     ? `<div class="ref-progress"><span class="ref-spinner"></span><span>${escapeHtml(o.progressText || '处理中...')}</span></div>`
     : '';
+
+  let taskProfileHtml = '';
+  if (o.taskProfile) {
+    const p = o.taskProfile;
+    const verify = p.requiresVerification ? '需验证' : '不强制验证';
+    const codeChange = p.requiresCodeChange ? '可能改代码' : '不预期改代码';
+    taskProfileHtml = `
+      <div class="outline-task-profile" title="${escapeHtml(p.reason || '')}">
+        <span>${escapeHtml(p.domain || 'general')}</span>
+        <span>${escapeHtml(p.intent || 'other')}</span>
+        <span>${codeChange}</span>
+        <span class="${p.requiresVerification ? 'verify' : ''}">${verify}</span>
+      </div>`;
+  }
   
   const mainSection = `
     <div class="outline-section main">
@@ -153,6 +177,7 @@ function renderOutlinePanel(m, idx) {
       </button>
       <div class="outline-body">
         ${mainSection}
+        ${taskProfileHtml}
         ${globalToolsHtml}
         ${injectionsHtml}
         ${actionHtml}
@@ -183,12 +208,27 @@ function renderOutlineToolCalls(calls) {
 
 function renderOutlineDiffSummary(m, idx) {
   const summary = m && m.outline && m.outline.diffSummary;
-  if (!summary || !Array.isArray(summary.files) || !summary.files.length) return '';
-  const expanded = !!summary.expanded;
-  const visible = expanded ? summary.files : summary.files.slice(0, 3);
-  const hiddenCount = Math.max(0, summary.files.length - visible.length);
-  const totalAdded = parseInt(summary.totalAdded) || 0;
-  const totalRemoved = parseInt(summary.totalRemoved) || 0;
+  const outline = m && m.outline;
+  if ((!summary || !Array.isArray(summary.files) || !summary.files.length) && !(outline && outline.checkpointId)) return '';
+  const verify = (typeof outlineVerificationState === 'function') ? outlineVerificationState(m.outline) : null;
+  let verifyHtml = '';
+  if (verify && verify.hasMutation) {
+    if (verify.hasPassedVerificationAfterMutation) {
+      const cmd = verify.lastVerificationAfterMutation && verify.lastVerificationAfterMutation.args ? verify.lastVerificationAfterMutation.args.command : '';
+      verifyHtml = `<div class="outline-diff-verify pass">验证通过：${escapeHtml(cmd || 'execute_action')}</div>`;
+    } else if (verify.hasVerificationAfterMutation) {
+      const cmd = verify.lastVerificationAfterMutation && verify.lastVerificationAfterMutation.args ? verify.lastVerificationAfterMutation.args.command : '';
+      verifyHtml = `<div class="outline-diff-verify fail">最新验证未通过：${escapeHtml(cmd || 'execute_action')}（退出码 ${escapeHtml(String(verify.lastVerificationReturncode ?? '?'))}）</div>`;
+    } else {
+      verifyHtml = `<div class="outline-diff-verify warn">代码修改后尚未通过验证命令</div>`;
+    }
+  }
+  const expanded = !!(summary && summary.expanded);
+  const files = summary && Array.isArray(summary.files) ? summary.files : [];
+  const visible = expanded ? files : files.slice(0, 3);
+  const hiddenCount = Math.max(0, files.length - visible.length);
+  const totalAdded = parseInt(summary && summary.totalAdded) || 0;
+  const totalRemoved = parseInt(summary && summary.totalRemoved) || 0;
   const rows = visible.map(f => {
     const added = parseInt(f.added) || 0;
     const removed = parseInt(f.removed) || 0;
@@ -202,20 +242,32 @@ function renderOutlineDiffSummary(m, idx) {
         </span>
       </div>`;
   }).join('');
+  const checkpointId = outline && outline.checkpointId;
+  const restoreState = outline && outline.restoreState;
+  const checkpointHtml = checkpointId ? `
+      <div class="outline-diff-checkpoint">
+        <div class="outline-diff-checkpoint-main">
+          <span>checkpoint</span>
+          <code>${escapeHtml(checkpointId)}</code>
+        </div>
+        ${restoreState && restoreState.restored ? `<div class="outline-diff-restore-ok">已恢复：${escapeHtml(restoreState.checkpointId || checkpointId)}（恢复 ${restoreState.restoredCount || 0}，删除 ${restoreState.deletedCount || 0}，跳过 ${restoreState.skippedCount || 0}）</div>` : `<button class="outline-diff-restore-btn" onclick="restoreOutlineCheckpoint(${idx})">回滚到修改前</button>`}
+      </div>` : '';
   return `
     <div class="outline-diff-card">
       <div class="outline-diff-head">
         <span class="outline-diff-icon">⊞</span>
         <div class="outline-diff-title">
-          <div>已编辑 ${summary.totalFiles || summary.files.length} 个文件</div>
+          <div>已编辑 ${(summary && summary.totalFiles) || files.length} 个文件</div>
           <div class="outline-diff-total">
             ${totalAdded ? `<span class="outline-diff-add">+${totalAdded}</span>` : '<span class="outline-diff-muted">+0</span>'}
             ${totalRemoved ? `<span class="outline-diff-del">-${totalRemoved}</span>` : '<span class="outline-diff-muted">-0</span>'}
           </div>
         </div>
       </div>
-      <div class="outline-diff-list">${rows}</div>
-      ${hiddenCount ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">再显示 ${hiddenCount} 个文件⌄</button>` : (summary.files.length > 3 ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">收起⌃</button>` : '')}
+      ${verifyHtml}
+      ${checkpointHtml}
+      ${rows ? `<div class="outline-diff-list">${rows}</div>` : ''}
+      ${hiddenCount ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">再显示 ${hiddenCount} 个文件⌄</button>` : (files.length > 3 ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">收起⌃</button>` : '')}
     </div>`;
 }
 
@@ -226,6 +278,33 @@ function toggleOutlineDiffSummary(idx) {
   if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
   else if (typeof renderMessages === 'function') renderMessages();
   saveData();
+}
+
+async function restoreOutlineCheckpoint(idx) {
+  const c = currentChat();
+  const msg = c && c.messages[idx];
+  const outline = msg && msg.outline;
+  const checkpointId = outline && outline.checkpointId;
+  if (!checkpointId || typeof restoreCheckpoint !== 'function') return;
+  const result = await restoreCheckpoint(checkpointId, true, { chatId: c.id, chat: c, outline });
+  if (typeof result === 'object' && result && result.ok) {
+    outline.restoreState = {
+      restored: true,
+      restoredAt: new Date().toISOString(),
+      checkpointId,
+      restoredCount: Array.isArray(result.restored) ? result.restored.length : 0,
+      deletedCount: Array.isArray(result.deleted) ? result.deleted.length : 0,
+      skippedCount: Array.isArray(result.skipped) ? result.skipped.length : 0,
+      safetyCheckpointId: result.safetyCheckpoint && result.safetyCheckpoint.id
+    };
+    if (typeof toast === 'function') toast('已恢复到修改前 checkpoint');
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
+    else if (typeof renderMessages === 'function') renderMessages();
+    saveData();
+  } else if (typeof toast === 'function') {
+    const text = typeof result === 'string' ? result : ((result && result.text) || '恢复 checkpoint 失败');
+    toast(text.slice(0, 180), 5000);
+  }
 }
 
 function toggleOutlinePanel(idx) {

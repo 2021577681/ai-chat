@@ -2,6 +2,7 @@
 ~/.aichat_terminal_token
 .aichat_terminal_token
 lms_tool/.lms_cookie
+.agent/checkpoints/
 .agent/
 
 # ============ LMS 本地数据/下载 ============

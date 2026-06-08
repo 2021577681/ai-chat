@@ -151,6 +151,10 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_edit_file(body)
             elif action == 'apply_patch':
                 self.handle_apply_patch(body)
+            elif action == 'list_checkpoints':
+                self.handle_list_checkpoints(body)
+            elif action == 'restore_checkpoint':
+                self.handle_restore_checkpoint(body)
             elif action == 'delete_file':
                 self.handle_delete_file(body)
             elif action == 'list_dir':

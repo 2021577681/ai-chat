@@ -1370,6 +1370,10 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .outline-panel .outline-body > .ref-progress{margin-top:10px;background:rgba(14,165,233,.06)}
 .outline-panel .outline-body > .ref-progress .ref-spinner{border-top-color:#0ea5e9}
 
+.outline-task-profile{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+.outline-task-profile span{padding:2px 7px;border:1px solid var(--border);border-radius:999px;background:var(--bg-chat);color:var(--text-secondary);font-size:11px}
+.outline-task-profile span.verify{border-color:rgba(14,165,233,.35);background:rgba(14,165,233,.08);color:#0ea5e9}
+
 
 /* ============ 📑 大纲模式 - 用户介入区域 ============ */
 .outline-actions{margin:10px 0 0;padding:12px;background:linear-gradient(135deg,rgba(14,165,233,.05),rgba(139,92,246,.05));border:1px solid var(--border);border-radius:10px}
@@ -1404,6 +1408,16 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .outline-diff-title{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:1;font-size:14px;font-weight:600;color:var(--text);min-width:0}
 .outline-diff-total{display:flex;align-items:center;gap:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;font-weight:600;white-space:nowrap}
 .outline-diff-list{padding:4px 0}
+.outline-diff-verify{padding:8px 16px;border-bottom:1px solid var(--border);font-size:12.5px;line-height:1.45}
+.outline-diff-verify.pass{background:rgba(16,185,129,.08);color:var(--success)}
+.outline-diff-verify.fail{background:rgba(239,68,68,.08);color:var(--danger)}
+.outline-diff-verify.warn{background:rgba(245,158,11,.10);color:var(--warning)}
+.outline-diff-checkpoint{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 16px;border-bottom:1px solid var(--border);font-size:12.5px;background:var(--bg-chat)}
+.outline-diff-checkpoint-main{display:flex;align-items:center;gap:8px;min-width:0;color:var(--text-secondary)}
+.outline-diff-checkpoint code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:var(--text);background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+.outline-diff-restore-btn{border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
+.outline-diff-restore-btn:hover{background:var(--hover)}
+.outline-diff-restore-ok{color:var(--success);font-size:12px;white-space:nowrap}
 .outline-diff-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px;font-size:13.5px}
 .outline-diff-row:hover{background:var(--bg-input)}
 .outline-diff-path{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

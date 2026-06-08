@@ -26,9 +26,131 @@ function outlineLooksLikeCodeTask(text) {
 }
 
 function buildOutlineSystemPrompt(basePrompt, history) {
+  return buildOutlineSystemPromptForProfile(basePrompt, history, outlineFallbackTaskProfile(history));
+}
+
+function outlineFallbackTaskProfile(history, reason) {
+  const taskText = outlineExtractTaskText(history);
+  const looksCode = outlineLooksLikeCodeTask(taskText);
+  return {
+    domain: looksCode ? 'coding' : 'general',
+    intent: looksCode ? 'code_change' : 'other',
+    requiresCodeChange: looksCode,
+    requiresVerification: looksCode,
+    verificationPolicy: looksCode ? 'if_code_changed' : 'none',
+    suggestedCommands: [],
+    confidence: looksCode ? 0.55 : 0.45,
+    reason: reason || (looksCode ? '关键词规则判断为代码相关任务。' : '关键词规则未判断为代码任务。'),
+    source: 'heuristic'
+  };
+}
+
+function normalizeOutlineTaskProfile(raw, history) {
+  const fallback = outlineFallbackTaskProfile(history);
+  const allowedDomains = new Set(['coding', 'research', 'writing', 'file_ops', 'general']);
+  const allowedIntents = new Set(['read_only', 'code_change', 'debug', 'test_only', 'explain', 'other']);
+  const allowedPolicies = new Set(['none', 'if_code_changed', 'after_each_code_change']);
+  const profile = raw && typeof raw === 'object' ? raw : {};
+  const domain = allowedDomains.has(profile.domain) ? profile.domain : fallback.domain;
+  const intent = allowedIntents.has(profile.intent) ? profile.intent : fallback.intent;
+  const requiresCodeChange = typeof profile.requiresCodeChange === 'boolean'
+    ? profile.requiresCodeChange
+    : (typeof profile.requires_code_change === 'boolean' ? profile.requires_code_change : fallback.requiresCodeChange);
+  let requiresVerification = typeof profile.requiresVerification === 'boolean'
+    ? profile.requiresVerification
+    : (typeof profile.requires_verification === 'boolean' ? profile.requires_verification : fallback.requiresVerification);
+  let verificationPolicy = allowedPolicies.has(profile.verificationPolicy)
+    ? profile.verificationPolicy
+    : (allowedPolicies.has(profile.verification_policy) ? profile.verification_policy : fallback.verificationPolicy);
+  const confidence = Math.max(0, Math.min(1, Number(profile.confidence)));
+  const suggestedRaw = Array.isArray(profile.suggestedCommands)
+    ? profile.suggestedCommands
+    : (Array.isArray(profile.suggested_commands) ? profile.suggested_commands : []);
+
+  // 运行时门禁只在实际发生代码修改后触发；这里的 true 表示任务策略需要验证。
+  if (verificationPolicy === 'none') requiresVerification = false;
+  if (requiresVerification && verificationPolicy === 'none') verificationPolicy = 'if_code_changed';
+
+  return {
+    domain,
+    intent,
+    requiresCodeChange: !!requiresCodeChange,
+    requiresVerification: !!requiresVerification,
+    verificationPolicy,
+    suggestedCommands: suggestedRaw.map(x => String(x || '').trim()).filter(Boolean).slice(0, 6),
+    confidence: Number.isFinite(confidence) ? confidence : fallback.confidence,
+    reason: String(profile.reason || fallback.reason || '').slice(0, 500),
+    source: profile.source || 'ai'
+  };
+}
+
+function parseOutlineTaskProfileJson(raw, history) {
+  try {
+    let txt = String(raw || '').trim();
+    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '');
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('missing json');
+    return normalizeOutlineTaskProfile(JSON.parse(m[0]), history);
+  } catch (e) {
+    return outlineFallbackTaskProfile(history, `AI 分类结果不可解析，回退关键词规则：${e.message || e}`);
+  }
+}
+
+async function classifyOutlineTaskProfile(history, model, options = {}) {
+  const taskText = outlineExtractTaskText(history);
+  const prompt = `你是任务分流器。请判断用户任务是否需要代码修改和验证。严格只输出 JSON，不要代码块或解释。
+
+字段：
+{
+  "domain": "coding|research|writing|file_ops|general",
+  "intent": "read_only|code_change|debug|test_only|explain|other",
+  "requiresCodeChange": true/false,
+  "requiresVerification": true/false,
+  "verificationPolicy": "none|if_code_changed|after_each_code_change",
+  "suggestedCommands": ["可选验证命令"],
+  "confidence": 0到1,
+  "reason": "一句话理由"
+}
+
+判断规则：
+- 解释概念、写作、总结、资料查询通常不需要代码验证。
+- 只读代码/解释项目可以 domain=coding，但 requiresCodeChange=false，requiresVerification=false。
+- 修 bug、实现功能、改代码、调测试、改配置、改依赖时 requiresCodeChange=true，requiresVerification=true。
+- 如果不确定是否会改代码，但任务目标明显是修复/实现/调试，requiresVerification=true；运行时只有实际改代码后才会强制验证。
+- suggestedCommands 只给明显可能相关的命令，不要编造太具体的脚本名。`;
+  try {
+    const raw = await callOnceWithRole(
+      [{ role: 'user', content: `【用户任务】\n${taskText || '(空)'}` }],
+      model,
+      prompt,
+      {
+        ...options,
+        sourceLabel: '大纲模式 · 任务分类'
+      }
+    );
+    return parseOutlineTaskProfileJson(raw, history);
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw e;
+    return outlineFallbackTaskProfile(history, `AI 分类调用失败，回退关键词规则：${e.message || e}`);
+  }
+}
+
+function outlineShouldUseCodeProfile(taskProfile, history) {
+  if (!taskProfile) return outlineLooksLikeCodeTask(outlineExtractTaskText(history));
+  return taskProfile.domain === 'coding'
+    || taskProfile.requiresCodeChange
+    || taskProfile.requiresVerification
+    || ['code_change', 'debug', 'test_only'].includes(taskProfile.intent);
+}
+
+function buildOutlineSystemPromptForProfile(basePrompt, history, taskProfile) {
   const prompt = basePrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
-  if (!outlineLooksLikeCodeTask(outlineExtractTaskText(history))) return prompt;
-  return prompt + (typeof CODE_TASK_OUTLINE_PROFILE_PROMPT === 'string' ? CODE_TASK_OUTLINE_PROFILE_PROMPT : '');
+  if (!outlineShouldUseCodeProfile(taskProfile, history)) return prompt;
+  let extra = typeof CODE_TASK_OUTLINE_PROFILE_PROMPT === 'string' ? CODE_TASK_OUTLINE_PROFILE_PROMPT : '';
+  if (taskProfile && taskProfile.suggestedCommands && taskProfile.suggestedCommands.length) {
+    extra += `\n\n【建议验证命令】\n${taskProfile.suggestedCommands.map(x => `- ${x}`).join('\n')}`;
+  }
+  return prompt + extra;
 }
 
 function outlineToolCallEntries(outlineObj) {
@@ -47,8 +169,7 @@ function outlineHasExecuteAction(outlineObj) {
   return outlineToolCallEntries(outlineObj).some(tc => tc.name === 'execute_action');
 }
 
-function outlineHasCodeMutation(outlineObj) {
-  return outlineToolCallEntries(outlineObj).some(tc => {
+function outlineIsCodeMutationCall(tc) {
     if (!tc || !tc.name) return false;
     if (['apply_patch', 'save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
       if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) return false;
@@ -56,9 +177,55 @@ function outlineHasCodeMutation(outlineObj) {
     }
     if (tc.name !== 'execute_action') return false;
     const cmd = String((tc.args && tc.args.command) || '');
-    return /\b(npm|pnpm|yarn|pip|python|node|mvn|gradle|cargo|go|git)\b.*\b(add|install|write|format|lint|fix|build|test|run|commit)\b/i.test(cmd)
+    return /\b(npm|pnpm|yarn|pip)\b.*\b(add|install|remove|uninstall)\b/i.test(cmd)
+      || /\b(eslint|ruff)\b.*\b--fix\b/i.test(cmd)
+      || /\b(prettier)\b.*\b--write\b/i.test(cmd)
+      || /\b(gofmt|rustfmt)\b.*\b-w\b/i.test(cmd)
+      || /\b(npm|pnpm|yarn)\b.*\b(format|fix)\b/i.test(cmd)
       || /\b(sed|perl|powershell|python)\b.*\b(-i|set-content|out-file|writealltext|replace)\b/i.test(cmd);
+}
+
+function outlineHasCodeMutation(outlineObj) {
+  return outlineToolCallEntries(outlineObj).some(outlineIsCodeMutationCall);
+}
+
+function outlineLooksLikeVerificationCommand(command) {
+  const cmd = String(command || '').toLowerCase();
+  return /\b(test|pytest|unittest|jest|vitest|mocha|ava|npm\s+test|pnpm\s+test|yarn\s+test|mvn\s+test|gradle\s+test|cargo\s+test|go\s+test|build|lint|typecheck|check|compile|tsc|eslint|ruff|flake8|mypy|pytest|phpunit|rspec)\b/.test(cmd)
+    || /\b(python|node|go|cargo|mvn|gradle|npm|pnpm|yarn)\b.*\b(test|build|lint|check|compile|typecheck)\b/.test(cmd);
+}
+
+function outlineVerificationState(outlineObj) {
+  const entries = outlineToolCallEntries(outlineObj)
+    .map((tc, idx) => ({ tc, idx, ts: Number(tc && tc._ts) || idx }));
+  const mutationEntries = entries.filter(x => outlineIsCodeMutationCall(x.tc));
+  const lastMutation = mutationEntries.length ? mutationEntries[mutationEntries.length - 1] : null;
+  const executeEntries = entries.filter(x => x.tc && x.tc.name === 'execute_action');
+  const verificationEntries = executeEntries.filter(x =>
+    outlineLooksLikeVerificationCommand(x.tc.args && x.tc.args.command)
+  );
+  const afterMutation = lastMutation
+    ? verificationEntries.filter(x => x.ts > lastMutation.ts || (x.ts === lastMutation.ts && x.idx > lastMutation.idx))
+    : verificationEntries;
+  const passedAfterMutation = afterMutation.filter(x => {
+    const rc = x.tc.rawResult && Number.isFinite(Number(x.tc.rawResult.returncode))
+      ? Number(x.tc.rawResult.returncode)
+      : null;
+    return rc === 0;
   });
+  const lastVerification = verificationEntries.length ? verificationEntries[verificationEntries.length - 1].tc : null;
+  const lastAfterMutation = afterMutation.length ? afterMutation[afterMutation.length - 1].tc : null;
+  return {
+    hasMutation: !!lastMutation,
+    lastMutation: lastMutation ? lastMutation.tc : null,
+    hasExecute: executeEntries.length > 0,
+    hasVerification: verificationEntries.length > 0,
+    hasVerificationAfterMutation: afterMutation.length > 0,
+    hasPassedVerificationAfterMutation: passedAfterMutation.length > 0,
+    lastVerification,
+    lastVerificationAfterMutation: lastAfterMutation,
+    lastVerificationReturncode: lastAfterMutation && lastAfterMutation.rawResult ? lastAfterMutation.rawResult.returncode : null
+  };
 }
 
 function outlineHasVerificationBlocker(outlineObj) {
@@ -69,11 +236,22 @@ function outlineHasVerificationBlocker(outlineObj) {
   return /(?:无法运行|不能运行|未能运行|无法执行|不能执行|缺少依赖|缺依赖|缺少配置|缺配置|权限不足|环境限制|没有测试|无测试|阻塞|blocked|cannot run|can't run|unable to run|missing dependency|missing config|permission denied|environment limitation|no test)/i.test(text);
 }
 
-function outlineCodeGateNeedsVerification(outlineObj, isCodeTask) {
-  return !!isCodeTask
-    && outlineHasCodeMutation(outlineObj)
-    && !outlineHasExecuteAction(outlineObj)
-    && !outlineHasVerificationBlocker(outlineObj);
+function outlineCodeGateNeedsVerification(outlineObj, taskProfile) {
+  if (!taskProfile || !taskProfile.requiresVerification || outlineHasVerificationBlocker(outlineObj)) return false;
+  const state = outlineVerificationState(outlineObj);
+  return state.hasMutation && !state.hasPassedVerificationAfterMutation;
+}
+
+function outlineCodeGateMessage(outlineObj) {
+  const st = outlineVerificationState(outlineObj);
+  if (!st.hasMutation) return '';
+  if (!st.hasVerification) {
+    return '【系统门禁】这是代码任务，且你已经修改过代码，但还没有运行任何明显的测试、构建、lint、typecheck、启动检查或最小复现命令。不要最终总结。请继续调用 execute_action 运行最相关的验证命令；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+  }
+  if (!st.hasVerificationAfterMutation) {
+    return '【系统门禁】你在上一次验证之后又修改了代码，但还没有重新验证。不要最终总结。请继续调用 execute_action 运行与最新改动相关的测试、构建或最小检查；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+  }
+  return `【系统门禁】最新代码修改后的验证命令没有通过（退出码 ${st.lastVerificationReturncode ?? '?'}）。不要最终总结。请读取 stdout/stderr，继续修复后再次运行验证命令；如果失败是环境/依赖/权限阻塞，必须调用 update_outline 明确记录阻塞原因。`;
 }
 
 function outlineNormalizePatchPath(path) {
@@ -254,7 +432,7 @@ async function callAPIWithOutline(options = {}) {
   if (typeof renderChatList === 'function') renderChatList();
   
   let aiMsg, msgIdx;
-  let conversationMessages, finalAnswer, completedNaturally, isCodeTask;
+  let conversationMessages, finalAnswer, completedNaturally, taskProfile;
   let startLoop, model, systemPrompt, maxRounds, history;
   
   if (options.resumeFromMsgIdx !== undefined) {
@@ -281,7 +459,8 @@ async function callAPIWithOutline(options = {}) {
     systemPrompt = snap.systemPrompt;
     maxRounds = snap.maxRounds;
     history = snap.history;
-    isCodeTask = !!snap.isCodeTask;
+    taskProfile = snap.taskProfile || outlineFallbackTaskProfile(snap.history || history || [], '旧任务快照缺少 taskProfile，已回退关键词规则。');
+    aiMsg.outline.taskProfile = taskProfile;
     completedNaturally = false;
     
     // 注入用户留言
@@ -339,8 +518,33 @@ async function callAPIWithOutline(options = {}) {
     
     history = c.messages.slice(0, -1);
     model = (s.outlineModel || '').trim() || s.currentModel;
-    isCodeTask = outlineLooksLikeCodeTask(outlineExtractTaskText(history));
-    systemPrompt = buildOutlineSystemPrompt(s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, history);
+    aiMsg.outline.progressText = '🧭 识别任务类型...';
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    try {
+      taskProfile = await classifyOutlineTaskProfile(history, model, {
+        chatId: taskChatId,
+        chat: c,
+        signal: abortCtrl.signal,
+        isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+      });
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        aiMsg.content = (aiMsg.content || '') + '\n\n*[任务分类已停止]*';
+        aiMsg.outline.status = 'cancelled';
+        aiMsg.outline.inProgress = false;
+        delete aiMsg.outline.progressText;
+        if (!aiMsg._endTime) aiMsg._endTime = Date.now();
+        if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+        if (typeof updateSendBtn === 'function') updateSendBtn();
+        if (typeof renderChatList === 'function') renderChatList();
+        if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+        saveData();
+        return;
+      }
+      taskProfile = outlineFallbackTaskProfile(history, `AI 分类调用失败，回退关键词规则：${e.message || e}`);
+    }
+    aiMsg.outline.taskProfile = taskProfile;
+    systemPrompt = buildOutlineSystemPromptForProfile(s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, history, taskProfile);
     maxRounds = aiMsg.outline.maxRounds;
     conversationMessages = [];
     finalAnswer = '';
@@ -376,7 +580,7 @@ async function callAPIWithOutline(options = {}) {
       systemPrompt,
       maxRounds,
       history,
-      isCodeTask
+      taskProfile
     };
   };
   
@@ -412,7 +616,7 @@ async function callAPIWithOutline(options = {}) {
       }
       
       // 🛡️ 第二层加强：最后 1 轮强制禁用工具；代码验证门禁未满足时仍允许工具。
-      const verificationGateOpen = outlineCodeGateNeedsVerification(aiMsg.outline, isCodeTask);
+      const verificationGateOpen = outlineCodeGateNeedsVerification(aiMsg.outline, taskProfile);
       const forceNoTools = (remaining <= 1 && !verificationGateOpen);
       
       // ----- 构造请求 -----
@@ -568,10 +772,10 @@ async function callAPIWithOutline(options = {}) {
       
       // ----- 没工具调用：完成 -----
       if (!toolCalls || !toolCalls.length) {
-        if (outlineCodeGateNeedsVerification(aiMsg.outline, isCodeTask)) {
+        if (outlineCodeGateNeedsVerification(aiMsg.outline, taskProfile)) {
           conversationMessages.push({
             role: 'user',
-            content: '【系统门禁】这是代码任务，且你已经修改过代码，但还没有调用 execute_action 运行任何测试、构建、lint、启动检查或最小复现命令。不要最终总结。请继续调用工具：优先运行最相关的验证命令；如果确实无法运行，必须调用 update_outline 记录阻塞原因，然后再总结。'
+            content: outlineCodeGateMessage(aiMsg.outline)
           });
           aiMsg.outline.status = 'running';
           aiMsg.outline.progressText = '🧪 代码任务需要执行验证命令...';
@@ -622,18 +826,38 @@ async function callAPIWithOutline(options = {}) {
           }
           onUpdate();
           
-          result = await executeTool(fname, args, { chatId: taskChatId, chat: c });
+          result = await executeTool(fname, args, { chatId: taskChatId, chat: c, outline: aiMsg.outline });
           anyExternalToolCalled = true;
           
-          const content = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
+          const content = typeof result.value === 'string'
+            ? result.value
+            : ((result.value && result.value.text) ? result.value.text : JSON.stringify(result.value));
           liveEntry.result = content.slice(0, 500);
           liveEntry.ok = result.ok;
           liveEntry.rawResult = result.value && typeof result.value === 'object' ? result.value : null;
+          if (liveEntry.rawResult && liveEntry.rawResult.checkpoint_id) {
+            liveEntry.checkpointId = liveEntry.rawResult.checkpoint_id;
+            if (!aiMsg.outline.checkpointId) aiMsg.outline.checkpointId = liveEntry.rawResult.checkpoint_id;
+            if (liveEntry.rawResult.checkpoint) aiMsg.outline.checkpoint = liveEntry.rawResult.checkpoint;
+          }
+          if (fname === 'restore_checkpoint' && result.ok && liveEntry.rawResult && liveEntry.rawResult.checkpoint_id) {
+            aiMsg.outline.restoreState = {
+              restored: true,
+              restoredAt: new Date().toISOString(),
+              checkpointId: liveEntry.rawResult.checkpoint_id,
+              restoredCount: Array.isArray(liveEntry.rawResult.restored) ? liveEntry.rawResult.restored.length : 0,
+              deletedCount: Array.isArray(liveEntry.rawResult.deleted) ? liveEntry.rawResult.deleted.length : 0,
+              skippedCount: Array.isArray(liveEntry.rawResult.skipped) ? liveEntry.rawResult.skipped.length : 0,
+              safetyCheckpointId: liveEntry.rawResult.safetyCheckpoint && liveEntry.rawResult.safetyCheckpoint.id
+            };
+          }
           liveEntry._running = false;
           onUpdate();
         }
         
-        const content = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
+        const content = typeof result.value === 'string'
+          ? result.value
+          : ((result.value && result.value.text) ? result.value.text : JSON.stringify(result.value));
         conversationMessages.push({
           role: 'tool',
           tool_call_id: tc.id,

@@ -15,7 +15,8 @@ const PERMISSION_CATEGORIES = {
   // ⭐ AI Git 操作（3 个独立类别，权限粒度分级）
   git_read:    { icon: '🔍',  label: 'Git 查看',     desc: 'note_history / note_status / note_diff：只读查看版本历史' },
   git_write:   { icon: '💾',  label: 'Git 保存快照', desc: 'note_snapshot：将当前工作区改动提交为一个版本快照（不会覆盖文件）' },
-  git_restore: { icon: '⏪',  label: 'Git 恢复历史', desc: 'note_restore：将某个文件恢复到历史快照版本（⚠️ 会覆盖当前工作区文件）' }
+  git_restore: { icon: '⏪',  label: 'Git 恢复历史', desc: 'note_restore：将某个文件恢复到历史快照版本（⚠️ 会覆盖当前工作区文件）' },
+  checkpoint_restore: { icon: '⏪', label: '恢复修改前快照', desc: 'restore_checkpoint：把文件恢复到 AI 修改前 checkpoint（会覆盖或删除当前文件）' }
 };
 
 // action → 类别 映射
@@ -26,6 +27,7 @@ const ACTION_TO_CATEGORY = {
   edit_file: 'edit',
   apply_patch: 'edit',
   delete_file: 'delete',
+  restore_checkpoint: 'checkpoint_restore',
   read_file_binary: 'attach',
   screenshot: 'screenshot',
   list_windows: 'screenshot',
@@ -359,6 +361,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   }
   
   const category = ACTION_TO_CATEGORY[action] || '';
+  const requestParams = withCheckpointParam(params, context);
   const needConfirm = !!category;  // 有类别即需要确认；没类别（read_file/list_dir/search/file_info）放行
   
   if (needConfirm) {
@@ -393,7 +396,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     return await fetch(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
-      body: JSON.stringify({ action, ...params, session_id: getAgentSessionId({ chatId }) })
+      body: JSON.stringify({ action, ...requestParams, session_id: getAgentSessionId({ chatId }) })
     });
   };
   
@@ -412,6 +415,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     }
     
     const r = await resp.json();
+    bindCheckpointToToolContext(r, context);
     // ⭐ 如果响应里带了 workspace/cwd，顺手刷新顶部沙箱栏显示
     if (r && (r.workspace || r.cwd)) {
       if (r.workspace) TERMINAL_CONFIG.workspace = r.workspace;
@@ -433,6 +437,39 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   }
 }
 
+function getToolCheckpointId(context) {
+  const ctx = context || (typeof window !== 'undefined' ? window.__currentToolContext : null) || {};
+  if (ctx.checkpointId) return ctx.checkpointId;
+  if (ctx.outline && ctx.outline.checkpointId) return ctx.outline.checkpointId;
+  if (ctx.chat && ctx.chat.outline && ctx.chat.outline.checkpointId) return ctx.chat.outline.checkpointId;
+  return '';
+}
+
+function withCheckpointParam(params, context) {
+  const checkpointId = getToolCheckpointId(context);
+  if (!checkpointId) return params || {};
+  return { ...(params || {}), checkpoint_id: checkpointId };
+}
+
+function checkpointMetaFromResponse(r) {
+  if (!r || typeof r !== 'object') return {};
+  return {
+    checkpoint_id: r.checkpoint_id || (r.checkpoint && r.checkpoint.id) || '',
+    checkpoint: r.checkpoint || null
+  };
+}
+
+function bindCheckpointToToolContext(response, context) {
+  const checkpointId = response && (response.checkpoint_id || (response.checkpoint && response.checkpoint.id));
+  if (!checkpointId) return;
+  const ctx = context || (typeof window !== 'undefined' ? window.__currentToolContext : null) || {};
+  ctx.checkpointId = checkpointId;
+  if (ctx.outline && typeof ctx.outline === 'object') {
+    if (!ctx.outline.checkpointId) ctx.outline.checkpointId = checkpointId;
+    ctx.outline.checkpoint = response.checkpoint || ctx.outline.checkpoint || null;
+  }
+}
+
 async function executeTerminalCommand(command, cwd, newWindow, context) {
   const r = await callAgentBackend('execute', { command, cwd, timeout: 60, new_window: !!newWindow },
     'AI 想执行任务指令', command, context);
@@ -442,7 +479,16 @@ async function executeTerminalCommand(command, cwd, newWindow, context) {
   if (r.stdout) output += `\n[STDOUT]\n${r.stdout}`;
   if (r.stderr) output += `\n[STDERR]\n${r.stderr}`;
   if (!r.stdout && !r.stderr) output += '\n(无输出)';
-  return output;
+  return {
+    ok: true,
+    command,
+    cwd: r.cwd,
+    returncode: r.returncode,
+    stdout: r.stdout || '',
+    stderr: r.stderr || '',
+    new_window: !!r.new_window,
+    text: output
+  };
 }
 
 async function readFile(path, startLine, endLine, context) {
@@ -478,7 +524,7 @@ async function editFile(path, oldText, newText, context) {
 
 async function applyPatch(patch, dryRun, context) {
   const preview = String(patch || '').slice(0, 1200);
-  const r = await callAgentBackend('apply_patch', { patch, dry_run: !!dryRun },
+  const r = await callAgentBackend('apply_patch', withCheckpointParam({ patch, dry_run: !!dryRun }, context),
     dryRun ? 'AI 想预检代码补丁' : 'AI 想应用代码补丁',
     `[apply_patch ${dryRun ? 'dry-run' : 'apply'}]\n\n${preview}${String(patch || '').length > 1200 ? '\n...(已截断)' : ''}`,
     context);
@@ -491,6 +537,7 @@ async function applyPatch(patch, dryRun, context) {
     ok: true,
     dry_run: !!r.dry_run,
     files: r.files || [],
+    ...checkpointMetaFromResponse(r),
     text: `${r.dry_run ? '✅ Patch 预检通过' : '✅ Patch 已应用'}\n${files}`
   };
 }
@@ -501,6 +548,69 @@ async function deleteFile(path, context) {
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
   return `✅ 已移除${r.type === 'dir' ? '目录' : '文档'}：${r.path}`;
+}
+
+async function listCheckpoints(limit, context) {
+  const r = await callAgentBackend('list_checkpoints', { limit: limit || 20 }, undefined, undefined, context);
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `❌ ${r.error}`;
+  const rows = r.checkpoints || [];
+  if (!rows.length) return '暂无 checkpoint。';
+  let out = `checkpoint 列表（${rows.length} 个）\n\n`;
+  for (const ck of rows) {
+    const files = (ck.files || []).slice(0, 6).map(f => `  - ${f.path}${f.existed ? '' : '（创建前不存在）'}`).join('\n');
+    const more = (ck.files || []).length > 6 ? `\n  ... 还有 ${(ck.files || []).length - 6} 个文件` : '';
+    out += `- ${ck.id}\n  时间：${ck.createdAt || ck.updatedAt || ''}\n  原因：${ck.reason || ''}\n  文件数：${ck.fileCount || 0}\n${files}${more}\n\n`;
+  }
+  return {
+    ok: true,
+    checkpoints: rows,
+    text: out.trim()
+  };
+}
+
+async function restoreCheckpoint(checkpointId, force, context) {
+  const id = checkpointId || getToolCheckpointId(context);
+  if (!id) return '❌ 缺少 checkpoint_id。请先使用 list_checkpoints，或在大纲任务里使用当前 outline.checkpointId。';
+  const r = await callAgentBackend('restore_checkpoint', { checkpoint_id: id, force: !!force },
+    'AI 想恢复到修改前 checkpoint',
+    `[restore_checkpoint]\n\ncheckpoint：${id}\nforce：${!!force}\n\n此操作会按 checkpoint 恢复文件，可能覆盖或删除当前工作区文件。`,
+    context);
+  if (typeof r === 'string') return r;
+  if (!r.ok) {
+    if (r.needs_force && Array.isArray(r.conflicts)) {
+      const conflicts = r.conflicts.map(x => `- ${x.path}: ${x.reason}`).join('\n');
+      return {
+        ok: false,
+        checkpoint_id: id,
+        needs_force: true,
+        conflicts: r.conflicts,
+        text: `checkpoint 存在冲突，未恢复。若确认要覆盖当前状态，请在用户确认后传 force=true。\n\n${conflicts}`
+      };
+    }
+    return `❌ ${r.error || 'restore_checkpoint 失败'}`;
+  }
+  const restored = r.restored || [];
+  const deleted = r.deleted || [];
+  const skipped = r.skipped || [];
+  const safetyId = r.safetyCheckpoint && r.safetyCheckpoint.id;
+  const text = [
+    `已恢复 checkpoint：${id}`,
+    `恢复文件：${restored.length}`,
+    `删除新文件：${deleted.length}`,
+    `跳过：${skipped.length}`,
+    safetyId ? `恢复前安全 checkpoint：${safetyId}` : ''
+  ].filter(Boolean).join('\n');
+  return {
+    ok: true,
+    checkpoint_id: id,
+    restored,
+    deleted,
+    skipped,
+    conflicts: r.conflicts || [],
+    safetyCheckpoint: r.safetyCheckpoint || null,
+    text
+  };
 }
 
 async function listDir(path, context) {

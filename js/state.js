@@ -115,6 +115,7 @@ function injectBuiltinTools() {
   const OPTIONAL_TOOL_NAMES = new Set([
     // 💾 Git 快照工具（5 个）
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
+    'restore_checkpoint',
     // 📚 论文工具（3 个）
     'arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'
   ]);
@@ -446,6 +447,7 @@ function resetBuiltinTools() {
   // ⭐ 与 injectBuiltinTools 保持一致：可选工具组（LMS / Git 快照 / 论文）不自动恢复
   const OPTIONAL_TOOL_NAMES = new Set([
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
+    'restore_checkpoint',
     'arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 

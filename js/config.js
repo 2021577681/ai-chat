@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v9';  // ⭐ v9：新增 AI 截图工具（分级窗口截图/全屏截图/区域裁剪）
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v10';  // ⭐ v10：新增 checkpoint 查看/恢复工具
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -258,6 +258,31 @@ const BUILTIN_TOOLS = [
       required: ['path']
     },
     code: 'return await deleteFile(args.path);'
+  },
+  {
+    name: 'list_checkpoints',
+    description: '列出 AI 文件工具在写入前自动创建的 checkpoint。用于用户要求回滚、验证失败后评估是否恢复、或查看本轮任务修改前快照。只读操作，不会修改文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: '返回数量，1-100，默认 20' }
+      },
+      required: []
+    },
+    code: 'return await listCheckpoints(args.limit);'
+  },
+  {
+    name: 'restore_checkpoint',
+    description: '【⚠️ 危险操作 - 会覆盖或删除当前文件】把文件恢复到指定 checkpoint 记录的修改前状态。AI 不应静默调用；只有当用户明确要求回滚，或验证失败后已向用户说明并获得确认时才调用。checkpoint_id 可来自当前大纲任务的 outline.checkpointId 或 list_checkpoints。默认 force=false；如果返回冲突，必须向用户说明风险并确认后才能用 force=true。',
+    parameters: {
+      type: 'object',
+      properties: {
+        checkpoint_id: { type: 'string', description: 'checkpoint ID，例如 ckpt_20260608_172155_abcd1234；为空时在大纲模式下会尝试使用当前 outline.checkpointId' },
+        force: { type: 'boolean', description: '是否强制覆盖冲突。默认 false。只有用户确认后才允许 true。' }
+      },
+      required: []
+    },
+    code: 'return await restoreCheckpoint(args.checkpoint_id, args.force === true);'
   },
   {
     name: 'get_current_time',
