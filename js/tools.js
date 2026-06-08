@@ -332,8 +332,9 @@ function toggleTools() {
   updateSendBtn();
 }
 
-function buildToolsArray() {
-  if (!state.settings.useTools || !state.tools.length) return null;
+function buildToolsArray(options = {}) {
+  const force = !!(options && options.force);
+  if ((!force && !state.settings.useTools) || !state.tools.length) return null;
   
   if (state.settings.apiFormat === 'anthropic') {
     return state.tools.map(t => ({

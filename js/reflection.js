@@ -5,11 +5,13 @@
 // - 老师只看学生最终答案，不看学生过程
 // - 工具历史不进入主对话 c.messages，只存 reflection.turns
 
-async function callAPIWithReflection() {
-  const c = currentChat();
+async function callAPIWithReflection(options = {}) {
+  const requestedChatId = options && options.chatId;
+  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
   const s = state.settings;
   const taskChatId = c && c.id;
   const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
+  const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
   const abortCtrl = new AbortController();
   const task = (typeof beginChatTask === 'function')
@@ -107,7 +109,7 @@ async function callAPIWithReflection() {
         chat: c,
         chatId: taskChatId,
         stream: true,
-        useTools: studentUseTools && state.settings.useTools && state.tools.length > 0,
+        useTools: studentUseTools && taskUseTools && state.tools.length > 0,
         onProgress: (ev) => onStudentProgress(ev, studentTurn, aiMsg, c)
       });
       
@@ -149,7 +151,7 @@ async function callAPIWithReflection() {
         chat: c,
         chatId: taskChatId,
         stream: true,
-        useTools: teacherUseTools && state.settings.useTools && state.tools.length > 0,
+        useTools: teacherUseTools && taskUseTools && state.tools.length > 0,
         onProgress: (ev) => onTeacherProgress(ev, teacherTurn, aiMsg, c)
       });
       

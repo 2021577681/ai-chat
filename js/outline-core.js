@@ -106,10 +106,12 @@ async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
 //   - userInjection: string     恢复时注入的用户留言
 
 async function callAPIWithOutline(options = {}) {
-  const c = currentChat();
+  const requestedChatId = options && options.chatId;
+  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
   if (!c) return;
   const taskChatId = c.id;
   const s = state.settings;
+  const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   
   let abortCtrl = new AbortController();
   const task = (typeof beginChatTask === 'function')
@@ -288,7 +290,7 @@ async function callAPIWithOutline(options = {}) {
       const forceNoTools = (remaining <= 1);
       
       // ----- 构造请求 -----
-      const tools = forceNoTools ? [] : buildOutlineTools();
+      const tools = forceNoTools ? [] : buildOutlineTools({ useTools: taskUseTools });
       let body;
       
       if (s.apiFormat === 'anthropic') {
@@ -967,33 +969,14 @@ function handleOutlineTool(name, args, outline) {
 
 // ============ 构建合并的 tools 数组（隐藏工具 + 用户工具）============
 
-function buildOutlineTools() {
+function buildOutlineTools(options = {}) {
   const s = state.settings;
+  const useUserTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   
-  // 用户工具（仅在 useTools 启用时合并；大纲模式下其实总是允许工具）
-  const userTools = (typeof buildToolsArray === 'function') ? (buildToolsArray() || []) : [];
-  
-  // 如果用户没开启工具，也要构造一份（强制启用工具，否则大纲模式没意义）
-  let userToolsFinal = userTools;
-  if (!userToolsFinal.length && state.tools && state.tools.length) {
-    // 临时构造（不依赖 useTools 开关）
-    if (s.apiFormat === 'anthropic') {
-      userToolsFinal = state.tools.map(t => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.parameters
-      }));
-    } else {
-      userToolsFinal = state.tools.map(t => ({
-        type: 'function',
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters
-        }
-      }));
-    }
-  }
+  // 用户工具按本次任务配置合并；大纲内置工具始终存在。
+  const userToolsFinal = (useUserTools && typeof buildToolsArray === 'function')
+    ? (buildToolsArray({ force: true }) || [])
+    : [];
   
   // OUTLINE_TOOLS 转换为对应格式
   let outlineToolsConverted;

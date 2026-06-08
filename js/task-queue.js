@@ -1,7 +1,10 @@
 // ============ 任务队列 ============
-// 逐条新建主界面对话并复用 onSend() 执行，避免绕开现有模式/工具/渲染逻辑。
-
+// 按手动序号分组执行：同一序号内并行，当前序号全部完成/跳过后才进入下一序号。
 const TASK_QUEUE_KEY = 'aichat_task_queue_v1';
+
+const TASK_QUEUE_DONE_STATUSES = new Set(['done', 'skipped']);
+const TASK_QUEUE_BLOCKING_STATUSES = new Set(['pending', 'running', 'paused', 'stopped', 'error']);
+const TASK_QUEUE_ITEM_STATUSES = ['pending', 'running', 'paused', 'stopped', 'skipped', 'done', 'error'];
 
 function _taskQueueDefaults() {
   return {
@@ -9,9 +12,10 @@ function _taskQueueDefaults() {
     defaultMode: 'normal',
     defaultUseTools: false,
     running: false,
-    stopAfterCurrent: false,
-    waiting: false,
-    loaded: false
+    paused: false,
+    loaded: false,
+    activeOrder: null,
+    stopAllRequested: false
   };
 }
 
@@ -24,19 +28,23 @@ function ensureTaskQueue() {
   if (!['normal', 'outline', 'reflection'].includes(q.defaultMode)) q.defaultMode = 'normal';
   q.defaultUseTools = !!q.defaultUseTools;
   q.running = !!q.running;
-  q.stopAfterCurrent = !!q.stopAfterCurrent;
-  q.waiting = !!q.waiting;
+  q.paused = !!q.paused;
+  q.loaded = !!q.loaded;
+  q.stopAllRequested = !!q.stopAllRequested;
+  q.activeOrder = _taskQueuePositiveInt(q.activeOrder, null);
   return q;
 }
 
 function _taskQueueNormalizeItem(raw) {
   const item = raw && typeof raw === 'object' ? raw : {};
   const mode = ['normal', 'outline', 'reflection'].includes(item.mode) ? item.mode : 'normal';
-  let status = ['pending', 'running', 'done', 'error', 'canceled'].includes(item.status) ? item.status : 'pending';
+  let status = TASK_QUEUE_ITEM_STATUSES.includes(item.status) ? item.status : 'pending';
   if (status === 'running') status = 'pending';
+  if (status === 'canceled') status = 'stopped';
   return {
     id: item.id || _taskQueueNewId(),
     text: String(item.text || '').trim(),
+    order: _taskQueuePositiveInt(item.order, 1),
     mode,
     useTools: !!item.useTools,
     status,
@@ -44,7 +52,9 @@ function _taskQueueNormalizeItem(raw) {
     error: item.error || '',
     createdAt: item.createdAt || Date.now(),
     startedAt: item.startedAt || null,
-    finishedAt: item.finishedAt || null
+    finishedAt: item.finishedAt || null,
+    pausedAt: item.pausedAt || null,
+    skippedAt: item.skippedAt || null
   };
 }
 
@@ -62,8 +72,9 @@ function loadTaskQueue() {
     console.warn('[task-queue] 加载失败:', e);
   }
   q.running = false;
-  q.stopAfterCurrent = false;
-  q.waiting = false;
+  q.paused = false;
+  q.activeOrder = null;
+  q.stopAllRequested = false;
   q.loaded = true;
   renderTaskQueueBadge();
 }
@@ -75,6 +86,7 @@ function saveTaskQueue() {
       items: q.items.map(it => ({
         id: it.id,
         text: it.text,
+        order: _taskQueuePositiveInt(it.order, 1),
         mode: it.mode,
         useTools: !!it.useTools,
         status: it.status,
@@ -82,7 +94,9 @@ function saveTaskQueue() {
         error: it.error || '',
         createdAt: it.createdAt || Date.now(),
         startedAt: it.startedAt || null,
-        finishedAt: it.finishedAt || null
+        finishedAt: it.finishedAt || null,
+        pausedAt: it.pausedAt || null,
+        skippedAt: it.skippedAt || null
       })),
       defaultMode: q.defaultMode,
       defaultUseTools: !!q.defaultUseTools
@@ -124,7 +138,7 @@ function _taskQueueEnsureModal() {
       <div class="task-queue-compose">
         <div class="form-group" style="margin-bottom:0;">
           <label>输入任务</label>
-          <textarea id="taskQueueInput" placeholder="每行一个任务。需要多行任务时，把拆分方式改成「空行分隔任务」。"></textarea>
+          <textarea id="taskQueueInput" placeholder="每行一个任务。新增任务默认序号为 1。"></textarea>
         </div>
         <div class="task-queue-controls">
           <label class="task-queue-check">拆分
@@ -144,22 +158,22 @@ function _taskQueueEnsureModal() {
             <input type="checkbox" id="taskQueueDefaultTools" onchange="taskQueueSaveDefaults()"> 启用工具
           </label>
           <label class="task-queue-check">
-            <input type="checkbox" id="taskQueueAutoStart" checked> 添加后自动开始
+            <input type="checkbox" id="taskQueueAutoStart"> 添加后按顺序开始
           </label>
           <button class="btn btn-primary" onclick="taskQueueAddTasks()">加入队列</button>
         </div>
       </div>
       <div class="task-queue-toolbar">
         <div class="task-queue-stats" id="taskQueueStats">暂无任务</div>
-        <button class="btn btn-primary" id="taskQueueStartBtn" onclick="startTaskQueue()">开始/继续</button>
-        <button class="btn" id="taskQueuePauseBtn" onclick="pauseTaskQueue()">跑完当前后暂停</button>
-        <button class="btn btn-warning" id="taskQueueStopBtn" onclick="stopCurrentTaskAndPauseQueue()">停止当前并暂停</button>
+        <button class="btn btn-primary" id="taskQueueStartBtn" onclick="startTaskQueue()">按顺序开始执行</button>
+        <button class="btn" id="taskQueuePauseAllBtn" onclick="taskQueueTogglePauseAll()">暂停所有任务</button>
+        <button class="btn btn-warning" id="taskQueueStopAllBtn" onclick="taskQueueStopAll()">停止所有任务</button>
         <button class="btn" onclick="taskQueueClearSettled()">清除已结束</button>
         <button class="btn" onclick="taskQueueClearAll()">清空队列</button>
       </div>
       <div class="task-queue-list" id="taskQueueList"></div>
       <div class="form-hint" style="margin-top:12px;">
-        队列会逐条新建主界面对话并发送任务。计划模式需要人工审批，所以不会出现在队列执行方式中。
+        执行规则：先执行全部序号 1，序号 1 全部完成或跳过后才执行序号 2。若某序号存在暂停、停止、失败或待处理任务，后续序号不会执行。
       </div>
     </div>
   `;
@@ -190,13 +204,13 @@ function renderTaskQueueBadge() {
   const badge = document.getElementById('taskQueueMenuBadge');
   if (!badge || !state.taskQueue) return;
   const q = ensureTaskQueue();
-  const pending = q.items.filter(it => it.status === 'pending').length;
+  const pendingLike = q.items.filter(it => it.status === 'pending' || it.status === 'paused').length;
   const running = q.running || q.items.some(it => it.status === 'running');
   if (running) {
     badge.textContent = '跑';
     badge.style.display = 'inline-block';
-  } else if (pending) {
-    badge.textContent = String(pending);
+  } else if (pendingLike) {
+    badge.textContent = String(pendingLike);
     badge.style.display = 'inline-block';
   } else {
     badge.textContent = '';
@@ -210,50 +224,64 @@ function renderTaskQueueModal() {
   const statsEl = document.getElementById('taskQueueStats');
   const listEl = document.getElementById('taskQueueList');
   if (!statsEl || !listEl) return;
-  
+
   const counts = q.items.reduce((acc, it) => {
     acc[it.status] = (acc[it.status] || 0) + 1;
     return acc;
   }, {});
-  const pending = counts.pending || 0;
-  const running = counts.running || 0;
-  const done = counts.done || 0;
-  const error = counts.error || 0;
-  const canceled = counts.canceled || 0;
-  const waitingText = q.waiting ? ' · 等待当前生成结束' : '';
-  statsEl.textContent = `共 ${q.items.length} 条 · 待运行 ${pending} · 运行中 ${running} · 完成 ${done} · 失败 ${error} · 停止 ${canceled}${waitingText}`;
-  
+  const activeText = q.activeOrder ? ` · 当前序号 ${q.activeOrder}` : '';
+  const pausedText = q.paused ? ' · 已暂停' : '';
+  statsEl.textContent = `共 ${q.items.length} 条 · 待运行 ${counts.pending || 0} · 运行中 ${counts.running || 0} · 暂停 ${counts.paused || 0} · 停止 ${counts.stopped || 0} · 跳过 ${counts.skipped || 0} · 完成 ${counts.done || 0} · 失败 ${counts.error || 0}${activeText}${pausedText}`;
+
   const startBtn = document.getElementById('taskQueueStartBtn');
-  const pauseBtn = document.getElementById('taskQueuePauseBtn');
-  const stopBtn = document.getElementById('taskQueueStopBtn');
-  if (startBtn) startBtn.disabled = q.running || pending === 0;
-  if (pauseBtn) pauseBtn.disabled = !q.running || q.stopAfterCurrent;
-  if (stopBtn) stopBtn.disabled = !q.running;
-  
+  const pauseAllBtn = document.getElementById('taskQueuePauseAllBtn');
+  const stopAllBtn = document.getElementById('taskQueueStopAllBtn');
+  const hasRunnable = q.items.some(it => it.status === 'pending' || it.status === 'paused');
+  const hasRunning = q.items.some(it => it.status === 'running');
+  const hasPending = q.items.some(it => it.status === 'pending');
+  const hasStoppable = q.items.some(it => it.status === 'pending' || it.status === 'running' || it.status === 'paused');
+  if (startBtn) {
+    startBtn.disabled = q.running || !hasRunnable;
+    startBtn.textContent = '按顺序开始执行';
+  }
+  if (pauseAllBtn) {
+    pauseAllBtn.disabled = !q.running && !q.paused && !hasRunning && !hasPending;
+    pauseAllBtn.textContent = q.paused ? '继续所有任务' : '暂停所有任务';
+  }
+  if (stopAllBtn) stopAllBtn.disabled = !hasStoppable;
+
   if (!q.items.length) {
-    listEl.innerHTML = '<div class="task-queue-empty">还没有任务。输入任务后可自动开始，也可以先加入队列再逐条调整模式。</div>';
+    listEl.innerHTML = '<div class="task-queue-empty">还没有任务。新增任务默认序号为 1，可在任务卡片中手动修改序号。</div>';
     return;
   }
-  
-  listEl.innerHTML = q.items.map((item, idx) => _taskQueueRenderItem(item, idx)).join('');
+
+  const ordered = q.items
+    .map((item, idx) => ({ item, idx }))
+    .sort((a, b) => (a.item.order - b.item.order) || (a.item.createdAt - b.item.createdAt) || (a.idx - b.idx));
+  listEl.innerHTML = ordered.map(({ item, idx }) => _taskQueueRenderItem(item, idx)).join('');
 }
 
 function _taskQueueRenderItem(item, idx) {
-  const locked = item.status === 'running';
-  const editable = item.status === 'pending';
+  const editable = ['pending', 'paused', 'stopped', 'error'].includes(item.status);
+  const canPause = item.status === 'running' || item.status === 'pending';
+  const canStop = item.status === 'running' || item.status === 'pending' || item.status === 'paused';
+  const canSkip = !TASK_QUEUE_DONE_STATUSES.has(item.status);
   const chatBtn = item.chatId
     ? `<button class="btn" onclick="taskQueueOpenChat('${item.id}')">打开对话</button>`
     : '';
-  const retryBtn = (item.status === 'error' || item.status === 'canceled')
+  const retryBtn = (item.status === 'error' || item.status === 'stopped')
     ? `<button class="btn" onclick="taskQueueRetryItem('${item.id}')">重跑</button>`
     : '';
-  const removeBtn = locked
+  const removeBtn = item.status === 'running'
     ? ''
     : `<button class="btn" onclick="taskQueueRemoveItem('${item.id}')">删除</button>`;
   return `
-    <div class="task-queue-item ${escapeHtml(item.status)}">
+    <div class="task-queue-item ${escapeHtml(item.status)}" data-task-id="${escapeHtml(item.id)}">
       <div class="task-queue-item-head">
         <span class="task-queue-status ${escapeHtml(item.status)}">${_taskQueueStatusText(item.status)}</span>
+        <label class="task-queue-order">序号
+          <input type="number" min="1" step="1" value="${_taskQueuePositiveInt(item.order, 1)}" ${item.status === 'running' ? 'disabled' : ''} onchange="taskQueueUpdateItemOrder('${item.id}', this.value)">
+        </label>
         <span class="task-queue-title">#${idx + 1} ${escapeHtml(_taskQueueItemTitle(item))}</span>
         <span class="task-queue-meta">${_taskQueueModeText(item)}${item.chatId ? ' · 已建对话' : ''}</span>
       </div>
@@ -269,6 +297,9 @@ function _taskQueueRenderItem(item, idx) {
         <label class="task-queue-check">
           <input type="checkbox" ${item.useTools ? 'checked' : ''} ${editable ? '' : 'disabled'} onchange="taskQueueUpdateItemTools('${item.id}', this.checked)"> 启用工具
         </label>
+        <button class="btn" ${canPause ? '' : 'disabled'} onclick="taskQueuePauseItem('${item.id}')">暂停</button>
+        <button class="btn btn-warning" ${canStop ? '' : 'disabled'} onclick="taskQueueStopItem('${item.id}')">停止</button>
+        <button class="btn" ${canSkip ? '' : 'disabled'} onclick="taskQueueSkipItem('${item.id}')">跳过</button>
         ${chatBtn}${retryBtn}${removeBtn}
       </div>
       ${item.error ? `<div class="task-queue-error">${escapeHtml(item.error)}</div>` : ''}
@@ -280,9 +311,11 @@ function _taskQueueStatusText(status) {
   return {
     pending: '待运行',
     running: '运行中',
+    paused: '已暂停',
+    stopped: '已停止',
+    skipped: '已跳过',
     done: '已完成',
-    error: '失败',
-    canceled: '已停止'
+    error: '失败'
   }[status] || '待运行';
 }
 
@@ -313,11 +346,12 @@ function taskQueueAddTasks() {
     if (typeof toast === 'function') toast('请输入至少一个任务');
     return;
   }
-  
+
   for (const text of tasks) {
     q.items.push({
       id: _taskQueueNewId(),
       text,
+      order: 1,
       mode: q.defaultMode,
       useTools: !!q.defaultUseTools,
       status: 'pending',
@@ -325,7 +359,9 @@ function taskQueueAddTasks() {
       error: '',
       createdAt: Date.now(),
       startedAt: null,
-      finishedAt: null
+      finishedAt: null,
+      pausedAt: null,
+      skippedAt: null
     });
   }
   if (input) input.value = '';
@@ -348,15 +384,23 @@ function _taskQueueParseInput(raw, splitMode) {
 
 function taskQueueUpdateItemText(id, value) {
   const item = _taskQueueFindItem(id);
-  if (!item || item.status !== 'pending') return;
+  if (!item || !['pending', 'paused', 'stopped', 'error'].includes(item.status)) return;
   item.text = String(value || '').trim();
   saveTaskQueue();
   renderTaskQueueBadge();
 }
 
+function taskQueueUpdateItemOrder(id, value) {
+  const item = _taskQueueFindItem(id);
+  if (!item || item.status === 'running') return;
+  item.order = _taskQueuePositiveInt(value, 1);
+  saveTaskQueue();
+  renderTaskQueueModal();
+}
+
 function taskQueueUpdateItemMode(id, value) {
   const item = _taskQueueFindItem(id);
-  if (!item || item.status !== 'pending') return;
+  if (!item || !['pending', 'paused', 'stopped', 'error'].includes(item.status)) return;
   if (['normal', 'outline', 'reflection'].includes(value)) item.mode = value;
   saveTaskQueue();
   renderTaskQueueModal();
@@ -364,7 +408,7 @@ function taskQueueUpdateItemMode(id, value) {
 
 function taskQueueUpdateItemTools(id, checked) {
   const item = _taskQueueFindItem(id);
-  if (!item || item.status !== 'pending') return;
+  if (!item || !['pending', 'paused', 'stopped', 'error'].includes(item.status)) return;
   item.useTools = !!checked;
   saveTaskQueue();
   renderTaskQueueModal();
@@ -386,6 +430,8 @@ function taskQueueRetryItem(id) {
   item.error = '';
   item.startedAt = null;
   item.finishedAt = null;
+  item.pausedAt = null;
+  item.skippedAt = null;
   saveTaskQueue();
   renderTaskQueueModal();
 }
@@ -399,19 +445,23 @@ function taskQueueOpenChat(id) {
 
 function taskQueueClearSettled() {
   const q = ensureTaskQueue();
-  q.items = q.items.filter(it => it.status === 'pending' || it.status === 'running');
+  q.items = q.items.filter(it => !TASK_QUEUE_DONE_STATUSES.has(it.status) && it.status !== 'error' && it.status !== 'stopped');
   saveTaskQueue();
   renderTaskQueueModal();
 }
 
 function taskQueueClearAll() {
   const q = ensureTaskQueue();
-  if (q.running) {
-    if (typeof toast === 'function') toast('队列运行中，请先暂停或停止当前任务');
+  if (q.items.some(it => it.status === 'running')) {
+    if (typeof toast === 'function') toast('存在运行中任务，请先停止所有任务');
     return;
   }
   if (q.items.length && !confirm('清空整个任务队列？')) return;
   q.items = [];
+  q.running = false;
+  q.paused = false;
+  q.activeOrder = null;
+  q.stopAllRequested = false;
   saveTaskQueue();
   renderTaskQueueModal();
 }
@@ -419,8 +469,14 @@ function taskQueueClearAll() {
 async function startTaskQueue() {
   const q = ensureTaskQueue();
   if (q.running) return;
-  if (!q.items.some(it => it.status === 'pending')) {
-    if (typeof toast === 'function') toast('没有待运行任务');
+  const validation = _taskQueueValidateOrders(q);
+  if (!validation.ok) {
+    if (typeof toast === 'function') toast(validation.error, 5000);
+    renderTaskQueueModal();
+    return;
+  }
+  if (!q.items.some(it => it.status === 'pending' || it.status === 'paused')) {
+    if (typeof toast === 'function') toast('没有可执行任务');
     renderTaskQueueModal();
     return;
   }
@@ -429,81 +485,141 @@ async function startTaskQueue() {
     if (typeof openSettings === 'function') openSettings();
     return;
   }
-  
+
   q.running = true;
-  q.stopAfterCurrent = false;
-  q.waiting = false;
-  q._modeSnapshot = _taskQueueSnapshotModeSettings();
+  q.paused = false;
+  q.stopAllRequested = false;
+  q.items.forEach(it => {
+    if (it.status === 'paused') {
+      it.status = 'pending';
+      it.error = '';
+    }
+  });
   saveTaskQueue();
   renderTaskQueueModal();
-  
+
   try {
-    while (q.running && !q.stopAfterCurrent) {
-      await _taskQueueWaitUntilIdle(q);
-      if (!q.running || q.stopAfterCurrent) break;
-      const item = q.items.find(it => it.status === 'pending');
-      if (!item) break;
-      await _taskQueueRunItem(item);
+    while (q.running && !q.stopAllRequested) {
+      if (q.paused) {
+        await _taskQueueSleep(500);
+        continue;
+      }
+      const nextOrder = _taskQueueNextRunnableOrder(q);
+      if (!nextOrder) break;
+      q.activeOrder = nextOrder;
+      const group = q.items.filter(it => it.order === nextOrder);
+      const blockers = group.filter(it => TASK_QUEUE_BLOCKING_STATUSES.has(it.status) && it.status !== 'pending' && it.status !== 'running');
+      if (blockers.length) break;
+      const runnable = group.filter(it => it.status === 'pending');
+      if (!runnable.length) {
+        if (group.every(it => TASK_QUEUE_DONE_STATUSES.has(it.status))) continue;
+        break;
+      }
       saveTaskQueue();
       renderTaskQueueModal();
+      await Promise.allSettled(runnable.map(item => _taskQueueRunItem(item)));
+      saveTaskQueue();
+      renderTaskQueueModal();
+      if (group.some(it => !TASK_QUEUE_DONE_STATUSES.has(it.status))) break;
     }
   } finally {
-    const stoppedByRequest = q.stopAfterCurrent;
+    const keepPaused = q.paused && q.items.some(it => it.status === 'paused');
     q.running = false;
-    q.stopAfterCurrent = false;
-    q.waiting = false;
-    _taskQueueRestoreModeSettings(q._modeSnapshot);
-    q._modeSnapshot = null;
+    q.paused = keepPaused;
+    q.activeOrder = null;
+    q.stopAllRequested = false;
     saveTaskQueue();
     renderTaskQueueModal();
     if (typeof toast === 'function') {
-      const hasPending = q.items.some(it => it.status === 'pending');
-      toast(hasPending ? (stoppedByRequest ? '任务队列已暂停' : '任务队列已停止') : '任务队列已完成');
+      const next = _taskQueueNextRunnableOrder(q);
+      const blocked = _taskQueueFirstBlockedOrder(q);
+      if (next) toast(blocked ? `任务队列停在序号 ${blocked}` : '任务队列已暂停');
+      else toast('任务队列已完成可执行部分');
     }
   }
 }
 
-function pauseTaskQueue() {
+function taskQueueTogglePauseAll() {
   const q = ensureTaskQueue();
-  if (!q.running) return;
-  q.stopAfterCurrent = true;
-  saveTaskQueue();
-  renderTaskQueueModal();
-  if (typeof toast === 'function') toast('当前任务结束后暂停队列');
-}
-
-function stopCurrentTaskAndPauseQueue() {
-  const q = ensureTaskQueue();
-  if (!q.running) return;
-  q.stopAfterCurrent = true;
-  const runningItem = q.items.find(it => it.status === 'running' && it.chatId);
-  if (runningItem && typeof requestStopChatTask === 'function') {
-    requestStopChatTask(runningItem.chatId);
-  } else if (typeof stopGenerate === 'function' && ((typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : state.isGenerating)) {
-    stopGenerate();
-  }
-  saveTaskQueue();
-  renderTaskQueueModal();
-  if (typeof toast === 'function') toast('已请求停止当前任务，队列随后暂停');
-}
-
-async function _taskQueueWaitUntilIdle(q) {
-  const anyGenerating = () => (typeof isAnyChatGenerating === 'function')
-    ? isAnyChatGenerating()
-    : !!(state.isGenerating || state.abortCtrl);
-  if (!anyGenerating()) {
-    q.waiting = false;
+  if (q.paused) {
+    q.paused = false;
+    saveTaskQueue();
+    renderTaskQueueModal();
+    if (!q.running) setTimeout(() => startTaskQueue(), 0);
+    if (typeof toast === 'function') toast('已继续所有任务');
     return;
   }
-  q.waiting = true;
+  q.paused = true;
+  const running = q.items.filter(it => it.status === 'running');
+  running.forEach(it => _taskQueueAbortItem(it, 'paused'));
+  q.items.filter(it => it.status === 'pending').forEach(it => {
+    it.status = 'paused';
+    it.error = '已暂停';
+    it.pausedAt = Date.now();
+  });
   saveTaskQueue();
   renderTaskQueueModal();
-  while (q.running && !q.stopAfterCurrent && anyGenerating()) {
-    await new Promise(r => setTimeout(r, 800));
+  if (typeof toast === 'function') toast(running.length ? '已请求暂停所有任务' : '队列已暂停');
+}
+
+function taskQueueStopAll() {
+  const q = ensureTaskQueue();
+  if (!q.items.length) return;
+  if (!confirm('停止所有未完成任务？')) return;
+  q.stopAllRequested = true;
+  q.running = false;
+  q.paused = false;
+  for (const item of q.items) {
+    if (item.status === 'running') _taskQueueAbortItem(item, 'stopped');
+    else if (item.status === 'pending' || item.status === 'paused') {
+      item.status = 'stopped';
+      item.error = '已停止';
+      item.finishedAt = Date.now();
+    }
   }
-  q.waiting = false;
   saveTaskQueue();
   renderTaskQueueModal();
+  if (typeof toast === 'function') toast('已停止所有未完成任务');
+}
+
+function taskQueuePauseItem(id) {
+  const item = _taskQueueFindItem(id);
+  if (!item || (item.status !== 'running' && item.status !== 'pending')) return;
+  if (item.status === 'running') _taskQueueAbortItem(item, 'paused');
+  else {
+    item.status = 'paused';
+    item.error = '已暂停';
+    item.pausedAt = Date.now();
+  }
+  saveTaskQueue();
+  renderTaskQueueModal();
+  if (typeof toast === 'function') toast('已请求暂停该任务');
+}
+
+function taskQueueStopItem(id) {
+  const item = _taskQueueFindItem(id);
+  if (!item || TASK_QUEUE_DONE_STATUSES.has(item.status)) return;
+  if (item.status === 'running') _taskQueueAbortItem(item, 'stopped');
+  else {
+    item.status = 'stopped';
+    item.error = '已停止';
+    item.finishedAt = Date.now();
+  }
+  saveTaskQueue();
+  renderTaskQueueModal();
+}
+
+function taskQueueSkipItem(id) {
+  const item = _taskQueueFindItem(id);
+  if (!item || TASK_QUEUE_DONE_STATUSES.has(item.status)) return;
+  if (item.status === 'running') _taskQueueAbortItem(item, 'skipped');
+  else _taskQueueMarkSkipped(item);
+  saveTaskQueue();
+  renderTaskQueueModal();
+  if (ensureTaskQueue().running === false) {
+    const q = ensureTaskQueue();
+    if (q.items.some(it => it.status === 'pending')) renderTaskQueueModal();
+  }
 }
 
 async function _taskQueueRunItem(item) {
@@ -514,49 +630,77 @@ async function _taskQueueRunItem(item) {
     item.finishedAt = Date.now();
     return;
   }
-  
+
+  if (item.status !== 'pending') return;
   item.status = 'running';
   item.error = '';
   item.startedAt = Date.now();
   item.finishedAt = null;
+  item.pausedAt = null;
+  item.skippedAt = null;
   saveTaskQueue();
   renderTaskQueueModal();
-  
+
   try {
-    _taskQueueApplyItemMode(item);
-    if (typeof newChat !== 'function' || typeof onSend !== 'function') {
-      throw new Error('聊天发送函数尚未加载');
-    }
-    
-    newChat();
-    const c = typeof currentChat === 'function' ? currentChat() : null;
-    if (!c) throw new Error('无法创建新对话');
+    if (typeof callAPI !== 'function') throw new Error('API 函数尚未加载');
+    const c = _taskQueueEnsureChatForItem(item);
     item.chatId = c.id;
     saveTaskQueue();
     renderTaskQueueModal();
-    
-    state.pendingAttachments = [];
-    state.pendingAIAttachments = [];
+
     if (typeof clearPendingAIAttachments === 'function') clearPendingAIAttachments(c.id);
-    if (typeof renderPendingAtts === 'function') renderPendingAtts();
-    
-    const input = document.getElementById('input');
-    if (!input) throw new Error('找不到主输入框');
-    input.value = item.text;
-    input.style.height = 'auto';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    
-    await onSend();
-    
-    const result = _taskQueueInspectResult(item.chatId);
-    item.status = result.status;
-    item.error = result.error || '';
-    item.finishedAt = Date.now();
+    if (item.mode === 'outline') {
+      await callAPIWithOutline({ chatId: c.id, useTools: item.useTools });
+    } else if (item.mode === 'reflection') {
+      await callAPIWithReflection({ chatId: c.id, useTools: item.useTools });
+    } else {
+      await callAPI(undefined, { chatId: c.id, useTools: item.useTools });
+    }
+
+    if (item.status === 'running') {
+      const result = _taskQueueInspectResult(item.chatId);
+      _taskQueueApplyRequestedOrResult(item, result);
+      item.finishedAt = Date.now();
+    }
   } catch (e) {
-    item.status = 'error';
-    item.error = e && e.message ? e.message : String(e);
+    if (item._requestedStatus) {
+      _taskQueueApplyRequestedOrResult(item, null);
+      return;
+    }
+    if (item.status === 'paused' || item.status === 'stopped' || item.status === 'skipped') return;
+    if (e && e.name === 'AbortError') {
+      item.status = 'stopped';
+      item.error = '已停止';
+    } else {
+      item.status = 'error';
+      item.error = e && e.message ? e.message : String(e);
+    }
     item.finishedAt = Date.now();
+  } finally {
+    if (item.status === 'running') {
+      const result = _taskQueueInspectResult(item.chatId);
+      _taskQueueApplyRequestedOrResult(item, result);
+      item.finishedAt = Date.now();
+    }
+    saveTaskQueue();
+    renderTaskQueueModal();
   }
+}
+
+function _taskQueueEnsureChatForItem(item) {
+  let c = item.chatId && typeof chatById === 'function' ? chatById(item.chatId) : null;
+  if (c) return c;
+  c = {
+    id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    title: _taskQueueItemTitle(item).slice(0, 30) || '队列任务',
+    messages: [{ role: 'user', content: item.text }],
+    createdAt: Date.now()
+  };
+  state.chats.unshift(c);
+  item.chatId = c.id;
+  saveData();
+  if (typeof renderChatList === 'function') renderChatList();
+  return c;
 }
 
 function _taskQueueInspectResult(chatId) {
@@ -564,56 +708,115 @@ function _taskQueueInspectResult(chatId) {
   if (!c || !Array.isArray(c.messages)) return { status: 'error', error: '找不到任务对话' };
   const assistant = c.messages.slice().reverse().find(m => m.role === 'assistant');
   const content = assistant ? String(assistant.content || '') : '';
-  if (content.includes('[已停止]')) return { status: 'canceled', error: '' };
+  if (content.includes('[已停止]')) return { status: 'stopped', error: '已停止' };
   if (content.trim().startsWith('❌')) {
     return { status: 'error', error: content.trim().split('\n')[0].slice(0, 220) };
   }
   return { status: 'done', error: '' };
 }
 
-function _taskQueueApplyItemMode(item) {
-  const s = state.settings;
-  s.usePlan = false;
-  s.useOutline = item.mode === 'outline';
-  s.useReflection = item.mode === 'reflection';
-  s.useTools = !!item.useTools && !!(state.tools && state.tools.length);
-  _taskQueueRefreshModeButtons();
+function _taskQueueAbortItem(item, nextStatus) {
+  item._requestedStatus = nextStatus;
+  if (item.chatId && typeof requestStopChatTask === 'function') requestStopChatTask(item.chatId);
+  if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
+    try { window.cancelAutoResend(item.chatId); } catch (e) {}
+  }
+  if (nextStatus === 'paused') {
+    item.status = 'paused';
+    item.error = '已暂停';
+    item.pausedAt = Date.now();
+  } else if (nextStatus === 'skipped') {
+    _taskQueueMarkSkipped(item);
+  } else {
+    item.status = 'stopped';
+    item.error = '已停止';
+    item.finishedAt = Date.now();
+  }
 }
 
-function _taskQueueSnapshotModeSettings() {
-  const s = state.settings || {};
-  return {
-    usePlan: !!s.usePlan,
-    useOutline: !!s.useOutline,
-    useReflection: !!s.useReflection,
-    useTools: !!s.useTools
-  };
+function _taskQueueApplyRequestedOrResult(item, result) {
+  if (item._requestedStatus === 'paused') {
+    item.status = 'paused';
+    item.error = '已暂停';
+    item.pausedAt = item.pausedAt || Date.now();
+  } else if (item._requestedStatus === 'skipped') {
+    _taskQueueMarkSkipped(item);
+  } else if (item._requestedStatus === 'stopped') {
+    item.status = 'stopped';
+    item.error = '已停止';
+    item.finishedAt = item.finishedAt || Date.now();
+  } else if (result) {
+    item.status = result.status;
+    item.error = result.error || '';
+  }
+  delete item._requestedStatus;
 }
 
-function _taskQueueRestoreModeSettings(snapshot) {
-  if (!snapshot || !state.settings) return;
-  state.settings.usePlan = !!snapshot.usePlan;
-  state.settings.useOutline = !!snapshot.useOutline;
-  state.settings.useReflection = !!snapshot.useReflection;
-  state.settings.useTools = !!snapshot.useTools;
-  _taskQueueRefreshModeButtons();
-  if (typeof persistSettings === 'function') persistSettings();
+function _taskQueueMarkSkipped(item) {
+  item.status = 'skipped';
+  item.error = '';
+  item.skippedAt = Date.now();
+  item.finishedAt = Date.now();
 }
 
-function _taskQueueRefreshModeButtons() {
-  const s = state.settings || {};
-  const planBtn = document.getElementById('planBtn');
-  const outlineBtn = document.getElementById('outlineBtn');
-  const reflectBtn = document.getElementById('reflectBtn');
-  const toolsBtn = document.getElementById('toolsBtn');
-  if (planBtn) planBtn.classList.toggle('plan-active', !!s.usePlan);
-  if (outlineBtn) outlineBtn.classList.toggle('outline-active', !!s.useOutline);
-  if (reflectBtn) reflectBtn.classList.toggle('reflect-active', !!s.useReflection);
-  if (toolsBtn) toolsBtn.classList.toggle('tool-active', !!s.useTools);
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+function _taskQueueValidateOrders(q) {
+  for (const item of q.items) {
+    const order = Number(item.order);
+    if (!Number.isInteger(order) || order < 1) {
+      return { ok: false, error: '任务序号必须是从 1 开始的正整数' };
+    }
+  }
+  if (!q.items.length) return { ok: true };
+  const orders = Array.from(new Set(q.items.map(it => _taskQueuePositiveInt(it.order, 1)))).sort((a, b) => a - b);
+  for (let i = 0; i < orders.length; i++) {
+    const expected = i + 1;
+    if (orders[i] !== expected) {
+      return { ok: false, error: `任务序号不连续：缺少序号 ${expected}` };
+    }
+  }
+  return { ok: true };
+}
+
+function _taskQueueNextRunnableOrder(q) {
+  const orders = Array.from(new Set(q.items.map(it => _taskQueuePositiveInt(it.order, 1)))).sort((a, b) => a - b);
+  for (const order of orders) {
+    const group = q.items.filter(it => it.order === order);
+    if (group.every(it => TASK_QUEUE_DONE_STATUSES.has(it.status))) continue;
+    if (group.some(it => it.status === 'pending')) return order;
+    return null;
+  }
+  return null;
+}
+
+function _taskQueueFirstBlockedOrder(q) {
+  const orders = Array.from(new Set(q.items.map(it => _taskQueuePositiveInt(it.order, 1)))).sort((a, b) => a - b);
+  for (const order of orders) {
+    const group = q.items.filter(it => it.order === order);
+    if (group.every(it => TASK_QUEUE_DONE_STATUSES.has(it.status))) continue;
+    if (group.some(it => TASK_QUEUE_BLOCKING_STATUSES.has(it.status))) return order;
+  }
+  return null;
+}
+
+function _taskQueuePositiveInt(value, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+function _taskQueueSleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function _taskQueueFindItem(id) {
   const q = ensureTaskQueue();
   return q.items.find(it => it.id === id) || null;
+}
+
+// 兼容旧按钮名；新 UI 不再使用。
+function pauseTaskQueue() {
+  taskQueueTogglePauseAll();
+}
+
+function stopCurrentTaskAndPauseQueue() {
+  taskQueueStopAll();
 }

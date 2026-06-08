@@ -4,7 +4,7 @@
 //       state.js / chat.js / tools.js / api-stream.js（updateLastMsg）
 // 加载顺序：在 api-adapters.js 之后
 
-function buildRequestBody(history, modelOverride, streamOverride) {
+function buildRequestBody(history, modelOverride, streamOverride, options = {}) {
   const s = state.settings;
   const model = modelOverride || s.currentModel;
   const stream = streamOverride !== undefined ? streamOverride : !!s.stream;
@@ -19,7 +19,8 @@ function buildRequestBody(history, modelOverride, streamOverride) {
   const apiMessages = s.apiFormat === 'anthropic' 
     ? buildAnthropicMessages(history)
     : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(history) : buildOpenAIMessages(history));
-  const tools = buildToolsArray();
+  const toolsEnabled = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
+  const tools = toolsEnabled ? buildToolsArray({ force: true }) : null;
   
   // ⭐ 先构造默认请求体
   let body;
@@ -354,6 +355,7 @@ async function callAPI(roundLimit, options = {}) {
   }
   const taskChatId = c.id;
   const isTaskVisible = () => isCurrentChat(taskChatId);
+  const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!state.settings.useTools;
   
   const s = state.settings;
   
@@ -388,7 +390,7 @@ async function callAPI(roundLimit, options = {}) {
   const url = buildFullUrl(s.baseUrl, s.apiPath);
   let body;
   try {
-    body = buildRequestBody(c.messages.slice(0, -1));
+    body = buildRequestBody(c.messages.slice(0, -1), undefined, undefined, { useTools: taskUseTools });
   } catch (e) {
     c.messages[lastIdx].content = `❌ 构造请求失败：${e.message}`;
     if (isTaskVisible()) renderMessages();
@@ -617,9 +619,9 @@ async function callAPI(roundLimit, options = {}) {
       }
       
       if (userStoppedAll) {
-        await callAPI(0, { chatId: taskChatId });
+        await callAPI(0, { chatId: taskChatId, useTools: taskUseTools });
       } else {
-        await callAPI(roundLimit - 1, { chatId: taskChatId });
+        await callAPI(roundLimit - 1, { chatId: taskChatId, useTools: taskUseTools });
       }
       return;
     }
@@ -1146,7 +1148,7 @@ async function runAgentLoop({
   
   // 内部维护 messages（不动 c.messages）
   const messages = JSON.parse(JSON.stringify(initialMessages || []));
-  const tools = useTools ? buildToolsArray() : null;
+  const tools = useTools ? buildToolsArray({ force: true }) : null;
   
   let finalText = '';
   let totalUsage = null;
