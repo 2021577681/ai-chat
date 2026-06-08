@@ -6,7 +6,7 @@
 // 数据结构：
 //   storage[API_PROFILES_KEY] = [
 //     { id, name, settings: {provider, baseUrl, apiPath, apiFormat, apiKey,
-//       modelName, currentModel, temperature, maxTokens, systemPrompt}, createdAt, updatedAt }
+//       modelName, currentModel, temperature, maxTokens, useLocalProxy, systemPrompt}, createdAt, updatedAt }
 //   ]
 //   storage[ACTIVE_PROFILE_ID_KEY] = '<id>'  // 当前激活的 profile id
 
@@ -25,6 +25,9 @@ const PROFILE_SETTINGS_KEYS = [
   'currentModel',
   'temperature',
   'maxTokens',
+  'useLocalProxy',
+  'contextLimitMode',
+  'contextLimitOverride',
   'systemPrompt',
   'useCustomJson',
   'jsonTemplate',
@@ -91,6 +94,13 @@ function _applyProfileToSettings(profSettings) {
       state.settings[k] = profSettings[k];
     }
   }
+  // 旧版 profile 没有上下文长度字段；切换旧档案时应回到自动识别，
+  // 避免沿用上一个档案的手动上下文窗口。
+  if (profSettings.contextLimitMode === undefined) state.settings.contextLimitMode = 'auto';
+  if (profSettings.contextLimitOverride === undefined) state.settings.contextLimitOverride = 0;
+  // 旧版 profile 没有本地代理字段；切换旧档案时回到默认启用，
+  // 避免沿用上一个档案的直连/代理状态。
+  if (profSettings.useLocalProxy === undefined) state.settings.useLocalProxy = true;
 }
 
 // 摘要：用于触发器和菜单项的小字
@@ -99,7 +109,8 @@ function _profileSummary(p) {
   const url = s.baseUrl || '?';
   const model = s.currentModel || (s.modelName || '').split(',')[0].trim() || '?';
   const keyHint = s.apiKey ? (s.apiKey.slice(0, 4) + '...' + s.apiKey.slice(-4)) : '(无 Key)';
-  return `${url} · ${model} · ${keyHint}`;
+  const proxyHint = s.useLocalProxy === false ? '直连' : '本地代理';
+  return `${url} · ${model} · ${proxyHint} · ${keyHint}`;
 }
 
 // ============ 对外 API ============
@@ -428,6 +439,12 @@ function _harvestSettingsModalToState() {
   const systemPrompt = get('systemPrompt'); if (systemPrompt !== undefined) s.systemPrompt = systemPrompt;
   const temperature = get('temperature');   if (temperature !== undefined) s.temperature = parseFloat(temperature);
   const maxTokens = get('maxTokens');       if (maxTokens !== undefined) s.maxTokens = parseInt(maxTokens);
+  const useLocalProxy = document.getElementById('useLocalProxy');
+  if (useLocalProxy) s.useLocalProxy = useLocalProxy.checked;
+  const contextMode = get('contextLimitMode');
+  if (contextMode !== undefined) s.contextLimitMode = contextMode === 'manual' ? 'manual' : 'auto';
+  const contextLimit = get('contextLimitOverride');
+  if (contextLimit !== undefined && contextLimit !== '') s.contextLimitOverride = parseInt(contextLimit);
 }
 
 // 把 state.settings 的值写回设置面板的输入框
@@ -449,6 +466,11 @@ function _refreshSettingsModalFromState() {
   const tempVal = document.getElementById('tempVal');
   if (tempVal && s.temperature !== undefined) tempVal.textContent = s.temperature;
   set('maxTokens', s.maxTokens);
+  const proxyEl = document.getElementById('useLocalProxy');
+  if (proxyEl) proxyEl.checked = !!s.useLocalProxy;
+  set('contextLimitMode', s.contextLimitMode || 'auto');
+  set('contextLimitOverride', s.contextLimitOverride || '');
+  if (typeof updateContextLimitModeUI === 'function') updateContextLimitModeUI();
   if (typeof updateUrlPreview === 'function') updateUrlPreview();
 }
 
@@ -461,7 +483,8 @@ function _refreshSettingsModalFromState() {
     if (window._saveAndCloseHooked) return true;
     const orig = window.saveAndClose;
     window.saveAndClose = function() {
-      orig.apply(this, arguments);
+      const result = orig.apply(this, arguments);
+      if (result === false) return false;
       // 保存后：如果当前有激活的 profile，自动同步它的 settings
       try {
         const activeId = getActiveProfileId();
@@ -478,6 +501,7 @@ function _refreshSettingsModalFromState() {
       } catch (e) {
         console.warn('[api-profiles] 保存后同步失败:', e);
       }
+      return result;
     };
     window._saveAndCloseHooked = true;
     return true;

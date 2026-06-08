@@ -361,6 +361,276 @@ function buildToolsArray(options = {}) {
   }
 }
 
+// ============ 工具结果 Artifact（长输出归档）============
+const TOOL_ARTIFACT_INDEX_KEY = 'aichat_tool_artifacts_index_v1';
+const TOOL_ARTIFACT_ITEM_PREFIX = 'aichat_tool_artifact_v1_';
+const TOOL_ARTIFACT_THRESHOLD_CHARS = 8000;
+const TOOL_ARTIFACT_MAX_COUNT = 200;
+const TOOL_ARTIFACT_MAX_TOTAL_CHARS = 50 * 1024 * 1024;
+
+function _toolArtifactStore() {
+  return (typeof storage !== 'undefined') ? storage : {
+    get: k => localStorage.getItem(k),
+    set: (k, v) => localStorage.setItem(k, v),
+    remove: k => localStorage.removeItem(k)
+  };
+}
+
+function _toolArtifactString(value) {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  try { return JSON.stringify(value); } catch (e) { return String(value); }
+}
+
+function _loadToolArtifactIndex() {
+  try {
+    const raw = _toolArtifactStore().get(TOOL_ARTIFACT_INDEX_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    console.warn('[tool-artifact] index load failed:', e);
+    return [];
+  }
+}
+
+function _saveToolArtifactIndex(index) {
+  try {
+    _toolArtifactStore().set(TOOL_ARTIFACT_INDEX_KEY, JSON.stringify(index || []));
+  } catch (e) {
+    console.warn('[tool-artifact] index save failed:', e);
+  }
+}
+
+function _formatArtifactSize(chars) {
+  return typeof formatSize === 'function'
+    ? formatSize(chars)
+    : (chars >= 1024 * 1024 ? (chars / 1024 / 1024).toFixed(2) + ' MB' : (chars / 1024).toFixed(1) + ' KB');
+}
+
+function _toolArtifactLines(text) {
+  return _toolArtifactString(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+}
+
+function _clipToolText(text, maxChars) {
+  const s = _toolArtifactString(text);
+  if (s.length <= maxChars) return s;
+  const head = Math.floor(maxChars * 0.48);
+  const tail = Math.floor(maxChars * 0.48);
+  return `${s.slice(0, head)}\n\n[中间省略 ${s.length - head - tail} 字符]\n\n${s.slice(-tail)}`;
+}
+
+function _toolArtifactPreview(lines, start, count, maxChars) {
+  if (!lines.length || count <= 0) return '';
+  const slice = lines.slice(start, start + count);
+  const numbered = slice.map((line, i) => `${start + i + 1}: ${line}`).join('\n');
+  return _clipToolText(numbered, maxChars);
+}
+
+function _toolArtifactHints(content) {
+  const text = _toolArtifactString(content);
+  const hints = [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      hints.push(`- JSON 顶层类型: array，条目数: ${parsed.length}`);
+    } else if (parsed && typeof parsed === 'object') {
+      const keys = Object.keys(parsed).slice(0, 20);
+      hints.push(`- JSON 顶层类型: object，字段: ${keys.join(', ') || '无'}`);
+      for (const key of ['returncode', 'exitCode', 'status', 'ok', 'error', 'stderr', 'stdout', 'path', 'checkpoint_id']) {
+        if (Object.prototype.hasOwnProperty.call(parsed, key)) {
+          const val = typeof parsed[key] === 'string' ? _clipToolText(parsed[key], 240) : JSON.stringify(parsed[key]);
+          hints.push(`- ${key}: ${val}`);
+        }
+      }
+    }
+  } catch (e) {}
+  const important = [];
+  const re = /(error|failed|failure|exception|traceback|fatal|warning|失败|错误|异常|returncode|exit code|exit_code)/i;
+  for (const [idx, line] of _toolArtifactLines(text).entries()) {
+    if (re.test(line)) {
+      important.push(`- L${idx + 1}: ${_clipToolText(line.trim(), 220)}`);
+      if (important.length >= 8) break;
+    }
+  }
+  if (important.length) {
+    hints.push('- 疑似关键行:');
+    hints.push(...important);
+  }
+  return hints.join('\n');
+}
+
+function _pruneToolArtifacts(index, keepId = '') {
+  let list = Array.isArray(index) ? index.slice() : [];
+  let total = list.reduce((sum, item) => sum + (Number(item.sizeChars) || 0), 0);
+  const store = _toolArtifactStore();
+  while (list.length > TOOL_ARTIFACT_MAX_COUNT || total > TOOL_ARTIFACT_MAX_TOTAL_CHARS) {
+    let removeIdx = list.length - 1;
+    while (removeIdx >= 0 && list[removeIdx] && list[removeIdx].id === keepId) removeIdx--;
+    if (removeIdx < 0) break;
+    const old = list.splice(removeIdx, 1)[0];
+    total -= Number(old.sizeChars) || 0;
+    try { store.remove(TOOL_ARTIFACT_ITEM_PREFIX + old.id); } catch (e) {}
+  }
+  return list;
+}
+
+function saveToolArtifact({ chatId, toolCallId, toolName, args, status, content }) {
+  const text = _toolArtifactString(content);
+  const now = Date.now();
+  const id = `tool_art_${now}_${Math.random().toString(36).slice(2, 8)}`;
+  const lines = _toolArtifactLines(text);
+  const meta = {
+    id,
+    chatId: chatId || '',
+    toolCallId: toolCallId || '',
+    toolName: toolName || 'tool',
+    status: status || 'success',
+    sizeChars: text.length,
+    lineCount: lines.length,
+    createdAt: now,
+    argsPreview: _clipToolText(args, 1200)
+  };
+  const store = _toolArtifactStore();
+  store.set(TOOL_ARTIFACT_ITEM_PREFIX + id, JSON.stringify({ ...meta, content: text }));
+  const index = _pruneToolArtifacts([meta, ..._loadToolArtifactIndex().filter(item => item && item.id !== id)], id);
+  _saveToolArtifactIndex(index);
+  return meta;
+}
+
+function formatArchivedToolResult(meta, content) {
+  const lines = _toolArtifactLines(content);
+  const head = _toolArtifactPreview(lines, 0, 80, 3200);
+  const tailStart = Math.max(0, lines.length - 60);
+  const tail = tailStart > 80 ? _toolArtifactPreview(lines, tailStart, 60, 2600) : '';
+  const hints = _toolArtifactHints(content);
+  return `[工具结果已归档]
+artifact_id: ${meta.id}
+tool: ${meta.toolName}
+status: ${meta.status}
+size: ${_formatArtifactSize(meta.sizeChars)}
+lines: ${meta.lineCount}
+time: ${new Date(meta.createdAt).toISOString()}
+
+摘要:
+- 工具输出超过 ${_formatArtifactSize(TOOL_ARTIFACT_THRESHOLD_CHARS)}，完整内容已保存到本地 artifact。
+- 当前上下文仅保留首尾片段和可验证线索，避免长输出污染后续对话。
+- 如需全文、搜索或指定行范围，请调用 read_tool_artifact，参数 artifact_id="${meta.id}"。
+${hints ? '\n' + hints : ''}
+
+--- BEGIN HEAD ---
+${head}
+--- END HEAD ---
+${tail ? `
+--- BEGIN TAIL ---
+${tail}
+--- END TAIL ---` : ''}`;
+}
+
+function prepareToolResultForContext({ content, toolName, toolCallId, chatId, chat, status, args } = {}) {
+  const text = _toolArtifactString(content);
+  if (!text || text.length <= TOOL_ARTIFACT_THRESHOLD_CHARS || toolName === 'read_tool_artifact') {
+    return { content: text, archived: false };
+  }
+  try {
+    const meta = saveToolArtifact({
+      chatId: chatId || (chat && chat.id) || '',
+      toolCallId,
+      toolName,
+      args,
+      status,
+      content: text
+    });
+    return {
+      content: formatArchivedToolResult(meta, text),
+      archived: true,
+      artifactId: meta.id,
+      artifactMeta: meta
+    };
+  } catch (e) {
+    console.warn('[tool-artifact] archive failed:', e);
+    return { content: text, archived: false, error: e.message };
+  }
+}
+
+function readToolArtifact(artifactId, query, startLine, endLine, headLines, tailLines, maxChars, context = {}) {
+  const id = String(artifactId || '').trim();
+  if (!id) return { ok: false, error: '缺少 artifact_id' };
+  let artifact;
+  try {
+    const raw = _toolArtifactStore().get(TOOL_ARTIFACT_ITEM_PREFIX + id);
+    if (!raw) return { ok: false, error: `未找到 artifact: ${id}` };
+    artifact = JSON.parse(raw);
+  } catch (e) {
+    return { ok: false, error: `读取 artifact 失败: ${e.message}` };
+  }
+  const content = _toolArtifactString(artifact.content);
+  const lines = _toolArtifactLines(content);
+  const limit = Math.max(1000, Math.min(50000, parseInt(maxChars) || 12000));
+  const header = [
+    `[tool artifact] ${artifact.id}`,
+    `tool: ${artifact.toolName || 'tool'}`,
+    `status: ${artifact.status || 'unknown'}`,
+    `size: ${_formatArtifactSize(content.length)}`,
+    `lines: ${lines.length}`,
+    `created_at: ${artifact.createdAt ? new Date(artifact.createdAt).toISOString() : 'unknown'}`
+  ].join('\n');
+  
+  if (query && String(query).trim()) {
+    const q = String(query).toLowerCase();
+    const matches = [];
+    const contextLines = 2;
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].toLowerCase().includes(q)) continue;
+      const from = Math.max(0, i - contextLines);
+      const to = Math.min(lines.length, i + contextLines + 1);
+      matches.push(lines.slice(from, to).map((line, j) => `${from + j + 1}: ${line}`).join('\n'));
+      if (matches.join('\n\n').length > limit) break;
+    }
+    return `${header}
+mode: query
+query: ${query}
+matches: ${matches.length}
+
+${matches.length ? _clipToolText(matches.join('\n\n---\n\n'), limit) : '(无匹配)'}`;
+  }
+  
+  const start = parseInt(startLine);
+  const end = parseInt(endLine);
+  if (!isNaN(start) || !isNaN(end)) {
+    const from = Math.max(1, isNaN(start) ? 1 : start);
+    const to = Math.min(lines.length, isNaN(end) ? from + 199 : end);
+    const body = lines.slice(from - 1, to).map((line, i) => `${from + i}: ${line}`).join('\n');
+    return `${header}
+mode: line_range
+range: ${from}-${to}
+
+${_clipToolText(body, limit)}`;
+  }
+  
+  if (content.length <= limit) {
+    return `${header}
+mode: full
+
+${content}`;
+  }
+  
+  const h = Math.max(1, Math.min(300, parseInt(headLines) || 100));
+  const t = Math.max(0, Math.min(300, parseInt(tailLines) || 80));
+  const head = _toolArtifactPreview(lines, 0, h, Math.floor(limit * 0.55));
+  const tail = t ? _toolArtifactPreview(lines, Math.max(0, lines.length - t), t, Math.floor(limit * 0.35)) : '';
+  return `${header}
+mode: preview
+note: 内容超过 max_chars，仅返回首尾。需要定位请传 query 或 start_line/end_line。
+
+--- BEGIN HEAD ---
+${head}
+--- END HEAD ---
+${tail ? `
+--- BEGIN TAIL ---
+${tail}
+--- END TAIL ---` : ''}`;
+}
+
 function _toolContextChatId(context = {}) {
   if (typeof context === 'string') return context;
   if (context && context.chatId) return context.chatId;
@@ -389,6 +659,7 @@ async function executeTool(name, args, context = {}) {
     const scopedNames = [
       'callAgentBackend',
       'executeTerminalCommand', 'readFile', 'writeFile', 'appendFile', 'editFile', 'applyPatch', 'deleteFile',
+      'readToolArtifact',
       'listCheckpoints', 'restoreCheckpoint',
       'listDir', 'searchInFiles', 'webSearch', 'fetchUrl', 'aiScreenshot', 'attachFileForAI',
       'callGit', 'aiGitStatus', 'aiGitHistory', 'aiGitDiff', 'aiGitSnapshot', 'aiGitRestore'

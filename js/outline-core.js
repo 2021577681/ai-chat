@@ -796,6 +796,17 @@ async function callAPIWithOutline(options = {}) {
         if (tools.length) body.tools = tools;
       }
       
+      if (typeof ensureContextBeforeAgentRun === 'function') {
+        aiMsg.outline.progressText = `🗜️ 第 ${loop + 1}/${maxRounds} 轮 · 检查上下文...`;
+        onUpdate();
+        const ok = await ensureContextBeforeAgentRun(c, {
+          label: '大纲模式',
+          extraMessages: conversationMessages,
+          mutableMessages: conversationMessages
+        });
+        if (!ok) throw new Error('自动压缩失败，已暂停大纲模式请求');
+      }
+      
       // ----- 限速 -----
       if (typeof applyRateLimit === 'function') {
         aiMsg.outline.progressText = `⏳ 第 ${loop + 1}/${maxRounds} 轮 · 等待 API 配额...`;
@@ -917,6 +928,7 @@ async function callAPIWithOutline(options = {}) {
         
         const isOutlineTool = OUTLINE_TOOL_NAMES.has(fname);
         let result;
+        let preparedExternalToolResult = null;
         
         if (isOutlineTool) {
           result = handleOutlineTool(fname, args, aiMsg.outline);
@@ -945,10 +957,24 @@ async function callAPIWithOutline(options = {}) {
           result = await executeTool(fname, args, { chatId: taskChatId, chat: c, outline: aiMsg.outline });
           anyExternalToolCalled = true;
           
-          const content = outlineToolResultText(result);
+          const rawContent = outlineToolResultText(result);
+          const preparedToolResult = typeof prepareToolResultForContext === 'function'
+            ? prepareToolResultForContext({
+                content: rawContent,
+                toolName: fname,
+                toolCallId: tc.id,
+                chatId: taskChatId,
+                chat: c,
+                status: result.ok ? 'success' : 'error',
+                args
+              })
+            : { content: rawContent, archived: false };
+          const content = preparedToolResult.content;
           const outcome = outlineToolResultOutcome(result, content);
+          preparedExternalToolResult = preparedToolResult;
           liveEntry.result = content.slice(0, 500);
           liveEntry.ok = outcome.ok;
+          liveEntry.artifactId = preparedToolResult.artifactId;
           liveEntry.rawResult = result.value && typeof result.value === 'object' ? result.value : null;
           if (liveEntry.rawResult && liveEntry.rawResult.checkpoint_id) {
             liveEntry.checkpointId = liveEntry.rawResult.checkpoint_id;
@@ -970,14 +996,18 @@ async function callAPIWithOutline(options = {}) {
           onUpdate();
         }
         
-        const content = outlineToolResultText(result);
+        let content = outlineToolResultText(result);
+        let preparedToolResult = preparedExternalToolResult || { content, archived: false };
+        if (preparedExternalToolResult) content = preparedExternalToolResult.content;
         const outcome = outlineToolResultOutcome(result, content);
         conversationMessages.push({
           role: 'tool',
           tool_call_id: tc.id,
           name: fname,
           content: content,
-          status: outcome.ok ? 'success' : 'error'
+          status: outcome.ok ? 'success' : 'error',
+          _artifactId: preparedToolResult.artifactId,
+          _artifactMeta: preparedToolResult.artifactMeta
         });
         executedToolCallIds.push(tc.id);
         

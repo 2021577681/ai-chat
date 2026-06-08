@@ -1060,6 +1060,10 @@ async function _taskQueueRunItem(item) {
     renderTaskQueueModal();
 
     if (typeof clearPendingAIAttachments === 'function') clearPendingAIAttachments(c.id);
+    if (typeof ensureContextBeforeAgentRun === 'function') {
+      const ok = await ensureContextBeforeAgentRun(c, { label: '任务队列' });
+      if (!ok) throw new Error('自动压缩失败，任务队列已暂停该任务请求');
+    }
     if (item.mode === 'outline') {
       await callAPIWithOutline({ chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
     } else if (item.mode === 'reflection') {

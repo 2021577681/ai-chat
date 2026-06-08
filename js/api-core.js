@@ -379,6 +379,21 @@ async function callAPI(roundLimit, options = {}) {
   updateSendBtn();
   if (typeof renderChatList === 'function') renderChatList();
   
+  if (!options.contextChecked && typeof ensureContextBeforeAgentRun === 'function') {
+    const ok = await ensureContextBeforeAgentRun(c, { label: '普通对话' });
+    if (!ok) {
+      if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+      else {
+        state.isGenerating = false;
+        state.abortCtrl = null;
+        if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+      }
+      if (typeof updateSendBtn === 'function') updateSendBtn();
+      if (typeof renderChatList === 'function') renderChatList();
+      return;
+    }
+  }
+  
   c.messages.push({ role: 'assistant', content: '', _startTime: Date.now() });
   // ⭐ 增量追加新的 assistant 占位（不重建整个列表）
   if (typeof appendMsgNode === 'function') {
@@ -569,12 +584,27 @@ async function callAPI(roundLimit, options = {}) {
           isError = !result.ok;
         }
         
+        const preparedToolResult = typeof prepareToolResultForContext === 'function'
+          ? prepareToolResultForContext({
+              content: contentText,
+              toolName: fname,
+              toolCallId: tc.id,
+              chatId: taskChatId,
+              chat: c,
+              status: isError ? 'error' : 'success',
+              args
+            })
+          : { content: contentText, archived: false };
+        contentText = preparedToolResult.content;
+        
         c.messages.push({
           role: 'tool',
           tool_call_id: tc.id,
           name: fname,
           content: contentText,
           status: isError ? 'error' : 'success',
+          _artifactId: preparedToolResult.artifactId,
+          _artifactMeta: preparedToolResult.artifactMeta,
           _startTime: Date.now(),
           _endTime: Date.now()
         });
@@ -1169,6 +1199,16 @@ async function runAgentLoop({
     }
     
     _emit({ type: 'round_start', round: round + 1 });
+    if (typeof ensureContextBeforeAgentRun === 'function') {
+      const guardChat = chat || (chatId && typeof chatById === 'function' ? chatById(chatId) : null);
+      const ok = await ensureContextBeforeAgentRun(guardChat, {
+        label: '师生/隔离工具循环',
+        extraMessages: messages,
+        mutableMessages: messages,
+        preserveFirstUser: true
+      });
+      if (!ok) throw new Error('自动压缩失败，已停止本轮 agent 请求');
+    }
     
     // ----- 构造请求 -----
     // 用现有适配器把内部 messages 转成 API 格式
@@ -1512,6 +1552,19 @@ async function runAgentLoop({
         isError = !result.ok;
       }
       
+      const preparedToolResult = typeof prepareToolResultForContext === 'function'
+        ? prepareToolResultForContext({
+            content: contentText,
+            toolName: tc.name,
+            toolCallId: tc.id,
+            chatId,
+            chat: chat || (chatId && typeof chatById === 'function' ? chatById(chatId) : null),
+            status: isError ? 'error' : 'success',
+            args
+          })
+        : { content: contentText, archived: false };
+      contentText = preparedToolResult.content;
+      
       _emit({ type: 'tool_result', id: tc.id, name: tc.name, content: contentText, ok: !isError });
       
       // 加入内部 messages（供下一轮 LLM 参考）
@@ -1519,7 +1572,9 @@ async function runAgentLoop({
         role: 'tool',
         tool_call_id: tc.id,
         name: tc.name,
-        content: contentText
+        content: contentText,
+        _artifactId: preparedToolResult.artifactId,
+        _artifactMeta: preparedToolResult.artifactMeta
       });
       executedIds.push(tc.id);  // ⭐ 记录已执行
       

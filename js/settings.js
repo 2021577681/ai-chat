@@ -66,6 +66,11 @@ function openSettings() {
   if (compThresholdVal) compThresholdVal.textContent = (s.compressAutoThreshold || 75) + '%';
   if (compKeep) compKeep.value = s.compressKeepLast || 4;
   if (compKeepVal) compKeepVal.textContent = s.compressKeepLast || 4;
+  const contextMode = document.getElementById('contextLimitMode');
+  const contextOverride = document.getElementById('contextLimitOverride');
+  if (contextMode) contextMode.value = s.contextLimitMode === 'manual' ? 'manual' : 'auto';
+  if (contextOverride) contextOverride.value = s.contextLimitOverride ? s.contextLimitOverride : '';
+  updateContextLimitModeUI();
   
   // 🧪 自动信标
   const bEnabled = document.getElementById('beaconEnabled');
@@ -76,6 +81,85 @@ function openSettings() {
   if (bIntervalVal) bIntervalVal.textContent = s.beaconInterval || 5;
   
   updateUrlPreview();
+}
+
+function currentSettingsModelName() {
+  const current = state.settings.currentModel || '';
+  const modelInput = document.getElementById('modelName');
+  const list = (modelInput?.value || state.settings.modelName || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (current && (!list.length || list.includes(current))) return current;
+  return list[0] || current || 'unknown';
+}
+
+function updateContextLimitModeUI() {
+  const modeEl = document.getElementById('contextLimitMode');
+  const inputEl = document.getElementById('contextLimitOverride');
+  const hintEl = document.getElementById('contextLimitHint');
+  if (!modeEl || !inputEl) return;
+  const isManual = modeEl.value === 'manual';
+  inputEl.disabled = !isManual;
+  inputEl.placeholder = isManual ? '例如 200000' : '自动识别时不需要填写';
+  
+  if (hintEl) {
+    const model = currentSettingsModelName();
+    const autoLimit = typeof getAutoContextLimit === 'function'
+      ? getAutoContextLimit(model)
+      : 200000;
+    const autoText = typeof formatNumber === 'function' ? formatNumber(autoLimit) : String(autoLimit);
+    if (isManual) {
+      hintEl.textContent = `当前模型自动识别值：${autoText} tokens；手动值会覆盖它并影响 token 条、自动压缩和长流程上下文检查。`;
+    } else {
+      hintEl.textContent = `当前模型自动识别值：${autoText} tokens。未知模型默认按 200k 估算。`;
+    }
+  }
+}
+
+function readContextLimitSettingsFromModal() {
+  const s = state.settings;
+  const modeEl = document.getElementById('contextLimitMode');
+  const inputEl = document.getElementById('contextLimitOverride');
+  if (!modeEl || !inputEl) return true;
+  const mode = modeEl.value === 'manual' ? 'manual' : 'auto';
+  const raw = inputEl.value.trim();
+  const n = parseInt(raw);
+  
+  if (mode === 'manual') {
+    if (!Number.isFinite(n) || n < 1024) {
+      toast('手动上下文长度至少需要 1024 tokens');
+      inputEl.focus();
+      return false;
+    }
+    s.contextLimitMode = 'manual';
+    s.contextLimitOverride = Math.min(n, 4000000);
+    inputEl.value = s.contextLimitOverride;
+  } else {
+    s.contextLimitMode = 'auto';
+    if (Number.isFinite(n) && n > 0) {
+      s.contextLimitOverride = Math.min(Math.max(n, 1024), 4000000);
+    }
+  }
+  return true;
+}
+
+function openContextLimitSettings() {
+  const wrap = document.querySelector('.more-menu-wrap');
+  if (wrap) wrap.classList.remove('open');
+  openSettings();
+  setTimeout(() => {
+    const group = document.getElementById('contextLimitSettingsGroup');
+    if (group) {
+      group.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      group.classList.add('settings-focus');
+      setTimeout(() => group.classList.remove('settings-focus'), 1800);
+    }
+    const modeEl = document.getElementById('contextLimitMode');
+    const inputEl = document.getElementById('contextLimitOverride');
+    if (state.settings.contextLimitMode === 'manual' && inputEl) inputEl.focus();
+    else if (modeEl) modeEl.focus();
+  }, 80);
 }
 
 function closeSettings() {
@@ -129,6 +213,7 @@ function saveAndClose() {
   if (compEnabled) s.compressAutoEnabled = compEnabled.checked;
   if (compThreshold) s.compressAutoThreshold = parseInt(compThreshold.value);
   if (compKeep) s.compressKeepLast = parseInt(compKeep.value);
+  if (!readContextLimitSettingsFromModal()) return false;
   
   // 🧪 自动信标
   const bEnabled = document.getElementById('beaconEnabled');
@@ -148,12 +233,16 @@ function saveAndClose() {
   // ⭐ 切换 apiFormat（OpenAI ↔ Anthropic）会让 count_tokens 的可用性变化，
   // 且不同模型的上下文限制不同 → 立即重新拉一次精确 token 数
   if (typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount();
+  return true;
 }
 
 function saveSettings() {
   state.settings.currentModel = document.getElementById('modelSelect').value;
   persistSettings();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (document.getElementById('settingsModal')?.classList.contains('show')) {
+    updateContextLimitModeUI();
+  }
 }
 
 function onProviderChange() {
@@ -164,6 +253,7 @@ function onProviderChange() {
     document.getElementById('apiFormat').value = PROVIDERS[p].format;
     document.getElementById('modelName').value = PROVIDERS[p].models;
     updateUrlPreview();
+    updateContextLimitModeUI();
   }
 }
 
@@ -589,6 +679,7 @@ function confirmAddFetchedModels() {
     if (!existingSet.has(m)) { existing.push(m); existingSet.add(m); added++; }
   });
   input.value = existing.join(', ');
+  updateContextLimitModeUI();
   
   toast(`✅ 已添加 ${added} 个模型（共 ${existing.length} 个）`, 2500);
   closeFetchModelsModal();
@@ -613,3 +704,5 @@ window.toggleSelectAllFetchModels = toggleSelectAllFetchModels;
 window.confirmAddFetchedModels = confirmAddFetchedModels;
 window.openFetchModelsModal = openFetchModelsModal;
 window.closeFetchModelsModal = closeFetchModelsModal;
+window.openContextLimitSettings = openContextLimitSettings;
+window.updateContextLimitModeUI = updateContextLimitModeUI;

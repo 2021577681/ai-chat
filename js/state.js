@@ -49,6 +49,8 @@ let state = {
     outlineMaxRounds: 30,
     outlineModel: '',
     outlineSystemPrompt: '',  // 留空则使用 outline.js 中的 DEFAULT_OUTLINE_SYSTEM_PROMPT
+    contextLimitMode: 'auto',
+    contextLimitOverride: 0,
     compressAutoEnabled: false,
     compressAutoThreshold: 75,
     compressKeepLast: 4,

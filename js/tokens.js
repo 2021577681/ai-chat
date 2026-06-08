@@ -13,7 +13,16 @@ const MODEL_CONTEXT_LIMITS = {
   '_default': 200000
 };
 
-function getContextLimit(modelName) {
+const CONTEXT_LIMIT_OVERRIDE_MIN = 1024;
+const CONTEXT_LIMIT_OVERRIDE_MAX = 4000000;
+
+function normalizeContextLimitOverride(value) {
+  const n = parseInt(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.max(CONTEXT_LIMIT_OVERRIDE_MIN, Math.min(CONTEXT_LIMIT_OVERRIDE_MAX, n));
+}
+
+function getAutoContextLimit(modelName) {
   if (!modelName) return MODEL_CONTEXT_LIMITS._default;
   if (MODEL_CONTEXT_LIMITS[modelName]) return MODEL_CONTEXT_LIMITS[modelName];
   for (const key of Object.keys(MODEL_CONTEXT_LIMITS)) {
@@ -22,6 +31,24 @@ function getContextLimit(modelName) {
     }
   }
   return MODEL_CONTEXT_LIMITS._default;
+}
+
+function getContextLimitInfo(modelName) {
+  const autoLimit = getAutoContextLimit(modelName);
+  const s = (typeof state !== 'undefined' && state.settings) ? state.settings : {};
+  const override = normalizeContextLimitOverride(s.contextLimitOverride);
+  const manual = s.contextLimitMode === 'manual' && override > 0;
+  return {
+    limit: manual ? override : autoLimit,
+    autoLimit,
+    override,
+    mode: manual ? 'manual' : 'auto',
+    label: manual ? '手动指定' : '自动识别'
+  };
+}
+
+function getContextLimit(modelName) {
+  return getContextLimitInfo(modelName).limit;
 }
 
 // ============ 估算 Token ============
@@ -409,7 +436,8 @@ function updateTokenDisplay() {
     sourceLabel = '估算值（可能误差 ±20%）';
   }
   
-  const limit = getContextLimit(state.settings.currentModel);
+  const limitInfo = getContextLimitInfo(state.settings.currentModel);
+  const limit = limitInfo.limit;
   const pct = Math.min(100, Math.round(inputTokens / limit * 100));
   const msgCount = c.messages.filter(m => m.role !== 'tool').length;
   
@@ -435,7 +463,7 @@ function updateTokenDisplay() {
   
   el.innerHTML = `
     <span class="token-msgs" title="消息数">💬 ${msgCount}</span>
-    <span class="token-count token-input" title="输入 token · ${sourceLabel}">${accuracyIcon} 📥 ${formatNumber(inputTokens)} / ${formatNumber(limit)}</span>
+    <span class="token-count token-input" title="输入 token · ${sourceLabel} · 上下文${limitInfo.label}">${accuracyIcon} 📥 ${formatNumber(inputTokens)} / ${formatNumber(limit)}</span>
     ${extras}
     <div class="token-bar" title="输入 token 占上下文 ${pct}%">
       <div class="token-bar-fill ${pctClass}" style="width:${pct}%"></div>
@@ -463,8 +491,9 @@ function showTokenDetails() {
   }
   
   const stats = getChatTokenStats(c);
-  const limit = getContextLimit(state.settings.currentModel);
   const model = state.settings.currentModel;
+  const limitInfo = getContextLimitInfo(model);
+  const limit = limitInfo.limit;
   
   // ⭐ 从可配置定价表查价（来源：pricing.js）
   //   用户可在 ⋯ 更多 → 定价管理 中自定义。pricing.js 没加载时走简单内置 fallback。
@@ -481,7 +510,10 @@ function showTokenDetails() {
   html += `<h3 style="margin:0 0 12px;font-size:15px;">📊 Token 详细统计</h3>`;
   html += `<div style="background:var(--bg-input);padding:12px;border-radius:8px;margin-bottom:12px;">`;
   html += `<div><strong>模型：</strong>${escapeHtml(model)}</div>`;
-  html += `<div><strong>上下文限制：</strong>${formatNumber(limit)} tokens</div>`;
+  const limitModeText = limitInfo.mode === 'manual'
+    ? `手动指定，自动识别值 ${formatNumber(limitInfo.autoLimit)}`
+    : '自动识别';
+  html += `<div><strong>上下文限制：</strong>${formatNumber(limit)} tokens <span style="color:var(--text-secondary);">(${limitModeText})</span> <a href="javascript:void(0)" onclick="document.getElementById('tokenDetailModal') && document.getElementById('tokenDetailModal').classList.remove('show'); if (typeof openContextLimitSettings === 'function') openContextLimitSettings();" style="margin-left:6px;">设置</a></div>`;
   html += `<div><strong>消息数：</strong>${c.messages.length}</div>`;
   html += `</div>`;
   
@@ -578,40 +610,496 @@ function resetTokenStats() {
 
 // ============ 压缩对话 ============
 
+const COMPRESSION_UNDO_TTL_MS = 30 * 60 * 1000;
+const _compressionUndoSnapshots = {};
+
+function compressionJsonClone(value) {
+  try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
+}
+
+function cleanupCompressionUndoSnapshots() {
+  const now = Date.now();
+  for (const id of Object.keys(_compressionUndoSnapshots)) {
+    const snap = _compressionUndoSnapshots[id];
+    if (!snap || now - snap.createdAt > COMPRESSION_UNDO_TTL_MS) {
+      delete _compressionUndoSnapshots[id];
+    }
+  }
+}
+
+function rememberCompressionUndo(chat, compressedMessages, meta = {}) {
+  cleanupCompressionUndoSnapshots();
+  const id = `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  _compressionUndoSnapshots[id] = {
+    chatId: chat?.id || null,
+    createdAt: Date.now(),
+    compressedMessages: compressionJsonClone(compressedMessages),
+    meta: { ...meta }
+  };
+  return id;
+}
+
+function canUndoCompression(undoId, chat) {
+  cleanupCompressionUndoSnapshots();
+  const snap = undoId ? _compressionUndoSnapshots[undoId] : null;
+  if (!snap) return false;
+  return !snap.chatId || !chat || snap.chatId === chat.id;
+}
+
+function undoCompressionSnapshot(undoId) {
+  const c = currentChat();
+  const snap = undoId ? _compressionUndoSnapshots[undoId] : null;
+  if (!c || !snap || (snap.chatId && snap.chatId !== c.id)) {
+    toast('压缩快照已失效，无法撤销');
+    return;
+  }
+  const summaryIdx = c.messages.findIndex(m => m && m._isSummary && m._compressionUndoId === undoId);
+  if (summaryIdx < 0) {
+    toast('未找到对应的压缩摘要，无法撤销');
+    return;
+  }
+  if (!confirm(`撤销这次压缩？\n\n会把摘要还原为原来的 ${snap.compressedMessages.length} 条消息，摘要之后的新消息会保留。`)) {
+    return;
+  }
+  const restored = compressionJsonClone(snap.compressedMessages);
+  c.messages.splice(summaryIdx, 1, ...restored);
+  delete _compressionUndoSnapshots[undoId];
+  
+  const stats = getChatTokenStats(c);
+  stats.lastInputTokens = 0;
+  stats.msgCount = c.messages.length;
+  stats.time = 0;
+  
+  saveData();
+  renderChatList();
+  renderMessages();
+  updateTokenDisplay();
+  if (typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount(c.id);
+  toast(`已撤销压缩，恢复 ${restored.length} 条消息`);
+}
+
+function compressionString(value) {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+}
+
+function middleTrimText(text, maxChars) {
+  const s = compressionString(text);
+  if (s.length <= maxChars) return s;
+  const head = Math.floor(maxChars * 0.45);
+  const tail = Math.floor(maxChars * 0.45);
+  return `${s.slice(0, head)}\n\n[中间省略约 ${s.length - head - tail} 字符]\n\n${s.slice(-tail)}`;
+}
+
+const COMPRESSION_REQUIRED_HEADINGS = [
+  '当前任务',
+  '用户目标和约束',
+  '已完成事项',
+  '关键决策和事实',
+  '已查看或修改的文件',
+  '工具/命令结果',
+  '计划/大纲状态',
+  '测试和验证状态',
+  '未完成事项',
+  '风险/阻塞',
+  '下一步建议',
+  '可丢弃上下文'
+];
+
+function compressHeadingSet(text) {
+  const headings = new Set();
+  for (const line of compressionString(text).split(/\r?\n/)) {
+    const m = line.match(/^\s*#{1,4}\s+(.+?)\s*$/);
+    if (m) headings.add(m[1].replace(/[：:]+$/, '').trim());
+  }
+  return headings;
+}
+
+function compressionExtractArtifactIds(text) {
+  const out = new Set();
+  const s = compressionString(text);
+  for (const m of s.matchAll(/\btool_art_\d+_[a-z0-9]+\b/gi)) out.add(m[0]);
+  for (const m of s.matchAll(/\bartifact_id\s*[:=]\s*([A-Za-z0-9_-]+)/gi)) out.add(m[1]);
+  return out;
+}
+
+function compressionExtractCheckpointIds(text) {
+  const out = new Set();
+  const s = compressionString(text);
+  for (const m of s.matchAll(/\bckpt_\d{8}_\d{6}_[A-Za-z0-9]+\b/g)) out.add(m[0]);
+  for (const m of s.matchAll(/\bcheckpoint(?:_id|Id)?\s*["']?\s*[:=]\s*["']?([A-Za-z0-9_-]*ckpt_[A-Za-z0-9_-]+|[A-Za-z0-9_-]{8,})/gi)) {
+    const id = m[1].replace(/["',，。；;]+$/, '');
+    if (/ckpt_|checkpoint/i.test(id)) out.add(id);
+  }
+  return out;
+}
+
+function compressionExtractFilePaths(text) {
+  const out = new Set();
+  const s = compressionString(text);
+  const pathRe = /(?:^|[\s"'([{])((?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[\w\u4e00-\u9fa5 .@()+-]+[\\/])+[\w\u4e00-\u9fa5 .@()+-]+\.(?:js|ts|jsx|tsx|py|java|c|cpp|h|hpp|cs|go|rs|rb|php|html|css|scss|json|md|yml|yaml|toml|ini|sql|sh|bat|ps1|txt|csv|xml|vue|svelte|tsx?))/g;
+  for (const m of s.matchAll(pathRe)) {
+    const p = m[1].replace(/[),.;:，。；]+$/, '');
+    if (p.length >= 4 && p.length <= 240) out.add(p);
+  }
+  const backtickRe = /`([^`\n]+\.(?:js|ts|jsx|tsx|py|java|c|cpp|h|hpp|cs|go|rs|rb|php|html|css|scss|json|md|yml|yaml|toml|ini|sql|sh|bat|ps1|txt|csv|xml|vue|svelte))`/g;
+  for (const m of s.matchAll(backtickRe)) out.add(m[1]);
+  return out;
+}
+
+function compressionRefsFromMessage(m) {
+  const textParts = [];
+  textParts.push(m.content || '');
+  if (m._artifactId) textParts.push(m._artifactId);
+  if (m._artifactMeta) textParts.push(m._artifactMeta);
+  if (m.attachments?.length) textParts.push(m.attachments.map(a => a.name || a.path || '').join('\n'));
+  if (m.tool_calls?.length) textParts.push(m.tool_calls.map(tc => `${tc.function?.name || tc.name || ''}\n${tc.function?.arguments || tc.arguments || ''}`).join('\n'));
+  if (m.plan) textParts.push(m.plan);
+  if (m.outline) textParts.push(m.outline);
+  if (m.reflection) textParts.push(m.reflection);
+  const combined = textParts.map(compressionString).join('\n');
+  return {
+    artifactIds: compressionExtractArtifactIds(combined),
+    checkpointIds: compressionExtractCheckpointIds(combined),
+    filePaths: compressionExtractFilePaths(combined)
+  };
+}
+
+function compressionCollectRequiredRefs(messages) {
+  const refs = {
+    artifactIds: new Set(),
+    checkpointIds: new Set(),
+    filePaths: new Set()
+  };
+  for (const m of messages || []) {
+    const r = compressionRefsFromMessage(m || {});
+    for (const id of r.artifactIds) refs.artifactIds.add(id);
+    for (const id of r.checkpointIds) refs.checkpointIds.add(id);
+    for (const p of r.filePaths) refs.filePaths.add(p);
+  }
+  return refs;
+}
+
+function compressionMissingRefs(summary, refs) {
+  const s = compressionString(summary);
+  const missing = {
+    artifactIds: [],
+    checkpointIds: [],
+    filePaths: []
+  };
+  for (const id of refs.artifactIds || []) if (!s.includes(id)) missing.artifactIds.push(id);
+  for (const id of refs.checkpointIds || []) if (!s.includes(id)) missing.checkpointIds.push(id);
+  for (const p of refs.filePaths || []) if (!s.includes(p)) missing.filePaths.push(p);
+  return missing;
+}
+
+function compressionValidateSummary(summary, refs) {
+  const headings = compressHeadingSet(summary);
+  const missingHeadings = COMPRESSION_REQUIRED_HEADINGS.filter(h => !headings.has(h));
+  const missingRefs = compressionMissingRefs(summary, refs);
+  const missingRefCount = missingRefs.artifactIds.length + missingRefs.checkpointIds.length + missingRefs.filePaths.length;
+  return {
+    ok: missingHeadings.length === 0 && missingRefCount === 0,
+    missingHeadings,
+    missingRefs,
+    missingRefCount
+  };
+}
+
+function compressionValidationFeedback(validation) {
+  const lines = [];
+  if (validation.missingHeadings.length) {
+    lines.push(`缺少固定标题：${validation.missingHeadings.map(h => `## ${h}`).join('，')}`);
+  }
+  if (validation.missingRefs.artifactIds.length) {
+    lines.push(`必须保留 artifact_id：${validation.missingRefs.artifactIds.join(', ')}`);
+  }
+  if (validation.missingRefs.checkpointIds.length) {
+    lines.push(`必须保留 checkpoint_id：${validation.missingRefs.checkpointIds.join(', ')}`);
+  }
+  if (validation.missingRefs.filePaths.length) {
+    lines.push(`必须保留文件路径：${validation.missingRefs.filePaths.slice(0, 80).join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+function compressionBudgetInfo(chat, extraMessages = []) {
+  const c = chat || currentChat();
+  let tokens = c ? estimateChatTokens(c) : 0;
+  for (const m of extraMessages || []) tokens += estimateMessageTokens(m || {});
+  const limit = getContextLimit(state.settings.currentModel);
+  const pct = tokens / limit * 100;
+  const threshold = state.settings.compressAutoThreshold || 75;
+  const maxOutput = Math.max(0, parseInt(state.settings.maxTokens) || 0);
+  const safetyBuffer = Math.max(1024, Math.min(8192, Math.round(limit * 0.03)));
+  const reserve = maxOutput + safetyBuffer;
+  const remaining = limit - tokens;
+  return {
+    tokens,
+    limit,
+    pct,
+    threshold,
+    reserve,
+    remaining,
+    needsCompression: pct >= threshold || remaining < reserve
+  };
+}
+
+function findTransientCompressionCut(messages, keepLast) {
+  const list = messages || [];
+  if (list.length < Math.max(4, keepLast + 2)) return -1;
+  const initialCutIdx = Math.max(0, list.length - keepLast);
+  for (let i = initialCutIdx; i < list.length; i++) {
+    if (list[i] && list[i].role !== 'tool') return i;
+  }
+  for (let i = initialCutIdx - 1; i > 0; i--) {
+    if (list[i] && list[i].role !== 'tool') return i;
+  }
+  return -1;
+}
+
+async function compressTransientMessagesForAgent(messages, options = {}) {
+  if (!Array.isArray(messages) || messages.length < 6) return false;
+  if (typeof callOnceWithRole !== 'function') return false;
+  const keepLast = Math.max(4, parseInt(options.keepLast) || Math.max(6, state.settings.compressKeepLast || 4));
+  const preserveFirstUser = !!options.preserveFirstUser;
+  const preserved = [];
+  let workMessages = messages;
+  if (preserveFirstUser && messages[0] && messages[0].role === 'user') {
+    preserved.push(messages[0]);
+    workMessages = messages.slice(1);
+  }
+  const cutIdx = findTransientCompressionCut(workMessages, keepLast);
+  if (cutIdx <= 0) return false;
+  
+  const rawToCompress = workMessages.slice(0, cutIdx);
+  const toCompress = archiveLongToolMessagesForCompression(rawToCompress, options.chat || null);
+  const toKeep = workMessages.slice(cutIdx);
+  const realMessages = toCompress.filter(m => !m._isSummary && !m._isCompressing);
+  if (!realMessages.length) return false;
+  
+  const requiredRefs = compressionCollectRequiredRefs(toCompress);
+  const label = options.label || '内部工具循环';
+  const conversationText = middleTrimText(
+    realMessages.map((m, idx) => formatMessageForCompression(m, idx)).join('\n\n'),
+    50000
+  );
+  const compressPrompt = `你正在为一个长流程 agent 压缩“${label}”中的内部历史。这个摘要会替代旧的内部工具循环记录，并继续参与后续模型请求。
+
+要求：
+- 不要编造；不知道或没有就写“无”。
+- 所有 artifact_id、checkpoint_id 和重要文件路径必须逐字保留。
+- 如果看到“[工具结果已归档]”，必须保留 artifact_id，并说明可用 read_tool_artifact 读取。
+- 保留工具调用结果、用户约束、关键错误、已验证事项和下一步。
+- 严格使用下面的 Markdown 结构输出：
+
+## 当前任务
+## 用户目标和约束
+## 已完成事项
+## 关键决策和事实
+## 已查看或修改的文件
+## 工具/命令结果
+## 计划/大纲状态
+## 测试和验证状态
+## 未完成事项
+## 风险/阻塞
+## 下一步建议
+## 可丢弃上下文
+
+【需要压缩的内部历史】
+${conversationText}
+
+请输出结构化内部上下文摘要：`;
+  
+  let summary = await callOnceWithRole(
+    [{ role: 'user', content: compressPrompt }],
+    state.settings.currentModel,
+    '你是一个严谨的长流程 agent 内部上下文压缩器，必须保留可继续执行的关键信息。'
+  );
+  if (!summary || !String(summary).trim()) throw new Error(`${label} 内部压缩返回空摘要`);
+  let finalSummary = String(summary).trim();
+  let validation = compressionValidateSummary(finalSummary, requiredRefs);
+  if (!validation.ok) {
+    const feedback = compressionValidationFeedback(validation);
+    const retryPrompt = `${compressPrompt}
+
+【上一次摘要】
+${finalSummary}
+
+【校验失败】
+${feedback}
+
+请重写摘要，只输出修正后的结构化摘要。`;
+    summary = await callOnceWithRole(
+      [{ role: 'user', content: retryPrompt }],
+      state.settings.currentModel,
+      '你正在修复未通过校验的内部上下文摘要，必须保留指定引用。'
+    );
+    if (!summary || !String(summary).trim()) throw new Error(`${label} 内部压缩重写返回空摘要`);
+    finalSummary = String(summary).trim();
+    validation = compressionValidateSummary(finalSummary, requiredRefs);
+  }
+  if (!validation.ok) {
+    throw new Error(`${label} 内部摘要校验失败：${compressionValidationFeedback(validation)}`);
+  }
+  
+  const summaryMsg = {
+    role: 'user',
+    content: `【${label}历史摘要】（自动压缩 ${toCompress.length} 条内部消息）\n\n${finalSummary}`,
+    _isTransientSummary: true,
+    _originalCount: toCompress.length,
+    _compressTime: Date.now()
+  };
+  messages.splice(0, messages.length, ...preserved, summaryMsg, ...toKeep);
+  return true;
+}
+
+function archiveLongToolMessagesForCompression(messages, chat) {
+  if (typeof prepareToolResultForContext !== 'function') return messages;
+  return (messages || []).map(m => {
+    if (!m || m.role !== 'tool' || m._artifactId) return m;
+    const content = compressionString(m.content || '');
+    const prepared = prepareToolResultForContext({
+      content,
+      toolName: m.name || 'tool',
+      toolCallId: m.tool_call_id || '',
+      chatId: chat?.id || '',
+      chat,
+      status: m.status || 'success',
+      args: { compression_backfill: true }
+    });
+    if (!prepared || !prepared.archived) return m;
+    return {
+      ...m,
+      content: prepared.content,
+      _artifactId: prepared.artifactId,
+      _artifactMeta: prepared.artifactMeta,
+      _compressionBackfilledArtifact: true
+    };
+  });
+}
+
+function formatMessageForCompression(m, idx) {
+  const role = m.role === 'user' ? '用户'
+    : (m.role === 'assistant' ? 'AI'
+      : (m.role === 'tool' ? '工具结果' : (m.role || '消息')));
+  const blocks = [`### ${idx + 1}. ${role}`];
+  const content = middleTrimText(m.content || '', m.role === 'tool' ? 2200 : 1800).trim();
+  if (content) blocks.push(content);
+  
+  if (m.attachments?.length) {
+    const atts = m.attachments.map(a => {
+      const flags = [];
+      if (a._fromAI) flags.push('AI生成');
+      if (a._stripped) flags.push('数据已剥离');
+      return `- ${a.name || a.id || 'attachment'} (${a.mime || a.type || 'unknown'}, ${formatSize(a.size || 0)}${flags.length ? ', ' + flags.join(', ') : ''})`;
+    }).join('\n');
+    blocks.push(`[附件]\n${atts}`);
+  }
+  
+  if (m.tool_calls?.length) {
+    const calls = m.tool_calls.map(tc => {
+      const name = tc.function?.name || tc.name || 'unknown_tool';
+      const args = middleTrimText(tc.function?.arguments || tc.arguments || '', 1000);
+      return `- ${name}${args ? `\n  参数: ${args}` : ''}`;
+    }).join('\n');
+    blocks.push(`[工具调用]\n${calls}`);
+  }
+  
+  if (m.name || m.tool_call_id) {
+    blocks.push(`[工具元信息] name=${m.name || ''} tool_call_id=${m.tool_call_id || ''}`);
+  }
+  if (m.plan) {
+    blocks.push(`[计划状态]\n${middleTrimText(m.plan, 1800)}`);
+  }
+  if (m.outline) {
+    blocks.push(`[大纲状态]\n${middleTrimText(m.outline, 2200)}`);
+  }
+  if (m.reflection) {
+    blocks.push(`[反思/评审状态]\n${middleTrimText(m.reflection, 1400)}`);
+  }
+  
+  return blocks.join('\n');
+}
+
 async function manualCompress() {
   const c = currentChat();
   if (!c || c.messages.length < 4) { toast('对话太短，无需压缩'); return; }
   if (!state.settings.apiKey) { toast('请先配置 API Key'); return; }
-  if (!confirm(`确定要压缩当前对话历史吗？\n\n会保留最近 ${state.settings.compressKeepLast || 4} 条消息，前面的对话会被 AI 总结成摘要。\n\n建议先用「💾 备份」保存原始数据。`)) return;
-  await compressChat(c);
+  if (!confirm(`确定要压缩当前对话历史吗？\n\n会保留最近 ${state.settings.compressKeepLast || 4} 条消息，前面的对话会被 AI 总结成结构化摘要。\n\n压缩完成后可在摘要卡片撤销（刷新页面前有效）。`)) return;
+  await compressChat(c, { reason: 'manual' });
 }
 
-async function autoCompressCheck() {
+async function autoCompressCheck(chat = null, options = {}) {
   if (!state.settings.compressAutoEnabled) return false;
-  const c = currentChat();
+  const c = chat || currentChat();
   if (!c || c.messages.length < 6) return false;
   
-  let tokens;
-  const stats = getChatTokenStats(c);
-  if (stats.lastInputTokens > 0) {
-    tokens = stats.lastInputTokens;
-  } else {
-    tokens = estimateChatTokens(c);
-  }
+  // 自动压缩必须看当前消息数组。stats.lastInputTokens 可能是上一轮请求的精确值，
+  // 在新 user 消息刚入队时已经过期。
+  const tokens = estimateChatTokens(c);
   
   const limit = getContextLimit(state.settings.currentModel);
   const pct = tokens / limit * 100;
   const threshold = state.settings.compressAutoThreshold || 75;
-  if (pct >= threshold) {
-    toast(`📦 上下文已达 ${Math.round(pct)}%，自动压缩中...`, 3000);
-    await compressChat(c);
-    return true;
+  const maxOutput = Math.max(0, parseInt(state.settings.maxTokens) || 0);
+  const safetyBuffer = Math.max(1024, Math.min(8192, Math.round(limit * 0.03)));
+  const reserve = maxOutput + safetyBuffer;
+  const remaining = limit - tokens;
+  if (pct >= threshold || remaining < reserve) {
+    const reason = pct >= threshold
+      ? `上下文已达 ${Math.round(pct)}%`
+      : `剩余上下文不足 ${formatNumber(reserve)} token`;
+    toast(`📦 ${reason}，自动压缩中...`, 3000);
+    const ok = await compressChat(c, {
+      reason: 'auto',
+      estimatedBefore: tokens,
+      pct,
+      reserve,
+      preserveGeneratingState: !!options.preserveGeneratingState
+    });
+    return ok ? true : 'failed';
   }
   return false;
 }
 
-async function compressChat(chat) {
-  const keepLast = state.settings.compressKeepLast || 4;
+async function ensureContextBeforeAgentRun(chat = null, options = {}) {
+  if (!state.settings.compressAutoEnabled) return true;
+  if (typeof autoCompressCheck !== 'function') return true;
+  const c = chat || currentChat();
+  const extraMessages = Array.isArray(options.extraMessages) ? options.extraMessages : [];
+  if ((!c || !c.messages || !c.messages.length) && !extraMessages.length) return true;
+  if (extraMessages.length) {
+    const budget = compressionBudgetInfo(c, extraMessages);
+    if (budget.needsCompression && Array.isArray(options.mutableMessages) && typeof compressTransientMessagesForAgent === 'function') {
+      await compressTransientMessagesForAgent(options.mutableMessages, {
+        label: options.label || '内部工具循环',
+        chat: c,
+        preserveFirstUser: !!options.preserveFirstUser
+      });
+    }
+  }
+  if (!c || !c.messages || !c.messages.length) return true;
+  const result = await autoCompressCheck(c, {
+    preserveGeneratingState: options.preserveGeneratingState !== false
+  });
+  if (result === 'failed') {
+    const label = options.label ? `（${options.label}）` : '';
+    if (typeof toast === 'function') {
+      toast(`自动压缩失败${label}，已暂停本次请求以避免超长上下文`, 4000);
+    }
+    return false;
+  }
+  return true;
+}
+
+async function compressChat(chat, options = {}) {
+  const keepLast = Math.max(2, parseInt(state.settings.compressKeepLast) || 4);
+  const sourceMessages = (chat.messages || []).filter(m => !m._isCompressing);
+  const estimatedBefore = options.estimatedBefore || estimateChatTokens(chat);
+  const prevGenerating = !!state.isGenerating;
+  const prevAbortCtrl = state.abortCtrl || null;
   
   // ⭐ 切点策略：toKeep 必须以 user 消息开头（且不能是摘要消息）
   //   否则压缩后会出现 assistant(tool_calls) 紧跟摘要的情况，
@@ -623,62 +1111,85 @@ async function compressChat(chat) {
   //      —— 命中：正好保留约 keepLast 条
   //   2) 找不到（末尾全是工具循环 / assistant 收尾）→ 从末尾向前找最近一条真实 user
   //      —— 这种情况会"多保留几条"，但能保证压缩成功而不是直接报错
-  const initialCutIdx = Math.max(0, chat.messages.length - keepLast);
+  const initialCutIdx = Math.max(0, sourceMessages.length - keepLast);
   const isRealUser = (m) => m && m.role === 'user' && !m._isSummary;
   
   let cutIdx = -1;
   // 第 1 步：向后找
-  for (let i = initialCutIdx; i < chat.messages.length; i++) {
-    if (isRealUser(chat.messages[i])) { cutIdx = i; break; }
+  for (let i = initialCutIdx; i < sourceMessages.length; i++) {
+    if (isRealUser(sourceMessages[i])) { cutIdx = i; break; }
   }
   // 第 2 步：向后没找到 → 向前找（兜底，保留更多消息但能成功压缩）
   if (cutIdx < 0) {
-    for (let i = chat.messages.length - 1; i >= 0; i--) {
-      if (isRealUser(chat.messages[i])) { cutIdx = i; break; }
+    for (let i = sourceMessages.length - 1; i >= 0; i--) {
+      if (isRealUser(sourceMessages[i])) { cutIdx = i; break; }
     }
   }
   
   if (cutIdx < 0) {
     toast('对话里没有任何 user 消息，无法压缩');
-    return;
+    return false;
   }
   if (cutIdx <= 0) {
     toast('对话太短，无需压缩');
-    return;
+    return false;
   }
   
-  const toCompress = chat.messages.slice(0, cutIdx);
-  const toKeep = chat.messages.slice(cutIdx);
-  let previousSummary = '';
-  const firstMsg = toCompress[0];
-  if (firstMsg && firstMsg._isSummary) previousSummary = firstMsg.content;
+  const rawToCompress = sourceMessages.slice(0, cutIdx);
+  const toCompress = archiveLongToolMessagesForCompression(rawToCompress, chat);
+  const toKeep = sourceMessages.slice(cutIdx);
+  const previousSummary = toCompress
+    .filter(m => m._isSummary)
+    .map(m => m.content || '')
+    .filter(Boolean)
+    .join('\n\n');
+  const realMessages = toCompress.filter(m => !m._isSummary && !m._isCompressing);
+  if (!realMessages.length) {
+    toast('没有新的历史内容需要压缩');
+    return false;
+  }
+  const requiredRefs = compressionCollectRequiredRefs(toCompress);
   
-  const conversationText = toCompress.filter(m => !m._isSummary).map(m => {
-    const role = m.role === 'user' ? '用户' : (m.role === 'assistant' ? 'AI' : '工具');
-    const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-    let line = `【${role}】${content.slice(0, 1500)}`;
-    if (m.tool_calls?.length) line += `\n[调用工具: ${m.tool_calls.map(t => t.function?.name).join(', ')}]`;
-    return line;
-  }).join('\n\n');
+  const conversationText = middleTrimText(
+    realMessages.map((m, idx) => formatMessageForCompression(m, idx)).join('\n\n'),
+    70000
+  );
   
-  const compressPrompt = `${previousSummary ? '【已有摘要】\n' + previousSummary + '\n\n' : ''}以下是一段对话历史，请提炼成简洁的摘要，保留：
-1. 用户的核心问题和需求
-2. AI 给出的关键答案、决定和事实
-3. 涉及的重要文件、命令、数据
-4. 已完成的任务和未完成的事项
-5. 任何对继续对话至关重要的上下文
+  const compressPrompt = `${previousSummary ? '【已有摘要】\n' + previousSummary + '\n\n' : ''}你正在为一个会调用工具、读写项目文件的 AI agent 压缩上下文。
+目标：丢弃噪声，但保留之后继续执行任务所需的事实、约束、文件路径、命令结果、用户决定、权限/拒绝记录、计划/大纲状态和验证状态。
 
 要求：
-- 用第三人称叙述
-- 简洁紧凑，不超过原文 1/4 长度
-- 用清晰的分点结构
-- 保留具体的技术细节、文件名、关键代码片段
+- 不要编造；不知道或没有就写“无”。
+- 文件路径、函数名、命令、错误信息、checkpoint/回滚信息必须尽量原样保留。
+- 摘要应紧凑，但要足够让后续模型不用重读全部历史也能继续工作。
+- 所有 artifact_id、checkpoint_id 和重要文件路径必须逐字保留，不得改写。
+- 如果看到“[工具结果已归档]”，必须在“工具/命令结果”或“下一步建议”里保留对应 artifact_id，并说明可用 read_tool_artifact 读取。
+- 如果某些内容只适合按需重读，请写入“下一步建议”或“可丢弃上下文”。
+- 严格使用下面的 Markdown 结构输出：
+
+## 当前任务
+## 用户目标和约束
+## 已完成事项
+## 关键决策和事实
+## 已查看或修改的文件
+## 工具/命令结果
+## 计划/大纲状态
+## 测试和验证状态
+## 未完成事项
+## 风险/阻塞
+## 下一步建议
+## 可丢弃上下文
 
 【需要总结的对话】
 ${conversationText}
 
-请输出摘要：`;
+请输出结构化上下文摘要：`;
 
+  const undoId = rememberCompressionUndo(chat, rawToCompress, {
+    originalCount: toCompress.length,
+    reason: options.reason || 'manual',
+    estimatedBefore
+  });
   chat.messages.push({ role: 'assistant', content: '🗜️ 正在压缩对话历史...', _isCompressing: true });
   renderMessages();
   
@@ -694,36 +1205,83 @@ ${conversationText}
     const summary = await callOnceWithRole(
       [{ role: 'user', content: compressPrompt }],
       state.settings.currentModel,
-      '你是一个专业的对话摘要专家，擅长提炼对话核心信息。'
+      '你是一个严谨的上下文压缩器，专门为长任务 agent 保留可继续执行的关键信息。'
     );
+    if (!summary || !String(summary).trim()) {
+      throw new Error('压缩模型返回了空摘要');
+    }
+    let finalSummary = String(summary).trim();
+    let validation = compressionValidateSummary(finalSummary, requiredRefs);
+    if (!validation.ok) {
+      const feedback = compressionValidationFeedback(validation);
+      const retryPrompt = `${compressPrompt}
+
+【上一次摘要】
+${finalSummary}
+
+【校验失败】
+${feedback}
+
+请重写摘要。要求：
+- 必须补齐全部固定标题。
+- 必须逐字保留上面列出的 artifact_id / checkpoint_id / 文件路径。
+- 不要解释校验过程，只输出修正后的结构化摘要。`;
+      const retrySummary = await callOnceWithRole(
+        [{ role: 'user', content: retryPrompt }],
+        state.settings.currentModel,
+        '你是一个严谨的上下文压缩器。你正在修复一份未通过校验的摘要，必须保留指定引用。'
+      );
+      if (!retrySummary || !String(retrySummary).trim()) {
+        throw new Error('摘要校验失败，重写返回空结果');
+      }
+      finalSummary = String(retrySummary).trim();
+      validation = compressionValidateSummary(finalSummary, requiredRefs);
+    }
+    if (!validation.ok) {
+      throw new Error(`摘要校验失败：${compressionValidationFeedback(validation)}`);
+    }
     removeCompressingPlaceholder();
     
     const summaryMsg = {
       role: 'system',
-      content: `【对话历史摘要】（由 AI 自动压缩，原 ${toCompress.length} 条消息）\n\n${summary}`,
+      content: `【对话历史摘要】（由 AI ${options.reason === 'auto' ? '自动' : '手动'}压缩，原 ${toCompress.length} 条消息）\n\n${finalSummary}`,
       _isSummary: true,
       _originalCount: toCompress.length,
-      _compressTime: Date.now()
+      _compressTime: Date.now(),
+      _compressionReason: options.reason || 'manual',
+      _compressionUndoId: undoId,
+      _estimatedBefore: estimatedBefore
     };
     chat.messages = [summaryMsg, ...toKeep];
+    summaryMsg._estimatedAfter = estimateChatTokens(chat);
     
     // 清除精确统计缓存（消息变了）
     const compStats = getChatTokenStats(chat);
     compStats.lastInputTokens = 0;
     compStats.msgCount = chat.messages.length;
+    compStats.time = 0;
     
     saveData();
     renderMessages();
     updateTokenDisplay();
     scheduleAccurateTokenCount(chat.id);
-    toast(`✓ 已压缩 ${toCompress.length} 条消息为摘要`);
+    const saved = Math.max(0, estimatedBefore - summaryMsg._estimatedAfter);
+    toast(`✓ 已压缩 ${toCompress.length} 条消息，预计节省 ${formatNumber(saved)} token`);
+    return true;
   } catch (e) {
+    delete _compressionUndoSnapshots[undoId];
     removeCompressingPlaceholder();
     renderMessages();
     toast(`❌ 压缩失败：${e.message}`, 3000);
+    return false;
   } finally {
-    state.isGenerating = false;
-    state.abortCtrl = null;
+    if (options.preserveGeneratingState) {
+      state.isGenerating = prevGenerating;
+      state.abortCtrl = prevAbortCtrl;
+    } else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+    }
     updateSendBtn();
   }
 }

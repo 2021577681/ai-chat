@@ -135,6 +135,24 @@ const BUILTIN_TOOLS = [
     code: 'return await readSkill(args.path);'
   },
   {
+    name: 'read_tool_artifact',
+    description: '读取被系统归档的长工具输出。当前上下文里看到“[工具结果已归档] artifact_id: ...”时，如需查看全文、搜索关键字或指定行范围，调用本工具。优先用 query 或 start_line/end_line 精确读取，避免一次性取回过长内容。',
+    parameters: {
+      type: 'object',
+      properties: {
+        artifact_id: { type: 'string', description: '归档 ID，例如 tool_art_20260608_xxxxxx' },
+        query: { type: 'string', description: '可选：在 artifact 中搜索关键词，返回匹配行及上下文' },
+        start_line: { type: 'number', description: '可选：起始行号，从 1 开始' },
+        end_line: { type: 'number', description: '可选：结束行号' },
+        head_lines: { type: 'number', description: '未指定 query/range 且内容过长时返回的开头行数，默认 100' },
+        tail_lines: { type: 'number', description: '未指定 query/range 且内容过长时返回的结尾行数，默认 80' },
+        max_chars: { type: 'number', description: '最多返回字符数，默认 12000，最大 50000' }
+      },
+      required: ['artifact_id']
+    },
+    code: 'return await readToolArtifact(args.artifact_id, args.query, args.start_line, args.end_line, args.head_lines, args.tail_lines, args.max_chars);'
+  },
+  {
     name: 'execute_action',
     description: '在用户的本地工作区中执行任务指令。可用于运行程序、查询信息、安装依赖、版本管理等日常任务。命令只能在工作区沙箱内运行；cwd 可指定执行目录。单独执行 cd 会切换当前浏览器会话的后续工具目录，其他标签/任务不受影响；更推荐直接传 cwd 保持目录明确。每次执行前会向用户征求确认。如果用户明确要求在新终端窗口中运行（如想看到实时输出、命令耗时很长不想阻塞），请设置 new_window: true。',
     parameters: {

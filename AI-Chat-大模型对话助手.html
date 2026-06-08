@@ -81,6 +81,9 @@
           <button class="more-menu-item" onclick="openTokenUsageStats()">
             <span class="more-menu-icon">📊</span><span>Token 统计</span>
           </button>
+          <button class="more-menu-item" onclick="openContextLimitSettings()">
+            <span class="more-menu-icon">📐</span><span>上下文长度</span>
+          </button>
           <button class="more-menu-item" onclick="openGitPanel()">
             <span class="more-menu-icon">🌿</span><span>Git 管理</span>
           </button>
@@ -271,7 +274,7 @@
         <span>模型名称</span>
         <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" onclick="onFetchModels()">📡 拉取模型</button>
       </label>
-      <input type="text" id="modelName">
+      <input type="text" id="modelName" oninput="updateContextLimitModeUI()">
       <div class="form-hint">多个用逗号分隔。点【📡 拉取模型】可从服务商自动获取可用列表</div>
     </div>
     
@@ -347,6 +350,24 @@
     <!-- 上下文压缩设置 -->
     <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
     <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🗜️ 上下文压缩</h3>
+
+    <div class="form-group" id="contextLimitSettingsGroup">
+      <label>模型上下文长度</label>
+      <div class="form-row two-cols" style="margin-bottom:0;">
+        <div>
+          <label>模式</label>
+          <select id="contextLimitMode" onchange="updateContextLimitModeUI()">
+            <option value="auto">按模型自动识别</option>
+            <option value="manual">手动指定</option>
+          </select>
+        </div>
+        <div>
+          <label>手动 token 数</label>
+          <input type="number" id="contextLimitOverride" min="1024" max="4000000" step="1000" oninput="updateContextLimitModeUI()">
+        </div>
+      </div>
+      <div class="form-hint" id="contextLimitHint">当前模型自动识别值：-</div>
+    </div>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div>

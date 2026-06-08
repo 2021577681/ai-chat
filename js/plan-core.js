@@ -1041,6 +1041,15 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
   for (let loop = 0; loop < MAX_LOOPS; loop++) {
     // ⭐ 循环开始前主动检查中止信号
     throwIfAborted();
+    if (typeof ensureContextBeforeAgentRun === 'function') {
+      const guardChat = options.chat || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null);
+      const ok = await ensureContextBeforeAgentRun(guardChat, {
+        label: '计划模式',
+        extraMessages: [{ role: 'user', content: userPrompt }, ...conversationMessages],
+        mutableMessages: conversationMessages
+      });
+      if (!ok) throw new Error('自动压缩失败，已停止计划步骤请求');
+    }
     
     let body;
     if (s.apiFormat === 'anthropic') {
@@ -1207,7 +1216,19 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
         chatId: options.chatId,
         chat: options.chat || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null)
       });
-      const content = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
+      const rawContent = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
+      const preparedToolResult = typeof prepareToolResultForContext === 'function'
+        ? prepareToolResultForContext({
+            content: rawContent,
+            toolName: fname,
+            toolCallId: tc.id,
+            chatId: options.chatId,
+            chat: options.chat || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null),
+            status: result.ok ? 'success' : 'error',
+            args
+          })
+        : { content: rawContent, archived: false };
+      const content = preparedToolResult.content;
       
       // ⭐ 更新该卡片为完成状态
       if (liveEntry) {
@@ -1223,7 +1244,9 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
         tool_call_id: tc.id,
         name: fname,
         content: content,
-        status: result.ok ? 'success' : 'error'
+        status: result.ok ? 'success' : 'error',
+        _artifactId: preparedToolResult.artifactId,
+        _artifactMeta: preparedToolResult.artifactMeta
       });
       toolLogs.push({
         name: fname,

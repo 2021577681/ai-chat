@@ -279,6 +279,9 @@ function updatePlanPanel(msgIdx, targetChat) {
 
 function renderMsg(m, idx) {
   if (m._isSummary) {
+    const undoBtn = (m._compressionUndoId && typeof canUndoCompression === 'function' && canUndoCompression(m._compressionUndoId, currentChat()))
+      ? `<button class="msg-action" onclick="undoCompressionSnapshot('${escapeHtml(m._compressionUndoId)}')">↩ 撤销压缩</button>`
+      : '';
     return `
       <div class="message summary-msg" data-idx="${idx}">
         <div class="avatar" style="background:linear-gradient(135deg, var(--warning), #fbbf24);">🗜️</div>
@@ -287,6 +290,7 @@ function renderMsg(m, idx) {
           <div class="msg-content">${renderMarkdown(m.content || '')}</div>
           <div class="msg-actions">
             <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
+            ${undoBtn}
           </div>
         </div>
       </div>`;
@@ -650,10 +654,6 @@ async function onSend() {
   
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
   
-  if (typeof autoCompressCheck === 'function') {
-    await autoCompressCheck();
-  }
-  
   const c = currentChat();
   
   // ⭐ 检查是否有未完成的计划模式任务（待审批、已暂停、出错状态）
@@ -732,6 +732,16 @@ async function onSend() {
     requestAnimationFrame(() => scrollBottom());
   }
   
+  // ⭐ 压缩检查必须放在新 user 消息/附件/信标入队之后。
+  // 否则旧上下文还没到阈值，但本轮新输入一加入就可能超过窗口。
+  if (typeof autoCompressCheck === 'function') {
+    const compressResult = await autoCompressCheck(c);
+    if (compressResult === 'failed') {
+      toast('自动压缩失败，本轮请求已取消，避免发送超长上下文', 4000);
+      return;
+    }
+  }
+  
   try {
     // ⭐ 双保险：每次发送/重发都清零软停止标志
     //   各 callAPIWithXxx 内部也清，但放这里更直观，避免任何遗漏路径
@@ -742,7 +752,7 @@ async function onSend() {
     if (mode === 'outline') await callAPIWithOutline();
     else if (mode === 'plan') await callAPIWithPlan();
     else if (mode === 'reflection') await callAPIWithReflection();
-    else await callAPI();
+    else await callAPI(undefined, { contextChecked: true });
   } catch (e) {
     console.error('[onSend] 错误:', e);
     toast('❌ 发送失败：' + e.message, 3000);
@@ -804,7 +814,7 @@ async function regenerate(idx) {
   if (mode === 'outline') await callAPIWithOutline();
   else if (mode === 'plan') await callAPIWithPlan();
   else if (mode === 'reflection') await callAPIWithReflection();
-  else await callAPI();
+  else await callAPI(undefined, { contextChecked: true });
 }
 
 // ============ 🆕 工具调用流程折叠 ============
