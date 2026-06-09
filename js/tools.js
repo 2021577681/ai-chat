@@ -181,7 +181,14 @@ function updateGitToggleBtn() {
 }
 
 // ============ 📚 论文工具批量启停 ============
-const PAPER_TOOL_NAMES = ['arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'];
+const PAPER_TOOL_NAMES = [
+  'arxiv_search',
+  'semantic_scholar_search',
+  'dblp_search',
+  'openalex_search',
+  'crossref_search',
+  'fetch_pdf_text'
+];
 
 function isPaperTool(name) {
   return typeof name === 'string' && PAPER_TOOL_NAMES.includes(name);
@@ -197,20 +204,21 @@ function paperToolCount() {
 }
 
 function togglePaperTools() {
-  if (paperToolsEnabled()) {
+  if (typeof BUILTIN_TOOLS === 'undefined') {
+    toast('未找到内置工具定义');
+    return;
+  }
+  const paperTools = BUILTIN_TOOLS.filter(t => isPaperTool(t.name));
+  const enabledCount = state.tools.filter(t => isPaperTool(t.name)).length;
+  if (enabledCount > 0 && enabledCount >= paperTools.length) {
     // 禁用：从 state.tools 移除所有论文工具
-    const removed = state.tools.filter(t => isPaperTool(t.name)).length;
+    const removed = enabledCount;
     state.tools = state.tools.filter(t => !isPaperTool(t.name));
     persistTools();
     renderToolList();
     toast(`🔕 已禁用 ${removed} 个论文工具`);
   } else {
-    // 启用：从 BUILTIN_TOOLS 中把论文工具加回来
-    if (typeof BUILTIN_TOOLS === 'undefined') {
-      toast('未找到内置工具定义');
-      return;
-    }
-    const paperTools = BUILTIN_TOOLS.filter(t => isPaperTool(t.name));
+    // 启用/补全：从 BUILTIN_TOOLS 中把论文工具加回来
     let added = 0;
     for (const tool of paperTools) {
       if (!state.tools.some(t => t.name === tool.name)) {
@@ -220,7 +228,7 @@ function togglePaperTools() {
     }
     persistTools();
     renderToolList();
-    toast(`📚 已启用 ${added} 个论文工具`);
+    toast(added ? `📚 已启用 ${added} 个论文工具` : '📚 论文工具已全部启用');
   }
 }
 
@@ -231,13 +239,19 @@ function updatePaperToggleBtn() {
   const total = paperToolCount();
   if (enabled) {
     const cur = state.tools.filter(t => isPaperTool(t.name)).length;
-    btn.textContent = `🔕 禁用论文工具 (${cur})`;
-    btn.classList.remove('btn-primary');
-    btn.title = '当前论文工具已启用，点击全部移除';
+    if (cur < total) {
+      btn.textContent = `📚 补全论文工具 (${cur}/${total})`;
+      btn.classList.add('btn-primary');
+      btn.title = '当前只启用了部分论文工具，点击补全 DBLP / OpenAlex / Crossref 等检索源';
+    } else {
+      btn.textContent = `🔕 禁用论文工具 (${cur})`;
+      btn.classList.remove('btn-primary');
+      btn.title = '当前论文工具已启用，点击全部移除';
+    }
   } else {
     btn.textContent = `📚 启用论文工具 (${total})`;
     btn.classList.add('btn-primary');
-    btn.title = '当前未启用，点击一键加入 arXiv + Semantic Scholar + PDF 全文工具';
+    btn.title = '当前未启用，点击一键加入 arXiv + Semantic Scholar + DBLP + OpenAlex + Crossref + PDF 全文工具';
   }
 }
 

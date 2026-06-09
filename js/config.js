@@ -429,6 +429,49 @@ const BUILTIN_TOOLS = [
     code: 'return await semanticScholarSearch(args.query, args.max_results, args.year);'
   },
   {
+    name: 'dblp_search',
+    description: '🧮【论文】用 DBLP 检索计算机科学论文元数据，适合查会议/期刊论文、作者、venue、DOI 和 DBLP 条目。\n\n特点：\n- 专注计算机科学，会议和作者信息准确\n- 适合按论文标题、作者、会议名或关键词查找\n- 返回出版链接和 DBLP 页面；不直接提供 PDF 全文\n\n建议：计算机专业先用 dblp_search 精确定位，再用 DOI/标题去 Crossref、OpenAlex 或开放 PDF 源补全文。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '查询关键词，如论文标题、作者、会议名、主题关键词' },
+        max_results: { type: 'number', description: '返回数量，默认 8，最多 20' },
+        year: { type: 'string', description: '可选，限定单一年份，如 "2024"' }
+      },
+      required: ['query']
+    },
+    code: 'return await dblpSearch(args.query, args.max_results, args.year);'
+  },
+  {
+    name: 'openalex_search',
+    description: '🌐【论文】用 OpenAlex 检索跨学科开放论文元数据，适合替代 Google Scholar 做大范围学术检索。返回标题、作者、年份、引用数、来源、DOI、OpenAlex 链接和开放获取链接。\n\n特点：\n- 覆盖全学科和大量开放元数据\n- 可按引用数排序，适合找高影响力论文\n- 可能返回开放获取链接，但不保证每篇都有 PDF',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '查询关键词，英文效果最佳' },
+        max_results: { type: 'number', description: '返回数量，默认 8，最多 20' },
+        year: { type: 'string', description: '可选，限定单一年份，如 "2024"' },
+        sort_by: { type: 'string', description: '排序方式：relevance（相关度，默认）/ cited_by_count（引用数）' }
+      },
+      required: ['query']
+    },
+    code: 'return await openAlexSearch(args.query, args.max_results, args.year, args.sort_by);'
+  },
+  {
+    name: 'crossref_search',
+    description: '🔎【论文】用 Crossref 检索正式出版物和 DOI 元数据，适合按标题、作者、关键词查 DOI、期刊/会议来源、出版日期和 DOI 链接。\n\n特点：\n- DOI 和出版元数据较可靠\n- 适合确认正式发表版本\n- 通常不提供 PDF 全文，需结合开放 PDF 链接或 fetch_pdf_text 使用',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '查询关键词，如论文标题、作者、DOI 片段或主题关键词' },
+        max_results: { type: 'number', description: '返回数量，默认 8，最多 20' },
+        year: { type: 'string', description: '可选，限定单一年份，如 "2024"' }
+      },
+      required: ['query']
+    },
+    code: 'return await crossrefSearch(args.query, args.max_results, args.year);'
+  },
+  {
     name: 'fetch_pdf_text',
     description: '📄【论文】下载并提取 PDF 全文内容（用于读论文正文，不只是摘要）。基于浏览器端 pdf.js，首次调用会自动加载库（约 300KB）。\n\n使用场景：\n- arxiv_search 拿到 PDF 链接后，用本工具读全文\n- 用户给一个 PDF 链接想让你总结/翻译/答疑\n\n推荐：arXiv 链接（https://arxiv.org/pdf/...）可靠性最高，其他源可能因 CORS 失败。',
     parameters: {

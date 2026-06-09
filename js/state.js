@@ -256,8 +256,8 @@ function injectBuiltinTools() {
     // 💾 Git 快照工具（5 个）
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
     'restore_checkpoint',
-    // 📚 论文工具（3 个）
-    'arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'
+    // 📚 论文工具（6 个）
+    'arxiv_search', 'semantic_scholar_search', 'dblp_search', 'openalex_search', 'crossref_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || OPTIONAL_TOOL_PREFIXES.some(p => name.startsWith(p));
@@ -590,7 +590,7 @@ function resetBuiltinTools() {
   const OPTIONAL_TOOL_NAMES = new Set([
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
     'restore_checkpoint',
-    'arxiv_search', 'semantic_scholar_search', 'fetch_pdf_text'
+    'arxiv_search', 'semantic_scholar_search', 'dblp_search', 'openalex_search', 'crossref_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || name.startsWith('lms_');
