@@ -1,163 +1,380 @@
-# AI Chat Local Agent Workbench
+# 🧠 AI Chat Local Agent Workbench
 
 一个本地优先、可观察、可控、可执行的大模型 Agent 工作台。
 
-它不是一个只会聊天的 Web UI，也不是把模型直接放进终端里裸跑的自动化脚本。这个项目把聊天、工具调用、文件/命令执行、Git、网页检索、截图、MCP、Skill、计划模式、大纲模式、反思评审、Token/费用统计和请求调试放在同一个浏览器工作台里，让模型真正能做事，同时把关键权限和执行过程留在用户手里。
+它不是只负责聊天的 Web UI，也不是把模型接进终端后直接放手运行的自动化脚本。这个项目把大模型对话、工具调用、文件读写、命令执行、Git 快照、网页检索、截图观察、MCP、Skill、计划模式、大纲模式、师生反思、Token/费用统计和请求调试整合在同一个浏览器工作台里，让模型能真正落地做事，同时把关键权限和执行过程留在用户手里。
 
-前端零构建，主界面可以直接打开 HTML；配合本地 Python 服务后，模型可以在受控工作区内读写文件、执行命令、查看屏幕、搜索网页、管理 Git 快照和调用扩展工具。
+前端零构建，主界面可以直接打开 HTML；配合本地 Python 后端后，Agent 可以在受控工作区内读取和修改文件、运行命令、查看屏幕、搜索网页、管理 Git 快照，并调用扩展工具。
 
-## 为什么它更适合个人 Agent 工作流
+## ✨ 项目亮点：更友好的个人 Agent 工作台
 
-很多现有 Agent 工具通常会卡在几个点上：要么只有聊天和工具调用但不透明，要么能执行但安全边界粗糙，要么工作流很自动但用户很难插手，要么调试 API 请求和费用统计要靠外部工具。
+很多 Agent 工具能“自动做事”，但真实使用时经常卡在部署重、终端黑盒、请求不可查、权限粗糙、长任务无反馈这些体验问题上。这个项目更关注个人日常使用的顺手程度：能落地执行，也能看清过程；能自动推进，也能随时接管。
 
-这个项目的取向更务实：
-
-| 常见痛点 | 本项目的做法 |
+| 常见 Agent 工具的不便 | 本项目的体验优化 |
 | --- | --- |
-| 模型到底发了什么请求看不清 | 内置 JSON 请求查看器、原始响应记录、cURL 复制、请求历史 |
-| Agent 一跑起来很难控制 | 工具权限按类别确认，计划模式需审批，大纲模式可暂停/继续/收尾 |
-| 只能给建议，不能真的落地 | 本地后端支持文件读写、命令执行、截图、Git、网页抓取、MCP |
-| 单一模型或接口绑定 | 支持 OpenAI、OpenAI Responses、Anthropic、DeepSeek、Qwen、智谱和自定义兼容接口 |
-| Token 和费用不透明 | 对话级 Token 条、全局 usage 账本、模型定价、缓存/思考 token 统计 |
-| 云端工具不适合私有项目 | 对话、配置、工具、统计默认存浏览器 IndexedDB；文件操作限制在本地工作区 |
-| 自动化太重，日常使用成本高 | 零构建前端 + 轻量 Python 后端，不需要 LangChain/LangGraph 这类框架即可使用 |
+| 需要部署服务、数据库、Docker 或复杂环境 | 前端零构建，HTML 可直接打开；后端一个 Python 脚本即可启动 |
+| 主要靠终端交互，状态不直观 | 浏览器 UI 工作台集中管理对话、设置、工具、权限、Git、Token 和请求调试 |
+| 模型到底发了什么请求看不见 | 内置 JSON 查看器，可看 URL、Headers、Body、原始响应、请求历史和 cURL |
+| 长回答或长任务结束没有反馈 | 支持 AI 完成提示音，并可在设置里开关和调节音量 |
+| Agent 一旦开始执行就像黑盒 | 命令、写入、删除、截图、MCP、Git 等操作按类别弹窗确认 |
+| 只能聊天，不能真正处理本地项目 | 本地后端可在工作区沙箱内读写文件、执行命令、截图、搜索网页和管理 Git |
+| 绑定单一模型或平台 | 支持多 Provider、多 API 配置档案和自定义兼容接口 |
 
-## 核心亮点
+### 🚪 无需部署，打开就能用
 
-### 1. 可执行，但默认受控
+- 不需要前端构建流程，不依赖 Node、Docker、数据库或云端部署。
+- 主界面可以直接双击 HTML 打开，也可以由本地 Python 后端托管访问。
+- 后端入口就是 `local_terminal_server.py`，安装依赖后运行一条命令即可启动。
 
-- `execute_action` 在工作区沙箱内运行命令，可用于测试、安装依赖、启动服务、查看状态。
-- 文本工具支持读取、保存、追加、精确替换、删除、目录浏览和全文搜索。
-- 截图工具支持全屏、指定窗口、窗口列表定位，让模型能观察桌面 UI 或运行结果。
-- Git 快照工具可查看状态、历史、diff，保存阶段性改动，也能在确认后恢复历史文件。
-- 所有高风险能力都有权限确认：命令、写入、删除、附件、截图、MCP、Git 写入、Git 恢复。
+### 🖥️ 有完整 UI，不是终端黑盒
 
-### 2. 三种 Agent 工作流
+- 对话、模型配置、工具开关、权限管理、Git 面板、Token 统计和 JSON 调试都在浏览器里完成。
+- 常用能力都有可视化入口，不需要记一堆命令或配置文件位置。
+- 计划模式、大纲模式、任务队列和权限弹窗让长任务更容易跟踪和接管。
 
-- **计划模式**：先规划、再评审、再由用户审批，然后逐步执行，最后由验证老师判断结果是否完成。
-- **大纲模式**：模型边做边维护动态任务大纲，适合长任务；支持暂停、继续、中途追加用户意见和强制收尾。
-- **师生反思模式**：学生生成答案，老师独立评审打分，学生根据反馈改进，适合写作、代码、推理和翻译质量提升。
+### 🔔 AI 完成提示音
 
-### 3. 请求和成本完全可观察
+- 普通对话、计划模式、大纲模式等完成后可以播放提示音。
+- 适合长回答、长任务或后台等待场景，不用一直盯着页面。
+- 提示音支持在设置里开关，并可单独调节音量，不影响系统音量。
 
-- 查看实际发送给模型的 URL、Headers、Body 和原始响应。
-- 支持自定义 JSON 请求模板、额外请求头、本地 LLM 代理，方便适配非标准网关。
-- 支持流式响应、自动重试、请求超时、频率限制和随机延迟。
-- Token 使用有当前对话统计和全局账本，能按模型聚合请求数、输入、输出、缓存读取、思考 token 和估算费用。
+### 🧾 JSON 请求查看器
 
-### 4. 工具生态可扩展
+- 可以预览实际请求体，查看模型调用的 URL、Headers、Body 和响应内容。
+- 支持请求历史、响应详情、请求体复制和 cURL 复制。
+- 适合调试 OpenAI 兼容接口、中转网关、自定义模型服务和非标准响应问题。
 
-- 自定义 JS 工具：在 UI 中写工具代码和参数 schema，直接交给模型调用。
-- MCP stdio 工具：配置 MCP server，自动同步工具列表并映射为模型可调用工具。
-- 本地 Skill：扫描 `skill/` 目录，把 Skill 摘要注入系统提示，必要时再读取完整 `SKILL.md`。
-- 论文工具：arXiv、Semantic Scholar、PDF 文本提取。
-- LMS 工具：课程、作业、课件、下载等示例能力，可作为接入私有业务系统的样板。
+### 🛡️ 更细的权限控制
 
-### 5. 项目级记忆
+- 命令执行、文件写入、删除、截图、MCP、Git 写入和 Git 恢复等高风险能力都会确认。
+- 支持“仅本次允许”“本任务允许”“永久允许”和撤销，避免每一步都重复确认，也避免完全放开。
+- 文件和命令默认被限制在指定 `WORKSPACE` 内，适合处理私有项目。
 
-项目记忆默认关闭。开启后才会读取或生成当前 workspace 的 `.agent/memory.md`，用于保存项目定位、启动方式、架构约定、关键文件、已知注意事项、用户偏好和长期待办。它更像一个可编辑的项目背景文件，而不是不可控的黑盒长期记忆。
+### 🧭 更适合真实长任务
 
-## 功能地图
+- 计划模式适合先拆解、再审批、再逐步执行。
+- 大纲模式适合边做边调整，支持暂停、继续、追加意见和强制收尾。
+- 师生反思模式适合写作、代码、推理、翻译等需要自我评审和改进的任务。
 
-### 对话与模型
+### 🧩 工具扩展不锁死
 
-- Provider：OpenAI、OpenAI Responses、Anthropic、DeepSeek、Qwen、智谱、自定义兼容接口。
-- 多套 API 配置档案：Base URL、Path、API Key、模型名、温度、最大输出等可保存并切换。
-- Markdown、代码高亮、KaTeX 公式、图片/PDF/文本附件。
-- OpenAI / Anthropic / Responses 消息格式适配，自动修复部分 tool call 序列问题。
+- 支持自定义 JS 工具，把个人脚本或业务能力变成模型可调用工具。
+- 支持 MCP stdio server，可接入更大的外部工具生态。
+- 支持本地 Skill，把项目规范、工作流或专业说明按需注入给模型。
 
-### 本地 Agent 工具
+## 🗺️ 功能概览
 
-| 工具 | 能力 |
+| 能力 | 说明 |
 | --- | --- |
-| `execute_action` | 在工作区内执行命令，可选择新终端窗口运行长任务 |
-| `read_note` / `save_note` / `append_note` / `edit_note` / `delete_note` | 文本文件读取、写入、追加、精确替换、删除 |
-| `list_notes` / `find_in_notes` | 目录浏览和全文搜索 |
-| `attach_file` | 把本地图片、PDF 等加入对话，供多模态模型查看 |
-| `web_search` / `fetch_url` | 在线搜索和网页正文提取 |
-| `ai_screenshot` / `list_windows` | 截取全屏或指定窗口，辅助模型观察界面 |
-| `get_current_time` / `calculator` | 当前时间和数学表达式计算 |
-| `read_skill` | 按需读取已扫描的本地 Skill |
+| 本地后端 | `local_terminal_server.py` 提供文件、命令、Git、截图、网页和代理能力 |
+| 静态前端 | `AI-Chat-大模型对话助手.html` 可直接打开，也可由后端托管访问 |
+| 工作区沙箱 | 后端启动时指定 `--workspace`，文件和命令默认限制在该目录内 |
+| 权限确认 | 命令、写入、删除、附件、截图、MCP、Git 写入和恢复等高风险操作会弹窗确认 |
+| 请求调试 | 查看请求 JSON、Headers、原始响应、请求历史和 cURL |
+| Token 统计 | 对话级 token 条、全局 usage 账本、模型价格和费用估算 |
+| Git 快照 | 查看状态、历史、diff，保存阶段性改动，必要时恢复指定文件 |
+| MCP/Skill | 接入外部工具和本地技能说明，让 Agent 按需扩展能力 |
 
-### 可选工具组
+## 🚀 快速开始
 
-| 工具组 | 能力 |
-| --- | --- |
-| Git 快照工具 | `note_status`、`note_history`、`note_diff`、`note_snapshot`、`note_restore` |
-| 论文工具 | `arxiv_search`、`semantic_scholar_search`、`fetch_pdf_text` |
-| LMS 工具 | 课程、待办、作业详情、课件、下载、Cookie 状态 |
-| MCP 工具 | 配置 stdio MCP server，同步并调用外部工具 |
-| 自定义工具 | 在工具面板中编写 JS 工具和参数 schema |
+### 1. 🐍 准备 Python
 
-## 快速开始
+需要 Python 3.10 或更高版本。Windows 上安装 Python 时建议勾选：
 
-### 1. 安装依赖
-
-```bash
-pip install -r requirements.txt
+```text
+Add python.exe to PATH
 ```
 
-`local_terminal_server.py` 主体尽量使用 Python 标准库；`requests` 用于搜索/网页/LMS，`Pillow`、`pywin32`、`psutil` 用于截图和窗口定位。
+安装完成后重新打开 PowerShell，检查：
 
-### 2. 启动本地后端
+```powershell
+python --version
+```
 
-在你希望模型访问的工作区目录启动：
+如果 `python --version` 没有输出，通常是 Windows 的应用执行别名干扰。可以在：
 
-```bash
+```text
+设置 -> 应用 -> 高级应用设置 -> 应用执行别名
+```
+
+关闭 `python.exe` 和 `python3.exe`，然后重新安装或重新打开终端再试。
+
+### 2. 📦 安装依赖
+
+进入项目目录：
+
+```powershell
+cd "D:\path\to\agent"
+```
+
+安装依赖：
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+如果你想隔离环境，也可以使用虚拟环境：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+### 3. ▶️ 启动后端
+
+最简单的启动方式：
+
+```powershell
 python local_terminal_server.py
 ```
 
-也可以显式指定工作区：
-
-```bash
-python local_terminal_server.py --workspace D:\your-project
-```
-
-默认监听 `127.0.0.1:8765`。服务启动目录会作为沙箱根目录，文件操作和命令工作目录都限制在这个目录内。
-
-### 3. 打开界面
-
-方式一：直接双击打开：
-
-```text
-AI-Chat-大模型对话助手.html
-```
-
-方式二：启动后端后访问本地静态服务：
+启动成功后，终端会打印服务地址、Token 和工作区信息，并保持运行。默认地址是：
 
 ```text
 http://127.0.0.1:8765/
 ```
 
-首次使用进入设置，填写 API Key、Base URL、模型名和接口格式。需要通过本地代理访问模型 API 时，先在设置里拉取本地终端 Token，并在 Python 终端确认授权。
+默认工作区是启动命令所在目录。也可以显式指定工作区：
 
-### 4. 按需开启能力
+```powershell
+python local_terminal_server.py --workspace "D:\your-project"
+```
 
-- 在工具面板启用 Git 快照工具、论文工具、LMS 工具。
-- 在 MCP / Skill 面板添加 MCP server 或扫描 `skill/` 目录。
-- 在更多菜单开启项目记忆后，Agent 才会检测或生成 `.agent/memory.md`。
-- 在 JSON 请求编辑器中调整请求体模板和额外请求头。
-- 在定价管理中配置模型价格，用于费用估算。
+如果使用虚拟环境但没有激活环境，可以这样启动：
 
-## 典型使用场景
+```powershell
+.\.venv\Scripts\python .\local_terminal_server.py --workspace "D:\your-project"
+```
 
-- **调试项目**：让模型读取代码、运行测试、查看错误、修改文件、保存 Git 快照。
-- **长任务执行**：用计划模式先拆解和审批，再逐步执行；或用大纲模式边做边调整。
-- **本地资料处理**：读取 Markdown、代码、JSON、图片和 PDF，必要时结合网页搜索。
-- **API 网关适配**：用 JSON 请求编辑器调试模型请求，复制 cURL 到终端复现。
-- **学习和研究**：搜索论文、提取 PDF 文本、生成总结或对照分析。
-- **私有工具接入**：通过 MCP、自定义 JS 工具或 LMS 示例，把内部系统接进 Agent 工作流。
+### 4. 🌐 打开前端
 
-## 安全设计
+推荐在后端启动后访问：
+
+```text
+http://127.0.0.1:8765/
+```
+
+也可以直接双击打开：
+
+```text
+AI-Chat-大模型对话助手.html
+```
+
+首次使用时进入设置页，配置：
+
+- API Key
+- Base URL
+- API Path
+- 模型名
+- 接口格式
+- 是否使用本地代理
+- 本地服务 URL
+
+如果页面需要调用本地后端，点击获取本地 Token。非本机来源访问时，Python 终端可能会提示授权，输入 `y` 即可。
+
+## 💻 在其他电脑上使用
+
+### 🖥️ 本机单独使用
+
+把整个项目文件夹复制到另一台电脑，例如：
+
+```text
+D:\path\to\agent
+```
+
+确认至少包含：
+
+```text
+local_terminal_server.py
+server/
+js/
+AI-Chat-大模型对话助手.html
+requirements.txt
+start_agent.bat
+```
+
+然后运行：
+
+```powershell
+cd "D:\path\to\agent"
+python -m pip install -r requirements.txt
+python local_terminal_server.py
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8765/
+```
+
+### 🌍 局域网其他电脑访问
+
+在运行后端的电脑上启动：
+
+```powershell
+python local_terminal_server.py --host 0.0.0.0 --port 8765 --workspace "D:\path\to\agent"
+```
+
+在另一台电脑浏览器访问：
+
+```text
+http://后端电脑的局域网IP:8765/
+```
+
+例如：
+
+```text
+http://192.168.1.23:8765/
+```
+
+注意事项：
+
+- Windows 防火墙可能需要放行 Python 或端口 `8765`。
+- 前端的“本地服务 URL”要改成 `http://后端电脑IP:8765`。
+- 非本机浏览器获取 Token 时，后端终端会请求授权，输入 `y`。
+
+## 🪟 bat 启动器用法
+
+Windows 可以使用 `start_agent.bat` 启动后端。它有两个核心路径：
+
+```text
+AGENT_HOME = 后端代码所在目录
+WORKSPACE  = Agent 允许操作的工作区目录
+```
+
+项目自带的默认逻辑是：
+
+```bat
+if not defined AGENT_HOME set "AGENT_HOME=%~dp0"
+set "WORKSPACE=%~dp0"
+```
+
+含义是：
+
+- `AGENT_HOME` 默认等于 bat 文件所在目录。
+- `WORKSPACE` 也等于 bat 文件所在目录。
+- 所以当 bat 放在项目根目录时，双击即可启动。
+
+### 📁 把 bat 放到其他文件夹使用
+
+如果你想把 bat 复制到任意工作文件夹，并让 Agent 操作那个文件夹，需要把 `AGENT_HOME` 固定为项目代码目录，保留 `WORKSPACE=%~dp0`。
+
+示例：
+
+```bat
+set "AGENT_HOME=D:\path\to\agent"
+set "WORKSPACE=%~dp0"
+```
+
+这样配置后：
+
+- 后端代码始终从 `AGENT_HOME` 指向的项目目录加载。
+- bat 放在哪个文件夹，哪个文件夹就是 Agent 的工作区。
+
+如果还想让局域网访问，可以把最后启动行改成：
+
+```bat
+python "%AGENT_HOME%\local_terminal_server.py" --host 0.0.0.0 --port 8765 --workspace "%WORKSPACE%" %*
+```
+
+## 🧭 三类路径速查
+
+| 名称 | 在哪里配置 | 作用 |
+| --- | --- | --- |
+| `AGENT_HOME` | `start_agent.bat` / `start_agent.sh` | 后端代码所在目录，里面要有 `local_terminal_server.py` |
+| `WORKSPACE` / `--workspace` | 启动命令或 bat | Agent 可以读写和执行命令的沙箱目录 |
+| `serverUrl` | 页面设置或 `js/terminal.js` | 前端连接后端的地址，例如 `http://127.0.0.1:8765` |
+
+默认前端地址在 `js/terminal.js`：
+
+```js
+serverUrl: 'http://localhost:8765'
+```
+
+跨电脑访问时，需要改成：
+
+```text
+http://后端电脑IP:8765
+```
+
+## 🧯 常见问题
+
+### 🐍 `python --version` 没反应
+
+优先检查：
+
+```powershell
+where python
+where py
+```
+
+如果路径指向 `WindowsApps\python.exe`，关闭 Windows 的 Python 应用执行别名，然后重新安装 Python，并勾选 `Add python.exe to PATH`。
+
+也可以尝试：
+
+```powershell
+py --version
+py -3 local_terminal_server.py
+```
+
+### ⚠️ `python local_terminal_server.py` 执行后马上退出
+
+正常启动后，终端应该一直停留在后端服务运行状态。如果马上回到 PowerShell 提示符，通常说明：
+
+- `local_terminal_server.py` 文件不完整或复制错了。
+- 当前目录不是项目根目录。
+- 缺少 `server/` 目录。
+- Python 环境异常。
+
+检查入口文件末尾是否有：
+
+```python
+if __name__ == '__main__':
+    main()
+```
+
+### 📁 bat 提示找不到 `local_terminal_server.py`
+
+说明 `AGENT_HOME` 没有指向后端项目目录。把 bat 里的路径改成：
+
+```bat
+set "AGENT_HOME=D:\path\to\agent"
+```
+
+### 🔌 浏览器连接不上后端
+
+检查：
+
+- 后端终端是否仍在运行。
+- 地址是否正确：本机通常是 `http://127.0.0.1:8765/`。
+- 跨电脑访问时是否用了后端电脑的局域网 IP。
+- Windows 防火墙是否放行。
+- 前端设置里的本地服务 URL 是否正确。
+
+### 🔁 端口被占用
+
+换一个端口启动：
+
+```powershell
+python local_terminal_server.py --port 9000
+```
+
+然后前端本地服务 URL 改成：
+
+```text
+http://127.0.0.1:9000
+```
+
+## 🔐 安全设计
 
 已经实现的防护：
 
-- 本地服务使用 Token 鉴权，浏览器端需要授权后才能调用。
-- 文件操作限制在工作区根目录内，使用 `realpath` / `commonpath` 防止路径越界和 symlink 越狱。
+- 本地服务使用 Token 鉴权，浏览器需要授权后才能调用敏感接口。
+- 文件操作限制在工作区根目录内，使用 `realpath` / `commonpath` 防止路径越界和 symlink 越界。
 - 命令执行前检查危险命令和明显的工作区外路径。
-- 多标签/多任务使用独立会话目录状态，避免一个任务 `cd` 后影响另一个任务。
-- 工具权限按类别弹窗确认，并支持本任务允许/永久允许/撤销。
-- Git 恢复文件属于高危操作，执行前需要额外确认。
+- 多标签/多任务使用独立会话目录状态，避免一个任务切换目录后影响另一个任务。
+- 工具权限按类别弹窗确认，并支持本任务允许、永久允许和撤销。
+- Git 恢复文件属于高风险操作，执行前需要额外确认。
 - API Key、LMS Cookie、本地 Token、永久授权可以一键清除。
 
 仍需注意：
@@ -167,42 +384,44 @@ http://127.0.0.1:8765/
 - 不要导入不可信备份；自定义工具本质上是在浏览器中执行的 JS 代码。
 - 浏览器 IndexedDB 是本地存储，不适合在公共电脑长期保存密钥。
 
-## 项目结构
+## 🧱 项目结构
 
 ```text
 .
-├── AI-Chat-大模型对话助手.html   # 主入口，浏览器直接打开
+├── AI-Chat-大模型对话助手.html   # 主入口，可直接打开
 ├── base.css                      # 通用样式
+├── gemini-theme.css              # Gemini 风格主题
 ├── git-panel.css                 # Git 面板样式
 ├── lms.css                       # LMS 面板样式
-├── local_terminal_server.py      # 本地工具后端入口
+├── local_terminal_server.py      # 本地后端入口
 ├── requirements.txt              # Python 依赖
-├── start_agent.bat / start_agent.sh
+├── start_agent.bat               # Windows 启动器
+├── start_agent.sh                # Linux / macOS 启动器
 ├── js/
 │   ├── api-adapters.js           # OpenAI / Anthropic / Responses 消息适配
-│   ├── api-core.js               # 请求体构造、重试、代理、非流式处理
+│   ├── api-core.js               # 请求构造、重试、代理、非流式处理
 │   ├── api-stream.js             # 流式响应处理
 │   ├── api-profiles.js           # 多套 API 配置档案
 │   ├── json-editor.js            # 请求预览、模板、Headers、响应、历史
-│   ├── tokens.js                 # Token 估算、精确统计、压缩
+│   ├── terminal.js               # 本地后端调用和权限交互
+│   ├── permissions.js            # 权限管理
+│   ├── tokens.js                 # Token 估算、统计和压缩
 │   ├── token-usage.js            # 全局 Token 使用统计
 │   ├── pricing.js                # 模型定价和费用估算
-│   ├── project-memory.js         # 项目级记忆读取、生成和注入
-│   ├── plan-core.js / plan-ui.js
-│   ├── outline-core.js / outline-render.js / outline-prompts.js
+│   ├── project-memory.js         # 项目级记忆
+│   ├── plan-core.js / plan-ui.js # 计划模式
+│   ├── outline-core.js           # 大纲模式
 │   ├── reflection.js             # 师生反思模式
-│   ├── tools.js / terminal.js / permissions.js
 │   ├── mcp-skills.js             # MCP 和本地 Skill 前端集成
 │   ├── git-panel.js              # Git 可视化面板
-│   ├── paper_tools.js            # arXiv / Semantic Scholar / PDF 文本
-│   └── ...
+│   └── paper_tools.js            # 论文工具
 ├── server/
 │   ├── handler.py                # HTTP 路由
 │   ├── exec.py                   # 命令执行
 │   ├── files.py                  # 文件读写
 │   ├── git_ops.py                # Git 操作
 │   ├── mcp_skills.py             # MCP stdio client + Skill loader
-│   ├── proxy.py                  # LLM 代理
+│   ├── proxy.py                  # LLM / LMS 代理和静态文件服务
 │   ├── sandbox.py                # 工作区和危险命令限制
 │   ├── screenshot.py             # 窗口/屏幕截图
 │   └── web.py                    # 搜索与网页读取
@@ -214,22 +433,23 @@ http://127.0.0.1:8765/
     └── .lms_cookie.example
 ```
 
-## 开发特点
+## 🧪 开发特点
 
-- 纯前端零构建：JS 通过 HTML 中的 `<script>` 顺序加载，不使用打包器。
-- 后端轻依赖：主体为 Python 标准库，按需使用 `requests` / `Pillow` / `pywin32` / `psutil`。
-- 工具以 JSON schema 描述参数，由模型通过 function calling 调用。
+- 纯前端零构建：JS 通过 HTML 中的 `<script>` 顺序加载，不依赖打包器。
+- 后端轻依赖：主体使用 Python 标准库，按需使用 `requests`、`Pillow`、`pywin32` 和 `psutil`。
+- 工具用 JSON schema 描述参数，由模型通过 function calling 调用。
 - 可选工具组默认不全部注入，避免工具列表过长；需要时在 UI 中手动启用。
-- 状态持久化使用 IndexedDB，支持配置、工具、对话、统计的备份和恢复。
+- 状态持久化使用 IndexedDB，支持配置、工具、对话和统计数据的备份恢复。
 
-## 后续路线图
+## 🎯 适合场景
 
-- 给计划模式增加更细的步骤级自动 Gate。
-- 增加简单任务路由，把轻量问题自动分配给便宜模型。
-- 为师生模式增加多评审者并行投票。
-- 将项目记忆升级为可选语义检索，而不是只依赖单个 Markdown 文件。
-- 接入小型回归评测，方便比较不同模型和 prompt 的实际效果。
+- 本地项目调试和代码修改。
+- 长任务规划、执行和验证。
+- 论文检索、PDF 阅读和资料总结。
+- 多模型 API 调试和网关适配。
+- 私有工具、课程系统或内部系统接入。
+- 希望 Agent 能做事，但仍需要保留本地控制权的个人工作流。
 
-## License
+## 📄 License
 
 仅供个人学习与研究使用。使用第三方模型、搜索、论文、LMS、MCP 或代理服务时，请遵守对应服务条款。
