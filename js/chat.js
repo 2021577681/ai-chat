@@ -736,7 +736,7 @@ async function onSend() {
   // ⭐ 压缩检查必须放在新 user 消息/附件/信标入队之后。
   // 否则旧上下文还没到阈值，但本轮新输入一加入就可能超过窗口。
   if (typeof autoCompressCheck === 'function') {
-    const compressResult = await autoCompressCheck(c);
+    const compressResult = await autoCompressCheck(c, { touchGlobalGenerating: true });
     if (compressResult === 'failed') {
       toast('自动压缩失败，本轮请求已取消，避免发送超长上下文', 4000);
       return;

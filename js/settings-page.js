@@ -14,7 +14,7 @@ const SETTINGS_PAGE_SECTIONS = {
   permissions: { open: 'openPermissions', close: 'closePermissions', modalId: 'permissionsModal' },
   pricing: { open: 'openPricingManager', close: 'closePricingManager', modalId: 'pricingModal' },
   tokenUsage: { open: 'openTokenUsageStats', close: 'closeTokenUsageStats', modalId: 'tokenUsageModal' },
-  contextLimit: { open: 'openSettings', close: 'closeSettings', modalId: 'settingsModal', focusId: 'contextLimitSettingsGroup' },
+  contextLimit: { open: 'openContextLimitSettings', close: 'closeContextLimitSettings', modalId: 'contextLimitModal' },
   git: { open: 'openGitPanel', close: 'closeGitPanel', modalId: 'gitModal' }
 };
 
@@ -50,6 +50,7 @@ function initSettingsPage() {
     'openPermissions',
     'openPricingManager',
     'openTokenUsageStats',
+    'openContextLimitSettings',
     'openGitPanel',
     'closeSettings',
     'closePlanSettings',
@@ -64,6 +65,7 @@ function initSettingsPage() {
     'closePermissions',
     'closePricingManager',
     'closeTokenUsageStats',
+    'closeContextLimitSettings',
     'closeGitPanel'
   ].forEach(name => {
     if (typeof window[name] === 'function') SETTINGS_PAGE_STATE.originals[name] = window[name];
@@ -98,6 +100,7 @@ function initSettingsPage() {
   window.closePermissions = function() { closeSettingsProxy('permissions'); };
   window.closePricingManager = function() { closeSettingsProxy('pricing'); };
   window.closeTokenUsageStats = function() { closeSettingsProxy('tokenUsage'); };
+  window.closeContextLimitSettings = function() { closeSettingsProxy('contextLimit'); };
   window.closeGitPanel = function() { closeSettingsProxy('git'); };
 
   window.openSettingsPage = openSettingsPage;
@@ -293,7 +296,7 @@ function closeSettingsProxy(section) {
   const page = document.getElementById('settingsPage');
   const isPageOpen = !!page && page.classList.contains('show');
   const active = SETTINGS_PAGE_STATE.activeSection;
-  if (isPageOpen && (!section || active === section || (section === 'main' && active === 'contextLimit'))) {
+  if (isPageOpen && (!section || active === section)) {
     closeSettingsPage();
     return;
   }

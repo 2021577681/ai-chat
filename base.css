@@ -511,9 +511,9 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(59,130,246,.15)
 }
 .pricing-table-wrap{
-  border:1px solid var(--border);border-radius:10px;overflow:hidden
+  border:1px solid var(--border);border-radius:10px;overflow:auto
 }
-.pricing-table{width:100%;font-size:13px;border-collapse:collapse}
+.pricing-table{width:100%;min-width:900px;font-size:13px;border-collapse:collapse}
 .pricing-table thead tr{background:var(--bg-input)}
 .pricing-table thead th{
   padding:10px 12px;text-align:left;font-weight:600;font-size:12px;
@@ -533,7 +533,32 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(59,130,246,.15)
 }
 .pricing-table .pricing-input[type=number]{text-align:right;font-family:'SF Mono',Consolas,monospace}
+.pricing-currency-segment{
+  width:100%;min-height:31px;display:grid;grid-template-columns:1fr 1fr;
+  border:1px solid var(--border);border-radius:6px;overflow:hidden;
+  background:var(--bg-input);box-sizing:border-box
+}
+.pricing-currency-option{
+  border:0;background:transparent;color:var(--text-secondary);font-size:10px;
+  font-family:'SF Mono',Consolas,monospace;font-weight:700;cursor:pointer;
+  padding:0 3px;line-height:1;transition:background .15s,color .15s
+}
+.pricing-currency-option+.pricing-currency-option{border-left:1px solid var(--border)}
+.pricing-currency-option:hover{color:var(--text);background:var(--bg-hover)}
+.pricing-currency-option.active{background:var(--primary);color:#fff}
+.pricing-currency-option:focus-visible{
+  outline:2px solid rgba(59,130,246,.35);outline-offset:-2px
+}
 .pricing-table .pricing-empty td{padding:30px;text-align:center;color:var(--text-secondary);font-size:13px}
+.context-limit-status{
+  padding:12px 14px;border:1px solid var(--border);border-radius:10px;
+  background:var(--bg-input);font-size:13px;line-height:1.7;color:var(--text)
+}
+.context-limit-status code{
+  background:var(--bg);padding:1px 6px;border-radius:4px;
+  font-family:'SF Mono',Consolas,monospace;font-size:12px
+}
+.context-limit-table{min-width:760px}
 
 /* —— 行内删除按钮（红色圆形） —— */
 .pricing-row-del{

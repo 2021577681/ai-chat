@@ -856,6 +856,7 @@ input::placeholder{
 .form-row textarea,
 .api-profile-trigger,
 .pricing-table .pricing-input,
+.pricing-currency-segment,
 .outline-inject-input,
 .task-queue-item textarea,
 .task-queue-order input,
@@ -889,6 +890,7 @@ input::placeholder{
 .form-row textarea:focus,
 .api-profile-trigger.open,
 .pricing-table .pricing-input:focus,
+.pricing-currency-segment:focus-within,
 .outline-inject-input:focus,
 .git-form-row input:focus,
 .git-commit-box textarea:focus,
@@ -1246,6 +1248,7 @@ body.settings-page-open .settings-docked-mask.show{
 }
 
 .settings-page-content .settings-section-pricing,
+.settings-page-content .settings-section-contextLimit,
 .settings-page-content .settings-section-tokenUsage{
   width:min(980px,100%);
 }
@@ -1704,6 +1707,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .form-row textarea,
 [data-theme="dark"] .api-profile-trigger,
 [data-theme="dark"] .pricing-table .pricing-input,
+[data-theme="dark"] .pricing-currency-segment,
 [data-theme="dark"] .outline-inject-input,
 [data-theme="dark"] .task-queue-item textarea,
 [data-theme="dark"] .task-queue-order input,
@@ -1724,6 +1728,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .form-row textarea:focus,
 [data-theme="dark"] .api-profile-trigger.open,
 [data-theme="dark"] .pricing-table .pricing-input:focus,
+[data-theme="dark"] .pricing-currency-segment:focus-within,
 [data-theme="dark"] .outline-inject-input:focus,
 [data-theme="dark"] .git-form-row input:focus,
 [data-theme="dark"] .git-commit-box textarea:focus,
@@ -1742,6 +1747,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .git-inline-config,
 [data-theme="dark"] .backup-lede,
 [data-theme="dark"] .pricing-config-box,
+[data-theme="dark"] .context-limit-status,
 [data-theme="dark"] .api-profile-box,
 [data-theme="dark"] .json-help,
 [data-theme="dark"] .suggestion,

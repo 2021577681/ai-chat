@@ -355,13 +355,17 @@ async function callAPI(roundLimit, options = {}) {
   }
   const taskChatId = c.id;
   const isTaskVisible = () => isCurrentChat(taskChatId);
+  const isFirstCall = (typeof roundLimit !== 'number');
+  if (isFirstCall && ((typeof isChatGenerating === 'function') ? isChatGenerating(taskChatId) : !!state.isGenerating)) {
+    if (typeof toast === 'function' && isTaskVisible()) toast('此对话已有任务正在执行，请稍等');
+    return;
+  }
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!state.settings.useTools;
   const suppressCompletionSound = !!options.suppressCompletionSound;
   
   const s = state.settings;
   
   // 如果未显式传入 roundLimit，则使用设置中的值（首次调用）
-  const isFirstCall = (typeof roundLimit !== 'number');
   if (isFirstCall) {
     const cfg = parseInt(s.maxToolRounds);
     roundLimit = (isNaN(cfg) || cfg < 0) ? 15 : cfg;
@@ -376,11 +380,20 @@ async function callAPI(roundLimit, options = {}) {
     state.isGenerating = true;
     state.activeTaskChatId = taskChatId;
   }
+  const abortCtrl = new AbortController();
+  if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+  else state.abortCtrl = abortCtrl;
   updateSendBtn();
   if (typeof renderChatList === 'function') renderChatList();
   
   if (!options.contextChecked && typeof ensureContextBeforeAgentRun === 'function') {
-    const ok = await ensureContextBeforeAgentRun(c, { label: '普通对话' });
+    const ok = await ensureContextBeforeAgentRun(c, {
+      label: '普通对话',
+      chat: c,
+      chatId: taskChatId,
+      signal: abortCtrl.signal,
+      isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+    });
     if (!ok) {
       if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
       else {
@@ -422,9 +435,6 @@ async function callAPI(roundLimit, options = {}) {
   }
   
   const requestHeaders = buildHeaders();
-  const abortCtrl = new AbortController();
-  if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
-  else state.abortCtrl = abortCtrl;
   
   // ⭐ 自动重试：把"发请求 + 读响应"包成可重试单元
   const maxAttempts = Math.max(1, (parseInt(s.retryMaxAttempts) || 3) + 1);  // 总尝试次数 = 重试次数+1
@@ -986,16 +996,25 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
   const localCtrl = new AbortController();
   const signal = localCtrl.signal;
   let _bridgeOuterAbort = null;
+  const useGlobalAbortFallback = !options || options.useGlobalAbortFallback === true;
   const outerSignal = options && options.signal
     ? options.signal
-    : (state.abortCtrl && state.abortCtrl.signal ? state.abortCtrl.signal : null);
+    : (useGlobalAbortFallback && state.abortCtrl && state.abortCtrl.signal ? state.abortCtrl.signal : null);
   const isStopped = (options && typeof options.isStopped === 'function')
     ? options.isStopped
-    : () => !!state.stopRequested;
+    : (useGlobalAbortFallback ? () => !!state.stopRequested : () => false);
+  let _stopPollTimer = null;
   if (outerSignal) {
     _bridgeOuterAbort = () => { try { localCtrl.abort(); } catch (_) {} };
     if (outerSignal.aborted) _bridgeOuterAbort();
     else outerSignal.addEventListener('abort', _bridgeOuterAbort, { once: true });
+  }
+  if (options && typeof options.isStopped === 'function') {
+    _stopPollTimer = setInterval(() => {
+      try {
+        if (isStopped()) localCtrl.abort();
+      } catch (_) {}
+    }, 250);
   }
   const tempMessages = history.filter(m => m.role !== 'system' && m.role !== 'tool');
   let body;
@@ -1142,6 +1161,10 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
     // 理论上走不到这（要么 return 要么 throw），兜底
     throw lastErr || new Error('callOnceWithRole 未知错误');
   } finally {
+    if (_stopPollTimer) {
+      clearInterval(_stopPollTimer);
+      _stopPollTimer = null;
+    }
     // 解绑桥接监听器，避免外层 controller 累积闭包引用
     if (_bridgeOuterAbort && outerSignal) {
       try { outerSignal.removeEventListener('abort', _bridgeOuterAbort); } catch (_) {}
@@ -1208,7 +1231,11 @@ async function runAgentLoop({
         label: '师生/隔离工具循环',
         extraMessages: messages,
         mutableMessages: messages,
-        preserveFirstUser: true
+        preserveFirstUser: true,
+        chat: guardChat || chat || null,
+        chatId: chatId || (guardChat && guardChat.id) || '',
+        signal,
+        isStopped: _isStopped
       });
       if (!ok) throw new Error('自动压缩失败，已停止本轮 agent 请求');
     }

@@ -26,8 +26,6 @@ const PROFILE_SETTINGS_KEYS = [
   'temperature',
   'maxTokens',
   'useLocalProxy',
-  'contextLimitMode',
-  'contextLimitOverride',
   'systemPrompt',
   'useCustomJson',
   'jsonTemplate',
@@ -94,10 +92,6 @@ function _applyProfileToSettings(profSettings) {
       state.settings[k] = profSettings[k];
     }
   }
-  // 旧版 profile 没有上下文长度字段；切换旧档案时应回到自动识别，
-  // 避免沿用上一个档案的手动上下文窗口。
-  if (profSettings.contextLimitMode === undefined) state.settings.contextLimitMode = 'auto';
-  if (profSettings.contextLimitOverride === undefined) state.settings.contextLimitOverride = 0;
   // 旧版 profile 没有本地代理字段；切换旧档案时回到默认启用，
   // 避免沿用上一个档案的直连/代理状态。
   if (profSettings.useLocalProxy === undefined) state.settings.useLocalProxy = true;
@@ -441,10 +435,6 @@ function _harvestSettingsModalToState() {
   const maxTokens = get('maxTokens');       if (maxTokens !== undefined) s.maxTokens = parseInt(maxTokens);
   const useLocalProxy = document.getElementById('useLocalProxy');
   if (useLocalProxy) s.useLocalProxy = useLocalProxy.checked;
-  const contextMode = get('contextLimitMode');
-  if (contextMode !== undefined) s.contextLimitMode = contextMode === 'manual' ? 'manual' : 'auto';
-  const contextLimit = get('contextLimitOverride');
-  if (contextLimit !== undefined && contextLimit !== '') s.contextLimitOverride = parseInt(contextLimit);
 }
 
 // 把 state.settings 的值写回设置面板的输入框
@@ -468,9 +458,6 @@ function _refreshSettingsModalFromState() {
   set('maxTokens', s.maxTokens);
   const proxyEl = document.getElementById('useLocalProxy');
   if (proxyEl) proxyEl.checked = !!s.useLocalProxy;
-  set('contextLimitMode', s.contextLimitMode || 'auto');
-  set('contextLimitOverride', s.contextLimitOverride || '');
-  if (typeof updateContextLimitModeUI === 'function') updateContextLimitModeUI();
   if (typeof updateUrlPreview === 'function') updateUrlPreview();
 }
 

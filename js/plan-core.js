@@ -1051,7 +1051,11 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
       const ok = await ensureContextBeforeAgentRun(guardChat, {
         label: '计划模式',
         extraMessages: [{ role: 'user', content: userPrompt }, ...conversationMessages],
-        mutableMessages: conversationMessages
+        mutableMessages: conversationMessages,
+        chat: guardChat || options.chat || null,
+        chatId: options.chatId || (guardChat && guardChat.id) || '',
+        signal: abortSignal,
+        isStopped
       });
       if (!ok) throw new Error('自动压缩失败，已停止计划步骤请求');
     }

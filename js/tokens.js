@@ -15,6 +15,11 @@ const MODEL_CONTEXT_LIMITS = {
 
 const CONTEXT_LIMIT_OVERRIDE_MIN = 1024;
 const CONTEXT_LIMIT_OVERRIDE_MAX = 4000000;
+const CONTEXT_LIMIT_RULES_KEY = 'aichat_context_limit_rules_v1';
+
+const DEFAULT_CONTEXT_LIMIT_RULES = Object.entries(MODEL_CONTEXT_LIMITS)
+  .filter(([key]) => key !== '_default')
+  .map(([key, limit]) => ({ key, limit }));
 
 function normalizeContextLimitOverride(value) {
   const n = parseInt(value);
@@ -33,23 +38,70 @@ function getAutoContextLimit(modelName) {
   return MODEL_CONTEXT_LIMITS._default;
 }
 
+function loadContextLimitRules() {
+  try {
+    const raw = storage.get(CONTEXT_LIMIT_RULES_KEY);
+    if (!raw) return DEFAULT_CONTEXT_LIMIT_RULES.map(x => ({ ...x }));
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return DEFAULT_CONTEXT_LIMIT_RULES.map(x => ({ ...x }));
+    return arr.map(normalizeContextLimitRule).filter(rule => rule.key && rule.limit > 0);
+  } catch (e) {
+    console.warn('[context-limit] 加载失败:', e);
+    return DEFAULT_CONTEXT_LIMIT_RULES.map(x => ({ ...x }));
+  }
+}
+
+function saveContextLimitRules(list) {
+  try {
+    storage.set(CONTEXT_LIMIT_RULES_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+  } catch (e) {
+    console.warn('[context-limit] 保存失败:', e);
+  }
+}
+
+function normalizeContextLimitRule(rule) {
+  const key = String((rule && rule.key) || '').trim();
+  const limit = normalizeContextLimitOverride(rule && rule.limit);
+  const note = String((rule && rule.note) || '').trim();
+  return { key, limit, note: note || undefined };
+}
+
+function getContextLimitRuleMatch(modelName) {
+  if (!modelName) return null;
+  const lower = String(modelName).toLowerCase();
+  const sorted = loadContextLimitRules()
+    .filter(rule => rule.key && rule.limit > 0)
+    .sort((a, b) => (b.key || '').length - (a.key || '').length);
+  for (const rule of sorted) {
+    if (lower.includes(rule.key.toLowerCase())) return rule;
+  }
+  return null;
+}
+
 function getContextLimitInfo(modelName) {
   const autoLimit = getAutoContextLimit(modelName);
-  const s = (typeof state !== 'undefined' && state.settings) ? state.settings : {};
-  const override = normalizeContextLimitOverride(s.contextLimitOverride);
-  const manual = s.contextLimitMode === 'manual' && override > 0;
+  const matchedRule = getContextLimitRuleMatch(modelName);
+  const matched = matchedRule && matchedRule.limit > 0;
   return {
-    limit: manual ? override : autoLimit,
+    limit: matched ? matchedRule.limit : autoLimit,
     autoLimit,
-    override,
-    mode: manual ? 'manual' : 'auto',
-    label: manual ? '手动指定' : '自动识别'
+    override: 0,
+    matchedKey: matched ? matchedRule.key : null,
+    mode: matched ? 'matched' : 'auto',
+    label: matched ? `匹配：${matchedRule.key}` : '自动识别'
   };
 }
 
 function getContextLimit(modelName) {
   return getContextLimitInfo(modelName).limit;
 }
+
+window.loadContextLimitRules = loadContextLimitRules;
+window.saveContextLimitRules = saveContextLimitRules;
+window.DEFAULT_CONTEXT_LIMIT_RULES = DEFAULT_CONTEXT_LIMIT_RULES;
+window.normalizeContextLimitOverride = normalizeContextLimitOverride;
+window.getContextLimitInfo = getContextLimitInfo;
+window.getAutoContextLimit = getAutoContextLimit;
 
 // ============ 估算 Token ============
 function estimateTokens(text) {
@@ -510,8 +562,8 @@ function showTokenDetails() {
   html += `<h3 style="margin:0 0 12px;font-size:15px;">📊 Token 详细统计</h3>`;
   html += `<div style="background:var(--bg-input);padding:12px;border-radius:8px;margin-bottom:12px;">`;
   html += `<div><strong>模型：</strong>${escapeHtml(model)}</div>`;
-  const limitModeText = limitInfo.mode === 'manual'
-    ? `手动指定，自动识别值 ${formatNumber(limitInfo.autoLimit)}`
+  const limitModeText = limitInfo.mode === 'matched'
+    ? `匹配关键词 ${limitInfo.matchedKey}，内置识别值 ${formatNumber(limitInfo.autoLimit)}`
     : '自动识别';
   html += `<div><strong>上下文限制：</strong>${formatNumber(limit)} tokens <span style="color:var(--text-secondary);">(${limitModeText})</span> <a href="javascript:void(0)" onclick="document.getElementById('tokenDetailModal') && document.getElementById('tokenDetailModal').classList.remove('show'); if (typeof openContextLimitSettings === 'function') openContextLimitSettings();" style="margin-left:6px;">设置</a></div>`;
   html += `<div><strong>消息数：</strong>${c.messages.length}</div>`;
@@ -545,11 +597,14 @@ function showTokenDetails() {
     const total = costInput + costOutput + costCache;
     const saved = stats.cacheReadTokens * (pricing.input - pricing.cacheRead) / 1000000;
     
-    html += `<div>输入费用：$${costInput.toFixed(6)} (${formatNumber(stats.inputTokens - stats.cacheReadTokens)} × $${pricing.input}/M)</div>`;
+    const inputPriceLabel = pricing.inputLabel || `$${pricing.input}`;
+    const outputPriceLabel = pricing.outputLabel || `$${pricing.output}`;
+    const cachePriceLabel = pricing.cacheReadLabel || `$${pricing.cacheRead}`;
+    html += `<div>输入费用：$${costInput.toFixed(6)} (${formatNumber(stats.inputTokens - stats.cacheReadTokens)} × ${inputPriceLabel}/M)</div>`;
     if (costCache > 0) {
-      html += `<div>缓存费用：$${costCache.toFixed(6)} (${formatNumber(stats.cacheReadTokens)} × $${pricing.cacheRead}/M)</div>`;
+      html += `<div>缓存费用：$${costCache.toFixed(6)} (${formatNumber(stats.cacheReadTokens)} × ${cachePriceLabel}/M)</div>`;
     }
-    html += `<div>输出费用：$${costOutput.toFixed(6)} (${formatNumber(stats.outputTokens)} × $${pricing.output}/M)</div>`;
+    html += `<div>输出费用：$${costOutput.toFixed(6)} (${formatNumber(stats.outputTokens)} × ${outputPriceLabel}/M)</div>`;
     html += `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;"><strong>总计：$${total.toFixed(6)}</strong>${showCny ? ` ≈ ¥${(total * exchangeRate).toFixed(4)}` : ''}</div>`;
     if (saved > 0) {
       html += `<div style="color:var(--success);margin-top:4px;">💚 缓存节省：$${saved.toFixed(6)}</div>`;
@@ -881,6 +936,13 @@ async function compressTransientMessagesForAgent(messages, options = {}) {
   
   const requiredRefs = compressionCollectRequiredRefs(toCompress);
   const label = options.label || '内部工具循环';
+  const helperOptions = {
+    chat: options.chat || null,
+    chatId: options.chatId || (options.chat && options.chat.id) || '',
+    signal: options.signal,
+    isStopped: options.isStopped,
+    sourceLabel: `${label} · 内部压缩`
+  };
   const conversationText = middleTrimText(
     realMessages.map((m, idx) => formatMessageForCompression(m, idx)).join('\n\n'),
     50000
@@ -915,7 +977,8 @@ ${conversationText}
   let summary = await callOnceWithRole(
     [{ role: 'user', content: compressPrompt }],
     state.settings.currentModel,
-    '你是一个严谨的长流程 agent 内部上下文压缩器，必须保留可继续执行的关键信息。'
+    '你是一个严谨的长流程 agent 内部上下文压缩器，必须保留可继续执行的关键信息。',
+    helperOptions
   );
   if (!summary || !String(summary).trim()) throw new Error(`${label} 内部压缩返回空摘要`);
   let finalSummary = String(summary).trim();
@@ -934,7 +997,11 @@ ${feedback}
     summary = await callOnceWithRole(
       [{ role: 'user', content: retryPrompt }],
       state.settings.currentModel,
-      '你正在修复未通过校验的内部上下文摘要，必须保留指定引用。'
+      '你正在修复未通过校验的内部上下文摘要，必须保留指定引用。',
+      {
+        ...helperOptions,
+        sourceLabel: `${label} · 内部压缩 · 重写`
+      }
     );
     if (!summary || !String(summary).trim()) throw new Error(`${label} 内部压缩重写返回空摘要`);
     finalSummary = String(summary).trim();
@@ -1026,9 +1093,13 @@ function formatMessageForCompression(m, idx) {
 async function manualCompress() {
   const c = currentChat();
   if (!c || c.messages.length < 4) { toast('对话太短，无需压缩'); return; }
+  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating) {
+    toast('此对话已有任务正在执行，请稍等');
+    return;
+  }
   if (!state.settings.apiKey) { toast('请先配置 API Key'); return; }
   if (!confirm(`确定要压缩当前对话历史吗？\n\n会保留最近 ${state.settings.compressKeepLast || 4} 条消息，前面的对话会被 AI 总结成结构化摘要。\n\n压缩完成后可在摘要卡片撤销（刷新页面前有效）。`)) return;
-  await compressChat(c, { reason: 'manual' });
+  await compressChat(c, { reason: 'manual', touchGlobalGenerating: true });
 }
 
 async function autoCompressCheck(chat = null, options = {}) {
@@ -1057,7 +1128,12 @@ async function autoCompressCheck(chat = null, options = {}) {
       estimatedBefore: tokens,
       pct,
       reserve,
-      preserveGeneratingState: !!options.preserveGeneratingState
+      preserveGeneratingState: !!options.preserveGeneratingState,
+      touchGlobalGenerating: !!options.touchGlobalGenerating,
+      chat: c,
+      chatId: c.id,
+      signal: options.signal,
+      isStopped: options.isStopped
     });
     return ok ? true : 'failed';
   }
@@ -1069,6 +1145,12 @@ async function ensureContextBeforeAgentRun(chat = null, options = {}) {
   if (typeof autoCompressCheck !== 'function') return true;
   const c = chat || currentChat();
   const extraMessages = Array.isArray(options.extraMessages) ? options.extraMessages : [];
+  const taskOptions = {
+    chat: c || options.chat || null,
+    chatId: options.chatId || (c && c.id) || '',
+    signal: options.signal,
+    isStopped: options.isStopped
+  };
   if ((!c || !c.messages || !c.messages.length) && !extraMessages.length) return true;
   if (extraMessages.length) {
     const budget = compressionBudgetInfo(c, extraMessages);
@@ -1076,13 +1158,20 @@ async function ensureContextBeforeAgentRun(chat = null, options = {}) {
       await compressTransientMessagesForAgent(options.mutableMessages, {
         label: options.label || '内部工具循环',
         chat: c,
+        chatId: taskOptions.chatId,
+        signal: taskOptions.signal,
+        isStopped: taskOptions.isStopped,
         preserveFirstUser: !!options.preserveFirstUser
       });
     }
   }
   if (!c || !c.messages || !c.messages.length) return true;
   const result = await autoCompressCheck(c, {
-    preserveGeneratingState: options.preserveGeneratingState !== false
+    preserveGeneratingState: options.preserveGeneratingState !== false,
+    chat: c,
+    chatId: taskOptions.chatId,
+    signal: taskOptions.signal,
+    isStopped: taskOptions.isStopped
   });
   if (result === 'failed') {
     const label = options.label ? `（${options.label}）` : '';
@@ -1100,6 +1189,21 @@ async function compressChat(chat, options = {}) {
   const estimatedBefore = options.estimatedBefore || estimateChatTokens(chat);
   const prevGenerating = !!state.isGenerating;
   const prevAbortCtrl = state.abortCtrl || null;
+  const taskChatId = options.chatId || (chat && chat.id) || '';
+  const isVisible = typeof isCurrentChat === 'function' ? isCurrentChat(chat) : chat === currentChat();
+  const renderCompressionView = () => {
+    if (isVisible && typeof renderMessages === 'function') renderMessages();
+  };
+  const shouldTouchGlobalGenerating = options.touchGlobalGenerating === true;
+  const foregroundAbortCtrl = shouldTouchGlobalGenerating && !options.signal ? new AbortController() : null;
+  let foregroundTaskCreated = false;
+  const helperOptions = {
+    chat,
+    chatId: taskChatId,
+    signal: options.signal || (foregroundAbortCtrl ? foregroundAbortCtrl.signal : undefined),
+    isStopped: options.isStopped || (shouldTouchGlobalGenerating ? () => !!state.stopRequested : undefined),
+    sourceLabel: `上下文压缩 · ${options.reason || 'manual'}`
+  };
   
   // ⭐ 切点策略：toKeep 必须以 user 消息开头（且不能是摘要消息）
   //   否则压缩后会出现 assistant(tool_calls) 紧跟摘要的情况，
@@ -1191,7 +1295,7 @@ ${conversationText}
     estimatedBefore
   });
   chat.messages.push({ role: 'assistant', content: '🗜️ 正在压缩对话历史...', _isCompressing: true });
-  renderMessages();
+  renderCompressionView();
   
   // ⭐ 用闭包函数代替 pop()，避免误删用户消息
   const removeCompressingPlaceholder = () => {
@@ -1200,12 +1304,22 @@ ${conversationText}
   };
   
   try {
-    state.isGenerating = true;
-    updateSendBtn();
+    if (shouldTouchGlobalGenerating) {
+      state.stopRequested = false;
+      if (foregroundAbortCtrl && taskChatId && typeof beginChatTask === 'function') {
+        beginChatTask(taskChatId, foregroundAbortCtrl, { resetStop: true });
+        foregroundTaskCreated = true;
+      } else {
+        state.isGenerating = true;
+        if (foregroundAbortCtrl) state.abortCtrl = foregroundAbortCtrl;
+      }
+      updateSendBtn();
+    }
     const summary = await callOnceWithRole(
       [{ role: 'user', content: compressPrompt }],
       state.settings.currentModel,
-      '你是一个严谨的上下文压缩器，专门为长任务 agent 保留可继续执行的关键信息。'
+      '你是一个严谨的上下文压缩器，专门为长任务 agent 保留可继续执行的关键信息。',
+      helperOptions
     );
     if (!summary || !String(summary).trim()) {
       throw new Error('压缩模型返回了空摘要');
@@ -1229,7 +1343,11 @@ ${feedback}
       const retrySummary = await callOnceWithRole(
         [{ role: 'user', content: retryPrompt }],
         state.settings.currentModel,
-        '你是一个严谨的上下文压缩器。你正在修复一份未通过校验的摘要，必须保留指定引用。'
+        '你是一个严谨的上下文压缩器。你正在修复一份未通过校验的摘要，必须保留指定引用。',
+        {
+          ...helperOptions,
+          sourceLabel: `上下文压缩 · ${options.reason || 'manual'} · 重写`
+        }
       );
       if (!retrySummary || !String(retrySummary).trim()) {
         throw new Error('摘要校验失败，重写返回空结果');
@@ -1262,8 +1380,8 @@ ${feedback}
     compStats.time = 0;
     
     saveData();
-    renderMessages();
-    updateTokenDisplay();
+    renderCompressionView();
+    if (isVisible && typeof updateTokenDisplay === 'function') updateTokenDisplay();
     scheduleAccurateTokenCount(chat.id);
     const saved = Math.max(0, estimatedBefore - summaryMsg._estimatedAfter);
     toast(`✓ 已压缩 ${toCompress.length} 条消息，预计节省 ${formatNumber(saved)} token`);
@@ -1271,16 +1389,27 @@ ${feedback}
   } catch (e) {
     delete _compressionUndoSnapshots[undoId];
     removeCompressingPlaceholder();
-    renderMessages();
-    toast(`❌ 压缩失败：${e.message}`, 3000);
+    renderCompressionView();
+    if (e && e.name === 'AbortError') {
+      if (typeof toast === 'function') toast('已停止压缩', 2000);
+    } else {
+      toast(`❌ 压缩失败：${e.message}`, 3000);
+    }
     return false;
   } finally {
-    if (options.preserveGeneratingState) {
+    if (shouldTouchGlobalGenerating) {
+      if (foregroundTaskCreated && typeof clearChatTask === 'function') {
+        clearChatTask(taskChatId);
+      } else {
+        state.isGenerating = prevGenerating;
+        state.abortCtrl = prevAbortCtrl;
+        if (!prevGenerating) state.stopRequested = false;
+      }
+    } else if (typeof syncGlobalTaskState === 'function') {
+      syncGlobalTaskState(state.currentId);
+    } else if (options.preserveGeneratingState) {
       state.isGenerating = prevGenerating;
       state.abortCtrl = prevAbortCtrl;
-    } else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
     }
     updateSendBtn();
   }

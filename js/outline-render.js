@@ -167,6 +167,21 @@ function renderOutlinePanel(m, idx) {
           <button class="outline-btn cancel" onclick="cancelOutline(${idx})">❌ 放弃</button>
         </div>
       </div>`;
+  } else if (o.status === 'error') {
+    // 出错中：有快照时允许继续 / 收尾；无快照时至少允许放弃以解除当前对话阻塞。
+    const hasSnap = !!o._snap;
+    actionHtml = `
+      <div class="outline-actions paused">
+        <div class="outline-actions-hint">❌ 任务出错${hasSnap ? '。可输入留言后继续，或基于已有信息收尾：' : '（任务状态已丢失，无法继续，仅能放弃）'}</div>
+        ${hasSnap ? `
+          <textarea class="outline-inject-input" id="outlineInject_${idx}" rows="2" placeholder="💬 给 AI 留言（可选）：比如「从中断处继续」「跳过失败步骤」「直接总结吧」..."></textarea>
+        ` : ''}
+        <div class="outline-actions-btns">
+          ${hasSnap ? `<button class="outline-btn resume" onclick="resumeOutline(${idx})">▶️ 继续执行</button>` : ''}
+          ${hasSnap ? `<button class="outline-btn finish" onclick="finishOutlineNow(${idx})">🏁 立即收尾</button>` : ''}
+          <button class="outline-btn cancel" onclick="cancelOutline(${idx})">❌ 放弃</button>
+        </div>
+      </div>`;
   }
   
   return `
@@ -440,8 +455,8 @@ async function resumeOutline(msgIdx) {
   }
   
   const aiMsg = c.messages[msgIdx];
-  if (aiMsg.outline.status !== 'paused') {
-    if (typeof toast === 'function') toast('该任务不处于暂停状态', 2500);
+  if (aiMsg.outline.status !== 'paused' && aiMsg.outline.status !== 'error') {
+    if (typeof toast === 'function') toast('该任务不处于可恢复状态', 2500);
     return;
   }
   
@@ -516,8 +531,8 @@ async function finishOutlineNow(msgIdx) {
     return;
   }
   
-  if (status === 'paused') {
-    // 暂停中：直接发起一次保底收尾调用
+  if (status === 'paused' || status === 'error') {
+    // 暂停 / 出错中：直接发起一次保底收尾调用
     if (!confirm('要求 AI 基于已有信息直接给出最终回答？')) {
       return;
     }

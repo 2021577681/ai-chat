@@ -873,6 +873,23 @@ function taskQueueClearAll() {
   renderTaskQueueModal();
 }
 
+async function _taskQueueRunRunnableGroup(runnable) {
+  const lanes = new Map();
+  for (const item of runnable || []) {
+    const key = item.chatId || item.id;
+    if (!lanes.has(key)) lanes.set(key, []);
+    lanes.get(key).push(item);
+  }
+  await Promise.allSettled(Array.from(lanes.values()).map(async lane => {
+    for (const item of lane) {
+      const q = ensureTaskQueue();
+      if (!q.running || q.stopAllRequested || q.paused) break;
+      if (item.status !== 'pending') continue;
+      await _taskQueueRunItem(item);
+    }
+  }));
+}
+
 async function startTaskQueue() {
   const q = ensureTaskQueue();
   if (q.running) return;
@@ -924,7 +941,7 @@ async function startTaskQueue() {
       }
       saveTaskQueue();
       renderTaskQueueModal();
-      await Promise.allSettled(runnable.map(item => _taskQueueRunItem(item)));
+      await _taskQueueRunRunnableGroup(runnable);
       saveTaskQueue();
       renderTaskQueueModal();
       if (group.some(it => !TASK_QUEUE_DONE_STATUSES.has(it.status))) break;
@@ -1060,16 +1077,23 @@ async function _taskQueueRunItem(item) {
     renderTaskQueueModal();
 
     if (typeof clearPendingAIAttachments === 'function') clearPendingAIAttachments(c.id);
-    if (typeof ensureContextBeforeAgentRun === 'function') {
-      const ok = await ensureContextBeforeAgentRun(c, { label: '任务队列' });
-      if (!ok) throw new Error('自动压缩失败，任务队列已暂停该任务请求');
-    }
+    const beforeMessageCount = Array.isArray(c.messages) ? c.messages.length : 0;
     if (item.mode === 'outline') {
       await callAPIWithOutline({ chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
     } else if (item.mode === 'reflection') {
       await callAPIWithReflection({ chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
     } else {
       await callAPI(undefined, { chatId: c.id, useTools: item.useTools, suppressCompletionSound: true });
+    }
+    if (item.status === 'running'
+        && (((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : false)
+        || (Array.isArray(c.messages)
+          && c.messages.length === beforeMessageCount
+          && !c.messages.slice(beforeMessageCount).some(m => m && m.role === 'assistant')))) {
+      item.status = 'paused';
+      item.error = '该对话已有任务正在执行，已暂停等待重试';
+      item.pausedAt = Date.now();
+      return;
     }
 
     if (item.status === 'running') {

@@ -411,14 +411,20 @@ function applyImport() {
   updateSendBtn();
   
   const reflectBtn = document.getElementById('reflectBtn');
-  if (state.settings.useReflection) reflectBtn.classList.add('reflect-active');
-  else reflectBtn.classList.remove('reflect-active');
+  if (reflectBtn) {
+    if (state.settings.useReflection) reflectBtn.classList.add('reflect-active');
+    else reflectBtn.classList.remove('reflect-active');
+  }
   const toolsBtn = document.getElementById('toolsBtn');
-  if (state.settings.useTools) toolsBtn.classList.add('tool-active');
-  else toolsBtn.classList.remove('tool-active');
+  if (toolsBtn) {
+    if (state.settings.useTools) toolsBtn.classList.add('tool-active');
+    else toolsBtn.classList.remove('tool-active');
+  }
   const planBtn = document.getElementById('planBtn');
-  if (state.settings.usePlan) planBtn.classList.add('plan-active');
-  else planBtn.classList.remove('plan-active');
+  if (planBtn) {
+    if (state.settings.usePlan) planBtn.classList.add('plan-active');
+    else planBtn.classList.remove('plan-active');
+  }
   const outlineBtn = document.getElementById('outlineBtn');
   if (outlineBtn) {
     if (state.settings.useOutline) outlineBtn.classList.add('outline-active');

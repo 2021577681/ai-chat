@@ -13,6 +13,10 @@ async function callAPIWithReflection(options = {}) {
   const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   const suppressCompletionSound = !!options.suppressCompletionSound;
+  if (taskChatId && ((typeof isChatGenerating === 'function') ? isChatGenerating(taskChatId) : !!state.isGenerating)) {
+    if (typeof toast === 'function' && isCurrentChat(taskChatId)) toast('此对话已有任务正在执行，请稍等');
+    return;
+  }
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
   const abortCtrl = new AbortController();
   const task = (typeof beginChatTask === 'function')

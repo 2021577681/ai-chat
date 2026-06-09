@@ -5,7 +5,7 @@
 //
 // 数据结构（持久化到 IDB）：
 //   storage[PRICING_LIST_KEY] = [
-//     { key, input, output, cacheRead, note? }, ...
+//     { key, input, output, cacheRead, currency?, note? }, ...
 //   ]
 //   storage[PRICING_CONFIG_KEY] = { rate: 7.2, showCny: true }
 
@@ -25,6 +25,7 @@ const DEFAULT_PRICING = [
 
 const DEFAULT_FALLBACK = { input: 1.0, output: 3.0, cacheRead: 0.1 };  // 没匹配上时用
 const DEFAULT_CONFIG = { rate: 7.2, showCny: true };
+const PRICING_CURRENCIES = ['USD', 'CNY'];
 
 // ============ 读写工具 ============
 
@@ -71,26 +72,46 @@ function savePricingConfig(cfg) {
 // ============ 对外 API：tokens.js 用这个查价 ============
 
 // 根据模型名查匹配的价格条目（关键词包含匹配）
-// 返回 { input, output, cacheRead, matched }
+// 返回 { input, output, cacheRead, matched, currency, ... }
+//   input/output/cacheRead 始终是美元单价，用于现有费用计算。
 //   matched: 命中的 key（null 表示用了 fallback）
 function getPricing(modelName) {
-  if (!modelName) return { ...DEFAULT_FALLBACK, matched: null };
+  if (!modelName) return buildPricingResult(DEFAULT_FALLBACK, null);
   const list = loadPricingList();
   const lower = modelName.toLowerCase();
+  const rate = getExchangeRate();
   // 精确度优先：先按 key 长度倒序排（更长的 key 更具体）
   const sorted = [...list].sort((a, b) => (b.key || '').length - (a.key || '').length);
   for (const p of sorted) {
     if (!p.key) continue;
     if (lower.includes(p.key.toLowerCase())) {
-      return {
-        input: parseFloat(p.input) || 0,
-        output: parseFloat(p.output) || 0,
-        cacheRead: parseFloat(p.cacheRead) || 0,
-        matched: p.key
-      };
+      return buildPricingResult(p, p.key, rate);
     }
   }
-  return { ...DEFAULT_FALLBACK, matched: null };
+  return buildPricingResult(DEFAULT_FALLBACK, null, rate);
+}
+
+function buildPricingResult(row, matched, rate = getExchangeRate()) {
+  const p = normalizePricingRow(row);
+  const input = convertPricingToUsd(p.input, p.currency, rate);
+  const output = convertPricingToUsd(p.output, p.currency, rate);
+  const cacheRead = convertPricingToUsd(p.cacheRead, p.currency, rate);
+  return {
+    input,
+    output,
+    cacheRead,
+    matched,
+    currency: p.currency,
+    inputCurrency: p.currency,
+    outputCurrency: p.currency,
+    cacheReadCurrency: p.currency,
+    inputSource: parseFloat(p.input) || 0,
+    outputSource: parseFloat(p.output) || 0,
+    cacheReadSource: parseFloat(p.cacheRead) || 0,
+    inputLabel: formatPricingForResult(input, p.input, p.currency),
+    outputLabel: formatPricingForResult(output, p.output, p.currency),
+    cacheReadLabel: formatPricingForResult(cacheRead, p.cacheRead, p.currency)
+  };
 }
 
 // 获取汇率（USD → CNY）
@@ -100,6 +121,54 @@ function getExchangeRate() {
 
 function shouldShowCny() {
   return loadPricingConfig().showCny !== false;
+}
+
+function normalizePricingCurrency(value) {
+  const currency = String(value || 'USD').toUpperCase();
+  return PRICING_CURRENCIES.includes(currency) ? currency : 'USD';
+}
+
+function normalizePricingRow(p) {
+  const rowCurrency = inferPricingRowCurrency(p);
+  return {
+    ...(p || {}),
+    currency: rowCurrency
+  };
+}
+
+function inferPricingRowCurrency(p) {
+  if (!p) return 'USD';
+  if (p.currency) return normalizePricingCurrency(p.currency);
+  const legacyCurrencies = [p.inputCurrency, p.outputCurrency, p.cacheReadCurrency]
+    .map(normalizePricingCurrency);
+  return legacyCurrencies.includes('CNY') ? 'CNY' : 'USD';
+}
+
+function convertPricingToUsd(value, currency, rate) {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  const normalizedCurrency = normalizePricingCurrency(currency);
+  const normalizedRate = Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_CONFIG.rate;
+  return normalizedCurrency === 'CNY' ? n / normalizedRate : n;
+}
+
+function formatPriceNumber(value) {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n)) return '0';
+  return Number.isInteger(n) ? String(n) : String(parseFloat(n.toFixed(6)));
+}
+
+function formatConfiguredPrice(value, currency) {
+  const normalizedCurrency = normalizePricingCurrency(currency);
+  const symbol = normalizedCurrency === 'CNY' ? '¥' : '$';
+  return `${symbol}${formatPriceNumber(value)}`;
+}
+
+function formatPricingForResult(usdValue, sourceValue, currency) {
+  const normalizedCurrency = normalizePricingCurrency(currency);
+  const configured = formatConfiguredPrice(sourceValue, normalizedCurrency);
+  if (normalizedCurrency === 'USD') return configured;
+  return `${configured}（≈ $${formatPriceNumber(usdValue)}）`;
 }
 
 // ============ UI ============
@@ -131,6 +200,7 @@ function _buildPricingModal() {
       <div class="json-help">
         💡 在这里配置各模型的 token 单价，用于 Token 统计弹窗里的费用估算。<br>
         匹配规则：模型名只要 <strong>包含</strong> 关键词（不区分大小写），就按对应价格计算。
+        每行价格可选择美元或人民币；人民币会按上方汇率换算后参与估算。
         没匹配到的模型走"未匹配默认价"（$${DEFAULT_FALLBACK.input}/$${DEFAULT_FALLBACK.output} 每 M token）。
       </div>
 
@@ -152,7 +222,7 @@ function _buildPricingModal() {
       </div>
 
       <div class="pricing-section-title">
-        <span>📋 价格表（每 1M token，美元）</span>
+        <span>📋 价格表（每 1M token）</span>
         <span class="pricing-section-hint">优先级按"关键词长度"自动排序，越具体越优先</span>
       </div>
 
@@ -160,12 +230,13 @@ function _buildPricingModal() {
         <table class="pricing-table" id="pricingTable">
           <thead>
             <tr>
-              <th style="width:24%;">模型关键词</th>
+              <th style="width:22%;">模型关键词</th>
+              <th style="width:12%;">单位</th>
               <th class="num" style="width:14%;">输入价 /M</th>
               <th class="num" style="width:14%;">输出价 /M</th>
               <th class="num" style="width:14%;">缓存读 /M</th>
-              <th style="width:24%;">备注</th>
-              <th class="act" style="width:10%;">操作</th>
+              <th style="width:16%;">备注</th>
+              <th class="act" style="width:8%;">操作</th>
             </tr>
           </thead>
           <tbody id="pricingTableBody"></tbody>
@@ -205,9 +276,9 @@ function _buildPricingModal() {
 function renderPricingTable() {
   const tbody = document.getElementById('pricingTableBody');
   if (!tbody) return;
-  const list = loadPricingList();
+  const list = loadPricingList().map(normalizePricingRow);
   if (!list.length) {
-    tbody.innerHTML = `<tr class="pricing-empty"><td colspan="6">暂无价格条目，点击 <strong>➕ 添加价格</strong> 或 <strong>↩ 恢复默认</strong> 开始</td></tr>`;
+    tbody.innerHTML = `<tr class="pricing-empty"><td colspan="7">暂无价格条目，点击 <strong>➕ 添加价格</strong> 或 <strong>↩ 恢复默认</strong> 开始</td></tr>`;
     return;
   }
   tbody.innerHTML = list.map((p, i) => _renderPricingRow(p, i)).join('');
@@ -215,18 +286,44 @@ function renderPricingTable() {
 
 // 单行渲染（复用于初始 / 增 / 删后重渲）
 function _renderPricingRow(p, i) {
+  const row = normalizePricingRow(p);
   return `
     <tr data-idx="${i}">
-      <td><input type="text"   class="pricing-input pricing-key"   value="${escapeHtml(p.key || '')}"  placeholder="如 gpt-4o" /></td>
-      <td><input type="number" class="pricing-input pricing-in"    value="${p.input}"     step="0.001" min="0" /></td>
-      <td><input type="number" class="pricing-input pricing-out"   value="${p.output}"    step="0.001" min="0" /></td>
-      <td><input type="number" class="pricing-input pricing-cache" value="${p.cacheRead}" step="0.001" min="0" /></td>
-      <td><input type="text"   class="pricing-input pricing-note"  value="${escapeHtml(p.note || '')}" placeholder="可选" /></td>
+      <td><input type="text"   class="pricing-input pricing-key"   value="${escapeHtml(row.key || '')}"  placeholder="如 gpt-4o" /></td>
+      <td>${renderCurrencyField(row.currency)}</td>
+      <td><input type="number" class="pricing-input pricing-in"    value="${formatPriceNumber(row.input)}"     step="0.001" min="0" /></td>
+      <td><input type="number" class="pricing-input pricing-out"   value="${formatPriceNumber(row.output)}"    step="0.001" min="0" /></td>
+      <td><input type="number" class="pricing-input pricing-cache" value="${formatPriceNumber(row.cacheRead)}" step="0.001" min="0" /></td>
+      <td><input type="text"   class="pricing-input pricing-note"  value="${escapeHtml(row.note || '')}" placeholder="可选" /></td>
       <td style="text-align:center;">
         <button class="pricing-row-del" onclick="removePricingRow(${i})" title="删除此行">×</button>
       </td>
     </tr>
   `;
+}
+
+function renderCurrencyField(currency) {
+  const normalizedCurrency = normalizePricingCurrency(currency);
+  return `
+    <div class="pricing-currency-segment" role="group" aria-label="价格单位">
+      <input type="hidden" class="pricing-currency-value pricing-currency" value="${normalizedCurrency}" />
+      <button type="button" class="pricing-currency-option${normalizedCurrency === 'USD' ? ' active' : ''}" aria-pressed="${normalizedCurrency === 'USD'}" onclick="setPricingCurrency(this,'USD')">USD</button>
+      <button type="button" class="pricing-currency-option${normalizedCurrency === 'CNY' ? ' active' : ''}" aria-pressed="${normalizedCurrency === 'CNY'}" onclick="setPricingCurrency(this,'CNY')">CNY</button>
+    </div>
+  `;
+}
+
+function setPricingCurrency(btn, currency) {
+  const field = btn && btn.closest('.pricing-currency-segment');
+  if (!field) return;
+  const normalizedCurrency = normalizePricingCurrency(currency);
+  const valueEl = field.querySelector('.pricing-currency-value');
+  if (valueEl) valueEl.value = normalizedCurrency;
+  field.querySelectorAll('.pricing-currency-option').forEach(option => {
+    const active = option.textContent.trim().toUpperCase() === normalizedCurrency;
+    option.classList.toggle('active', active);
+    option.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 function renderPricingConfig() {
@@ -238,9 +335,10 @@ function renderPricingConfig() {
 }
 
 // 从 UI 表格收集所有行，返回数组（不写库）
-function _collectPricingFromUI() {
+function _collectPricingFromUI(options = {}) {
   const tbody = document.getElementById('pricingTableBody');
   if (!tbody) return [];
+  const includeEmpty = options.includeEmpty === true;
   const rows = tbody.querySelectorAll('tr[data-idx]');
   const out = [];
   rows.forEach(tr => {
@@ -248,13 +346,15 @@ function _collectPricingFromUI() {
     const input = parseFloat(tr.querySelector('.pricing-in').value);
     const output = parseFloat(tr.querySelector('.pricing-out').value);
     const cacheRead = parseFloat(tr.querySelector('.pricing-cache').value);
+    const currency = normalizePricingCurrency(tr.querySelector('.pricing-currency')?.value);
     const note = tr.querySelector('.pricing-note').value.trim();
-    if (!key) return;  // 空 key 直接跳过
+    if (!key && !includeEmpty) return;  // 空 key 直接跳过
     out.push({
       key,
       input: isNaN(input) ? 0 : input,
       output: isNaN(output) ? 0 : output,
       cacheRead: isNaN(cacheRead) ? 0 : cacheRead,
+      currency,
       note: note || undefined
     });
   });
@@ -264,26 +364,17 @@ function _collectPricingFromUI() {
 function addPricingRow() {
   // 先把当前 UI 收集到内存，加一条空行，再渲染
   const current = _collectPricingFromUI();
-  current.push({ key: '', input: 0, output: 0, cacheRead: 0, note: '' });
+  current.push({ key: '', input: 0, output: 0, cacheRead: 0, currency: 'USD', note: '' });
   // 临时存到 UI 上（不入库），靠下次保存写库
   _renderListInMemory(current);
 }
 
 function removePricingRow(idx) {
-  const current = _collectPricingFromUI();
-  // 如果当前行 key 为空，可能上面 _collectPricingFromUI 已经过滤了，重新按 DOM 索引删
   const tbody = document.getElementById('pricingTableBody');
-  if (tbody) {
-    const tr = tbody.querySelector(`tr[data-idx="${idx}"]`);
-    if (tr) tr.remove();
-  }
-  // 重排 data-idx
-  const remaining = [];
-  if (tbody) {
-    tbody.querySelectorAll('tr[data-idx]').forEach((tr, i) => {
-      tr.dataset.idx = i;
-    });
-  }
+  if (!tbody) return;
+  const tr = tbody.querySelector(`tr[data-idx="${idx}"]`);
+  if (tr) tr.remove();
+  _renderListInMemory(_collectPricingFromUI({ includeEmpty: true }));
 }
 
 // 在不写库的前提下，用给定数组重新渲染表格
@@ -291,7 +382,7 @@ function _renderListInMemory(list) {
   const tbody = document.getElementById('pricingTableBody');
   if (!tbody) return;
   if (!list.length) {
-    tbody.innerHTML = `<tr class="pricing-empty"><td colspan="6">暂无价格条目</td></tr>`;
+    tbody.innerHTML = `<tr class="pricing-empty"><td colspan="7">暂无价格条目</td></tr>`;
     return;
   }
   tbody.innerHTML = list.map((p, i) => _renderPricingRow(p, i)).join('');
@@ -332,13 +423,13 @@ function testPricingMatch() {
     el.className = 'pricing-test-result show ok';
     el.innerHTML = `
       ✅ 模型 <code>${escapeHtml(model)}</code> 匹配到关键词 <code>${escapeHtml(result.matched)}</code><br>
-      <span style="color:var(--text-secondary);">输入 <strong>$${result.input}</strong>/M · 输出 <strong>$${result.output}</strong>/M · 缓存 <strong>$${result.cacheRead}</strong>/M</span>
+      <span style="color:var(--text-secondary);">输入 <strong>${result.inputLabel}</strong>/M · 输出 <strong>${result.outputLabel}</strong>/M · 缓存 <strong>${result.cacheReadLabel}</strong>/M</span>
     `;
   } else {
     el.className = 'pricing-test-result show warn';
     el.innerHTML = `
       ⚠️ 模型 <code>${escapeHtml(model)}</code> 未匹配任何关键词，使用默认价<br>
-      <span style="color:var(--text-secondary);">输入 <strong>$${result.input}</strong>/M · 输出 <strong>$${result.output}</strong>/M · 缓存 <strong>$${result.cacheRead}</strong>/M</span>
+      <span style="color:var(--text-secondary);">输入 <strong>${result.inputLabel}</strong>/M · 输出 <strong>${result.outputLabel}</strong>/M · 缓存 <strong>${result.cacheReadLabel}</strong>/M</span>
     `;
   }
 }
@@ -355,3 +446,4 @@ window.savePricingListFromUI = savePricingListFromUI;
 window.savePricingConfigFromUI = savePricingConfigFromUI;
 window.resetPricingToDefault = resetPricingToDefault;
 window.testPricingMatch = testPricingMatch;
+window.setPricingCurrency = setPricingCurrency;

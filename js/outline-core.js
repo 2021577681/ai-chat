@@ -500,6 +500,10 @@ async function callAPIWithOutline(options = {}) {
   const s = state.settings;
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   const suppressCompletionSound = !!options.suppressCompletionSound;
+  if (((typeof isChatGenerating === 'function') ? isChatGenerating(taskChatId) : !!state.isGenerating)) {
+    if (typeof toast === 'function' && isCurrentChat(taskChatId)) toast('此对话已有任务正在执行，请稍等');
+    return;
+  }
   
   let abortCtrl = new AbortController();
   const task = (typeof beginChatTask === 'function')
@@ -803,7 +807,11 @@ async function callAPIWithOutline(options = {}) {
         const ok = await ensureContextBeforeAgentRun(c, {
           label: '大纲模式',
           extraMessages: conversationMessages,
-          mutableMessages: conversationMessages
+          mutableMessages: conversationMessages,
+          chat: c,
+          chatId: taskChatId,
+          signal: abortSignal,
+          isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
         });
         if (!ok) throw new Error('自动压缩失败，已暂停大纲模式请求');
       }

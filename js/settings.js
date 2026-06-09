@@ -66,12 +66,6 @@ function openSettings() {
   if (compThresholdVal) compThresholdVal.textContent = (s.compressAutoThreshold || 75) + '%';
   if (compKeep) compKeep.value = s.compressKeepLast || 4;
   if (compKeepVal) compKeepVal.textContent = s.compressKeepLast || 4;
-  const contextMode = document.getElementById('contextLimitMode');
-  const contextOverride = document.getElementById('contextLimitOverride');
-  if (contextMode) contextMode.value = s.contextLimitMode === 'manual' ? 'manual' : 'auto';
-  if (contextOverride) contextOverride.value = s.contextLimitOverride ? s.contextLimitOverride : '';
-  updateContextLimitModeUI();
-  
   // 🧪 自动信标
   const bEnabled = document.getElementById('beaconEnabled');
   const bInterval = document.getElementById('beaconInterval');
@@ -95,71 +89,220 @@ function currentSettingsModelName() {
 }
 
 function updateContextLimitModeUI() {
-  const modeEl = document.getElementById('contextLimitMode');
-  const inputEl = document.getElementById('contextLimitOverride');
-  const hintEl = document.getElementById('contextLimitHint');
-  if (!modeEl || !inputEl) return;
-  const isManual = modeEl.value === 'manual';
-  inputEl.disabled = !isManual;
-  inputEl.placeholder = isManual ? '例如 200000' : '自动识别时不需要填写';
-  
-  if (hintEl) {
-    const model = currentSettingsModelName();
-    const autoLimit = typeof getAutoContextLimit === 'function'
-      ? getAutoContextLimit(model)
-      : 200000;
-    const autoText = typeof formatNumber === 'function' ? formatNumber(autoLimit) : String(autoLimit);
-    if (isManual) {
-      hintEl.textContent = `当前模型自动识别值：${autoText} tokens；手动值会覆盖它并影响 token 条、自动压缩和长流程上下文检查。`;
-    } else {
-      hintEl.textContent = `当前模型自动识别值：${autoText} tokens。未知模型默认按 200k 估算。`;
-    }
-  }
+  renderContextLimitStatus();
 }
 
 function readContextLimitSettingsFromModal() {
-  const s = state.settings;
-  const modeEl = document.getElementById('contextLimitMode');
-  const inputEl = document.getElementById('contextLimitOverride');
-  if (!modeEl || !inputEl) return true;
-  const mode = modeEl.value === 'manual' ? 'manual' : 'auto';
-  const raw = inputEl.value.trim();
-  const n = parseInt(raw);
-  
-  if (mode === 'manual') {
-    if (!Number.isFinite(n) || n < 1024) {
-      toast('手动上下文长度至少需要 1024 tokens');
-      inputEl.focus();
-      return false;
-    }
-    s.contextLimitMode = 'manual';
-    s.contextLimitOverride = Math.min(n, 4000000);
-    inputEl.value = s.contextLimitOverride;
-  } else {
-    s.contextLimitMode = 'auto';
-    if (Number.isFinite(n) && n > 0) {
-      s.contextLimitOverride = Math.min(Math.max(n, 1024), 4000000);
-    }
-  }
   return true;
 }
 
 function openContextLimitSettings() {
   const wrap = document.querySelector('.more-menu-wrap');
   if (wrap) wrap.classList.remove('open');
-  openSettings();
-  setTimeout(() => {
-    const group = document.getElementById('contextLimitSettingsGroup');
-    if (group) {
-      group.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      group.classList.add('settings-focus');
-      setTimeout(() => group.classList.remove('settings-focus'), 1800);
-    }
-    const modeEl = document.getElementById('contextLimitMode');
-    const inputEl = document.getElementById('contextLimitOverride');
-    if (state.settings.contextLimitMode === 'manual' && inputEl) inputEl.focus();
-    else if (modeEl) modeEl.focus();
-  }, 80);
+  let modal = document.getElementById('contextLimitModal');
+  if (!modal) {
+    modal = buildContextLimitModal();
+    document.body.appendChild(modal);
+  }
+  renderContextLimitTable();
+  renderContextLimitStatus();
+  modal.classList.add('show');
+}
+
+function closeContextLimitSettings() {
+  const modal = document.getElementById('contextLimitModal');
+  if (modal) modal.classList.remove('show');
+}
+
+function buildContextLimitModal() {
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-mask context-limit-modal';
+  wrap.id = 'contextLimitModal';
+  wrap.innerHTML = `
+    <div class="modal wide">
+      <h2>📐 上下文长度 <button class="modal-close" onclick="closeContextLimitSettings()">×</button></h2>
+
+      <div class="json-help">
+        💡 模型名只要 <strong>包含</strong> 关键词（不区分大小写），就按对应上下文长度计算 token 条、自动压缩和长流程上下文检查。<br>
+        多条命中时优先使用关键词更长的规则；未命中时使用内置自动识别，未知模型默认按 200k tokens。
+      </div>
+
+      <div class="pricing-section-title">
+        <span>📌 当前模型</span>
+        <span class="pricing-section-hint">保存规则后会立即刷新 token 条</span>
+      </div>
+      <div id="contextLimitStatus" class="context-limit-status"></div>
+
+      <div class="pricing-section-title">
+        <span>📋 匹配规则</span>
+        <span class="pricing-section-hint">越具体的关键词越优先</span>
+      </div>
+
+      <div class="pricing-table-wrap">
+        <table class="pricing-table context-limit-table" id="contextLimitTable">
+          <thead>
+            <tr>
+              <th style="width:38%;">模型关键词</th>
+              <th class="num" style="width:24%;">上下文长度 tokens</th>
+              <th style="width:28%;">备注</th>
+              <th class="act" style="width:10%;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="contextLimitTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="pricing-toolbar">
+        <button class="pricing-btn pricing-btn-primary" onclick="addContextLimitRow()">
+          <span>➕</span><span>添加规则</span>
+        </button>
+        <button class="pricing-btn pricing-btn-success" onclick="saveContextLimitRulesFromUI()">
+          <span>💾</span><span>保存规则</span>
+        </button>
+        <button class="pricing-btn" onclick="testContextLimitMatch()">
+          <span>🔍</span><span>测试匹配</span>
+        </button>
+        <div class="pricing-btn-spacer"></div>
+        <button class="pricing-btn pricing-btn-warning" onclick="resetContextLimitRulesToDefault()">
+          <span>↩</span><span>恢复默认</span>
+        </button>
+      </div>
+
+      <div id="contextLimitTestResult" class="pricing-test-result"></div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeContextLimitSettings()">关闭</button>
+      </div>
+    </div>
+  `;
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap) closeContextLimitSettings();
+  });
+  return wrap;
+}
+
+function renderContextLimitStatus() {
+  const el = document.getElementById('contextLimitStatus');
+  if (!el) return;
+  const model = state.settings.currentModel || currentSettingsModelName();
+  const info = typeof getContextLimitInfo === 'function'
+    ? getContextLimitInfo(model)
+    : { limit: 200000, autoLimit: 200000, mode: 'auto', label: '自动识别' };
+  const fmt = typeof formatNumber === 'function' ? formatNumber : n => String(n);
+  const matchText = info.mode === 'matched'
+    ? `命中关键词：<code>${escapeHtml(info.matchedKey || '')}</code>`
+    : `未命中自定义规则，${info.label}`;
+  el.innerHTML = `
+    <div><strong>模型：</strong><code>${escapeHtml(model || 'unknown')}</code></div>
+    <div><strong>当前上下文：</strong>${fmt(info.limit)} tokens <span style="color:var(--text-secondary);">（${matchText}；内置识别 ${fmt(info.autoLimit)}）</span></div>
+  `;
+}
+
+function renderContextLimitTable() {
+  const tbody = document.getElementById('contextLimitTableBody');
+  if (!tbody) return;
+  const list = typeof loadContextLimitRules === 'function' ? loadContextLimitRules() : [];
+  if (!list.length) {
+    tbody.innerHTML = `<tr class="pricing-empty"><td colspan="4">暂无规则，点击 <strong>➕ 添加规则</strong> 或 <strong>↩ 恢复默认</strong> 开始</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = list.map((rule, i) => renderContextLimitRow(rule, i)).join('');
+}
+
+function renderContextLimitRow(rule, i) {
+  return `
+    <tr data-idx="${i}">
+      <td><input type="text" class="pricing-input context-limit-key" value="${escapeHtml(rule.key || '')}" placeholder="如 gpt-4o" /></td>
+      <td><input type="number" class="pricing-input context-limit-value" value="${rule.limit || 0}" min="1024" max="4000000" step="1000" /></td>
+      <td><input type="text" class="pricing-input context-limit-note" value="${escapeHtml(rule.note || '')}" placeholder="可选" /></td>
+      <td style="text-align:center;">
+        <button class="pricing-row-del" onclick="removeContextLimitRow(${i})" title="删除此规则">×</button>
+      </td>
+    </tr>
+  `;
+}
+
+function collectContextLimitRulesFromUI(options = {}) {
+  const tbody = document.getElementById('contextLimitTableBody');
+  if (!tbody) return [];
+  const includeEmpty = options.includeEmpty === true;
+  const rows = tbody.querySelectorAll('tr[data-idx]');
+  const out = [];
+  rows.forEach(tr => {
+    const key = tr.querySelector('.context-limit-key')?.value.trim() || '';
+    const rawLimit = tr.querySelector('.context-limit-value')?.value;
+    const note = tr.querySelector('.context-limit-note')?.value.trim() || '';
+    const limit = typeof normalizeContextLimitOverride === 'function'
+      ? normalizeContextLimitOverride(rawLimit)
+      : Math.max(1024, Math.min(4000000, parseInt(rawLimit) || 0));
+    if (!key && !includeEmpty) return;
+    out.push({ key, limit, note: note || undefined });
+  });
+  return out;
+}
+
+function renderContextLimitListInMemory(list) {
+  const tbody = document.getElementById('contextLimitTableBody');
+  if (!tbody) return;
+  if (!list.length) {
+    tbody.innerHTML = `<tr class="pricing-empty"><td colspan="4">暂无规则</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = list.map((rule, i) => renderContextLimitRow(rule, i)).join('');
+}
+
+function addContextLimitRow() {
+  const current = collectContextLimitRulesFromUI();
+  current.push({ key: '', limit: 200000, note: '' });
+  renderContextLimitListInMemory(current);
+}
+
+function removeContextLimitRow(idx) {
+  const tbody = document.getElementById('contextLimitTableBody');
+  if (!tbody) return;
+  const tr = tbody.querySelector(`tr[data-idx="${idx}"]`);
+  if (tr) tr.remove();
+  renderContextLimitListInMemory(collectContextLimitRulesFromUI({ includeEmpty: true }));
+}
+
+function saveContextLimitRulesFromUI() {
+  const list = collectContextLimitRulesFromUI();
+  if (typeof saveContextLimitRules === 'function') saveContextLimitRules(list);
+  if (typeof toast === 'function') toast(`✓ 已保存 ${list.length} 条上下文规则`);
+  renderContextLimitTable();
+  renderContextLimitStatus();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount();
+}
+
+function resetContextLimitRulesToDefault() {
+  if (!confirm('确定恢复为默认上下文长度规则？\n\n你当前的自定义规则会被覆盖。')) return;
+  const defaults = typeof DEFAULT_CONTEXT_LIMIT_RULES !== 'undefined'
+    ? DEFAULT_CONTEXT_LIMIT_RULES.map(x => ({ ...x }))
+    : [];
+  if (typeof saveContextLimitRules === 'function') saveContextLimitRules(defaults);
+  renderContextLimitTable();
+  renderContextLimitStatus();
+  if (typeof toast === 'function') toast('↩ 已恢复默认上下文规则');
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+}
+
+function testContextLimitMatch() {
+  const model = prompt('输入一个模型名测试匹配结果：', state.settings.currentModel || 'gpt-4o-mini');
+  if (model === null) return;
+  const result = typeof getContextLimitInfo === 'function'
+    ? getContextLimitInfo(model.trim())
+    : { limit: 200000, autoLimit: 200000, mode: 'auto', label: '自动识别' };
+  const el = document.getElementById('contextLimitTestResult');
+  if (!el) return;
+  const fmt = typeof formatNumber === 'function' ? formatNumber : n => String(n);
+  if (result.mode === 'matched') {
+    el.className = 'pricing-test-result show ok';
+    el.innerHTML = `✅ 模型 <code>${escapeHtml(model)}</code> 匹配到关键词 <code>${escapeHtml(result.matchedKey || '')}</code><br><span style="color:var(--text-secondary);">上下文长度 <strong>${fmt(result.limit)}</strong> tokens</span>`;
+  } else {
+    el.className = 'pricing-test-result show warn';
+    el.innerHTML = `⚠️ 模型 <code>${escapeHtml(model)}</code> 未匹配自定义规则，使用内置识别<br><span style="color:var(--text-secondary);">上下文长度 <strong>${fmt(result.limit)}</strong> tokens</span>`;
+  }
 }
 
 function closeSettings() {
@@ -213,7 +356,6 @@ function saveAndClose() {
   if (compEnabled) s.compressAutoEnabled = compEnabled.checked;
   if (compThreshold) s.compressAutoThreshold = parseInt(compThreshold.value);
   if (compKeep) s.compressKeepLast = parseInt(compKeep.value);
-  if (!readContextLimitSettingsFromModal()) return false;
   
   // 🧪 自动信标
   const bEnabled = document.getElementById('beaconEnabled');
@@ -705,4 +847,10 @@ window.confirmAddFetchedModels = confirmAddFetchedModels;
 window.openFetchModelsModal = openFetchModelsModal;
 window.closeFetchModelsModal = closeFetchModelsModal;
 window.openContextLimitSettings = openContextLimitSettings;
+window.closeContextLimitSettings = closeContextLimitSettings;
 window.updateContextLimitModeUI = updateContextLimitModeUI;
+window.addContextLimitRow = addContextLimitRow;
+window.removeContextLimitRow = removeContextLimitRow;
+window.saveContextLimitRulesFromUI = saveContextLimitRulesFromUI;
+window.resetContextLimitRulesToDefault = resetContextLimitRulesToDefault;
+window.testContextLimitMatch = testContextLimitMatch;

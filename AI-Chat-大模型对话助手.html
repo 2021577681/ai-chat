@@ -226,7 +226,7 @@
         <span>模型名称</span>
         <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" onclick="onFetchModels()">📡 拉取模型</button>
       </label>
-      <input type="text" id="modelName" oninput="updateContextLimitModeUI()">
+      <input type="text" id="modelName">
       <div class="form-hint">多个用逗号分隔。点【📡 拉取模型】可从服务商自动获取可用列表</div>
     </div>
     
@@ -303,24 +303,6 @@
     <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
     <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🗜️ 上下文压缩</h3>
 
-    <div class="form-group" id="contextLimitSettingsGroup">
-      <label>模型上下文长度</label>
-      <div class="form-row two-cols" style="margin-bottom:0;">
-        <div>
-          <label>模式</label>
-          <select id="contextLimitMode" onchange="updateContextLimitModeUI()">
-            <option value="auto">按模型自动识别</option>
-            <option value="manual">手动指定</option>
-          </select>
-        </div>
-        <div>
-          <label>手动 token 数</label>
-          <input type="number" id="contextLimitOverride" min="1024" max="4000000" step="1000" oninput="updateContextLimitModeUI()">
-        </div>
-      </div>
-      <div class="form-hint" id="contextLimitHint">当前模型自动识别值：-</div>
-    </div>
-    
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div>
         <label style="margin:0;">自动压缩</label>
@@ -1140,7 +1122,7 @@
         <div class="settings-page-sub">AI Chat</div>
       </div>
     </div>
-    <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、上下文、代理和本地授权。" onclick="openSettingsSection('main')"><span>⚙</span><span>主设置</span></button>
+    <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、代理和本地授权。" onclick="openSettingsSection('main')"><span>⚙</span><span>主设置</span></button>
     <button class="settings-nav-item" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。" onclick="openSettingsSection('plan')"><span>📋</span><span>计划模式</span></button>
     <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span>📑</span><span>大纲模式</span></button>
     <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span>🎭</span><span>师生讨论</span></button>
@@ -1153,14 +1135,14 @@
     <button class="settings-nav-item" data-settings-section="permissions" data-desc="管理工具调用授权、临时权限和本地敏感凭证。" onclick="openSettingsSection('permissions')"><span>🔐</span><span>权限管理</span></button>
     <button class="settings-nav-item" data-settings-section="pricing" data-desc="配置模型 token 单价和费用估算规则。" onclick="openSettingsSection('pricing')"><span>💰</span><span>定价管理</span></button>
     <button class="settings-nav-item" data-settings-section="tokenUsage" data-desc="查看全局 token 使用、费用估算和历史账本。" onclick="openSettingsSection('tokenUsage')"><span>📊</span><span>Token 统计</span></button>
-    <button class="settings-nav-item" data-settings-section="contextLimit" data-desc="快速定位到主设置中的模型上下文和自动压缩配置。" onclick="openSettingsSection('contextLimit')"><span>📐</span><span>上下文长度</span></button>
+    <button class="settings-nav-item" data-settings-section="contextLimit" data-desc="按模型关键词配置上下文长度匹配规则。" onclick="openSettingsSection('contextLimit')"><span>📐</span><span>上下文长度</span></button>
     <button class="settings-nav-item" data-settings-section="git" data-desc="查看仓库状态、提交历史、文件 diff 和提交操作。" onclick="openSettingsSection('git')"><span>🌿</span><span>Git 管理</span></button>
   </aside>
   <main class="settings-page-main">
     <div class="settings-page-top">
       <div>
         <h1 id="settingsPageHeading">主设置</h1>
-        <p id="settingsPageDesc">管理 API、模型、上下文、代理和本地授权。</p>
+        <p id="settingsPageDesc">管理 API、模型、代理和本地授权。</p>
       </div>
       <div class="settings-page-actions">
         <button class="settings-theme-btn" onclick="toggleTheme()" id="themeBtn" title="切换主题">🌙</button>
