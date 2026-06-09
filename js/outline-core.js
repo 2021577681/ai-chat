@@ -527,6 +527,21 @@ async function callAPIWithOutline(options = {}) {
   let conversationMessages, finalAnswer, completedNaturally, taskProfile;
   let startLoop, model, systemPrompt, maxRounds, history;
   let stoppedByToolPolicy = false;
+
+  // 实时把状态写入 outline._snap，方便暂停/异常/强制中断后恢复。
+  const saveSnap = (nextLoop) => {
+    if (!aiMsg || !aiMsg.outline) return;
+    aiMsg.outline._snap = {
+      conversationMessages: (conversationMessages || []).slice(),
+      finalAnswer: finalAnswer || '',
+      nextLoop,
+      model,
+      systemPrompt,
+      maxRounds,
+      history,
+      taskProfile
+    };
+  };
   
   if (options.resumeFromMsgIdx !== undefined) {
     // ===== 恢复模式 =====
@@ -612,6 +627,14 @@ async function callAPIWithOutline(options = {}) {
     
     history = c.messages.slice(0, -1);
     model = (s.outlineModel || '').trim() || s.currentModel;
+    maxRounds = aiMsg.outline.maxRounds;
+    conversationMessages = [];
+    finalAnswer = '';
+    completedNaturally = false;
+    startLoop = 0;
+    taskProfile = outlineFallbackTaskProfile(history, '任务分类尚未完成，已建立初始恢复点。');
+    systemPrompt = buildOutlineSystemPromptForProfile(s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, history, taskProfile);
+    saveSnap(0);
     aiMsg.outline.progressText = '🧭 识别任务类型...';
     if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     try {
@@ -623,6 +646,17 @@ async function callAPIWithOutline(options = {}) {
       });
     } catch (e) {
       if (e && e.name === 'AbortError') {
+        if (aiMsg.outline.status === 'error') {
+          aiMsg.outline.inProgress = false;
+          delete aiMsg.outline.progressText;
+          if (!aiMsg._endTime) aiMsg._endTime = Date.now();
+          if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
+          if (typeof updateSendBtn === 'function') updateSendBtn();
+          if (typeof renderChatList === 'function') renderChatList();
+          if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+          saveData();
+          return;
+        }
         aiMsg.content = (aiMsg.content || '') + '\n\n*[任务分类已停止]*';
         aiMsg.outline.status = 'cancelled';
         aiMsg.outline.inProgress = false;
@@ -639,11 +673,7 @@ async function callAPIWithOutline(options = {}) {
     }
     aiMsg.outline.taskProfile = taskProfile;
     systemPrompt = buildOutlineSystemPromptForProfile(s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, history, taskProfile);
-    maxRounds = aiMsg.outline.maxRounds;
-    conversationMessages = [];
-    finalAnswer = '';
-    completedNaturally = false;
-    startLoop = 0;
+    saveSnap(startLoop);
   }
   
   const onUpdate = () => {
@@ -662,20 +692,6 @@ async function callAPIWithOutline(options = {}) {
       err.name = 'AbortError';
       throw err;
     }
-  };
-  
-  // 实时把状态写入 outline._snap，方便暂停后恢复
-  const saveSnap = (nextLoop) => {
-    aiMsg.outline._snap = {
-      conversationMessages: conversationMessages.slice(),
-      finalAnswer,
-      nextLoop,
-      model,
-      systemPrompt,
-      maxRounds,
-      history,
-      taskProfile
-    };
   };
   
   try {
@@ -765,9 +781,12 @@ async function callAPIWithOutline(options = {}) {
           }
         }
         
+        const fixedMsgs = (typeof fixAnthropicMessageSequence === 'function')
+          ? fixAnthropicMessageSequence(allMsgs)
+          : allMsgs;
         body = {
           model,
-          messages: allMsgs,
+          messages: fixedMsgs,
           max_tokens: parseInt(s.maxTokens),
           temperature: parseFloat(s.temperature),
           stream: false,
@@ -792,9 +811,12 @@ async function callAPIWithOutline(options = {}) {
           ...baseMsgs,
           ...conversationMessages
         ];
+        const fixedMsgs = (typeof fixOpenAIMessageSequence === 'function')
+          ? fixOpenAIMessageSequence(allMsgs)
+          : allMsgs;
         body = {
           model,
-          messages: allMsgs,
+          messages: fixedMsgs,
           temperature: parseFloat(s.temperature),
           max_tokens: parseInt(s.maxTokens),
           stream: false
@@ -1293,9 +1315,12 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
       }
     }
     
+    const fixedMsgs = (typeof fixAnthropicMessageSequence === 'function')
+      ? fixAnthropicMessageSequence(allMsgs)
+      : allMsgs;
     body = {
       model,
-      messages: allMsgs,
+      messages: fixedMsgs,
       max_tokens: parseInt(s.maxTokens),
       temperature: parseFloat(s.temperature),
       stream: false,
@@ -1326,9 +1351,12 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
       ...conversationMessages,
       { role: 'user', content: finalUserMsg }
     ];
+    const fixedMsgs = (typeof fixOpenAIMessageSequence === 'function')
+      ? fixOpenAIMessageSequence(allMsgs)
+      : allMsgs;
     body = {
       model,
-      messages: allMsgs,
+      messages: fixedMsgs,
       temperature: parseFloat(s.temperature),
       max_tokens: parseInt(s.maxTokens),
       stream: false
