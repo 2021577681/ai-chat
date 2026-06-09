@@ -134,7 +134,7 @@ body{
 .chat-item{
   border-radius:999px;
   margin:2px 0;
-  padding:10px 12px;
+  padding:10px 8px 10px 12px;
   color:var(--text);
   transition:background .15s,color .15s;
 }
@@ -153,12 +153,40 @@ body{
   background:#303134;
 }
 
-.chat-item-del{
+.chat-item-menu-btn{
   border-radius:999px;
+  color:var(--text-secondary);
 }
 
-.chat-item-del:hover{
-  background:rgba(217,48,37,.10);
+.chat-item-menu-btn:hover,
+.chat-item-menu-wrap:focus-within .chat-item-menu-btn{
+  background:rgba(60,64,67,.08);
+  color:var(--text);
+}
+
+.chat-item-menu{
+  background:var(--gemini-surface);
+  border:1px solid var(--border);
+  border-radius:16px;
+  box-shadow:var(--gemini-shadow-lg);
+  padding:8px;
+}
+
+.chat-item-menu-entry{
+  border-radius:12px;
+  color:var(--text);
+}
+
+.chat-item-menu-entry:hover,
+.chat-item-menu-entry:focus-visible{
+  background:var(--bg-hover);
+  color:var(--text);
+}
+
+.chat-item-menu-entry.danger,
+.chat-item-menu-entry.danger:hover,
+.chat-item-menu-entry.danger:focus-visible{
+  color:var(--danger);
 }
 
 .sidebar-footer{

@@ -79,15 +79,103 @@ function switchChat(id) {
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
+function sidebarChats() {
+  return (state.chats || [])
+    .map((chat, index) => ({ chat, index }))
+    .sort((a, b) => {
+      const ap = Number(a.chat && a.chat.pinnedAt) || 0;
+      const bp = Number(b.chat && b.chat.pinnedAt) || 0;
+      if (ap || bp) {
+        if (ap !== bp) return bp - ap;
+        if (ap && bp) return a.index - b.index;
+      }
+      return a.index - b.index;
+    })
+    .map(item => item.chat);
+}
+
+function togglePinChat(id, e) {
+  if (e) e.stopPropagation();
+  const c = chatById(id);
+  if (!c) return;
+  if (c.pinnedAt) {
+    delete c.pinnedAt;
+    if (typeof toast === 'function') toast('已取消置顶');
+  } else {
+    c.pinnedAt = Date.now();
+    if (typeof toast === 'function') toast('已置顶');
+  }
+  saveData();
+  renderChatList();
+}
+
+function renameChat(id, e) {
+  if (e) e.stopPropagation();
+  const c = chatById(id);
+  if (!c) return;
+  const raw = prompt('重命名对话', c.title || '新对话');
+  if (raw === null) return;
+  const title = raw.trim();
+  if (!title) {
+    if (typeof toast === 'function') toast('名称不能为空');
+    return;
+  }
+  c.title = title.slice(0, 80);
+  saveData();
+  renderChatList();
+  if (typeof toast === 'function') toast('已重命名');
+}
+
+let _chatMenuCloseTimer = null;
+
+function closeChatItemMenus(keepWrap) {
+  document.querySelectorAll('.chat-item-menu-wrap.open').forEach(wrap => {
+    if (wrap !== keepWrap) wrap.classList.remove('open');
+  });
+}
+
+function positionChatItemMenu(wrap) {
+  if (!wrap) return;
+  const btn = wrap.querySelector('.chat-item-menu-btn');
+  const menu = wrap.querySelector('.chat-item-menu');
+  if (!btn || !menu) return;
+  const rect = btn.getBoundingClientRect();
+  const width = menu.offsetWidth || 136;
+  const height = menu.offsetHeight || 118;
+  const margin = 8;
+  let left = rect.right - width;
+  let top = rect.bottom + 4;
+  if (top + height > window.innerHeight - margin) top = rect.top - height - 4;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  top = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function openChatItemMenu(wrap) {
+  if (!wrap) return;
+  clearTimeout(_chatMenuCloseTimer);
+  closeChatItemMenus(wrap);
+  positionChatItemMenu(wrap);
+  wrap.classList.add('open');
+}
+
+function scheduleCloseChatItemMenu(wrap) {
+  clearTimeout(_chatMenuCloseTimer);
+  _chatMenuCloseTimer = setTimeout(() => {
+    if (wrap) wrap.classList.remove('open');
+  }, 140);
+}
+
 function deleteChat(id, e) {
-  e.stopPropagation();
+  if (e) e.stopPropagation();
   if (!confirm('删除这个对话？')) return;
   // ⭐ 若删除的是正在生成的对话，先中止后台任务，避免回调写回已删除对象
   if (typeof isChatGenerating === 'function' && isChatGenerating(id) && typeof _abortCurrentTaskIfAny === 'function') {
     _abortCurrentTaskIfAny(id);
   }
   state.chats = state.chats.filter(c => c.id !== id);
-  if (state.currentId === id) state.currentId = state.chats[0]?.id || null;
+  if (state.currentId === id) state.currentId = sidebarChats()[0]?.id || null;
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
   saveData();
   renderChatList();
@@ -118,11 +206,99 @@ function clearCurrentChat() {
 }
 
 function renderChatList() {
-  document.getElementById('chatList').innerHTML = state.chats.map(c => `
-    <div class="chat-item ${c.id === state.currentId ? 'active' : ''}" onclick="switchChat('${c.id}')">
-      <span class="chat-item-title">${(typeof isChatGenerating === 'function' && isChatGenerating(c.id)) ? '⏳' : '💬'} ${escapeHtml(c.title)}</span>
-      <button class="chat-item-del" onclick="deleteChat('${c.id}', event)">×</button>
-    </div>`).join('');
+  const list = document.getElementById('chatList');
+  if (!list) return;
+  list.innerHTML = sidebarChats().map(c => {
+    const isGenerating = typeof isChatGenerating === 'function' && isChatGenerating(c.id);
+    const isPinned = !!c.pinnedAt;
+    const title = c.title || '新对话';
+    const statusIcon = isGenerating ? '⏳' : (isPinned ? '📌' : '💬');
+    return `
+      <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned ? 'pinned' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
+        <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span><span class="chat-item-name">${escapeHtml(title)}</span></span>
+        <span class="chat-item-menu-wrap">
+          <button class="chat-item-menu-btn" type="button" title="对话操作" aria-label="对话操作">⋯</button>
+          <span class="chat-item-menu" role="menu">
+            <button class="chat-item-menu-entry" type="button" data-chat-action="pin" role="menuitem"><span class="chat-item-menu-icon">📌</span><span class="chat-item-menu-label">${isPinned ? '取消置顶' : '置顶'}</span></button>
+            <button class="chat-item-menu-entry" type="button" data-chat-action="rename" role="menuitem"><span class="chat-item-menu-icon">✏️</span><span class="chat-item-menu-label">重命名</span></button>
+            <button class="chat-item-menu-entry danger" type="button" data-chat-action="delete" role="menuitem"><span class="chat-item-menu-icon">🗑</span><span class="chat-item-menu-label">删除</span></button>
+          </span>
+        </span>
+      </div>`;
+  }).join('');
+  list.onclick = handleChatListClick;
+  list.onkeydown = handleChatListKeydown;
+  list.onmouseover = handleChatListPointerOver;
+  list.onmouseout = handleChatListPointerOut;
+  list.onfocusin = handleChatListFocusIn;
+  list.onfocusout = handleChatListFocusOut;
+}
+
+function handleChatListClick(e) {
+  const list = document.getElementById('chatList');
+  const target = e.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const item = target.closest('.chat-item');
+  if (!item || !list || !list.contains(item)) return;
+  const id = item.dataset.chatId;
+  const menuBtn = target.closest('.chat-item-menu-btn');
+  if (menuBtn) {
+    e.stopPropagation();
+    openChatItemMenu(menuBtn.closest('.chat-item-menu-wrap'));
+    return;
+  }
+  const actionBtn = target.closest('[data-chat-action]');
+  if (actionBtn) {
+    e.stopPropagation();
+    const action = actionBtn.dataset.chatAction;
+    if (action === 'pin') togglePinChat(id, e);
+    else if (action === 'rename') renameChat(id, e);
+    else if (action === 'delete') deleteChat(id, e);
+    return;
+  }
+  switchChat(id);
+}
+
+function handleChatListPointerOver(e) {
+  const target = e.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const wrap = target.closest('.chat-item-menu-wrap');
+  if (!wrap) return;
+  openChatItemMenu(wrap);
+}
+
+function handleChatListPointerOut(e) {
+  const target = e.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const wrap = target.closest('.chat-item-menu-wrap');
+  if (!wrap || wrap.contains(e.relatedTarget)) return;
+  scheduleCloseChatItemMenu(wrap);
+}
+
+function handleChatListFocusIn(e) {
+  const target = e.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const wrap = target.closest('.chat-item-menu-wrap');
+  if (wrap) openChatItemMenu(wrap);
+}
+
+function handleChatListFocusOut(e) {
+  const target = e.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const wrap = target.closest('.chat-item-menu-wrap');
+  if (!wrap || wrap.contains(e.relatedTarget)) return;
+  scheduleCloseChatItemMenu(wrap);
+}
+
+function handleChatListKeydown(e) {
+  const target = e.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const item = target.closest('.chat-item');
+  if (!item || target.closest('button')) return;
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    switchChat(item.dataset.chatId);
+  }
 }
 
 function renderMessages() {
