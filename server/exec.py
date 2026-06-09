@@ -7,11 +7,79 @@
 
 import os
 import re
+import locale
 import subprocess
 import tempfile
 
 from . import config
 from .sandbox import command_workspace_violation, is_dangerous_command, is_inside_workspace, resolve_path
+
+
+def _unique_encodings(names):
+    seen = set()
+    out = []
+    for name in names:
+        if not name:
+            continue
+        key = str(name).lower().replace('_', '-')
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def _looks_like_utf16(raw):
+    if len(raw) < 4:
+        return False
+    even_nuls = raw[0::2].count(0)
+    odd_nuls = raw[1::2].count(0)
+    pairs = max(len(raw) // 2, 1)
+    return even_nuls / pairs > 0.25 or odd_nuls / pairs > 0.25
+
+
+def _decode_process_output(raw):
+    if not raw:
+        return ''
+    if isinstance(raw, str):
+        return raw
+
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        try:
+            return raw.decode('utf-16')
+        except UnicodeDecodeError:
+            pass
+    if raw.startswith(b'\xef\xbb\xbf'):
+        try:
+            return raw.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            pass
+    if _looks_like_utf16(raw):
+        for enc in ('utf-16-le', 'utf-16-be'):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                pass
+
+    encodings = ['utf-8']
+    if os.name == 'nt':
+        encodings.extend([
+            locale.getpreferredencoding(False),
+            'oem',
+            'mbcs',
+            'gb18030',
+            'cp936',
+        ])
+    else:
+        encodings.append(locale.getpreferredencoding(False))
+
+    for enc in _unique_encodings(encodings):
+        try:
+            return raw.decode(enc)
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+    return raw.decode('utf-8', errors='replace')
 
 
 class ExecMixin:
@@ -157,13 +225,15 @@ class ExecMixin:
 
         try:
             proc = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
-                timeout=timeout, cwd=cwd_abs, encoding='utf-8', errors='replace'
+                command, shell=True, capture_output=True,
+                timeout=timeout, cwd=cwd_abs
             )
+            stdout = _decode_process_output(proc.stdout)
+            stderr = _decode_process_output(proc.stderr)
             self._send_json(200, {
                 'ok': True,
-                'stdout': (proc.stdout or '')[-8000:],
-                'stderr': (proc.stderr or '')[-3000:],
+                'stdout': stdout[-8000:],
+                'stderr': stderr[-3000:],
                 'returncode': proc.returncode,
                 'cwd': cwd_abs
             })

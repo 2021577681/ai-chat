@@ -593,6 +593,7 @@ function onClearTerminalToken() {
 
 let _fetchModelsBuffer = [];   // 当前拉取到的模型列表（用于过滤/全选）
 let _fetchModelsExisting = new Set();  // 当前输入框已有的模型
+let _fetchModelsSelected = new Set();  // 当前已勾选的模型，过滤列表时保持选择状态
 
 async function onFetchModels() {
   const baseUrl = (document.getElementById('baseUrl').value || '').trim();
@@ -608,6 +609,10 @@ async function onFetchModels() {
   const countEl = document.getElementById('fetchModelsCount');
   const hintEl = document.getElementById('fetchModelsHint');
   if (hintEl) hintEl.style.display = 'none';
+  _fetchModelsBuffer = [];
+  _fetchModelsExisting = new Set();
+  _fetchModelsSelected = new Set();
+  updateFetchModelsSelectAllButton();
   listEl.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;">📡 正在拉取模型列表…</div>';
   if (countEl) countEl.textContent = '加载中…';
   
@@ -645,6 +650,7 @@ async function onFetchModels() {
         </div>
       </div>`;
     if (countEl) countEl.textContent = '0 个';
+    updateFetchModelsSelectAllButton();
     return;
   }
   
@@ -773,16 +779,21 @@ function renderFetchModelsList(models) {
   const countEl = document.getElementById('fetchModelsCount');
   if (!models.length) {
     listEl.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;">无匹配模型</div>';
-    if (countEl) countEl.textContent = '0 个';
+    if (countEl) {
+      const selectedCount = Array.from(_fetchModelsSelected).filter(m => !_fetchModelsExisting.has(m)).length;
+      countEl.textContent = selectedCount ? `0 个匹配（已选 ${selectedCount} 个）` : '0 个';
+    }
+    updateFetchModelsSelectAllButton();
     return;
   }
   const html = models.map(m => {
     const exists = _fetchModelsExisting.has(m);
+    const checked = exists || _fetchModelsSelected.has(m);
     const safe = escapeHtml(m);
     return `
       <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:6px;${exists ? 'opacity:.55;' : ''}"
              onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
-        <input type="checkbox" class="fetchModelItem" value="${safe}" ${exists ? 'checked disabled' : ''}>
+        <input type="checkbox" class="fetchModelItem" value="${safe}" ${checked ? 'checked' : ''} ${exists ? 'disabled' : ''} onchange="onFetchModelItemToggle(this)">
         <span style="flex:1;font-family:monospace;font-size:13px;">${safe}</span>
         ${exists ? '<span style="font-size:11px;color:var(--text-secondary);">✓ 已添加</span>' : ''}
       </label>`;
@@ -790,30 +801,58 @@ function renderFetchModelsList(models) {
   listEl.innerHTML = html;
   if (countEl) {
     const newCount = models.filter(m => !_fetchModelsExisting.has(m)).length;
-    countEl.textContent = `共 ${models.length} 个（${newCount} 个未添加）`;
+    const selectedCount = Array.from(_fetchModelsSelected).filter(m => !_fetchModelsExisting.has(m)).length;
+    countEl.textContent = `共 ${models.length} 个（${newCount} 个未添加，已选 ${selectedCount} 个）`;
   }
+  updateFetchModelsSelectAllButton();
 }
 
 function filterFetchModels() {
-  const kw = (document.getElementById('fetchModelsFilter').value || '').trim().toLowerCase();
-  const filtered = kw
+  renderFetchModelsList(getCurrentFetchModelsView());
+}
+
+function getCurrentFetchModelsView() {
+  const kw = (document.getElementById('fetchModelsFilter')?.value || '').trim().toLowerCase();
+  return kw
     ? _fetchModelsBuffer.filter(m => m.toLowerCase().includes(kw))
     : _fetchModelsBuffer;
-  renderFetchModelsList(filtered);
+}
+
+function getSelectableFetchedModels() {
+  return _fetchModelsBuffer.filter(m => !_fetchModelsExisting.has(m));
+}
+
+function onFetchModelItemToggle(box) {
+  if (!box || box.disabled) return;
+  if (box.checked) _fetchModelsSelected.add(box.value);
+  else _fetchModelsSelected.delete(box.value);
+  renderFetchModelsList(getCurrentFetchModelsView());
+}
+
+function updateFetchModelsSelectAllButton() {
+  const btn = document.getElementById('fetchModelsSelAllBtn');
+  if (!btn) return;
+  const selectable = getSelectableFetchedModels();
+  const selectedCount = selectable.filter(m => _fetchModelsSelected.has(m)).length;
+  btn.disabled = selectable.length === 0;
+  btn.textContent = selectedCount === selectable.length && selectable.length ? '全不选' : '全选';
+  btn.title = selectable.length ? `选择本次拉取到的 ${selectable.length} 个未添加模型` : '没有可选择的新模型';
 }
 
 function toggleSelectAllFetchModels() {
-  const boxes = document.querySelectorAll('.fetchModelItem:not(:disabled)');
-  if (!boxes.length) return;
-  const anyUnchecked = Array.from(boxes).some(b => !b.checked);
-  boxes.forEach(b => { b.checked = anyUnchecked; });
-  const btn = document.getElementById('fetchModelsSelAllBtn');
-  if (btn) btn.textContent = anyUnchecked ? '全不选' : '全选';
+  const selectable = getSelectableFetchedModels();
+  if (!selectable.length) return;
+  const shouldSelectAll = selectable.some(m => !_fetchModelsSelected.has(m));
+  if (shouldSelectAll) {
+    selectable.forEach(m => _fetchModelsSelected.add(m));
+  } else {
+    selectable.forEach(m => _fetchModelsSelected.delete(m));
+  }
+  renderFetchModelsList(getCurrentFetchModelsView());
 }
 
 function confirmAddFetchedModels() {
-  const boxes = document.querySelectorAll('.fetchModelItem:not(:disabled):checked');
-  const picked = Array.from(boxes).map(b => b.value).filter(Boolean);
+  const picked = _fetchModelsBuffer.filter(m => _fetchModelsSelected.has(m) && !_fetchModelsExisting.has(m));
   if (!picked.length) { toast('未选择任何模型', 2000); return; }
   
   const input = document.getElementById('modelName');
@@ -838,6 +877,8 @@ function closeFetchModelsModal() {
   document.getElementById('fetchModelsModal').classList.remove('show');
   _fetchModelsBuffer = [];
   _fetchModelsExisting = new Set();
+  _fetchModelsSelected = new Set();
+  updateFetchModelsSelectAllButton();
   const f = document.getElementById('fetchModelsFilter');
   if (f) f.value = '';
 }
@@ -845,6 +886,7 @@ function closeFetchModelsModal() {
 // 暴露到全局
 window.onFetchModels = onFetchModels;
 window.filterFetchModels = filterFetchModels;
+window.onFetchModelItemToggle = onFetchModelItemToggle;
 window.toggleSelectAllFetchModels = toggleSelectAllFetchModels;
 window.confirmAddFetchedModels = confirmAddFetchedModels;
 window.openFetchModelsModal = openFetchModelsModal;
