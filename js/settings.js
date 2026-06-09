@@ -694,11 +694,14 @@ async function fetchModelsViaCorrectChannel(url, headers) {
   
   // 2) 走代理：用 /llm-proxy
   const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
-  if (!tc || !tc.token) {
-    // 没有 token 也试直连
-    const resp = await fetch(url, { method: 'GET', headers });
-    const text = await resp.text();
-    return { ok: resp.ok, status: resp.status, text };
+  if (!tc || !tc.serverUrl) {
+    throw new Error('本地代理未加载，请确认 terminal.js 已加载');
+  }
+  if (!tc.token && typeof fetchTerminalToken === 'function') {
+    await fetchTerminalToken(true);
+  }
+  if (!tc.token) {
+    throw new Error('本地代理 Token 获取失败，请确认 local_terminal_server.py 已启动');
   }
   const proxyUrl = tc.serverUrl.replace(/\/+$/, '') + '/llm-proxy';
   const resp = await fetch(proxyUrl, {

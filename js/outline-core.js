@@ -681,6 +681,7 @@ async function callAPIWithOutline(options = {}) {
   try {
     for (let loop = startLoop; loop < maxRounds; loop++) {
       throwIfAborted();
+      saveSnap(loop);
       
       aiMsg.outline.rounds = loop + 1;
       const remaining = maxRounds - loop;  // 包含本轮的剩余轮数
@@ -1188,7 +1189,7 @@ async function callAPIWithOutline(options = {}) {
       aiMsg.outline.status = 'error';
       delete aiMsg.outline.finishRequested;
       aiMsg.content = `❌ 出错：${e.message}` + (finalAnswer ? '\n\n**部分输出：**\n' + finalAnswer : '');
-      delete aiMsg.outline._snap;
+      if (!aiMsg.outline._snap) saveSnap(startLoop || 0);
     }
     aiMsg.outline.inProgress = false;
     delete aiMsg.outline.progressText;

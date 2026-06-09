@@ -470,6 +470,7 @@ async function resumeOutline(msgIdx) {
   const injection = ta ? ta.value : '';
   
   await callAPIWithOutline({
+    chatId: c.id,
     resumeFromMsgIdx: msgIdx,
     userInjection: injection
   });
@@ -565,6 +566,7 @@ async function finishOutlineNow(msgIdx) {
     if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     
     const snap = aiMsg.outline._snap;
+    let shouldClearSnap = false;
     
     try {
       const fallbackAnswer = await doFinalSummaryCall(
@@ -594,6 +596,7 @@ async function finishOutlineNow(msgIdx) {
       }
       
       aiMsg.outline.expanded = false;
+      shouldClearSnap = true;
       delete aiMsg.outline.finishRequested;
       if (typeof toast === 'function') toast('🏁 已收尾', 3000);
     } catch (e) {
@@ -609,7 +612,7 @@ async function finishOutlineNow(msgIdx) {
     } finally {
       aiMsg.outline.inProgress = false;
       delete aiMsg.outline.progressText;
-      delete aiMsg.outline._snap;
+      if (shouldClearSnap) delete aiMsg.outline._snap;
       aiMsg._endTime = Date.now();
       if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
       else {

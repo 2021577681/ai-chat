@@ -156,8 +156,9 @@ function switchToProfile(id) {
   
   if (typeof persistSettings === 'function') persistSettings();
   
-  // 刷新 UI（如果设置面板正打开）
-  if (document.getElementById('settingsModal') && document.getElementById('settingsModal').classList.contains('show')) {
+  // 刷新 UI。统一设置页会把 settingsModal 停靠到页面内并移除 .show，
+  // 因此不能只用 classList.contains('show') 判断是否需要同步表单。
+  if (document.getElementById('settingsModal')) {
     _refreshSettingsModalFromState();
   }
   // 刷新顶部模型选择和 URL 预览
@@ -456,8 +457,58 @@ function _refreshSettingsModalFromState() {
   const tempVal = document.getElementById('tempVal');
   if (tempVal && s.temperature !== undefined) tempVal.textContent = s.temperature;
   set('maxTokens', s.maxTokens);
+  const maxToolRoundsEl = document.getElementById('maxToolRounds');
+  const maxToolRoundsInputEl = document.getElementById('maxToolRoundsInput');
+  const maxToolRoundsValEl = document.getElementById('maxToolRoundsVal');
+  if (maxToolRoundsEl && s.maxToolRounds !== undefined) maxToolRoundsEl.value = Math.max(1, Math.min(100, s.maxToolRounds));
+  if (maxToolRoundsInputEl && s.maxToolRounds !== undefined) maxToolRoundsInputEl.value = s.maxToolRounds;
+  if (maxToolRoundsValEl && s.maxToolRounds !== undefined) maxToolRoundsValEl.textContent = s.maxToolRounds;
+  const streamEl = document.getElementById('streamMode');
+  if (streamEl) streamEl.checked = !!s.stream;
+  const completionSoundEl = document.getElementById('completionSoundEnabled');
+  if (completionSoundEl) completionSoundEl.checked = !!s.completionSoundEnabled;
+  const completionVolumeEl = document.getElementById('completionSoundVolume');
+  const completionVolumeValEl = document.getElementById('completionSoundVolumeVal');
+  if (completionVolumeEl) {
+    const volume = parseInt(s.completionSoundVolume);
+    const v = isNaN(volume) ? 80 : Math.max(0, Math.min(100, volume));
+    completionVolumeEl.value = v;
+    if (completionVolumeValEl) completionVolumeValEl.textContent = v + '%';
+  }
   const proxyEl = document.getElementById('useLocalProxy');
   if (proxyEl) proxyEl.checked = !!s.useLocalProxy;
+  const retryEl = document.getElementById('retryMaxAttempts');
+  const retryValEl = document.getElementById('retryMaxAttemptsVal');
+  if (retryEl) {
+    const v = (s.retryMaxAttempts === undefined || s.retryMaxAttempts === null) ? 3 : s.retryMaxAttempts;
+    retryEl.value = v;
+    if (retryValEl) retryValEl.textContent = v;
+  }
+  const compEnabled = document.getElementById('compressAutoEnabled');
+  const compThreshold = document.getElementById('compressAutoThreshold');
+  const compThresholdVal = document.getElementById('compressThresholdVal');
+  const compKeep = document.getElementById('compressKeepLast');
+  const compKeepVal = document.getElementById('compressKeepLastVal');
+  if (compEnabled) compEnabled.checked = !!s.compressAutoEnabled;
+  if (compThreshold) {
+    const v = s.compressAutoThreshold || 75;
+    compThreshold.value = v;
+    if (compThresholdVal) compThresholdVal.textContent = v + '%';
+  }
+  if (compKeep) {
+    const v = s.compressKeepLast || 4;
+    compKeep.value = v;
+    if (compKeepVal) compKeepVal.textContent = v;
+  }
+  const bEnabled = document.getElementById('beaconEnabled');
+  const bInterval = document.getElementById('beaconInterval');
+  const bIntervalVal = document.getElementById('beaconIntervalVal');
+  if (bEnabled) bEnabled.checked = !!s.beaconEnabled;
+  if (bInterval) {
+    const v = s.beaconInterval || 5;
+    bInterval.value = v;
+    if (bIntervalVal) bIntervalVal.textContent = v;
+  }
   if (typeof updateUrlPreview === 'function') updateUrlPreview();
 }
 
