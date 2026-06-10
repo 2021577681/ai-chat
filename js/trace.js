@@ -208,22 +208,42 @@ function installTraceHooks() {
   // 2) Hook executeTool —— 追踪所有工具调用
   if (typeof window.executeTool === 'function') {
     const _origExec = window.executeTool;
-    window.executeTool = async function(name, args) {
+    window.executeTool = async function(name, args, context) {
       const id = traceStart({
         type: 'tool',
         role: 'tool',
         title: `🛠 ${name}`,
         input: args,
-        meta: { toolName: name }
+        meta: {
+          toolName: name,
+          chatId: context && context.chatId,
+          concurrentAgentId: context && context.concurrentAgentId
+        }
       });
       try {
-        const result = await _origExec(name, args);
+        const result = await _origExec(name, args, context);
         const ok = result && result.ok !== false;
+        const output = result && result.value && result.value._concurrentAttachment
+          ? {
+              ...result.value,
+              attachment: result.value.attachment ? {
+                id: result.value.attachment.id,
+                name: result.value.attachment.name,
+                mime: result.value.attachment.mime,
+                size: result.value.attachment.size,
+                type: result.value.attachment.type
+              } : null
+            }
+          : (result && result.value !== undefined ? result.value : result);
         traceEnd(id, {
           status: ok ? 'ok' : 'fail',
-          output: result && result.value !== undefined ? result.value : result,
+          output,
           error: ok ? null : (result && (result.error || (typeof result.value === 'string' ? result.value : null))),
-          meta: { toolName: name }
+          meta: {
+            toolName: name,
+            chatId: context && context.chatId,
+            concurrentAgentId: context && context.concurrentAgentId
+          }
         });
         return result;
       } catch (e) {

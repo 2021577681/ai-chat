@@ -1544,6 +1544,7 @@ async function runAgentLoop({
     
     // 执行每个工具
     const executedIds = [];  // ⭐ 追踪已执行的 tool_call
+    const pendingConcurrentAttachmentMessages = [];
     for (const tc of assistantToolCalls) {
       if (_isAborted()) {
         // ⭐ 清理未执行的 tool_calls，避免残留
@@ -1571,11 +1572,30 @@ async function runAgentLoop({
       
       let contentText;
       let isError = false;
+      const concurrentAttachmentResult = result
+        && result.value
+        && typeof result.value === 'object'
+        && result.value._concurrentAttachment
+          ? result.value
+          : null;
       if (typeof result.value === 'string') {
         contentText = result.value;
         isError = !result.ok;
       } else if (typeof result.value === 'object' && result.value !== null) {
-        if (result.value._stopAll || result.value._userRejected) {
+        if (concurrentAttachmentResult) {
+          contentText = concurrentAttachmentResult.message || '附件已加入当前 AI 的私有上下文。';
+          isError = !result.ok || concurrentAttachmentResult.ok === false;
+          if (!isError && concurrentAttachmentResult.attachment) {
+            const attachment = { ...concurrentAttachmentResult.attachment };
+            pendingConcurrentAttachmentMessages.push({
+              role: 'user',
+              content: concurrentAttachmentResult.contextText || `系统：附件 ${attachment.name || 'attachment'} 已通过 attach_file 加入你的私有上下文，请结合附件继续完成用户任务。`,
+              attachments: [attachment],
+              _hiddenFromUI: true,
+              _concurrentAttachment: true
+            });
+          }
+        } else if (result.value._stopAll || result.value._userRejected) {
           contentText = result.value.error || '用户中断';
           isError = true;
         } else if (result.value.ok === false) {
@@ -1625,6 +1645,13 @@ async function runAgentLoop({
         }
         break;
       }
+    }
+
+    if (pendingConcurrentAttachmentMessages.length) {
+      messages.push(...pendingConcurrentAttachmentMessages.map(m => ({
+        ...m,
+        attachments: Array.isArray(m.attachments) ? m.attachments.map(a => ({ ...a })) : []
+      })));
     }
     
     // 继续下一轮

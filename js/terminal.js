@@ -1144,6 +1144,22 @@ async function attachFileForAI(path, description, context) {
     _hidden: true,
     _aiDescription: description || ''
   };
+
+  if (context && context.concurrentChatId && context.concurrentAgentId) {
+    if (r.is_image) {
+      toast(`✓ 已加载图片 ${r.name}`, 1500);
+    } else {
+      toast(`✓ 已加载文档 ${r.name}（${(r.size / 1024).toFixed(1)} KB）`, 1500);
+    }
+    const agentName = context.concurrentAgentName || '当前 AI';
+    return {
+      ok: true,
+      _concurrentAttachment: true,
+      attachment,
+      message: `✅ 已加载 ${r.name}（${(r.size / 1024).toFixed(1)} KB）\n\n📌 系统：附件已加入 ${agentName} 的私有上下文，下一轮可直接查看。`,
+      contextText: `系统：以下附件由 attach_file 工具加载，仅供 ${agentName} 查看。${description ? '\n说明：' + description : ''}\n请结合该附件继续完成用户任务。`
+    };
+  }
   
   pushPendingAIAttachment(chatId, attachment);
   

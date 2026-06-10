@@ -837,12 +837,9 @@ async function onSend() {
   const c = currentChat();
 
   if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
-    if (!text) {
+    const concurrentAttachments = state.pendingAttachments.map(a => ({ ...a }));
+    if (!text && !concurrentAttachments.length) {
       toast('请输入并发请求指令');
-      return;
-    }
-    if (state.pendingAttachments.length) {
-      toast('并发请求续聊暂不支持附件，请先移除附件', 4000);
       return;
     }
     if (typeof resetTaskPermission === 'function') resetTaskPermission();
@@ -853,7 +850,7 @@ async function onSend() {
     renderPendingAtts();
     try {
       const handled = (typeof continueConcurrentChatFromMainInput === 'function')
-        ? await continueConcurrentChatFromMainInput(text, c)
+        ? await continueConcurrentChatFromMainInput(text, c, concurrentAttachments)
         : false;
       if (!handled) toast('当前并发对话无法继续', 3000);
     } catch (e) {

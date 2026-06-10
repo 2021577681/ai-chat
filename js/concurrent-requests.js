@@ -64,6 +64,11 @@ function concurrentAgentName(index) {
   return `AI助手${_concurrentChineseNumber(index)}号`;
 }
 
+function _concurrentCloneAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.map(a => ({ ...(a || {}) }));
+}
+
 function _concurrentGetChats() {
   return (state.chats || []).filter(c => c && c.concurrent && c.concurrent.type === 'concurrent_requests');
 }
@@ -235,8 +240,10 @@ function stopAllConcurrentRequests() {
   if (typeof toast === 'function') toast(`已请求停止 ${ids.length} 个并发对话`);
 }
 
-async function startConcurrentRound(chat, prompt, useTools) {
-  if (!chat || !String(prompt || '').trim()) return;
+async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
+  const cleanPrompt = String(prompt || '').trim();
+  const roundAttachments = _concurrentCloneAttachments(attachments);
+  if (!chat || (!cleanPrompt && !roundAttachments.length)) return;
   if (!state.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     if (typeof openSettings === 'function') openSettings();
@@ -251,13 +258,13 @@ async function startConcurrentRound(chat, prompt, useTools) {
   const agents = _concurrentEnsureAgents(meta, meta.agentCount);
   const roundId = _concurrentId('round');
   const startedAt = Date.now();
-  const cleanPrompt = String(prompt || '').trim();
   const userMsg = {
     role: 'user',
     content: cleanPrompt,
     _concurrentUser: true,
     concurrentRoundId: roundId
   };
+  if (roundAttachments.length) userMsg.attachments = _concurrentCloneAttachments(roundAttachments);
   const groupMsg = {
     role: 'assistant',
     content: '',
@@ -331,7 +338,11 @@ async function startConcurrentRound(chat, prompt, useTools) {
     try {
       const initialMessages = [
         ...(Array.isArray(agent.messages) ? agent.messages : []),
-        { role: 'user', content: cleanPrompt }
+        {
+          role: 'user',
+          content: cleanPrompt,
+          ...(roundAttachments.length ? { attachments: _concurrentCloneAttachments(roundAttachments) } : {})
+        }
       ];
       const result = await runAgentLoop({
         initialMessages,
@@ -447,13 +458,14 @@ async function startConcurrentRequestFromUi() {
   });
 }
 
-async function continueConcurrentChatFromMainInput(prompt, chat) {
+async function continueConcurrentChatFromMainInput(prompt, chat, attachments = []) {
   const targetChat = chat || (typeof currentChat === 'function' ? currentChat() : null);
   if (!targetChat || !targetChat.concurrent || targetChat.concurrent.type !== 'concurrent_requests') return false;
   const cleanPrompt = String(prompt || '').trim();
-  if (!cleanPrompt) return false;
+  const roundAttachments = _concurrentCloneAttachments(attachments);
+  if (!cleanPrompt && !roundAttachments.length) return false;
   const meta = ensureConcurrentChatMeta(targetChat, targetChat.concurrent.agentCount);
-  await startConcurrentRound(targetChat, cleanPrompt, !!(meta && meta.useTools));
+  await startConcurrentRound(targetChat, cleanPrompt, !!(meta && meta.useTools), roundAttachments);
   return true;
 }
 
