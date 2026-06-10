@@ -1195,7 +1195,8 @@ async function runAgentLoop({
   maxTokens,           // 可选，默认从 settings 取
   isStopped,           // 可选，任务级软停止检查
   chatId,              // 可选，usage 归属对话
-  chat                 // 可选，usage 归属对话对象
+  chat,                // 可选，usage 归属对话对象
+  toolContext = null   // 可选，传给工具执行的额外上下文
 }) {
   const s = state.settings;
   const _temp = temperature !== undefined ? temperature : parseFloat(s.temperature);
@@ -1559,7 +1560,14 @@ async function runAgentLoop({
       
       _emit({ type: 'tool_call', id: tc.id, name: tc.name, args });
       
-      const result = await executeTool(tc.name, args, { chatId, chat: chat || (chatId && typeof chatById === 'function' ? chatById(chatId) : null) });
+      const toolChat = chat || (chatId && typeof chatById === 'function' ? chatById(chatId) : null);
+      const toolChatId = chatId || (toolChat && toolChat.id) || (toolContext && (toolContext.chatId || toolContext.concurrentChatId)) || '';
+      const runToolContext = {
+        ...(toolContext && typeof toolContext === 'object' ? toolContext : {}),
+        chatId: toolChatId,
+        chat: toolChat || (toolContext && toolContext.chat) || null
+      };
+      const result = await executeTool(tc.name, args, runToolContext);
       
       let contentText;
       let isError = false;
@@ -1587,8 +1595,8 @@ async function runAgentLoop({
             content: contentText,
             toolName: tc.name,
             toolCallId: tc.id,
-            chatId,
-            chat: chat || (chatId && typeof chatById === 'function' ? chatById(chatId) : null),
+            chatId: runToolContext.chatId,
+            chat: runToolContext.chat,
             status: isError ? 'error' : 'success',
             args
           })

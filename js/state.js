@@ -480,6 +480,7 @@ function chatTaskById(chatId) {
 
 function isChatGenerating(chatOrId) {
   const id = typeof chatOrId === 'string' ? chatOrId : (chatOrId && chatOrId.id);
+  if (typeof isConcurrentChatRunning === 'function' && isConcurrentChatRunning(id)) return true;
   const task = chatTaskById(id);
   return !!(task && task.isGenerating);
 }
@@ -489,7 +490,8 @@ function isCurrentChatGenerating() {
 }
 
 function isAnyChatGenerating() {
-  return Object.values(ensureChatTasks()).some(t => t && t.isGenerating);
+  return Object.values(ensureChatTasks()).some(t => t && t.isGenerating)
+    || (typeof isAnyConcurrentChatRunning === 'function' && isAnyConcurrentChatRunning());
 }
 
 function beginChatTask(chatId, abortCtrl, opts = {}) {

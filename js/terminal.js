@@ -363,6 +363,10 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   
   const category = ACTION_TO_CATEGORY[action] || '';
   const requestParams = withCheckpointParam(params, context);
+  if (typeof guardConcurrentFileOwnership === 'function') {
+    const conflict = guardConcurrentFileOwnership(action, requestParams, context);
+    if (conflict) return conflict;
+  }
   const needConfirm = !!category;  // 有类别即需要确认；没类别（read_file/list_dir/search/file_info）放行
   
   if (needConfirm) {
@@ -375,6 +379,9 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, { chatId });
       
       if (!result.allowed) {
+        if (typeof claimConcurrentFileOwnership === 'function') {
+          claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+        }
         if (result.rejectAll) {
           return {
             ok: false,
@@ -410,6 +417,9 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       saveTerminalToken('');
       const tk = await fetchTerminalToken(false);
       if (!tk) {
+        if (typeof claimConcurrentFileOwnership === 'function') {
+          claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+        }
         return { ok: false, error: '❌ Token 失效且无法重新获取，请到 ⚙️ 设置 中处理。' };
       }
       resp = await doFetch();
@@ -417,6 +427,12 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     
     const r = await resp.json();
     bindCheckpointToToolContext(r, context);
+    if (typeof rememberConcurrentCheckpoints === 'function') {
+      rememberConcurrentCheckpoints(r, context);
+    }
+    if (typeof claimConcurrentFileOwnership === 'function') {
+      claimConcurrentFileOwnership(action, requestParams, r, context);
+    }
     // ⭐ 如果响应里带了 workspace/cwd，顺手刷新顶部沙箱栏显示
     if (r && (r.workspace || r.cwd)) {
       if (r.workspace) TERMINAL_CONFIG.workspace = r.workspace;
@@ -434,6 +450,9 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     }
     return r;
   } catch (e) {
+    if (typeof claimConcurrentFileOwnership === 'function') {
+      claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+    }
     return { ok: false, error: `无法连接后端服务：${e.message}` };
   }
 }
@@ -1039,6 +1058,11 @@ async function aiGitRestore(commit, path, context) {
   if (!showR.ok) {
     return `❌ 在快照 ${commit.slice(0, 7)} 中找不到文件 ${path}：${showR.error}`;
   }
+  const restoreOwnershipParams = { commit, path, files: [path] };
+  if (typeof guardConcurrentFileOwnership === 'function') {
+    const conflict = guardConcurrentFileOwnership('git_restore', restoreOwnershipParams, context);
+    if (conflict) return `❌ ${conflict.error || '并发请求文件所有权冲突'}`;
+  }
   
   // ⭐ note_restore 是危险操作（覆盖工作区文件），优先使用 _confirmDangerous（输入"我确定"）
   // 如果用户已永久授权 git_restore 类别，则跳过弹窗
@@ -1056,18 +1080,36 @@ async function aiGitRestore(commit, path, context) {
         confirmWord: '我确定',
         danger: true
       });
-      if (!ok) return '⏭️ 用户拒绝了恢复操作。';
+      if (!ok) {
+        if (typeof claimConcurrentFileOwnership === 'function') {
+          claimConcurrentFileOwnership('git_restore', restoreOwnershipParams, { ok: false }, context);
+        }
+        return '⏭️ 用户拒绝了恢复操作。';
+      }
     } else {
       // fallback：普通确认弹窗
       const perm = await _aiGitCheckPermission('git_restore', '⚠️ AI 想恢复文件到历史版本',
         `[note_restore]\n🔴 这将覆盖工作区文件！\n\n文件：${path}\n恢复到快照：${commit.slice(0, 7)}\n\n注意：当前文件中尚未提交的改动会丢失。`, context);
-      if (!perm.ok) return perm.error;
+      if (!perm.ok) {
+        if (typeof claimConcurrentFileOwnership === 'function') {
+          claimConcurrentFileOwnership('git_restore', restoreOwnershipParams, { ok: false }, context);
+        }
+        return perm.error;
+      }
     }
   }
   
   // 后端 checkout_file 接受 files 数组 + commit
   const r = await callGit('checkout_file', { commit, files: [path] });
-  if (!r.ok) return `❌ 恢复失败：${r.error}`;
+  if (!r.ok) {
+    if (typeof claimConcurrentFileOwnership === 'function') {
+      claimConcurrentFileOwnership('git_restore', restoreOwnershipParams, { ok: false }, context);
+    }
+    return `❌ 恢复失败：${r.error}`;
+  }
+  if (typeof claimConcurrentFileOwnership === 'function') {
+    claimConcurrentFileOwnership('git_restore', restoreOwnershipParams, { ok: true, path, files: [{ path }] }, context);
+  }
   return `✅ 已将 ${path} 恢复到快照 ${commit.slice(0, 7)}\n\n💡 现在该文件已与快照一致。如需保留这个回退，可调用 note_snapshot 提交。`;
 }
 
@@ -1081,7 +1123,8 @@ async function attachFileForAI(path, description, context) {
   const chatId = resolveToolChatId(context);
   const r = await callAgentBackend('read_file_binary', { path },
     'AI 想加载文档作为附件',
-    `[加载文档] ${path}\n\n${description ? '说明：' + description + '\n\n' : ''}加载后 AI 将立即查看内容。`);
+    `[加载文档] ${path}\n\n${description ? '说明：' + description + '\n\n' : ''}加载后 AI 将立即查看内容。`,
+    context);
   
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;

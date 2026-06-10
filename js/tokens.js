@@ -150,6 +150,13 @@ function estimateChatTokens(chat) {
   const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
     ? getEffectiveSystemPrompt()
     : (state.settings.systemPrompt || '');
+  if (chat.concurrent && chat.concurrent.type === 'concurrent_requests' && Array.isArray(chat.concurrent.agents)) {
+    const concurrentTotal = chat.concurrent.agents.reduce((sum, agent) => {
+      const msgs = Array.isArray(agent.messages) ? agent.messages : [];
+      return sum + estimateTokens(systemPrompt) + msgs.reduce((s, msg) => s + estimateMessageTokens(msg), 0);
+    }, 0);
+    if (concurrentTotal > 0) return concurrentTotal;
+  }
   let total = estimateTokens(systemPrompt);
   for (const m of chat.messages) total += estimateMessageTokens(m);
   return total;
@@ -409,6 +416,8 @@ async function refreshAccurateTokenCount(force = false, chatId) {
   if (!c || !c.messages.length) return;
   const targetChatId = c.id || chatId || state.currentId || 'default';
   const stats = getChatTokenStats(c);
+  const isConcurrentChat = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
+  if (isConcurrentChat) return;
   if (!force && stats.msgCount === c.messages.length
       && Date.now() - stats.time < 30000) return;
   if (_tokenFetchInflightByChat[targetChatId]) return;
@@ -455,6 +464,7 @@ function updateTokenDisplay() {
   }
   
   const stats = getChatTokenStats(c);
+  const isConcurrentChat = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
   // 看是否有当前对话的精确统计
   const hasAccurate = stats.totalRequests > 0;
   
@@ -462,7 +472,7 @@ function updateTokenDisplay() {
   let isAccurate, sourceLabel;
   
   if (hasAccurate) {
-    inputTokens = stats.lastInputTokens;     // 当前输入
+    inputTokens = isConcurrentChat ? stats.inputTokens : stats.lastInputTokens;     // 普通对话显示当前输入，并发对话显示所有 AI 累计输入
     outputTokens = stats.outputTokens;        // 累计输出
     cacheRead = stats.cacheReadTokens;
     thinking = stats.thinkingTokens;

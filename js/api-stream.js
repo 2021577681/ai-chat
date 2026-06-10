@@ -83,6 +83,13 @@ function stopGenerate() {
   //   - 由 callAPI / Plan / Outline / Reflection 的"首次进入"分支负责清零
   const c = typeof currentChat === 'function' ? currentChat() : null;
   const chatId = (c && c.id) || state.activeTaskChatId;
+  if (typeof requestStopConcurrentChat === 'function' && requestStopConcurrentChat(chatId)) {
+    state.stopRequested = true;
+    if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+    return;
+  }
   const task = (typeof chatTaskById === 'function' && chatId) ? chatTaskById(chatId) : null;
   if (typeof requestStopChatTask === 'function' && requestStopChatTask(chatId)) {
     // requestStopChatTask 已经标记 stopRequested 并 abort 对应 controller
@@ -125,6 +132,13 @@ function updateSendBtn() {
   } else {
     btn.textContent = '↑';
     btn.classList.remove('stop');
+    const c = (typeof currentChat === 'function') ? currentChat() : null;
+    if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
+      let info = `⚡ 并发请求 · ${c.concurrent.agentCount || 1} AI · ${c.concurrent.useTools ? '允许工具' : '禁用工具'}`;
+      if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+      document.getElementById('inputInfo').textContent = info;
+      return;
+    }
     let info = `${state.settings.apiFormat === 'anthropic' ? '🟠 Anthropic' : '🟢 OpenAI'}`;
     if (state.settings.usePlan) info += ` · 📋 计划模式(${state.settings.planMaxSteps}步)`;
     if (state.settings.useReflection) info += ` · 🎭 师生(${state.settings.refRounds}轮)`;

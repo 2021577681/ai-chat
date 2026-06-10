@@ -7,6 +7,7 @@ const SETTINGS_PAGE_SECTIONS = {
   reflection: { open: 'openReflectionSettings', close: 'closeReflectionSettings', modalId: 'reflectionModal' },
   tools: { open: 'openTools', close: 'closeTools', modalId: 'toolsModal' },
   taskQueue: { open: 'openTaskQueue', close: 'closeTaskQueue', modalId: 'taskQueueModal' },
+  concurrentRequests: { open: 'openConcurrentRequests', close: 'closeConcurrentRequests', modalId: 'concurrentRequestsModal' },
   mcpSkill: { open: 'openMcpSkillSettings', close: 'closeMcpSkillSettings', modalId: 'mcpSkillModal' },
   projectMemory: { open: 'openProjectMemorySettings', close: 'closeProjectMemorySettings', modalId: 'projectMemoryModal' },
   jsonEditor: { open: 'openJsonEditor', close: 'closeJsonEditor', modalId: 'jsonEditorModal' },
@@ -43,6 +44,7 @@ function initSettingsPage() {
     'openReflectionSettings',
     'openTools',
     'openTaskQueue',
+    'openConcurrentRequests',
     'openMcpSkillSettings',
     'openProjectMemorySettings',
     'openJsonEditor',
@@ -58,6 +60,7 @@ function initSettingsPage() {
     'closeReflectionSettings',
     'closeTools',
     'closeTaskQueue',
+    'closeConcurrentRequests',
     'closeMcpSkillSettings',
     'closeProjectMemorySettings',
     'closeJsonEditor',
@@ -77,6 +80,7 @@ function initSettingsPage() {
   window.openReflectionSettings = function() { openSettingsPage('reflection'); };
   window.openTools = function() { openSettingsPage('tools'); };
   window.openTaskQueue = function() { openSettingsPage('taskQueue'); };
+  window.openConcurrentRequests = function() { openSettingsPage('concurrentRequests'); };
   window.openMcpSkillSettings = function() { openSettingsPage('mcpSkill'); };
   window.openProjectMemorySettings = function() { openSettingsPage('projectMemory'); };
   window.openJsonEditor = function() { openSettingsPage('jsonEditor'); };
@@ -93,6 +97,7 @@ function initSettingsPage() {
   window.closeReflectionSettings = function() { closeSettingsProxy('reflection'); };
   window.closeTools = function() { closeSettingsProxy('tools'); };
   window.closeTaskQueue = function() { closeSettingsProxy('taskQueue'); };
+  window.closeConcurrentRequests = function() { closeSettingsProxy('concurrentRequests'); };
   window.closeMcpSkillSettings = function() { closeSettingsProxy('mcpSkill'); };
   window.closeProjectMemorySettings = function() { closeSettingsProxy('projectMemory'); };
   window.closeJsonEditor = function() { closeSettingsProxy('jsonEditor'); };

@@ -162,7 +162,7 @@ async function init() {
       const modals = [
         'imgPreview', 'termConfirmMask',
         'toolEditModal', 'backupModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
-        'planModal', 'outlineModal', 'taskQueueModal', 'settingsModal', 'jsonEditorModal',
+        'planModal', 'outlineModal', 'taskQueueModal', 'concurrentRequestsModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'
       ];

@@ -211,8 +211,9 @@ function renderChatList() {
   list.innerHTML = sidebarChats().map(c => {
     const isGenerating = typeof isChatGenerating === 'function' && isChatGenerating(c.id);
     const isPinned = !!c.pinnedAt;
+    const isConcurrent = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
     const title = c.title || '新对话';
-    const statusIcon = isGenerating ? '⏳' : (isPinned ? '📌' : '💬');
+    const statusIcon = isGenerating ? '⏳' : (isConcurrent ? '⚡' : (isPinned ? '📌' : '💬'));
     return `
       <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned ? 'pinned' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
         <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span><span class="chat-item-name">${escapeHtml(title)}</span></span>
@@ -454,6 +455,10 @@ function updatePlanPanel(msgIdx, targetChat) {
 }
 
 function renderMsg(m, idx) {
+  if (m && m._concurrentGroup && typeof renderConcurrentMsg === 'function') {
+    return renderConcurrentMsg(m, idx);
+  }
+
   if (m._isSummary) {
     const undoBtn = (m._compressionUndoId && typeof canUndoCompression === 'function' && canUndoCompression(m._compressionUndoId, currentChat()))
       ? `<button class="msg-action" onclick="undoCompressionSnapshot('${escapeHtml(m._compressionUndoId)}')">↩ 撤销压缩</button>`
@@ -829,9 +834,38 @@ async function onSend() {
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   if (!currentChat()) newChat();
   
-  if (typeof resetTaskPermission === 'function') resetTaskPermission();
-  
   const c = currentChat();
+
+  if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
+    if (!text) {
+      toast('请输入并发请求指令');
+      return;
+    }
+    if (state.pendingAttachments.length) {
+      toast('并发请求续聊暂不支持附件，请先移除附件', 4000);
+      return;
+    }
+    if (typeof resetTaskPermission === 'function') resetTaskPermission();
+    if (typeof _consumeOneShotMode === 'function') _consumeOneShotMode();
+    input.value = '';
+    input.style.height = 'auto';
+    state.pendingAttachments = [];
+    renderPendingAtts();
+    try {
+      const handled = (typeof continueConcurrentChatFromMainInput === 'function')
+        ? await continueConcurrentChatFromMainInput(text, c)
+        : false;
+      if (!handled) toast('当前并发对话无法继续', 3000);
+    } catch (e) {
+      console.error('[onSend concurrent] 错误:', e);
+      toast('❌ 并发请求发送失败：' + (e.message || e), 3000);
+    } finally {
+      if (typeof updateSendBtn === 'function') updateSendBtn();
+    }
+    return;
+  }
+  
+  if (typeof resetTaskPermission === 'function') resetTaskPermission();
   
   // ⭐ 检查是否有未完成的计划模式任务（待审批、已暂停、出错状态）
   //   注意：始终检查，不依赖 state.settings.usePlan
@@ -1008,7 +1042,7 @@ function groupToolFlows() {
   
   // ⭐ 1) 先把现有 group 解包，恢复扁平结构（同时记录展开状态以便后续恢复）
   const expandedKeys = new Set();
-  inner.querySelectorAll('.tool-flow-group').forEach(g => {
+  inner.querySelectorAll('.tool-flow-group:not(.concurrent-tool-flow):not(.concurrent-answer-flow)').forEach(g => {
     if (!g.classList.contains('collapsed')) {
       const key = g.dataset.flowKey;
       if (key) expandedKeys.add(key);
