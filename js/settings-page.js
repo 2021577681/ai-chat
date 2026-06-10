@@ -30,6 +30,7 @@ const SETTINGS_PAGE_STATE = {
   originalMask: null,
   originalCloseHandlers: new Map(),
   dockingDepth: 0,
+  openRequestId: 0,
   originals: {}
 };
 
@@ -140,6 +141,7 @@ async function openSettingsPage(section = 'main') {
 
 async function openSettingsSection(section = 'main') {
   initSettingsPage();
+  const requestId = ++SETTINGS_PAGE_STATE.openRequestId;
   const config = SETTINGS_PAGE_SECTIONS[section] || SETTINGS_PAGE_SECTIONS.main;
   const page = document.getElementById('settingsPage');
   const content = document.getElementById('settingsPageContent');
@@ -163,6 +165,7 @@ async function openSettingsSection(section = 'main') {
   if (desc) desc.textContent = activeItem?.dataset.desc || '';
 
   content.innerHTML = '<div class="settings-page-loading">Loading...</div>';
+  pruneBrokenSettingsModal(config.modalId);
 
   const openFn = SETTINGS_PAGE_STATE.originals[config.open];
   if (typeof openFn !== 'function') {
@@ -174,12 +177,16 @@ async function openSettingsSection(section = 'main') {
     beginSettingsDocking();
     await openFn();
   } catch (error) {
-    content.innerHTML = '<div class="settings-page-empty">Failed to open this settings section.</div>';
+    if (isSettingsOpenRequestCurrent(requestId, section)) {
+      content.innerHTML = '<div class="settings-page-empty">Failed to open this settings section.</div>';
+    }
     console.warn('[settings-page] open failed', error);
     return;
   } finally {
     endSettingsDocking();
   }
+
+  if (!isSettingsOpenRequestCurrent(requestId, section)) return;
 
   const mask = document.getElementById(config.modalId);
   const modal = mask ? mask.querySelector('.modal') : null;
@@ -189,6 +196,22 @@ async function openSettingsSection(section = 'main') {
   }
 
   dockSettingsPanel(mask, modal, section, config);
+}
+
+function isSettingsOpenRequestCurrent(requestId, section) {
+  const page = document.getElementById('settingsPage');
+  return SETTINGS_PAGE_STATE.openRequestId === requestId
+    && SETTINGS_PAGE_STATE.activeSection === section
+    && !!page
+    && page.classList.contains('show');
+}
+
+function pruneBrokenSettingsModal(modalId) {
+  if (!modalId) return;
+  const mask = document.getElementById(modalId);
+  if (mask && !mask.querySelector('.modal')) {
+    mask.remove();
+  }
 }
 
 function getSettingsNavTitle(item, fallback) {
@@ -311,6 +334,7 @@ function closeSettingsProxy(section) {
 }
 
 function closeSettingsPage() {
+  SETTINGS_PAGE_STATE.openRequestId += 1;
   closeDockedSection();
 
   const content = document.getElementById('settingsPageContent');

@@ -280,6 +280,47 @@ function injectBuiltinTools() {
   storage.set(BUILTIN_TOOLS_LOADED_KEY, JSON.stringify(currentSignatures));
 }
 
+function sanitizeMessageAttachmentsForSave(msg) {
+  if (!msg || !msg.attachments || msg.attachments.length === 0) return msg;
+
+  const cleanAttachments = msg.attachments.map(att => {
+    if (att.text && !att.data) return att;
+    const dataSize = att.data ? att.data.length : 0;
+    if (dataSize < 5 * 1024 * 1024) return att;
+    return {
+      id: att.id,
+      name: att.name,
+      mime: att.mime,
+      size: att.size,
+      type: att.type,
+      _fromAI: att._fromAI,
+      _hidden: att._hidden,
+      _aiDescription: att._aiDescription,
+      _stripped: true,
+      _strippedReason: `附件超大（${(dataSize / 1024 / 1024).toFixed(1)}MB），刷新后将丢失。要保留请重新加载。`
+    };
+  });
+
+  return { ...msg, attachments: cleanAttachments };
+}
+
+function sanitizeMessagesForSave(messages) {
+  return (Array.isArray(messages) ? messages : []).map(msg => sanitizeMessageAttachmentsForSave(msg));
+}
+
+function sanitizeConcurrentForSave(concurrent) {
+  if (!concurrent || typeof concurrent !== 'object') return concurrent;
+  return {
+    ...concurrent,
+    agents: Array.isArray(concurrent.agents)
+      ? concurrent.agents.map(agent => ({
+          ...agent,
+          messages: sanitizeMessagesForSave(agent && agent.messages)
+        }))
+      : concurrent.agents
+  };
+}
+
 // ⭐ 完整修复版 saveData：迁移 IndexedDB 后基本不会再爆容量，
 //     仍保留剥离 + quota 兜底逻辑，以防极端情况下 IDB 配额也满
 //
@@ -292,37 +333,8 @@ function saveData() {
     // 深拷贝并剥离大附件的 data 字段
     const chatsForSave = state.chats.map(chat => ({
       ...chat,
-      messages: chat.messages.map(msg => {
-        if (!msg.attachments || msg.attachments.length === 0) return msg;
-        
-        const cleanAttachments = msg.attachments.map(att => {
-          // 文本附件（小）保留全部
-          if (att.text && !att.data) return att;
-          
-          // 计算 data 大小（base64 编码后的字节数）
-          const dataSize = att.data ? att.data.length : 0;
-          
-          // ⭐ IndexedDB 容量充裕，把阈值从 100KB 提到 5MB：
-          //    大多数对话图片都能完整保留，刷新后不会丢
-          if (dataSize < 5 * 1024 * 1024) return att;
-          
-          // 超大附件（> 5MB）仍剥离，避免单次写入卡顿
-          return {
-            id: att.id,
-            name: att.name,
-            mime: att.mime,
-            size: att.size,
-            type: att.type,
-            _fromAI: att._fromAI,
-            _hidden: att._hidden,
-            _aiDescription: att._aiDescription,
-            _stripped: true,
-            _strippedReason: `附件超大（${(dataSize / 1024 / 1024).toFixed(1)}MB），刷新后将丢失。要保留请重新加载。`
-          };
-        });
-        
-        return { ...msg, attachments: cleanAttachments };
-      })
+      messages: sanitizeMessagesForSave(chat.messages),
+      concurrent: sanitizeConcurrentForSave(chat.concurrent)
     }));
     
     const savedAt = Date.now();
@@ -389,18 +401,26 @@ function handleStorageQuotaExceeded() {
   
   // 策略 3：清空当前对话的所有附件元数据
   console.log('[紧急清理] 移除所有附件元数据');
+  const stripAttachmentMeta = msg => {
+    if (!msg || !msg.attachments) return;
+    msg.attachments = msg.attachments.map(a => ({
+      id: a.id,
+      name: a.name,
+      mime: a.mime,
+      size: a.size,
+      type: a.type,
+      _stripped: true,
+      _strippedReason: '存储空间不足，附件已被自动清理'
+    }));
+  };
   for (const chat of state.chats) {
     for (const msg of chat.messages) {
-      if (msg.attachments) {
-        msg.attachments = msg.attachments.map(a => ({
-          id: a.id,
-          name: a.name,
-          mime: a.mime,
-          size: a.size,
-          type: a.type,
-          _stripped: true,
-          _strippedReason: '存储空间不足，附件已被自动清理'
-        }));
+      stripAttachmentMeta(msg);
+    }
+    const agents = chat.concurrent && Array.isArray(chat.concurrent.agents) ? chat.concurrent.agents : [];
+    for (const agent of agents) {
+      for (const msg of (agent && Array.isArray(agent.messages) ? agent.messages : [])) {
+        stripAttachmentMeta(msg);
       }
     }
   }
@@ -424,21 +444,8 @@ function handleStorageQuotaExceeded() {
 function serializeChatsWithStrippedAttachments() {
   const chatsForSave = state.chats.map(chat => ({
     ...chat,
-    messages: chat.messages.map(msg => {
-      if (!msg.attachments || msg.attachments.length === 0) return msg;
-      const cleanAttachments = msg.attachments.map(att => {
-        if (att.text && !att.data) return att;
-        const dataSize = att.data ? att.data.length : 0;
-        if (dataSize < 5 * 1024 * 1024) return att;
-        return {
-          id: att.id, name: att.name, mime: att.mime, size: att.size, type: att.type,
-          _fromAI: att._fromAI, _hidden: att._hidden, _aiDescription: att._aiDescription,
-          _stripped: true,
-          _strippedReason: `附件超大（${(dataSize / 1024 / 1024).toFixed(1)}MB）`
-        };
-      });
-      return { ...msg, attachments: cleanAttachments };
-    })
+    messages: sanitizeMessagesForSave(chat.messages),
+    concurrent: sanitizeConcurrentForSave(chat.concurrent)
   }));
   return JSON.stringify({ chats: chatsForSave, currentId: state.currentId });
 }

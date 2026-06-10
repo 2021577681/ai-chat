@@ -100,6 +100,10 @@ function openContextLimitSettings() {
   const wrap = document.querySelector('.more-menu-wrap');
   if (wrap) wrap.classList.remove('open');
   let modal = document.getElementById('contextLimitModal');
+  if (modal && !modal.querySelector('.modal')) {
+    modal.remove();
+    modal = null;
+  }
   if (!modal) {
     modal = buildContextLimitModal();
     document.body.appendChild(modal);

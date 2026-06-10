@@ -158,6 +158,89 @@ function _concurrentFindTurn(groupMsg, agentId) {
   return turns.find(t => t.agentId === agentId) || null;
 }
 
+function _concurrentTranscriptRounds(chat) {
+  const messages = Array.isArray(chat && chat.messages) ? chat.messages : [];
+  const rounds = [];
+  for (let i = 0; i < messages.length; i++) {
+    const user = messages[i];
+    if (!user || !user._concurrentUser || !user.concurrentRoundId) continue;
+    const group = messages.find(m => m && m._concurrentGroup && m.concurrent && m.concurrent.roundId === user.concurrentRoundId);
+    if (group) rounds.push({ user, group });
+  }
+  return rounds;
+}
+
+function _concurrentCountUserTurns(messages) {
+  return (Array.isArray(messages) ? messages : []).filter(m =>
+    m && m.role === 'user' && !m._concurrentAttachment && !m._isTransientSummary
+  ).length;
+}
+
+function _concurrentCountAssistantTurns(messages) {
+  return (Array.isArray(messages) ? messages : []).filter(m =>
+    m && m.role === 'assistant' && String(m.content || '').trim()
+  ).length;
+}
+
+function _concurrentTurnHasFinalText(round, agentId) {
+  const turn = _concurrentFindTurn(round && round.group, agentId);
+  return !!(turn && Array.isArray(turn.items) && turn.items.some(item =>
+    item && (item.type === 'final' || item.type === 'error' || item.type === 'stopped') && String(item.content || '').trim()
+  ));
+}
+
+function _concurrentRebuildAgentMessagesFromTranscript(chat, agentId, rounds = null) {
+  const rebuilt = [];
+  for (const round of (Array.isArray(rounds) ? rounds : _concurrentTranscriptRounds(chat))) {
+    const user = round.user || {};
+    const userMsg = {
+      role: 'user',
+      content: user.content || ''
+    };
+    if (Array.isArray(user.attachments) && user.attachments.length) {
+      userMsg.attachments = _concurrentCloneAttachments(user.attachments);
+    }
+    rebuilt.push(userMsg);
+
+    const turn = _concurrentFindTurn(round.group, agentId);
+    if (!turn || !Array.isArray(turn.items)) continue;
+    const finalItem = [...turn.items].reverse().find(item =>
+      item && (item.type === 'final' || item.type === 'error' || item.type === 'stopped') && String(item.content || '').trim()
+    );
+    if (finalItem) {
+      rebuilt.push({
+        role: 'assistant',
+        content: finalItem.type === 'final'
+          ? String(finalItem.content || '')
+          : `【${finalItem.type === 'error' ? '失败' : '已停止'}】${String(finalItem.content || '')}`
+      });
+    }
+  }
+  return rebuilt;
+}
+
+function _concurrentRepairAgentPrivateContext(chat, agent) {
+  if (!agent) return [];
+  const currentMessages = Array.isArray(agent.messages) ? agent.messages : [];
+  const completedRounds = _concurrentTranscriptRounds(chat).filter(round => {
+    const group = round.group && round.group.concurrent;
+    return group && group.status && group.status !== 'running' && group.status !== 'stopping';
+  });
+  if (!completedRounds.length) return currentMessages;
+  const userTurnCount = _concurrentCountUserTurns(currentMessages);
+  const assistantTurnCount = _concurrentCountAssistantTurns(currentMessages);
+  const finalTurnCount = completedRounds.filter(round => _concurrentTurnHasFinalText(round, agent.id)).length;
+  if (userTurnCount >= completedRounds.length && assistantTurnCount >= finalTurnCount) return currentMessages;
+
+  const rebuilt = _concurrentRebuildAgentMessagesFromTranscript(chat, agent.id, completedRounds);
+  if (rebuilt.length) {
+    agent.messages = rebuilt;
+    console.warn(`[concurrent] 已从主转录修复 ${agent.name || agent.id} 的私有上下文：user ${userTurnCount} -> ${_concurrentCountUserTurns(rebuilt)}，assistant ${assistantTurnCount} -> ${_concurrentCountAssistantTurns(rebuilt)}`);
+    return agent.messages;
+  }
+  return currentMessages;
+}
+
 function _concurrentRenderCurrent(chat) {
   if (typeof isCurrentChat === 'function' && isCurrentChat(chat)) {
     renderMessages();
@@ -336,8 +419,9 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     };
 
     try {
+      const privateHistory = _concurrentRepairAgentPrivateContext(chat, agent);
       const initialMessages = [
-        ...(Array.isArray(agent.messages) ? agent.messages : []),
+        ...(Array.isArray(privateHistory) ? privateHistory : []),
         {
           role: 'user',
           content: cleanPrompt,
@@ -756,6 +840,39 @@ function _concurrentIsToolFlowEvent(ev) {
   return type === 'tool_call' || type === 'tool_result' || type === 'assistant_step';
 }
 
+function _concurrentCollapsedBlockKind(ev) {
+  if (_concurrentIsToolFlowEvent(ev)) return 'tool';
+  if (ev && ev.item && ['final', 'error', 'stopped'].includes(ev.item.type)) return 'answer';
+  return 'misc';
+}
+
+function _concurrentBuildCollapsedBlocks(events) {
+  const blocks = [];
+  for (let i = 0; i < events.length;) {
+    const ev = events[i];
+    const kind = _concurrentCollapsedBlockKind(ev);
+    const block = {
+      kind,
+      seq: blocks.length,
+      firstAt: ev && typeof ev.at === 'number' ? ev.at : 0,
+      events: []
+    };
+    while (i < events.length && _concurrentCollapsedBlockKind(events[i]) === kind) {
+      const item = events[i];
+      block.events.push(item);
+      if (item && typeof item.at === 'number' && (block.firstAt == null || item.at < block.firstAt)) {
+        block.firstAt = item.at;
+      }
+      i++;
+    }
+    blocks.push(block);
+  }
+  return blocks.sort((a, b) => {
+    const rank = { tool: 0, answer: 1, misc: 2 };
+    return (rank[a.kind] - rank[b.kind]) || (a.firstAt - b.firstAt) || (a.seq - b.seq);
+  });
+}
+
 function _renderConcurrentToolFlowGroup(events, idx) {
   const toolResultCount = events.filter(ev => ev.item && ev.item.type === 'tool_result').length;
   const first = events[0];
@@ -810,20 +927,16 @@ function renderConcurrentMsg(m, idx) {
   }
 
   const html = [];
-  for (let i = 0; i < events.length;) {
-    if (_concurrentIsToolFlowEvent(events[i])) {
-      const block = [];
-      while (i < events.length && _concurrentIsToolFlowEvent(events[i])) {
-        block.push(events[i]);
-        i++;
+  const blocks = _concurrentBuildCollapsedBlocks(events);
+  for (const block of blocks) {
+    if (block.kind === 'tool') {
+      html.push(_renderConcurrentToolFlowGroup(block.events, idx));
+    } else if (block.kind === 'answer') {
+      for (const ev of block.events) {
+        html.push(_renderConcurrentAnswerFlowGroup(ev, idx));
       }
-      html.push(_renderConcurrentToolFlowGroup(block, idx));
-    } else if (events[i] && events[i].item && ['final', 'error', 'stopped'].includes(events[i].item.type)) {
-      html.push(_renderConcurrentAnswerFlowGroup(events[i], idx));
-      i++;
     } else {
-      html.push(_renderConcurrentEventMessage(events[i], idx));
-      i++;
+      html.push(block.events.map(ev => _renderConcurrentEventMessage(ev, idx)).join(''));
     }
   }
   return html.join('');
