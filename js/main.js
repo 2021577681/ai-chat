@@ -30,8 +30,9 @@ async function init() {
   // 1. 加载本地数据
   loadData();
   const recoveredTimers = (typeof recoverInterruptedMsgTimers === 'function') ? recoverInterruptedMsgTimers() : false;
+  const recoveredConcurrent = (typeof recoverInterruptedConcurrentRequests === 'function') ? recoverInterruptedConcurrentRequests() : false;
   if (typeof registerMsgTimerExitRecovery === 'function') registerMsgTimerExitRecovery();
-  if (recoveredTimers && typeof saveData === 'function') saveData();
+  if ((recoveredTimers || recoveredConcurrent) && typeof saveData === 'function') saveData();
   if (typeof loadTaskQueue === 'function') {
     loadTaskQueue();
   }

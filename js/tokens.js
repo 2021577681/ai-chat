@@ -889,9 +889,13 @@ function compressionValidationFeedback(validation) {
   return lines.join('\n');
 }
 
-function compressionBudgetInfo(chat, extraMessages = []) {
-  const c = chat || currentChat();
-  let tokens = c ? estimateChatTokens(c) : 0;
+function compressionBudgetInfo(chat, extraMessages = [], options = {}) {
+  const ignoreChat = !!(options && options.ignoreChat);
+  const c = ignoreChat ? null : (chat || currentChat());
+  const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+    ? getEffectiveSystemPrompt()
+    : (state.settings.systemPrompt || '');
+  let tokens = c ? estimateChatTokens(c) : estimateTokens(systemPrompt);
   for (const m of extraMessages || []) tokens += estimateMessageTokens(m || {});
   const limit = getContextLimit(state.settings.currentModel);
   const pct = tokens / limit * 100;
@@ -1155,6 +1159,7 @@ async function ensureContextBeforeAgentRun(chat = null, options = {}) {
   if (typeof autoCompressCheck !== 'function') return true;
   const c = chat || currentChat();
   const extraMessages = Array.isArray(options.extraMessages) ? options.extraMessages : [];
+  const isConcurrentChat = !!(c && c.concurrent && c.concurrent.type === 'concurrent_requests');
   const taskOptions = {
     chat: c || options.chat || null,
     chatId: options.chatId || (c && c.id) || '',
@@ -1163,7 +1168,7 @@ async function ensureContextBeforeAgentRun(chat = null, options = {}) {
   };
   if ((!c || !c.messages || !c.messages.length) && !extraMessages.length) return true;
   if (extraMessages.length) {
-    const budget = compressionBudgetInfo(c, extraMessages);
+    const budget = compressionBudgetInfo(c, extraMessages, { ignoreChat: isConcurrentChat });
     if (budget.needsCompression && Array.isArray(options.mutableMessages) && typeof compressTransientMessagesForAgent === 'function') {
       await compressTransientMessagesForAgent(options.mutableMessages, {
         label: options.label || '内部工具循环',
@@ -1175,6 +1180,7 @@ async function ensureContextBeforeAgentRun(chat = null, options = {}) {
       });
     }
   }
+  if (isConcurrentChat) return true;
   if (!c || !c.messages || !c.messages.length) return true;
   const result = await autoCompressCheck(c, {
     preserveGeneratingState: options.preserveGeneratingState !== false,

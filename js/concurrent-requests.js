@@ -222,6 +222,7 @@ function _concurrentRebuildAgentMessagesFromTranscript(chat, agentId, rounds = n
 function _concurrentRepairAgentPrivateContext(chat, agent) {
   if (!agent) return [];
   const currentMessages = Array.isArray(agent.messages) ? agent.messages : [];
+  if (currentMessages.some(m => m && m._isTransientSummary)) return currentMessages;
   const completedRounds = _concurrentTranscriptRounds(chat).filter(round => {
     const group = round.group && round.group.concurrent;
     return group && group.status && group.status !== 'running' && group.status !== 'stopping';
@@ -303,6 +304,54 @@ function requestStopConcurrentChat(chatId) {
   return true;
 }
 
+function recoverInterruptedConcurrentRequests() {
+  if (!state || !Array.isArray(state.chats)) return false;
+  const now = Date.now();
+  let changed = false;
+  state.chats.forEach(chat => {
+    if (!chat || !chat.concurrent || chat.concurrent.type !== 'concurrent_requests') return;
+    if (isConcurrentChatRunning(chat.id)) return;
+    const meta = ensureConcurrentChatMeta(chat);
+    (chat.messages || []).forEach(msg => {
+      const group = msg && msg._concurrentGroup && msg.concurrent ? msg.concurrent : null;
+      if (!group || (group.status !== 'running' && group.status !== 'stopping')) return;
+      group.status = 'stopped';
+      group.finishedAt = group.finishedAt || now;
+      group.collapsedAll = true;
+      msg._endTime = msg._endTime || group.finishedAt;
+      (group.turns || []).forEach(turn => {
+        if (!turn) return;
+        const wasOpen = turn.status === 'pending' || turn.status === 'running' || turn.status === 'stopping';
+        if (wasOpen) {
+          turn.status = 'stopped';
+          turn.finishedAt = turn.finishedAt || now;
+          if (!Array.isArray(turn.items)) turn.items = [];
+          const hasTerminalItem = turn.items.some(item => item && ['final', 'error', 'stopped'].includes(item.type));
+          if (!hasTerminalItem) {
+            turn.items.push({
+              id: _concurrentId('item'),
+              at: now,
+              type: 'stopped',
+              content: '页面刷新或应用重启，已停止'
+            });
+          }
+        }
+        turn.collapsed = true;
+      });
+      const roundMeta = meta && Array.isArray(meta.rounds)
+        ? meta.rounds.find(r => r && r.id === group.roundId)
+        : null;
+      if (roundMeta && (roundMeta.status === 'running' || roundMeta.status === 'stopping')) {
+        roundMeta.status = 'stopped';
+        roundMeta.finishedAt = roundMeta.finishedAt || group.finishedAt;
+      }
+      if (meta) meta.updatedAt = now;
+      changed = true;
+    });
+  });
+  return changed;
+}
+
 function stopSelectedConcurrentRequest() {
   const select = document.getElementById('concurrentTargetSelect');
   const chatId = select && select.value !== 'new' ? select.value : state.currentId;
@@ -326,15 +375,15 @@ function stopAllConcurrentRequests() {
 async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
   const cleanPrompt = String(prompt || '').trim();
   const roundAttachments = _concurrentCloneAttachments(attachments);
-  if (!chat || (!cleanPrompt && !roundAttachments.length)) return;
+  if (!chat || (!cleanPrompt && !roundAttachments.length)) return false;
   if (!state.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     if (typeof openSettings === 'function') openSettings();
-    return;
+    return false;
   }
   if (isConcurrentChatRunning(chat.id)) {
     if (typeof toast === 'function') toast('该并发对话正在运行，请先等待完成或停止');
-    return;
+    return false;
   }
 
   const meta = ensureConcurrentChatMeta(chat, chat.concurrent && chat.concurrent.agentCount, useTools);
@@ -405,6 +454,7 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
   const model = state.settings.currentModel;
 
   const runOne = async (agent, turn) => {
+    if (!agent || !turn) return;
     const ctrl = new AbortController();
     runtime.controllers[agent.id] = ctrl;
     turn.status = 'running';
@@ -500,6 +550,7 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     _concurrentRenderCurrent(chat);
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   }
+  return true;
 }
 
 async function startConcurrentRequestFromUi() {
@@ -510,6 +561,11 @@ async function startConcurrentRequestFromUi() {
   const prompt = input ? input.value.trim() : '';
   if (!prompt) {
     if (typeof toast === 'function') toast('请输入并发请求指令');
+    return;
+  }
+  if (!state.settings.apiKey) {
+    alert('请先在「设置」中填写 API Key');
+    if (typeof openSettings === 'function') openSettings();
     return;
   }
   const target = select ? select.value : 'new';
@@ -527,6 +583,10 @@ async function startConcurrentRequestFromUi() {
     useTools = !!chat.concurrent.useTools;
   } else {
     chat = _concurrentCreateChat(agentCount, useTools, prompt);
+  }
+  if (chat && isConcurrentChatRunning(chat.id)) {
+    if (typeof toast === 'function') toast('该并发对话正在运行，请先等待完成或停止');
+    return;
   }
 
   saveConcurrentRequestSettings({
@@ -549,8 +609,7 @@ async function continueConcurrentChatFromMainInput(prompt, chat, attachments = [
   const roundAttachments = _concurrentCloneAttachments(attachments);
   if (!cleanPrompt && !roundAttachments.length) return false;
   const meta = ensureConcurrentChatMeta(targetChat, targetChat.concurrent.agentCount);
-  await startConcurrentRound(targetChat, cleanPrompt, !!(meta && meta.useTools), roundAttachments);
-  return true;
+  return await startConcurrentRound(targetChat, cleanPrompt, !!(meta && meta.useTools), roundAttachments) === true;
 }
 
 function concurrentSelectTargetChanged() {
@@ -679,7 +738,8 @@ function renderConcurrentRequestsModal() {
     const running = isConcurrentChatRunning(chat.id);
     const rounds = (chat.messages || []).filter(m => m && m._concurrentGroup).length;
     const stats = typeof getChatTokenStats === 'function' ? getChatTokenStats(chat) : null;
-    const tokens = stats ? ((stats.inputTokens || 0) + (stats.outputTokens || 0)) : 0;
+    const recordedTokens = stats ? ((stats.inputTokens || 0) + (stats.outputTokens || 0)) : 0;
+    const tokens = recordedTokens || (typeof estimateChatTokens === 'function' ? estimateChatTokens(chat) : 0);
     const ownerCount = meta.fileOwners ? Object.keys(meta.fileOwners).length : 0;
     return `
       <div class="concurrent-history-card ${running ? 'running' : ''}">
@@ -1034,9 +1094,25 @@ function _concurrentIsMutationAction(action, params) {
     && !(action === 'apply_patch' && params && params.dry_run);
 }
 
+function _concurrentLooksLikeMutatingExecute(command) {
+  const s = String(command || '').trim();
+  if (!s) return false;
+  if (/(^|[^<])>>?[^&]/.test(s)) return true;
+  if (/\b(tee|sed\s+-i|perl\s+-pi)\b/i.test(s)) return true;
+  if (/(^|[;&|]\s*)(rm|del|erase|rmdir|rd|mkdir|md|touch|move|mv|copy|cp|ren|rename)\b/i.test(s)) return true;
+  if (/\b(new-item|set-content|add-content|out-file|remove-item|move-item|copy-item|rename-item)\b/i.test(s)) return true;
+  return false;
+}
+
 function guardConcurrentFileOwnership(action, params, context) {
   const ctx = _concurrentContext(context);
   if (!ctx) return null;
+  if (action === 'execute' && _concurrentLooksLikeMutatingExecute(params && params.command)) {
+    return {
+      ok: false,
+      error: '并发请求中 execute_action 不允许执行明显会写入、删除或移动文件的命令。请改用 save_note、append_note、edit_note、apply_patch 或 delete_note 等显式文件工具，以便后台检查文件所有权；只读命令和测试命令仍可执行。'
+    };
+  }
   if (!_concurrentIsMutationAction(action, params)) return null;
   const rawPaths = _concurrentMutationPaths(action, params, context);
   if (!rawPaths.length) return null;
@@ -1178,6 +1254,7 @@ window.concurrentSelectTargetChanged = concurrentSelectTargetChanged;
 window.stopSelectedConcurrentRequest = stopSelectedConcurrentRequest;
 window.stopAllConcurrentRequests = stopAllConcurrentRequests;
 window.requestStopConcurrentChat = requestStopConcurrentChat;
+window.recoverInterruptedConcurrentRequests = recoverInterruptedConcurrentRequests;
 window.isConcurrentChatRunning = isConcurrentChatRunning;
 window.isAnyConcurrentChatRunning = isAnyConcurrentChatRunning;
 window.renderConcurrentMsg = renderConcurrentMsg;

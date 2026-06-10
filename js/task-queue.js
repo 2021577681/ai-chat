@@ -135,6 +135,33 @@ function _taskQueueNewId() {
   return 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+function _taskQueueCreateItem(options = {}) {
+  const mode = ['normal', 'outline', 'reflection'].includes(options.mode) ? options.mode : 'normal';
+  return {
+    id: options.id || _taskQueueNewId(),
+    text: String(options.text || '').trim(),
+    order: _taskQueuePositiveInt(options.order, 1),
+    mode,
+    useTools: !!options.useTools,
+    exposeOutput: !!options.exposeOutput,
+    dependsOnTaskIds: Array.isArray(options.dependsOnTaskIds) ? options.dependsOnTaskIds.filter(Boolean) : [],
+    dependsOnTaskIndexes: Array.isArray(options.dependsOnTaskIndexes) ? options.dependsOnTaskIndexes : [],
+    dependsOnTasksText: typeof options.dependsOnTasksText === 'string' ? options.dependsOnTasksText : '',
+    outputPackage: null,
+    outputUpdatedAt: null,
+    outputWarning: '',
+    promptHash: '',
+    status: 'pending',
+    chatId: null,
+    error: '',
+    createdAt: options.createdAt || Date.now(),
+    startedAt: null,
+    finishedAt: null,
+    pausedAt: null,
+    skippedAt: null
+  };
+}
+
 function openTaskQueue() {
   const q = ensureTaskQueue();
   if (!q.loaded) loadTaskQueue();
@@ -162,7 +189,7 @@ function _taskQueueEnsureModal() {
       <div class="task-queue-compose">
         <div class="form-group" style="margin-bottom:0;">
           <label>输入任务</label>
-          <textarea id="taskQueueInput" placeholder="每行一个任务。新增任务默认序号为 1。"></textarea>
+          <textarea id="taskQueueInput" placeholder="手动加入：每行一个任务。AI 自动调度：输入一个总任务。"></textarea>
         </div>
         <div class="task-queue-controls">
           <label class="task-queue-check">拆分
@@ -185,7 +212,9 @@ function _taskQueueEnsureModal() {
             <input type="checkbox" id="taskQueueAutoStart"> 添加后按顺序开始
           </label>
           <button class="btn btn-primary" onclick="taskQueueAddTasks()">加入队列</button>
+          <button class="btn" id="taskQueueScheduleBtn" onclick="taskQueueAutoSchedule()">AI 自动调度</button>
         </div>
+        <div class="task-queue-scheduler-status" id="taskQueueSchedulerStatus"></div>
       </div>
       <div class="task-queue-toolbar">
         <div class="task-queue-stats" id="taskQueueStats">暂无任务</div>
@@ -711,29 +740,12 @@ function taskQueueAddTasks() {
   }
 
   for (const text of tasks) {
-    q.items.push({
-      id: _taskQueueNewId(),
+    q.items.push(_taskQueueCreateItem({
       text,
       order: 1,
       mode: q.defaultMode,
-      useTools: !!q.defaultUseTools,
-      exposeOutput: false,
-      dependsOnTaskIds: [],
-      dependsOnTaskIndexes: [],
-      dependsOnTasksText: '',
-      outputPackage: null,
-      outputUpdatedAt: null,
-      outputWarning: '',
-      promptHash: '',
-      status: 'pending',
-      chatId: null,
-      error: '',
-      createdAt: Date.now(),
-      startedAt: null,
-      finishedAt: null,
-      pausedAt: null,
-      skippedAt: null
-    });
+      useTools: !!q.defaultUseTools
+    }));
   }
   if (input) input.value = '';
   saveTaskQueue();
@@ -742,6 +754,238 @@ function taskQueueAddTasks() {
   if (autoStartEl && autoStartEl.checked && !q.running) {
     setTimeout(() => startTaskQueue(), 0);
   }
+}
+
+async function taskQueueAutoSchedule() {
+  const q = ensureTaskQueue();
+  taskQueueSaveDefaults();
+  const input = document.getElementById('taskQueueInput');
+  const raw = input ? input.value.trim() : '';
+  if (!raw) {
+    if (typeof toast === 'function') toast('请输入要调度的总任务');
+    return;
+  }
+  if (!state.settings.apiKey) {
+    alert('请先在「设置」中填写 API Key');
+    if (typeof openSettings === 'function') openSettings();
+    return;
+  }
+  if (q.running || q.items.some(_taskQueueItemBusy)) {
+    if (typeof toast === 'function') toast('任务队列正在运行，请停止或等待完成后再自动调度', 4000);
+    return;
+  }
+  if (typeof callOnceWithRole !== 'function') {
+    if (typeof toast === 'function') toast('辅助 API 函数尚未加载，无法自动调度', 4000);
+    return;
+  }
+
+  _taskQueueSetSchedulerBusy(true);
+  _taskQueueSetSchedulerStatus('正在生成任务队列...');
+  try {
+    const plan = await _taskQueueGenerateSchedule(raw, q);
+    const drafts = _taskQueueCoerceSchedulePlan(plan, q);
+    if (!drafts.length) throw new Error('AI 没有返回可用任务');
+    const added = _taskQueueAppendScheduledTasks(q, drafts);
+    if (input) input.value = '';
+    saveTaskQueue();
+    renderTaskQueueModal();
+    _taskQueueSetSchedulerStatus(`已生成 ${added} 个任务，可修改后执行`);
+    if (typeof toast === 'function') toast(`已自动生成 ${added} 个任务，可修改后执行`);
+  } catch (e) {
+    console.warn('[task-queue] 自动调度失败:', e);
+    _taskQueueSetSchedulerStatus('自动调度失败：' + (e.message || e), 'error');
+    if (typeof toast === 'function') toast('自动调度失败：' + (e.message || e), 5000);
+  } finally {
+    _taskQueueSetSchedulerBusy(false);
+  }
+}
+
+async function _taskQueueGenerateSchedule(userTask, q) {
+  const rolePrompt = [
+    '你是任务队列自动调度器。你只负责把用户的总任务拆成可执行的任务队列。',
+    '必须只输出一个 JSON 对象，不要输出 Markdown、解释或代码块。',
+    'JSON 固定格式：{"tasks":[{"text":"任务指令","order":1,"dependsOn":[],"mode":"normal","useTools":true,"exposeOutput":false}]}',
+    '调度目标：优先提高整体执行效率。没有真实依赖关系的任务必须放在同一个 order 中并行执行；只有必须等待前置任务结果才能继续的任务，才放到更晚 order。',
+    '不要把可以独立完成的任务串行化。不要为了看起来有步骤而拆出“先分析、再实现、再总结”这种低价值流水线，除非这些步骤确实需要由不同任务独立交付。',
+    '每个任务都必须是可独立执行的完整指令，包含必要背景、范围、产物和验收标准。不要写“继续上一步”“参考前面结果”这类不自包含描述，除非同时用 dependsOn 明确依赖。',
+    '任务数量规则：简单任务 1-3 个；中等任务 3-6 个；复杂任务 6-10 个；默认保持 3-8 个。除非用户明确要求，不要超过 10 个任务。',
+    '字段规则：',
+    '- text：给执行 AI 的完整任务指令，必须自包含、明确验收标准。',
+    '- order：正整数。同一 order 的任务可并行；后一个 order 会等前一个 order 完成。',
+    '- dependsOn：数组，填写本 JSON tasks 数组中的 1-based 任务编号；只能依赖更早 order 的任务。只有后续任务必须读取前置任务输出时才写 dependsOn；只是执行顺序不同但不需要读取输出，不要写 dependsOn。',
+    '- mode：只能是 normal、outline、reflection。normal 适合明确、短平快、单轮或少量工具调用的任务，默认优先使用；outline 仅用于复杂长流程、多阶段探索、需要持续规划推进的任务；reflection 仅用于代码审查、方案评审、质量改进、需要多个视角反复评估的任务。不要滥用 outline 或 reflection。',
+    '- useTools：是否允许工具。任务需要读取/修改文件、联网、运行命令、检查项目状态时为 true；纯文本分析、拆解、写作且不需要外部上下文时为 false。',
+    '- exposeOutput：若后续任务需要引用此任务结果则为 true。凡是被 dependsOn 引用的任务必须 exposeOutput=true；不被后续引用的终点任务通常为 false。',
+    '拆分原则：优先按可并行的独立工作包拆分，而不是按微步骤拆分；不要创建“总结/汇报”这种无实际执行价值的尾任务，除非用户明确要求。'
+  ].join('\n');
+
+  const history = [{
+    role: 'user',
+    content: [
+      `默认执行方式：${q.defaultMode}`,
+      `默认工具开关：${q.defaultUseTools ? 'true' : 'false'}`,
+      '用户总任务：',
+      userTask,
+      '',
+      '请输出固定 JSON。'
+    ].join('\n')
+  }];
+
+  const raw = await callOnceWithRole(history, state.settings.currentModel, rolePrompt, {
+    useGlobalAbortFallback: false,
+    sourceLabel: '任务队列自动调度'
+  });
+  return _taskQueueParseScheduleJson(raw);
+}
+
+function _taskQueueParseScheduleJson(raw) {
+  const text = String(raw || '').trim();
+  if (!text) throw new Error('AI 返回为空');
+  const unwrapped = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+  try {
+    return JSON.parse(unwrapped);
+  } catch (e) {
+    const match = unwrapped.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    const arrayMatch = unwrapped.match(/\[[\s\S]*\]/);
+    if (arrayMatch) return JSON.parse(arrayMatch[0]);
+    throw new Error('AI 返回不是有效 JSON');
+  }
+}
+
+function _taskQueueCoerceSchedulePlan(plan, q) {
+  const list = Array.isArray(plan) ? plan : (Array.isArray(plan && plan.tasks) ? plan.tasks : []);
+  const drafts = [];
+  list.forEach((raw, idx) => {
+    const item = raw && typeof raw === 'object' ? raw : { text: raw };
+    const text = _taskQueueScheduleTaskText(item);
+    if (!text) return;
+    drafts.push({
+      text,
+      order: _taskQueuePositiveInt(item.order ?? item.stage ?? item.group, idx + 1),
+      mode: _taskQueueScheduleMode(item.mode, q.defaultMode),
+      useTools: _taskQueueScheduleBool(item.useTools ?? item.use_tools ?? item.tools, !!q.defaultUseTools),
+      exposeOutput: _taskQueueScheduleBool(item.exposeOutput ?? item.expose_output ?? item.output, false),
+      dependsOnIndexes: _taskQueueScheduleDependencyIndexes(item)
+    });
+  });
+  _taskQueueNormalizeScheduledDraftOrders(drafts);
+  return drafts;
+}
+
+function _taskQueueScheduleTaskText(item) {
+  const title = String(item.title || item.name || '').trim();
+  const text = String(item.text || item.task || item.instruction || item.prompt || item.description || '').trim();
+  if (title && text && !text.includes(title)) return `${title}\n${text}`.trim();
+  return text || title;
+}
+
+function _taskQueueScheduleMode(value, fallback) {
+  const raw = String(value || '').toLowerCase();
+  if (raw.includes('outline') || raw.includes('大纲')) return 'outline';
+  if (raw.includes('reflection') || raw.includes('reflect') || raw.includes('师生') || raw.includes('评审')) return 'reflection';
+  if (raw.includes('normal') || raw.includes('普通')) return 'normal';
+  return ['normal', 'outline', 'reflection'].includes(fallback) ? fallback : 'normal';
+}
+
+function _taskQueueScheduleBool(value, fallback) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const raw = value.trim().toLowerCase();
+    if (['true', 'yes', 'y', '1', '需要', '启用', '是'].includes(raw)) return true;
+    if (['false', 'no', 'n', '0', '不需要', '禁用', '否'].includes(raw)) return false;
+  }
+  return !!fallback;
+}
+
+function _taskQueueScheduleDependencyIndexes(item) {
+  const raw = item.dependsOn ?? item.depends_on ?? item.dependencies ?? item.depends ?? item.dependsOnTasks;
+  if (Array.isArray(raw)) {
+    return Array.from(new Set(raw.map(x => {
+      if (typeof x === 'number') return x;
+      if (typeof x === 'string') return parseInt(x.replace(/^#/, ''), 10);
+      if (x && typeof x === 'object') return parseInt(x.index || x.task || x.taskNo || x.id, 10);
+      return NaN;
+    }).filter(n => Number.isInteger(n) && n > 0)));
+  }
+  if (typeof raw === 'string') {
+    const parsed = _taskQueueParseIndexList(raw.replace(/#/g, ''));
+    return parsed.ok ? parsed.indexes : [];
+  }
+  return [];
+}
+
+function _taskQueueNormalizeScheduledDraftOrders(drafts) {
+  if (!drafts.length) return;
+  const remapOrders = () => {
+    const orders = Array.from(new Set(drafts.map(d => _taskQueuePositiveInt(d.order, 1)))).sort((a, b) => a - b);
+    const map = new Map(orders.map((order, idx) => [order, idx + 1]));
+    drafts.forEach(d => { d.order = map.get(_taskQueuePositiveInt(d.order, 1)) || 1; });
+  };
+  remapOrders();
+  for (let pass = 0; pass < drafts.length; pass++) {
+    let changed = false;
+    drafts.forEach((draft, idx) => {
+      draft.dependsOnIndexes = (draft.dependsOnIndexes || []).filter(n => n !== idx + 1 && drafts[n - 1]);
+      for (const depIndex of draft.dependsOnIndexes) {
+        const dep = drafts[depIndex - 1];
+        if (dep && dep.order >= draft.order) {
+          draft.order = dep.order + 1;
+          changed = true;
+        }
+      }
+    });
+    if (!changed) break;
+  }
+  remapOrders();
+}
+
+function _taskQueueAppendScheduledTasks(q, drafts) {
+  const existingMaxOrder = (q.items || []).reduce((max, item) => Math.max(max, _taskQueuePositiveInt(item.order, 1)), 0);
+  const baseOrder = existingMaxOrder + 1;
+  const now = Date.now();
+  const items = drafts.map((draft, idx) => _taskQueueCreateItem({
+    text: draft.text,
+    order: baseOrder + _taskQueuePositiveInt(draft.order, 1) - 1,
+    mode: draft.mode,
+    useTools: draft.useTools,
+    exposeOutput: draft.exposeOutput,
+    createdAt: now + idx
+  }));
+
+  drafts.forEach((draft, idx) => {
+    const ids = (draft.dependsOnIndexes || [])
+      .map(depIndex => items[depIndex - 1])
+      .filter(Boolean)
+      .map(dep => dep.id);
+    items[idx].dependsOnTaskIds = Array.from(new Set(ids));
+    for (const id of ids) {
+      const dep = items.find(it => it.id === id);
+      if (dep) dep.exposeOutput = true;
+    }
+  });
+
+  q.items.push(...items);
+  _taskQueueNormalizeDependencyRefs(q);
+  return items.length;
+}
+
+function _taskQueueSetSchedulerBusy(busy) {
+  const btn = document.getElementById('taskQueueScheduleBtn');
+  if (!btn) return;
+  btn.disabled = !!busy;
+  btn.textContent = busy ? 'AI 调度中...' : 'AI 自动调度';
+}
+
+function _taskQueueSetSchedulerStatus(text, type = '') {
+  const el = document.getElementById('taskQueueSchedulerStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'task-queue-scheduler-status' + (type ? ` ${type}` : '');
 }
 
 function _taskQueueParseInput(raw, splitMode) {

@@ -837,6 +837,10 @@ async function onSend() {
   const c = currentChat();
 
   if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
+    if (typeof isConcurrentChatRunning === 'function' && isConcurrentChatRunning(c.id)) {
+      toast('该并发对话正在运行，请先等待完成或停止');
+      return;
+    }
     const concurrentAttachments = state.pendingAttachments.map(a => ({ ...a }));
     if (!text && !concurrentAttachments.length) {
       toast('请输入并发请求指令');
