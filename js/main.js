@@ -31,8 +31,9 @@ async function init() {
   loadData();
   const recoveredTimers = (typeof recoverInterruptedMsgTimers === 'function') ? recoverInterruptedMsgTimers() : false;
   const recoveredConcurrent = (typeof recoverInterruptedConcurrentRequests === 'function') ? recoverInterruptedConcurrentRequests() : false;
+  const recoveredDebates = (typeof recoverInterruptedDebates === 'function') ? recoverInterruptedDebates() : false;
   if (typeof registerMsgTimerExitRecovery === 'function') registerMsgTimerExitRecovery();
-  if ((recoveredTimers || recoveredConcurrent) && typeof saveData === 'function') saveData();
+  if ((recoveredTimers || recoveredConcurrent || recoveredDebates) && typeof saveData === 'function') saveData();
   if (typeof loadTaskQueue === 'function') {
     loadTaskQueue();
   }

@@ -8,6 +8,7 @@ const SETTINGS_PAGE_SECTIONS = {
   tools: { open: 'openTools', close: 'closeTools', modalId: 'toolsModal' },
   taskQueue: { open: 'openTaskQueue', close: 'closeTaskQueue', modalId: 'taskQueueModal' },
   concurrentRequests: { open: 'openConcurrentRequests', close: 'closeConcurrentRequests', modalId: 'concurrentRequestsModal' },
+  debateMode: { open: 'openDebateMode', close: 'closeDebateMode', modalId: 'debateModeModal' },
   mcpSkill: { open: 'openMcpSkillSettings', close: 'closeMcpSkillSettings', modalId: 'mcpSkillModal' },
   projectMemory: { open: 'openProjectMemorySettings', close: 'closeProjectMemorySettings', modalId: 'projectMemoryModal' },
   jsonEditor: { open: 'openJsonEditor', close: 'closeJsonEditor', modalId: 'jsonEditorModal' },
@@ -46,6 +47,7 @@ function initSettingsPage() {
     'openTools',
     'openTaskQueue',
     'openConcurrentRequests',
+    'openDebateMode',
     'openMcpSkillSettings',
     'openProjectMemorySettings',
     'openJsonEditor',
@@ -62,6 +64,7 @@ function initSettingsPage() {
     'closeTools',
     'closeTaskQueue',
     'closeConcurrentRequests',
+    'closeDebateMode',
     'closeMcpSkillSettings',
     'closeProjectMemorySettings',
     'closeJsonEditor',
@@ -82,6 +85,7 @@ function initSettingsPage() {
   window.openTools = function() { openSettingsPage('tools'); };
   window.openTaskQueue = function() { openSettingsPage('taskQueue'); };
   window.openConcurrentRequests = function() { openSettingsPage('concurrentRequests'); };
+  window.openDebateMode = function() { openSettingsPage('debateMode'); };
   window.openMcpSkillSettings = function() { openSettingsPage('mcpSkill'); };
   window.openProjectMemorySettings = function() { openSettingsPage('projectMemory'); };
   window.openJsonEditor = function() { openSettingsPage('jsonEditor'); };
@@ -99,6 +103,7 @@ function initSettingsPage() {
   window.closeTools = function() { closeSettingsProxy('tools'); };
   window.closeTaskQueue = function() { closeSettingsProxy('taskQueue'); };
   window.closeConcurrentRequests = function() { closeSettingsProxy('concurrentRequests'); };
+  window.closeDebateMode = function() { closeSettingsProxy('debateMode'); };
   window.closeMcpSkillSettings = function() { closeSettingsProxy('mcpSkill'); };
   window.closeProjectMemorySettings = function() { closeSettingsProxy('projectMemory'); };
   window.closeJsonEditor = function() { closeSettingsProxy('jsonEditor'); };

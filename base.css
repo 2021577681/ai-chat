@@ -1559,6 +1559,274 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 
 
+/* ============ 辩论模式 ============ */
+.debate-compose{display:flex;flex-direction:column;gap:14px}
+.debate-compose textarea{
+  width:100%;
+  min-height:96px;
+  resize:vertical;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--bg-input);
+  color:var(--text);
+  font-family:inherit;
+  font-size:13px;
+  line-height:1.55;
+  outline:none;
+}
+.debate-compose textarea:focus,
+.debate-field input:focus,
+.debate-field select:focus{
+  border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(79,70,229,.12);
+}
+.debate-controls{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.debate-role-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+}
+.debate-role-card{
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--bg-chat);
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.debate-role-title{
+  font-size:13px;
+  font-weight:700;
+  color:var(--text);
+}
+.debate-field{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  font-size:12px;
+  font-weight:600;
+  color:var(--text-secondary);
+}
+.debate-field input,
+.debate-field select{
+  width:100%;
+  padding:8px 10px;
+  border:1px solid var(--border);
+  border-radius:7px;
+  background:var(--bg-input);
+  color:var(--text);
+  font-size:13px;
+  font-family:inherit;
+  outline:none;
+}
+.debate-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.debate-summary{
+  margin:14px 0 10px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.debate-summary span,
+.debate-history-meta span{
+  border:1px solid var(--border);
+  background:var(--bg-input);
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:11.5px;
+  color:var(--text-secondary);
+}
+.debate-history{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.debate-history-card{
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--bg-chat);
+  padding:12px;
+}
+.debate-history-card.running{border-color:rgba(79,70,229,.35);background:rgba(79,70,229,.04)}
+.debate-history-head{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.debate-history-title{
+  flex:1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:14px;
+  font-weight:700;
+  color:var(--text);
+}
+.debate-status{
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:11px;
+  font-weight:700;
+  background:rgba(107,114,128,.12);
+  color:var(--text-secondary);
+}
+.debate-status.running,
+.debate-status.waiting_manual{background:rgba(245,158,11,.14);color:var(--warning)}
+.debate-status.completed{background:rgba(16,185,129,.14);color:var(--success)}
+.debate-history-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:8px;
+}
+.debate-history-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+.debate-empty{
+  padding:24px 14px;
+  text-align:center;
+  color:var(--text-secondary);
+  background:var(--bg-input);
+  border:1px dashed var(--border);
+  border-radius:8px;
+  font-size:13px;
+}
+.debate-judge-card{
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--bg-input);
+  overflow:hidden;
+}
+.debate-speech-badge{
+  background:linear-gradient(135deg,rgba(79,70,229,.9),rgba(16,185,129,.9));
+  color:#fff;
+}
+.debate-judge-card.pass{border-color:rgba(16,185,129,.28);background:rgba(16,185,129,.045)}
+.debate-judge-card.fail{border-color:rgba(245,158,11,.38);background:rgba(245,158,11,.06)}
+.debate-judge-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:9px 12px;
+  border-bottom:1px solid var(--border);
+  font-size:13px;
+  font-weight:700;
+  color:var(--text);
+}
+.debate-judge-result{
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:11px;
+  background:var(--bg-chat);
+  color:var(--text-secondary);
+}
+.debate-judge-card.pass .debate-judge-result{color:var(--success);background:rgba(16,185,129,.12)}
+.debate-judge-card.fail .debate-judge-result{color:var(--warning);background:rgba(245,158,11,.14)}
+.debate-judge-reason{
+  padding:10px 12px;
+  font-size:13px;
+  color:var(--text);
+  line-height:1.65;
+}
+.debate-manual-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:10px 12px;
+  border-top:1px solid var(--border);
+  background:var(--bg-chat);
+}
+.debate-round-fold{
+  margin:10px 0;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--bg-chat);
+  overflow:hidden;
+}
+.debate-round-fold summary{
+  cursor:pointer;
+  list-style:none;
+  padding:12px 14px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-size:14px;
+  font-weight:700;
+  color:var(--text);
+  background:var(--bg-input);
+}
+.debate-round-fold summary::-webkit-details-marker{display:none}
+.debate-round-fold summary::before{
+  content:'▶';
+  color:var(--text-secondary);
+  font-size:10px;
+  margin-right:2px;
+  transition:transform .15s;
+}
+.debate-round-fold[open] summary::before{transform:rotate(90deg)}
+.debate-round-fold summary span{flex:1}
+.debate-round-fold summary em{
+  font-style:normal;
+  color:var(--text-secondary);
+  font-size:12px;
+}
+.debate-round-body{padding:10px 10px 4px}
+.debate-result-card{
+  border:1px solid rgba(79,70,229,.28);
+  border-radius:10px;
+  background:linear-gradient(135deg,rgba(79,70,229,.07),rgba(16,185,129,.045));
+  padding:14px;
+}
+.debate-result-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-size:14px;
+  color:var(--text-secondary);
+}
+.debate-result-head strong{
+  color:var(--text);
+  font-size:16px;
+}
+.debate-scoreline{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  margin:12px 0;
+  font-size:14px;
+  color:var(--text);
+}
+.debate-scoreline strong{
+  font-size:22px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+}
+
+@media (max-width:900px){
+  .debate-role-grid{grid-template-columns:1fr}
+}
+@media (max-width:640px){
+  .debate-controls{grid-template-columns:1fr}
+  .debate-history-head{align-items:flex-start;flex-direction:column}
+}
+
+
 
 
 /* ============ 师生模式：工具调用 + 流式态 ============ */

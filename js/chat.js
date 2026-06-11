@@ -212,8 +212,9 @@ function renderChatList() {
     const isGenerating = typeof isChatGenerating === 'function' && isChatGenerating(c.id);
     const isPinned = !!c.pinnedAt;
     const isConcurrent = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
+    const isDebate = !!(c.debate && c.debate.type === 'debate_mode');
     const title = c.title || '新对话';
-    const statusIcon = isGenerating ? '⏳' : (isConcurrent ? '⚡' : (isPinned ? '📌' : '💬'));
+    const statusIcon = isGenerating ? '⏳' : (isDebate ? '⚖️' : (isConcurrent ? '⚡' : (isPinned ? '📌' : '💬')));
     return `
       <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned ? 'pinned' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
         <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span><span class="chat-item-name">${escapeHtml(title)}</span></span>
@@ -323,6 +324,14 @@ function renderMessages() {
   
   // ⭐ 渲染前先记录滚动位置：用户在底部时才自动跟随
   const stickToBottom = isNearBottom();
+
+  if (c.debate && c.debate.type === 'debate_mode' && c.debate.status === 'completed' && typeof renderDebateCompletedChat === 'function') {
+    inner.innerHTML = renderDebateCompletedChat(c);
+    postRender(inner);
+    if (stickToBottom) scrollBottom();
+    if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+    return;
+  }
   
   // 过滤掉标记为隐藏的消息
   const visibleIndices = [];
@@ -455,6 +464,15 @@ function updatePlanPanel(msgIdx, targetChat) {
 }
 
 function renderMsg(m, idx) {
+  if (m && m.debate && m.debate.kind === 'speech' && typeof renderDebateSpeechMsg === 'function') {
+    return renderDebateSpeechMsg(m, idx);
+  }
+  if (m && m._debateJudge && typeof renderDebateJudgeMsg === 'function') {
+    return renderDebateJudgeMsg(m, idx);
+  }
+  if (m && m._debateSummary && typeof renderDebateSummaryMsg === 'function') {
+    return renderDebateSummaryMsg(m, idx);
+  }
   if (m && m._concurrentGroup && typeof renderConcurrentMsg === 'function') {
     return renderConcurrentMsg(m, idx);
   }
@@ -863,6 +881,11 @@ async function onSend() {
     } finally {
       if (typeof updateSendBtn === 'function') updateSendBtn();
     }
+    return;
+  }
+
+  if (c && c.debate && c.debate.type === 'debate_mode') {
+    if (typeof toast === 'function') toast('辩论对话由辩论模式自动控制，请使用评委卡片按钮或新建普通对话');
     return;
   }
   

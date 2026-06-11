@@ -139,6 +139,13 @@ function updateSendBtn() {
       document.getElementById('inputInfo').textContent = info;
       return;
     }
+    if (c && c.debate && c.debate.type === 'debate_mode') {
+      const statusText = typeof _debateStatusText === 'function' ? _debateStatusText(c.debate.status) : (c.debate.status || '空闲');
+      let info = `⚖️ 辩论模式 · ${statusText} · 禁用工具`;
+      if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+      document.getElementById('inputInfo').textContent = info;
+      return;
+    }
     let info = `${state.settings.apiFormat === 'anthropic' ? '🟠 Anthropic' : '🟢 OpenAI'}`;
     if (state.settings.usePlan) info += ` · 📋 计划模式(${state.settings.planMaxSteps}步)`;
     if (state.settings.useReflection) info += ` · 🎭 师生(${state.settings.refRounds}轮)`;
