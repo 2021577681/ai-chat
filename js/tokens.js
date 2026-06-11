@@ -465,6 +465,7 @@ function updateTokenDisplay() {
   
   const stats = getChatTokenStats(c);
   const isConcurrentChat = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
+  const isDebateChat = !!(c.debate && c.debate.type === 'debate_mode');
   // 看是否有当前对话的精确统计
   const hasAccurate = stats.totalRequests > 0;
   
@@ -472,13 +473,15 @@ function updateTokenDisplay() {
   let isAccurate, sourceLabel;
   
   if (hasAccurate) {
-    inputTokens = isConcurrentChat ? stats.inputTokens : stats.lastInputTokens;     // 普通对话显示当前输入，并发对话显示所有 AI 累计输入
+    inputTokens = (isConcurrentChat || isDebateChat) ? stats.inputTokens : stats.lastInputTokens;     // 普通对话显示当前输入；并发/辩论显示所有 AI 累计输入
     outputTokens = stats.outputTokens;        // 累计输出
     cacheRead = stats.cacheReadTokens;
     thinking = stats.thinkingTokens;
     totalRequests = stats.totalRequests;
     isAccurate = true;
-    sourceLabel = '精确值（来自 API usage）';
+    sourceLabel = isDebateChat
+      ? '累计精确值（辩论所有已记录 AI 请求）'
+      : '精确值（来自 API usage）';
   } else if (stats.lastInputTokens > 0) {
     // count_tokens 拿到的输入值（但还没有真实 usage）
     inputTokens = stats.lastInputTokens;
@@ -522,12 +525,18 @@ function updateTokenDisplay() {
   }
   
   const showRefreshBtn = state.settings.apiFormat === 'anthropic';
+  const inputTitle = isDebateChat && hasAccurate
+    ? `累计输入 token · ${sourceLabel} · 费用统计口径，不代表单次上下文占用`
+    : `输入 token · ${sourceLabel} · 上下文${limitInfo.label}`;
+  const barTitle = isDebateChat && hasAccurate
+    ? `累计输入 token 相当于上下文上限 ${pct}%（费用统计口径，不代表单次上下文占用）`
+    : `输入 token 占上下文 ${pct}%`;
   
   el.innerHTML = `
     <span class="token-msgs" title="消息数">💬 ${msgCount}</span>
-    <span class="token-count token-input" title="输入 token · ${sourceLabel} · 上下文${limitInfo.label}">${accuracyIcon} 📥 ${formatNumber(inputTokens)} / ${formatNumber(limit)}</span>
+    <span class="token-count token-input" title="${inputTitle}">${accuracyIcon} 📥 ${formatNumber(inputTokens)} / ${formatNumber(limit)}</span>
     ${extras}
-    <div class="token-bar" title="输入 token 占上下文 ${pct}%">
+    <div class="token-bar" title="${barTitle}">
       <div class="token-bar-fill ${pctClass}" style="width:${pct}%"></div>
     </div>
     <span class="token-pct ${pctClass}">${pct}%</span>
@@ -1111,6 +1120,10 @@ async function manualCompress() {
     toast('此对话已有任务正在执行，请稍等');
     return;
   }
+  if (c.debate && c.debate.type === 'debate_mode' && typeof manualCompressDebate === 'function') {
+    await manualCompressDebate(c);
+    return;
+  }
   if (!state.settings.apiKey) { toast('请先配置 API Key'); return; }
   if (!confirm(`确定要压缩当前对话历史吗？\n\n会保留最近 ${state.settings.compressKeepLast || 4} 条消息，前面的对话会被 AI 总结成结构化摘要。\n\n压缩完成后可在摘要卡片撤销（刷新页面前有效）。`)) return;
   await compressChat(c, { reason: 'manual', touchGlobalGenerating: true });
@@ -1119,7 +1132,11 @@ async function manualCompress() {
 async function autoCompressCheck(chat = null, options = {}) {
   if (!state.settings.compressAutoEnabled) return false;
   const c = chat || currentChat();
-  if (!c || c.messages.length < 6) return false;
+  if (!c) return false;
+  if (c.debate && c.debate.type === 'debate_mode' && typeof autoCompressDebateCheck === 'function') {
+    return await autoCompressDebateCheck(c, options);
+  }
+  if (c.messages.length < 6) return false;
   
   // 自动压缩必须看当前消息数组。stats.lastInputTokens 可能是上一轮请求的精确值，
   // 在新 user 消息刚入队时已经过期。
