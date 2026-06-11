@@ -8,9 +8,21 @@ function _debateDefaultSettings() {
     topic: '',
     totalRounds: 3,
     answerThreshold: 6,
-    pro: { profileId: '__current', model: state.settings.currentModel || '' },
-    con: { profileId: '__current', model: state.settings.currentModel || '' },
-    judge: { profileId: '__current', model: state.settings.currentModel || '' }
+    pro: {
+      profileId: '__current',
+      model: state.settings.currentModel || '',
+      systemPrompt: '你是辩论赛中的正方辩手。\n辩题：{{topic}}\n你必须坚持正方立场。\n默认不使用工具，不要提及工具、计划模式、大纲模式或系统实现。\n本次你负责{{task}}：{{taskDesc}}\n如果你确实无法反驳，可以明确承认无法反驳或主动认输，不要强行狡辩。\n输出只写你的辩论发言，不要附加 JSON、评审、分数或角色说明。'
+    },
+    con: {
+      profileId: '__current',
+      model: state.settings.currentModel || '',
+      systemPrompt: '你是辩论赛中的反方辩手。\n辩题：{{topic}}\n你必须坚持反方立场。\n默认不使用工具，不要提及工具、计划模式、大纲模式或系统实现。\n本次你负责{{task}}：{{taskDesc}}\n如果你确实无法反驳，可以明确承认无法反驳或主动认输，不要强行狡辩。\n输出只写你的辩论发言，不要附加 JSON、评审、分数或角色说明。'
+    },
+    judge: {
+      profileId: '__current',
+      model: state.settings.currentModel || '',
+      systemPrompt: '你是辩论赛评委，只负责审核当前发言是否可以通过。\n审核标准要宽松：只要发言整体合理、回应了任务，即使有瑕疵也通过。\n不需要打分。\n如果当前发言明显无关、没有完成立论/反驳、反驳没有道理、无法回应对方，或主动认输，则不通过。\n只输出 JSON，格式为 {"pass":true|false,"reason":"简短说明"}。'
+    }
   };
 }
 
@@ -120,11 +132,27 @@ function _debateProfileName(profileId) {
 
 function _debateModelsForProfile(profileId) {
   const s = _debateProfileSettings(profileId);
-  const list = String(s.modelName || '')
+  // 优先从 profile 的 modelName 取，为空时回退到当前主设置的 modelName
+  let modelNameStr = s.modelName || '';
+  if (!modelNameStr && profileId !== '__current') {
+    modelNameStr = state.settings.modelName || '';
+  }
+  const list = String(modelNameStr)
     .split(',')
     .map(x => x.trim())
     .filter(Boolean);
-  if (s.currentModel && !list.includes(s.currentModel)) list.unshift(s.currentModel);
+  // 确保 currentModel 也在列表中
+  const currentModel = s.currentModel || state.settings.currentModel || '';
+  if (currentModel && !list.includes(currentModel)) list.unshift(currentModel);
+  // 如果仍然为空，尝试从 PROVIDERS 配置中获取默认模型
+  if (!list.length && typeof PROVIDERS !== 'undefined') {
+    const provider = s.provider || state.settings.provider || '';
+    const prov = PROVIDERS[provider];
+    if (prov && prov.models) {
+      const defaults = String(prov.models).split(',').map(x => x.trim()).filter(Boolean);
+      for (const m of defaults) { if (!list.includes(m)) list.push(m); }
+    }
+  }
   return [...new Set(list)];
 }
 
@@ -132,9 +160,16 @@ function _debateNormalizeRoleConfig(roleConfig) {
   const cfg = roleConfig && typeof roleConfig === 'object' ? roleConfig : {};
   const profileId = cfg.profileId || '__current';
   const models = _debateModelsForProfile(profileId);
+  const defaults = _debateDefaultSettings();
+  // 查默认提示词（按角色名找，pro/con/judge）
+  let defaultPrompt = '';
+  if (cfg._roleKey && defaults[cfg._roleKey]) {
+    defaultPrompt = defaults[cfg._roleKey].systemPrompt || '';
+  }
   return {
     profileId,
-    model: String(cfg.model || models[0] || state.settings.currentModel || '').trim()
+    model: String(cfg.model || models[0] || state.settings.currentModel || '').trim(),
+    systemPrompt: String(cfg.systemPrompt !== undefined ? cfg.systemPrompt : defaultPrompt).trim()
   };
 }
 
@@ -149,12 +184,14 @@ function _debateProfileOptions(selected) {
 function _debateModelOptions(role, selectedProfileId, selectedModel) {
   const models = _debateModelsForProfile(selectedProfileId);
   const cleanSelected = String(selectedModel || models[0] || '').trim();
-  const datalistId = `debate${role}ModelList`;
+  const options = [...new Set([cleanSelected, ...models].filter(Boolean))];
+  if (!options.length) {
+    return `<select id="debate${role}Model"><option value="">该 API 配置没有模型</option></select>`;
+  }
   return `
-    <input type="text" id="debate${role}Model" list="${datalistId}" value="${escapeHtml(cleanSelected)}" placeholder="输入或选择模型">
-    <datalist id="${datalistId}">
-      ${models.map(model => `<option value="${escapeHtml(model)}"></option>`).join('')}
-    </datalist>`;
+    <select id="debate${role}Model">
+      ${options.map(model => `<option value="${escapeHtml(model)}"${model === cleanSelected ? ' selected' : ''}>${escapeHtml(model)}</option>`).join('')}
+    </select>`;
 }
 
 function debateProfileChanged(role) {
@@ -168,7 +205,8 @@ function debateProfileChanged(role) {
 function _debateCollectSettingsFromUi() {
   const getRole = role => _debateNormalizeRoleConfig({
     profileId: document.getElementById(`debate${role}Profile`)?.value || '__current',
-    model: document.getElementById(`debate${role}Model`)?.value || ''
+    model: document.getElementById(`debate${role}Model`)?.value || '',
+    systemPrompt: document.getElementById(`debate${role}SystemPrompt`)?.value || ''
   });
   return {
     topic: String(document.getElementById('debateTopicInput')?.value || '').trim(),
@@ -192,6 +230,9 @@ function _debateRoleField(role, title, cfg) {
       </label>
       <label class="debate-field">模型
         <span id="debate${role}ModelWrap">${_debateModelOptions(role, normalized.profileId, normalized.model)}</span>
+      </label>
+      <label class="debate-field">系统提示词
+        <textarea id="debate${role}SystemPrompt" rows="6" class="debate-prompt-input" placeholder="自定义系统提示词，支持 {{topic}} {{task}} {{taskDesc}} 占位符">${escapeHtml(normalized.systemPrompt || '')}</textarea>
       </label>
     </div>`;
 }
@@ -251,6 +292,7 @@ function renderDebateModeModal() {
       <div class="debate-actions">
         <button class="btn btn-primary" onclick="startDebateFromUi()">开始辩论</button>
         <button class="btn btn-warning" onclick="stopCurrentDebate()">停止当前辩论</button>
+        <button class="btn" onclick="continueCurrentDebate()">继续当前辩论</button>
       </div>
     </div>
     <div class="debate-summary">
@@ -263,6 +305,7 @@ function renderDebateModeModal() {
         const meta = chat.debate || {};
         const score = meta.score || {};
         const running = isDebateRunning(chat.id);
+        const canContinue = !running && ['idle', 'stopped', 'error'].includes(meta.status || 'idle');
         return `
           <div class="debate-history-card ${running ? 'running' : ''}">
             <div class="debate-history-head">
@@ -277,6 +320,7 @@ function renderDebateModeModal() {
             </div>
             <div class="debate-history-actions">
               <button class="btn" onclick="openDebateChat('${escapeHtml(chat.id)}')">打开</button>
+              <button class="btn btn-primary" ${canContinue ? '' : 'disabled'} onclick="continueDebate('${escapeHtml(chat.id)}')">继续</button>
               <button class="btn btn-warning" ${running ? '' : 'disabled'} onclick="requestStopDebate('${escapeHtml(chat.id)}')">停止</button>
             </div>
           </div>`;
@@ -346,9 +390,9 @@ function _debateCreateChat(settings) {
       currentRound: 1,
       score: { pro: 0, con: 0 },
       roles: {
-        pro: _debateNormalizeRoleConfig(settings.pro),
-        con: _debateNormalizeRoleConfig(settings.con),
-        judge: _debateNormalizeRoleConfig(settings.judge)
+        pro: _debateNormalizeRoleConfig({ ...settings.pro, _roleKey: 'pro' }),
+        con: _debateNormalizeRoleConfig({ ...settings.con, _roleKey: 'con' }),
+        judge: _debateNormalizeRoleConfig({ ...settings.judge, _roleKey: 'judge' })
       },
       rounds: [],
       createdAt: now,
@@ -422,6 +466,38 @@ function stopCurrentDebate() {
   }
 }
 
+function continueCurrentDebate() {
+  const chatId = state.currentId;
+  if (!continueDebate(chatId) && typeof toast === 'function') {
+    toast('当前没有可继续的辩论');
+  }
+}
+
+function continueDebate(chatId) {
+  const chat = chatId ? chatById(chatId) : null;
+  if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
+  if (isDebateRunning(chat.id)) {
+    if (typeof switchChat === 'function') switchChat(chat.id);
+    return true;
+  }
+  if (chat.debate.status === 'completed') return false;
+  if (chat.debate.status === 'waiting_manual') {
+    if (typeof switchChat === 'function') switchChat(chat.id);
+    if (typeof toast === 'function') toast('该辩论正在等待人工审核，请使用评委卡片按钮');
+    return true;
+  }
+  chat.debate.status = 'running';
+  chat.debate.error = '';
+  chat.debate.updatedAt = Date.now();
+  saveData();
+  if (typeof switchChat === 'function') switchChat(chat.id);
+  startDebate(chat.id).catch(e => {
+    console.error('[debate] continue failed:', e);
+    if (typeof toast === 'function') toast('继续辩论失败：' + (e.message || e), 5000);
+  });
+  return true;
+}
+
 async function startDebate(chatId) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate) return false;
@@ -473,13 +549,18 @@ async function _debateRunLoop(chat, runtime) {
       continue;
     }
 
-    const lastSpeech = _debateLastSpeech(chat, roundNo);
-    const side = lastSpeech ? _debateOtherSide(lastSpeech.debate.side) : round.opener;
-    const speechType = lastSpeech ? 'rebuttal' : 'opening';
-    const text = await _debateCallSpeaker(chat, round, side, speechType, runtime);
-    const speechMsg = _debateAddSpeech(chat, round, side, speechType, text);
-    saveData();
-    _debateRenderRefresh(chat);
+    let speechMsg = _debateLastUnreviewedSpeech(chat, roundNo);
+    if (!speechMsg) {
+      const lastSpeech = _debateLastCompletedSpeech(chat, roundNo);
+      const side = lastSpeech ? _debateOtherSide(lastSpeech.debate.side) : round.opener;
+      const speechType = lastSpeech ? 'rebuttal' : 'opening';
+      speechMsg = _debateStartSpeech(chat, round, side, speechType);
+      saveData();
+      _debateRenderRefresh(chat);
+      await _debateCallSpeakerStream(chat, round, side, speechType, speechMsg, runtime);
+      saveData();
+      _debateRenderRefresh(chat);
+    }
 
     const review = await _debateCallJudge(chat, round, speechMsg, runtime);
     _debateAddJudgeCard(chat, round, speechMsg, review);
@@ -506,22 +587,54 @@ function _debateLastSpeech(chat, roundNo) {
   return null;
 }
 
-function _debateAddSpeech(chat, round, side, speechType, content) {
+function _debateLastCompletedSpeech(chat, roundNo) {
+  const messages = Array.isArray(chat.messages) ? chat.messages : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg || !msg.debate || msg.debate.round !== roundNo || msg.debate.kind !== 'speech') continue;
+    if (msg.debate.completed !== false && !msg.debate.stopped) return msg;
+  }
+  return null;
+}
+
+function _debateHasJudgeForSpeech(chat, speechMsg) {
+  const d = speechMsg && speechMsg.debate;
+  if (!d) return false;
+  return (chat.messages || []).some(msg => msg && msg.debate && msg.debate.kind === 'judge'
+    && msg.debate.round === d.round
+    && msg.debate.side === d.side
+    && msg.debate.speechSeq === d.seq);
+}
+
+function _debateLastUnreviewedSpeech(chat, roundNo) {
+  const messages = Array.isArray(chat.messages) ? chat.messages : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg || !msg.debate || msg.debate.round !== roundNo || msg.debate.kind !== 'speech') continue;
+    if (msg.debate.completed === false || msg.debate.stopped) continue;
+    if (!_debateHasJudgeForSpeech(chat, msg)) return msg;
+    return null;
+  }
+  return null;
+}
+
+function _debateStartSpeech(chat, round, side, speechType) {
   const now = Date.now();
   round.answerCount = (round.answerCount || 0) + 1;
   const msg = {
     role: side === 'pro' ? 'user' : 'assistant',
-    content: String(content || '').trim() || '（无发言）',
+    content: '',
     debate: {
       kind: 'speech',
       side,
       speechType,
       round: round.index,
-      seq: round.answerCount
+      seq: round.answerCount,
+      completed: false
     },
     _startTime: now,
-    _firstTokenAt: now,
-    _endTime: now
+    _firstTokenAt: null,
+    _endTime: null
   };
   chat.messages.push(msg);
   chat.debate.updatedAt = now;
@@ -660,7 +773,8 @@ function _debateTranscript(chat, roundNo = null) {
     if (roundNo && msg.debate.round !== roundNo) continue;
     if (msg.debate.kind === 'speech') {
       const type = msg.debate.speechType === 'opening' ? '立论' : '反驳';
-      lines.push(`第${msg.debate.round}局 ${_debateSideName(msg.debate.side)}${type}：\n${msg.content || ''}`);
+      const status = msg.debate.completed === false || msg.debate.stopped ? '（中断未审核）' : '';
+      lines.push(`第${msg.debate.round}局 ${_debateSideName(msg.debate.side)}${type}${status}：\n${msg.content || ''}`);
     } else if (msg.debate.kind === 'judge') {
       lines.push(`第${msg.debate.round}局 评委审核（${msg.debate.pass ? '通过' : '不通过'}）：\n${msg.debate.reason || msg.content || ''}`);
     }
@@ -668,11 +782,63 @@ function _debateTranscript(chat, roundNo = null) {
   return lines.join('\n\n');
 }
 
-async function _debateCallSpeaker(chat, round, side, speechType, runtime) {
+// ⭐ 占位符替换：{{key}} → 对应值，用于用户自定义提示词
+function _debateResolvePrompt(template, vars) {
+  if (!template || typeof template !== 'string') return '';
+  let result = template;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replace(new RegExp('\\{\\{' + key + '\\}\\}', 'g'), String(value ?? ''));
+  }
+  return result.trim();
+}
+
+function _debateRefreshMessage(chat, msg, forceSave = false) {
+  if (!chat || !msg) return;
+  const idx = chat.messages.indexOf(msg);
+  // ⭐ 如果消息已结束且不是 forceSave → 静默跳过（避免无效 DOM 操作）
+  if (msg._endTime && !forceSave) return;
+  // ⭐ 非当前对话 → 全量渲染（用户切走了）
+  if (!isCurrentChat(chat)) {
+    _debateRenderRefresh(chat);
+    return;
+  }
+  // ⭐ forceSave 表示流式已结束：完整替换节点（清光标 + 跑 KaTeX），跟 refreshMsgNode 行为一致
+  if (forceSave && typeof refreshMsgNode === 'function') {
+    refreshMsgNode(idx, chat);
+    return;
+  }
+  // ⭐ 当前对话流式刷新：只改 .msg-content 的 innerHTML（与 _flushLastMsg 一致），不重建整条消息
+  const wrap = document.querySelector(`.message[data-idx="${idx}"] .msg-content`);
+  if (wrap) {
+    const shouldFollow = (typeof isNearBottom !== 'function' || isNearBottom());
+    const renderFn = (typeof renderMarkdownStreaming === 'function')
+      ? renderMarkdownStreaming
+      : renderMarkdown;
+    wrap.innerHTML = renderFn(msg.content || '') + '<span class="cursor"></span>';
+    const msgNode = wrap.closest('.message');
+    if (msgNode) postRender(msgNode, { skipMath: true });
+    if (shouldFollow && typeof scrollBottom === 'function') scrollBottom();
+  } else {
+    // 节点还不存在（消息刚 push），全量渲染
+    _debateRenderRefresh(chat);
+  }
+}
+
+async function _debateCallSpeakerStream(chat, round, side, speechType, speechMsg, runtime) {
   const meta = chat.debate;
   const role = meta.roles[side];
   const isOpening = speechType === 'opening';
-  const systemPrompt = [
+  const task = isOpening ? '立论' : '反驳';
+  const taskDesc = isOpening
+    ? '提出清晰论点和关键理由'
+    : '直接回应上一位辩手：指出漏洞并给出自己的反驳';
+  // ⭐ 使用用户自定义提示词，支持 {{topic}} {{task}} {{taskDesc}} 占位符
+  const systemPrompt = _debateResolvePrompt(role.systemPrompt, {
+    topic: meta.topic,
+    sideName: _debateSideName(side),
+    task,
+    taskDesc
+  }) || [
     `你是辩论赛中的${_debateSideName(side)}辩手。`,
     `辩题：${meta.topic}`,
     `你必须坚持${_debateSideName(side)}立场。`,
@@ -689,20 +855,86 @@ async function _debateCallSpeaker(chat, round, side, speechType, runtime) {
     '共享上下文如下：',
     _debateTranscript(chat)
   ].join('\n\n');
-  return await _debateCallWithRoleConfig(role, [{ role: 'user', content: prompt }], systemPrompt, {
-    chat,
-    chatId: chat.id,
-    signal: runtime.ctrl.signal,
-    isStopped: () => runtime.stopRequested || runtime.ctrl.signal.aborted,
-    sourceLabel: `辩论模式 · ${_debateSideName(side)}`
-  });
+
+  let renderTimer = null;
+  let lastRenderAt = 0;
+  const flush = (force = false) => {
+    if (renderTimer) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    lastRenderAt = Date.now();
+    _debateRefreshMessage(chat, speechMsg, force);
+  };
+  const scheduleFlush = () => {
+    const now = Date.now();
+    if (now - lastRenderAt >= 80) {
+      flush(false);
+      return;
+    }
+    if (!renderTimer) renderTimer = setTimeout(() => flush(false), 80);
+  };
+
+  try {
+    const result = await _debateRunAgentWithRoleConfig(role, {
+      initialMessages: [{ role: 'user', content: prompt }],
+      systemPrompt,
+      maxRounds: 0,
+      signal: runtime.ctrl.signal,
+      useTools: false,
+      stream: true,
+      chatId: chat.id,
+      chat,
+      isStopped: () => runtime.stopRequested || runtime.ctrl.signal.aborted,
+      onProgress: ev => {
+        if (!ev || runtime.stopRequested) return;
+        if (ev.type === 'text_delta' && ev.text) {
+          if (!speechMsg._firstTokenAt) speechMsg._firstTokenAt = Date.now();
+          speechMsg.content += ev.text;
+          chat.debate.updatedAt = Date.now();
+          scheduleFlush();
+        }
+      },
+      sourceLabel: `辩论模式 · ${_debateSideName(side)}`
+    });
+    const finalText = String((result && result.finalText) || speechMsg.content || '').trim();
+    speechMsg.content = finalText || speechMsg.content || '（无发言）';
+    speechMsg.debate.completed = true;
+    delete speechMsg.debate.stopped;
+    speechMsg._firstTokenAt = speechMsg._firstTokenAt || Date.now();
+    speechMsg._endTime = Date.now();
+    chat.debate.updatedAt = speechMsg._endTime;
+    flush(true);
+    return speechMsg.content;
+  } catch (e) {
+    if (renderTimer) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    const stopped = runtime.stopRequested || runtime.ctrl.signal.aborted || e.name === 'AbortError';
+    if (stopped) {
+      speechMsg.debate.completed = false;
+      speechMsg.debate.stopped = true;
+      if (!String(speechMsg.content || '').trim()) speechMsg.content = '（已停止，尚未完成发言）';
+      speechMsg._endTime = Date.now();
+      chat.debate.updatedAt = speechMsg._endTime;
+      _debateRefreshMessage(chat, speechMsg, true);
+    }
+    throw e;
+  }
 }
 
 async function _debateCallJudge(chat, round, speechMsg, runtime) {
   const meta = chat.debate;
   const role = meta.roles.judge;
   const side = speechMsg.debate.side;
-  const systemPrompt = [
+  // ⭐ 使用用户自定义提示词，支持 {{topic}} {{sideName}} {{speechType}} {{speechContent}} 占位符
+  const systemPrompt = _debateResolvePrompt(role.systemPrompt, {
+    topic: meta.topic,
+    sideName: _debateSideName(side),
+    speechType: speechMsg.debate.speechType === 'opening' ? '立论' : '反驳',
+    speechContent: speechMsg.content || ''
+  }) || [
     '你是辩论赛评委，只负责审核当前发言是否可以通过。',
     '审核标准要宽松：只要发言整体合理、回应了任务，即使有瑕疵也通过。',
     '不需要打分。',
@@ -747,6 +979,200 @@ async function _debateCallWithRoleConfig(roleConfig, history, rolePrompt, option
       ...options,
       useGlobalAbortFallback: false
     });
+  } finally {
+    state.settings = { ...state.settings, ...originalSettings };
+  }
+}
+
+// ⭐ 流式版本的辩论角色调用 —— 支持 onProgress 回调实时输出
+async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
+  const cfg = _debateNormalizeRoleConfig(roleConfig);
+  if (!cfg.model) throw new Error('辩论角色模型不能为空');
+  const originalSettings = JSON.parse(JSON.stringify(state.settings || {}));
+  const profileSettings = _debateProfileSettings(cfg.profileId);
+  const keys = (typeof PROFILE_SETTINGS_KEYS !== 'undefined' && Array.isArray(PROFILE_SETTINGS_KEYS))
+    ? PROFILE_SETTINGS_KEYS
+    : ['provider', 'baseUrl', 'apiPath', 'apiFormat', 'apiKey', 'modelName', 'currentModel', 'temperature', 'maxTokens', 'useLocalProxy', 'systemPrompt', 'useCustomJson', 'jsonTemplate', 'jsonHeaders'];
+
+  try {
+    for (const k of keys) {
+      if (profileSettings[k] !== undefined) state.settings[k] = profileSettings[k];
+    }
+    state.settings.currentModel = cfg.model;
+
+    const s = state.settings;
+    const stream = options.stream !== undefined ? !!options.stream : true;
+    const signal = options.signal || null;
+    const isStopped = options.isStopped || (() => false);
+    const onProgress = options.onProgress || (() => {});
+    const initialMessages = options.initialMessages || [];
+    const systemPrompt = options.systemPrompt || '';
+
+    // 构造初始消息列表
+    const messages = [];
+    if (systemPrompt && s.apiFormat !== 'anthropic') {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    for (const m of initialMessages) {
+      if (m.role !== 'system') messages.push(m);
+    }
+
+    // 构造请求体
+    const apiMessages = s.apiFormat === 'anthropic'
+      ? (typeof buildAnthropicMessages === 'function' ? buildAnthropicMessages(messages) : messages)
+      : (s.apiFormat === 'responses' ? (typeof buildOpenAIResponsesInput === 'function' ? buildOpenAIResponsesInput(messages) : messages) : (typeof buildOpenAIMessages === 'function' ? buildOpenAIMessages(messages) : messages));
+
+    let body;
+    if (s.apiFormat === 'anthropic') {
+      body = {
+        model: cfg.model,
+        messages: apiMessages,
+        max_tokens: parseInt(s.maxTokens) || 4096,
+        temperature: parseFloat(s.temperature) || 0.7,
+        stream
+      };
+      if (systemPrompt) body.system = systemPrompt;
+    } else if (s.apiFormat === 'responses') {
+      body = {
+        model: cfg.model,
+        input: apiMessages,
+        max_output_tokens: parseInt(s.maxTokens) || 4096,
+        temperature: parseFloat(s.temperature) || 0.7,
+        stream
+      };
+      if (systemPrompt) body.instructions = systemPrompt;
+    } else {
+      const msgs = systemPrompt ? [{ role: 'system', content: systemPrompt }] : [];
+      for (const m of apiMessages) {
+        if (m.role !== 'system') msgs.push(m);
+      }
+      body = {
+        model: cfg.model,
+        messages: msgs,
+        max_tokens: parseInt(s.maxTokens) || 4096,
+        temperature: parseFloat(s.temperature) || 0.7,
+        stream
+      };
+      if (stream) body.stream_options = { include_usage: true };
+    }
+
+    // 构造 URL 和 headers
+    const url = typeof buildFullUrl === 'function'
+      ? buildFullUrl(s.baseUrl, s.apiPath)
+      : (s.baseUrl.replace(/\/+$/, '') + (s.apiPath || '/chat/completions'));
+    const headers = typeof buildHeaders === 'function' ? buildHeaders() : {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + (s.apiKey || '')
+    };
+
+    // 检查中止条件
+    if (isStopped() || (signal && signal.aborted)) {
+      const err = new Error('用户中断');
+      err.name = 'AbortError';
+      throw err;
+    }
+
+    // 限速检查
+    if (typeof applyRateLimit === 'function') {
+      await applyRateLimit(signal);
+    }
+
+    // 发送请求
+    const fetchFn = typeof _apiFetchWithTimeout === 'function' ? _apiFetchWithTimeout : fetch;
+    const API_FETCH_TIMEOUT_MS = 5 * 60 * 1000;
+    const resp = await fetchFn(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    }, signal, API_FETCH_TIMEOUT_MS);
+
+    if (typeof recordRequest === 'function') recordRequest();
+
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${t.slice(0, 500)}`);
+    }
+
+    const ct = resp.headers.get('content-type') || '';
+    const ctLower = ct.toLowerCase();
+    const looksLikeStream = ctLower.includes('event-stream')
+      || ctLower.includes('stream+json')
+      || (stream && !ctLower.includes('json') && !ctLower.includes('html'));
+
+    let finalText = '';
+
+    if (stream && looksLikeStream && resp.body && typeof resp.body.getReader === 'function') {
+      // === 流式解析 ===
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        if (isStopped() || (signal && signal.aborted)) {
+          try { reader.cancel(); } catch (_) {}
+          const err = new Error('用户中断');
+          err.name = 'AbortError';
+          throw err;
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        buf += chunk;
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t || !t.startsWith('data:')) continue;
+          const data = t.slice(5).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const j = JSON.parse(data);
+            if (s.apiFormat === 'anthropic') {
+              if (j.type === 'content_block_delta' && j.delta?.type === 'text_delta') {
+                const delta = j.delta.text || '';
+                finalText += delta;
+                onProgress({ type: 'text_delta', text: delta });
+              }
+            } else if (s.apiFormat === 'responses') {
+              if (j.type === 'response.output_text.delta') {
+                const delta = j.delta || '';
+                finalText += delta;
+                onProgress({ type: 'text_delta', text: delta });
+              }
+            } else {
+              const delta = j.choices?.[0]?.delta;
+              if (delta && delta.content) {
+                finalText += delta.content;
+                onProgress({ type: 'text_delta', text: delta.content });
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    } else {
+      // === 非流式解析 ===
+      const txt = await resp.text();
+      let j;
+      try { j = JSON.parse(txt); } catch (e) { throw new Error('JSON 解析失败：' + txt.slice(0, 200)); }
+      if (j.error) throw new Error(`API 错误：${j.error.message || JSON.stringify(j.error)}`);
+
+      if (s.apiFormat === 'anthropic') {
+        finalText = (j.content || []).filter(p => p.type === 'text').map(p => p.text).join('');
+      } else if (s.apiFormat === 'responses') {
+        finalText = typeof extractResponsesText === 'function' ? extractResponsesText(j) : '';
+      } else {
+        finalText = j.choices?.[0]?.message?.content || '';
+      }
+      onProgress({ type: 'text_delta', text: finalText });
+    }
+
+    // 记录 usage
+    if (typeof recordUsageFromResponse === 'function') {
+      const chat = options.chat || null;
+      if (chat) recordUsageFromResponse(chat, null, { model: cfg.model });
+    }
+
+    return { finalText, messages };
   } finally {
     state.settings = { ...state.settings, ...originalSettings };
   }

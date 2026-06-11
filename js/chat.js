@@ -843,6 +843,31 @@ async function onSend() {
   }
   const input = document.getElementById('input');
   const text = input.value.trim();
+
+  const c = currentChat();
+
+  // ⭐ 辩论模式发送按钮处理 —— 必须在空输入检查之前
+  //    停止/空闲/错误时点发送 = 恢复辩论，不需要输入内容
+  if (c && c.debate && c.debate.type === 'debate_mode') {
+    if (c.debate.status === 'waiting_manual') {
+      if (typeof toast === 'function') toast('该辩论正在等待人工审核，请使用评委卡片按钮');
+      return;
+    }
+    if (c.debate.status === 'completed') {
+      if (typeof toast === 'function') toast('该辩论已完成，请新建对话或打开设置开始新辩论');
+      return;
+    }
+    if (typeof isDebateRunning === 'function' && isDebateRunning(c.id)) {
+      // 正在运行中，发送按钮是停止按钮，走上面 stopGenerate 分支，不会到这里
+      return;
+    }
+    // 停止/空闲/错误 → 点击发送 = 恢复
+    if (typeof continueDebate === 'function') {
+      continueDebate(c.id);
+    }
+    return;
+  }
+
   if (!text && !state.pendingAttachments.length) return;
   if (!state.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
@@ -851,43 +876,6 @@ async function onSend() {
   }
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   if (!currentChat()) newChat();
-  
-  const c = currentChat();
-
-  if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
-    if (typeof isConcurrentChatRunning === 'function' && isConcurrentChatRunning(c.id)) {
-      toast('该并发对话正在运行，请先等待完成或停止');
-      return;
-    }
-    const concurrentAttachments = state.pendingAttachments.map(a => ({ ...a }));
-    if (!text && !concurrentAttachments.length) {
-      toast('请输入并发请求指令');
-      return;
-    }
-    if (typeof resetTaskPermission === 'function') resetTaskPermission();
-    if (typeof _consumeOneShotMode === 'function') _consumeOneShotMode();
-    input.value = '';
-    input.style.height = 'auto';
-    state.pendingAttachments = [];
-    renderPendingAtts();
-    try {
-      const handled = (typeof continueConcurrentChatFromMainInput === 'function')
-        ? await continueConcurrentChatFromMainInput(text, c, concurrentAttachments)
-        : false;
-      if (!handled) toast('当前并发对话无法继续', 3000);
-    } catch (e) {
-      console.error('[onSend concurrent] 错误:', e);
-      toast('❌ 并发请求发送失败：' + (e.message || e), 3000);
-    } finally {
-      if (typeof updateSendBtn === 'function') updateSendBtn();
-    }
-    return;
-  }
-
-  if (c && c.debate && c.debate.type === 'debate_mode') {
-    if (typeof toast === 'function') toast('辩论对话由辩论模式自动控制，请使用评委卡片按钮或新建普通对话');
-    return;
-  }
   
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
   

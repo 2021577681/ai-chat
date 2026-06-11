@@ -90,6 +90,16 @@ function stopGenerate() {
     if (typeof updateSendBtn === 'function') updateSendBtn();
     return;
   }
+  // ⭐ 辩论模式停止：如果当前对话是辩论模式且正在运行，优先停止
+  if (c && c.debate && c.debate.type === 'debate_mode' && chatId
+      && typeof isDebateRunning === 'function' && isDebateRunning(chatId)) {
+    if (typeof requestStopDebate === 'function') requestStopDebate(chatId);
+    state.stopRequested = true;
+    if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+    return;
+  }
   const task = (typeof chatTaskById === 'function' && chatId) ? chatTaskById(chatId) : null;
   if (typeof requestStopChatTask === 'function' && requestStopChatTask(chatId)) {
     // requestStopChatTask 已经标记 stopRequested 并 abort 对应 controller
