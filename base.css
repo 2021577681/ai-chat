@@ -1583,7 +1583,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 .debate-controls{
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-template-columns:repeat(3,minmax(0,1fr));
   gap:12px;
 }
 .debate-role-grid{
@@ -1749,6 +1749,62 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   padding:10px 12px;
   border-top:1px solid var(--border);
   background:var(--bg-chat);
+}
+/* === 终审裁决卡片 === */
+.debate-judge-card.final{
+  border-color:rgba(139,92,246,.35);
+  background:rgba(139,92,246,.045);
+}
+.debate-judge-card.final .debate-judge-result.final{
+  color:var(--text);
+  background:rgba(139,92,246,.18);
+  font-weight:700;
+}
+.debate-final-result{
+  padding:10px 12px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.debate-final-section{
+  border-radius:7px;
+  padding:10px 12px;
+}
+.debate-final-section.winner{
+  background:rgba(16,185,129,.06);
+  border:1px solid rgba(16,185,129,.2);
+}
+.debate-final-section.loser{
+  background:rgba(239,68,68,.04);
+  border:1px solid rgba(239,68,68,.15);
+}
+.debate-final-label{
+  font-size:13px;
+  font-weight:700;
+  color:var(--text);
+  margin-bottom:6px;
+}
+.debate-final-reason{
+  font-size:13px;
+  color:var(--text);
+  line-height:1.65;
+}
+.debate-final-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:10px 12px;
+  border-top:1px solid var(--border);
+  background:var(--bg-chat);
+}
+.debate-timeout-timer{
+  padding:10px 12px;
+  border-top:1px solid var(--border);
+  font-size:12px;
+  font-weight:600;
+  color:var(--text-secondary);
+  text-align:center;
+  background:rgba(245,158,11,.06);
 }
 .debate-round-fold{
   margin:10px 0;

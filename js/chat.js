@@ -470,6 +470,9 @@ function renderMsg(m, idx) {
   if (m && m._debateJudge && typeof renderDebateJudgeMsg === 'function') {
     return renderDebateJudgeMsg(m, idx);
   }
+  if (m && m._debateFinalJudge && typeof renderDebateFinalJudgeMsg === 'function') {
+    return renderDebateFinalJudgeMsg(m, idx);
+  }
   if (m && m._debateSummary && typeof renderDebateSummaryMsg === 'function') {
     return renderDebateSummaryMsg(m, idx);
   }

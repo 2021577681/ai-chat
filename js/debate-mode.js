@@ -8,6 +8,7 @@ function _debateDefaultSettings() {
     topic: '',
     totalRounds: 3,
     answerThreshold: 6,
+    maxExchanges: 10,
     pro: {
       profileId: '__current',
       model: state.settings.currentModel || '',
@@ -73,6 +74,12 @@ function _debateClampRounds(value) {
 function _debateClampThreshold(value) {
   const n = parseInt(value, 10);
   if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(99, n);
+}
+
+function _debateClampMaxExchanges(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 2) return 2;
   return Math.min(99, n);
 }
 
@@ -211,6 +218,7 @@ function _debateCollectSettingsFromUi() {
   return {
     topic: String(document.getElementById('debateTopicInput')?.value || '').trim(),
     totalRounds: _debateClampRounds(document.getElementById('debateTotalRounds')?.value),
+    maxExchanges: _debateClampMaxExchanges(document.getElementById('debateMaxExchanges')?.value),
     answerThreshold: _debateClampThreshold(document.getElementById('debateAnswerThreshold')?.value),
     pro: getRole('pro'),
     con: getRole('con'),
@@ -279,6 +287,9 @@ function renderDebateModeModal() {
       <div class="debate-controls">
         <label class="debate-field">局数
           <input type="number" id="debateTotalRounds" min="3" max="99" step="1" value="${_debateClampRounds(settings.totalRounds)}">
+        </label>
+        <label class="debate-field">每局轮数上限
+          <input type="number" id="debateMaxExchanges" min="2" max="99" step="1" value="${_debateClampMaxExchanges(settings.maxExchanges)}">
         </label>
         <label class="debate-field">人工审核阈值
           <input type="number" id="debateAnswerThreshold" min="1" max="99" step="1" value="${_debateClampThreshold(settings.answerThreshold)}">
@@ -385,6 +396,7 @@ function _debateCreateChat(settings) {
       id: _debateId('debate'),
       topic,
       totalRounds: _debateClampRounds(settings.totalRounds),
+      maxExchanges: _debateClampMaxExchanges(settings.maxExchanges),
       answerThreshold: _debateClampThreshold(settings.answerThreshold),
       status: 'idle',
       currentRound: 1,
@@ -450,6 +462,7 @@ function requestStopDebate(chatId) {
   }
   const chat = chatById(chatId);
   if (chat && chat.debate) {
+    _debateClearFinalJudgeTimeout(chat);
     chat.debate.status = 'stopped';
     chat.debate.updatedAt = Date.now();
     saveData();
@@ -566,6 +579,12 @@ async function _debateRunLoop(chat, runtime) {
     _debateAddJudgeCard(chat, round, speechMsg, review);
     saveData();
     _debateRenderRefresh(chat);
+
+    // 检查是否达到每局轮数上限
+    if (round.answerCount >= _debateClampMaxExchangesGet(chat)) {
+      await _debateHandleMaxExchanges(chat, round, runtime);
+      return;
+    }
 
     const needsManual = !review.pass || round.answerCount >= _debateClampThreshold(meta.answerThreshold);
     if (needsManual) {
@@ -684,6 +703,7 @@ function _debatePauseForManual(chat, round, speechMsg, review, reason) {
 function debateManualPass(chatId) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  _debateClearFinalJudgeTimeout(chat);
   delete chat.debate.waitingManual;
   chat.debate.status = 'running';
   chat.debate.updatedAt = Date.now();
@@ -698,6 +718,7 @@ function debateManualPass(chatId) {
 function debateManualWin(chatId, side) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  _debateClearFinalJudgeTimeout(chat);
   const waiting = chat.debate.waitingManual || {};
   const round = _debateEnsureRound(chat.debate, waiting.round || chat.debate.currentRound || 1);
   _debateSetRoundWinner(chat, round, side, 'manual');
@@ -1206,7 +1227,217 @@ function _debateParseJudge(raw) {
   };
 }
 
+// === 终审裁决：当一轮达到 maxExchanges 上限时调用 ===
+function _debateClampMaxExchangesGet(chat) {
+  const meta = chat && chat.debate;
+  return _debateClampMaxExchanges(meta ? meta.maxExchanges : 10);
+}
+
+async function _debateCallFinalJudge(chat, round, runtime) {
+  const meta = chat.debate;
+  const role = meta.roles.judge;
+  const systemPrompt = [
+    '你是辩论赛的终审仲裁官。',
+    '当前一局辩论已经结束，你需要根据该局双方的全部发言，评出获胜一方。',
+    '判决标准：论点质量、逻辑严密性、反驳力度、语言表达。',
+    '注意：你只能判一方胜利，不能平局。',
+    '输出 JSON 格式：{"winner":"pro"|"con","winnerReason":"正方/反方胜利的详细理由","loserReason":"正方/反方失败的详细理由"}。',
+    '理由必须详实具体，引用双方发言中的论点和反驳作为佐证。'
+  ].join('\n');
+
+  const prompt = [
+    `辩题：${meta.topic}`,
+    `当前是第 ${round.index}/${meta.totalRounds} 局。`,
+    '本局已到达发言上限，以下为双方全部发言：',
+    '---',
+    _debateTranscript(chat, round.index),
+    '---',
+    '请根据本局双方的全部发言进行终审裁决，输出 JSON。'
+  ].join('\n\n');
+
+  const raw = await _debateCallWithRoleConfig(role, [{ role: 'user', content: prompt }], systemPrompt, {
+    chat,
+    chatId: chat.id,
+    signal: runtime.ctrl.signal,
+    isStopped: () => runtime.stopRequested || runtime.ctrl.signal.aborted,
+    sourceLabel: '辩论模式 · 终审裁决'
+  });
+  return _debateParseFinalJudge(raw);
+}
+
+function _debateParseFinalJudge(raw) {
+  const text = String(raw || '').trim();
+  let obj = null;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : text;
+  try {
+    obj = JSON.parse(candidate);
+  } catch (e) {
+    const match = candidate.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { obj = JSON.parse(match[0]); } catch (_) {}
+    }
+  }
+  if (obj && typeof obj === 'object') {
+    const winner = (obj.winner === 'pro' || obj.winner === 'con') ? obj.winner : null;
+    return {
+      winner: winner || (String(obj.pick || obj.result || '').includes('反') ? 'con' : 'pro'),
+      winnerReason: String(obj.winnerReason || obj.winReason || '').trim() || '评委未提供详细理由。',
+      loserReason: String(obj.loserReason || obj.loseReason || '').trim() || '评委未提供详细理由。',
+      raw: text
+    };
+  }
+  // fallback: keyword matching
+  const isCon = /反方[胜赢]|反方更|判反|winner.*con/i.test(text) && !/正方[胜赢]|正方更/i.test(text);
+  const isPro = /正方[胜赢]|正方更|判正|winner.*pro/i.test(text) && !/反方[胜赢]|反方更/i.test(text);
+  const winner = isCon ? 'con' : (isPro ? 'pro' : 'pro'); // 默认判正方
+  return {
+    winner,
+    winnerReason: '评委裁决：' + text.slice(0, 500),
+    loserReason: '评委裁决：见上方理由。',
+    raw: text
+  };
+}
+
+async function _debateHandleMaxExchanges(chat, round, runtime) {
+  const meta = chat.debate;
+  try {
+    const finalResult = await _debateCallFinalJudge(chat, round, runtime);
+    _debateAddFinalJudgeCard(chat, round, finalResult);
+    _debatePauseForFinalJudge(chat, round, finalResult);
+    return;
+  } catch (e) {
+    const stopped = runtime.stopRequested || runtime.ctrl.signal.aborted || (e && e.name === 'AbortError');
+    if (stopped) throw e;
+    console.error('[debate] final judge call failed:', e);
+    meta.status = 'error';
+    meta.error = '终审裁决调用失败：' + (e.message || String(e));
+    meta.updatedAt = Date.now();
+    delete DEBATE_RUNTIME[chat.id];
+    if (typeof clearChatTask === 'function') clearChatTask(chat.id);
+    saveData();
+    _debateRenderRefresh(chat);
+    if (typeof toast === 'function') toast('终审裁决调用失败：' + (e.message || String(e)), 5000);
+    return;
+  }
+}
+
+function _debateAddFinalJudgeCard(chat, round, finalResult) {
+  const now = Date.now();
+  chat.messages.push({
+    role: 'assistant',
+    content: '',
+    _debateJudge: true,
+    _debateFinalJudge: true,
+    debate: {
+      kind: 'judge',
+      round: round.index,
+      finalJudgePick: finalResult.winner,
+      winnerReason: finalResult.winnerReason,
+      loserReason: finalResult.loserReason,
+      raw: finalResult.raw || ''
+    },
+    _startTime: now,
+    _firstTokenAt: now,
+    _endTime: now
+  });
+  chat.debate.updatedAt = now;
+}
+
+function _debatePauseForFinalJudge(chat, round, finalResult) {
+  const meta = chat.debate;
+  _debateClearFinalJudgeTimeout(chat);
+  meta.status = 'waiting_manual';
+  meta.waitingManual = {
+    round: round.index,
+    side: '',
+    speechSeq: 0,
+    reason: 'max_exchanges',
+    judgePass: false,
+    finalJudgePick: finalResult.winner,
+    winnerReason: finalResult.winnerReason,
+    loserReason: finalResult.loserReason,
+    at: Date.now()
+  };
+  meta.updatedAt = Date.now();
+  delete DEBATE_RUNTIME[chat.id];
+  if (typeof clearChatTask === 'function') clearChatTask(chat.id);
+  saveData();
+  _debateRenderRefresh(chat);
+  // 启动 120 秒倒计时
+  meta._finalJudgeTimeoutId = setTimeout(() => _debateFinalJudgeTimeout(chat.id), 120000);
+  meta._finalJudgeTimeoutAt = Date.now() + 120000;
+  // 启动每秒刷新的 UI 倒计时
+  _debateStartFinalJudgeCountdown(chat);
+}
+
+function _debateFinalJudgeTimeout(chatId) {
+  const chat = chatById(chatId);
+  if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  const waiting = chat.debate.waitingManual || {};
+  if (waiting.reason !== 'max_exchanges') return;
+  const pick = waiting.finalJudgePick;
+  if (pick !== 'pro' && pick !== 'con') return;
+  const round = _debateEnsureRound(chat.debate, waiting.round || chat.debate.currentRound || 1);
+  _debateClearFinalJudgeTimeout(chat);
+  _debateSetRoundWinner(chat, round, pick, 'judge');
+  chat.debate.waitingManual = null;
+  delete chat.debate.waitingManual;
+  chat.debate.status = 'running';
+  _debateAdvanceRound(chat);
+  saveData();
+  _debateRenderRefresh(chat);
+  if (typeof toast === 'function') toast(`超时未响应，已按评委裁决自动判${_debateSideName(pick)}胜利`, 4000);
+  if (chat.debate.status !== 'completed') {
+    startDebate(chat.id).catch(e => {
+      console.error('[debate] final judge timeout continue failed:', e);
+    });
+  }
+}
+
+function _debateClearFinalJudgeTimeout(chat) {
+  if (!chat || !chat.debate) return;
+  if (chat.debate._finalJudgeTimeoutId) {
+    clearTimeout(chat.debate._finalJudgeTimeoutId);
+    chat.debate._finalJudgeTimeoutId = null;
+  }
+  if (chat.debate._finalJudgeCountdownId) {
+    clearInterval(chat.debate._finalJudgeCountdownId);
+    chat.debate._finalJudgeCountdownId = null;
+  }
+  chat.debate._finalJudgeTimeoutAt = null;
+}
+
+function _debateStartFinalJudgeCountdown(chat) {
+  if (!chat || !chat.debate) return;
+  if (chat.debate._finalJudgeCountdownId) clearInterval(chat.debate._finalJudgeCountdownId);
+  chat.debate._finalJudgeCountdownId = setInterval(() => {
+    if (!chat.debate._finalJudgeTimeoutAt) {
+      clearInterval(chat.debate._finalJudgeCountdownId);
+      chat.debate._finalJudgeCountdownId = null;
+      return;
+    }
+    const remaining = Math.max(0, Math.ceil((chat.debate._finalJudgeTimeoutAt - Date.now()) / 1000));
+    const el = document.getElementById('debateFinalJudgeTimer');
+    if (el) {
+      el.textContent = `⏱ ${remaining}秒后自动按评委裁决`;
+      if (remaining <= 30) el.style.color = 'var(--warning)';
+    }
+    if (remaining <= 0) {
+      clearInterval(chat.debate._finalJudgeCountdownId);
+      chat.debate._finalJudgeCountdownId = null;
+    }
+    if (chat.debate.status !== 'waiting_manual') {
+      clearInterval(chat.debate._finalJudgeCountdownId);
+      chat.debate._finalJudgeCountdownId = null;
+    }
+  }, 1000);
+}
+
 function renderDebateJudgeMsg(m, idx) {
+  if (m._debateFinalJudge && typeof renderDebateFinalJudgeMsg === 'function') {
+    return renderDebateFinalJudgeMsg(m, idx);
+  }
   const d = m.debate || {};
   const pass = !!d.pass;
   const chat = currentChat();
@@ -1229,6 +1460,56 @@ function renderDebateJudgeMsg(m, idx) {
               <button class="btn" onclick="debateManualWin('${escapeHtml(chat.id)}','pro')">判正方胜利</button>
               <button class="btn" onclick="debateManualWin('${escapeHtml(chat.id)}','con')">判反方胜利</button>
             </div>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDebateFinalJudgeMsg(m, idx) {
+  const d = m.debate || {};
+  const chat = currentChat();
+  const waiting = chat && chat.debate && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual;
+  const showActions = waiting && waiting.reason === 'max_exchanges' && waiting.round === d.round;
+  const pick = d.finalJudgePick || (waiting && waiting.finalJudgePick) || '';
+  const winnerIsPro = pick === 'pro';
+  const winnerName = winnerIsPro ? '正方' : '反方';
+  const loserName = winnerIsPro ? '反方' : '正方';
+  const winnerReason = d.winnerReason || (waiting && waiting.winnerReason) || '';
+  const loserReason = d.loserReason || (waiting && waiting.loserReason) || '';
+
+  // 倒计时
+  let countdownHtml = '';
+  if (showActions && chat.debate._finalJudgeTimeoutAt) {
+    const remaining = Math.max(0, Math.ceil((chat.debate._finalJudgeTimeoutAt - Date.now()) / 1000));
+    countdownHtml = `<div class="debate-timeout-timer" id="debateFinalJudgeTimer">⏱ ${remaining}秒后自动按评委裁决</div>`;
+  }
+
+  return `
+    <div class="message debate-judge-message" data-idx="${idx}">
+      <div class="avatar assistant">裁</div>
+      <div class="msg-body">
+        <div class="debate-judge-card final">
+          <div class="debate-judge-head">
+            <span>第 ${d.round || '-'} 局终审裁决</span>
+            <span class="debate-judge-result final">${winnerIsPro ? '判正方胜利' : '判反方胜利'}</span>
+          </div>
+          <div class="debate-final-result">
+            <div class="debate-final-section winner">
+              <div class="debate-final-label">🏆 ${winnerName}胜利理由</div>
+              <div class="debate-final-reason">${renderMarkdown(winnerReason)}</div>
+            </div>
+            <div class="debate-final-section loser">
+              <div class="debate-final-label">💔 ${loserName}失败理由</div>
+              <div class="debate-final-reason">${renderMarkdown(loserReason)}</div>
+            </div>
+          </div>
+          ${showActions ? `
+            <div class="debate-final-actions">
+              <button class="btn btn-primary" onclick="debateManualWin('${escapeHtml(chat.id)}','pro')">判正方胜利</button>
+              <button class="btn btn-primary" onclick="debateManualWin('${escapeHtml(chat.id)}','con')">判反方胜利</button>
+            </div>
+            ${countdownHtml}
+          ` : ''}
         </div>
       </div>
     </div>`;
@@ -1324,6 +1605,13 @@ function recoverInterruptedDebates() {
       chat.debate.updatedAt = Date.now();
       changed = true;
     }
+    // 恢复 max_exchanges 的倒计时
+    if (chat.debate.status === 'waiting_manual' && chat.debate.waitingManual && chat.debate.waitingManual.reason === 'max_exchanges') {
+      _debateClearFinalJudgeTimeout(chat);
+      const remaining = Math.max(1000, (chat.debate.waitingManual.at || Date.now()) + 120000 - Date.now());
+      chat.debate._finalJudgeTimeoutId = setTimeout(() => _debateFinalJudgeTimeout(chat.id), remaining);
+      chat.debate._finalJudgeTimeoutAt = Date.now() + remaining;
+    }
   }
   return changed;
 }
@@ -1342,6 +1630,7 @@ window.isDebateRunning = isDebateRunning;
 window.isAnyDebateRunning = isAnyDebateRunning;
 window.renderDebateSpeechMsg = renderDebateSpeechMsg;
 window.renderDebateJudgeMsg = renderDebateJudgeMsg;
+window.renderDebateFinalJudgeMsg = renderDebateFinalJudgeMsg;
 window.renderDebateSummaryMsg = renderDebateSummaryMsg;
 window.renderDebateCompletedChat = renderDebateCompletedChat;
 window.recoverInterruptedDebates = recoverInterruptedDebates;
