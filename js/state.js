@@ -19,6 +19,7 @@ let state = {
     completionSoundVolume: 80,
     maxToolRounds: 15,
     theme: 'light',
+    coolMode: false,
     useTools: false,
     useReflection: false,
     refRounds: 3,

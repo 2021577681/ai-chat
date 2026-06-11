@@ -508,6 +508,115 @@ body{
 
 .messages-inner{
   color:var(--text);
+  position:relative;
+  z-index:1;
+}
+
+@property --cool-wave-shift{
+  syntax:"<length>";
+  inherits:false;
+  initial-value:0px;
+}
+
+[data-theme="dark"][data-cool-mode] .main{
+  background-color:#3a115b;
+  position:relative;
+  overflow:hidden;
+  isolation:isolate;
+}
+
+[data-theme="dark"][data-cool-mode] .main::before,
+[data-theme="dark"][data-cool-mode] .main::after{
+  content:"";
+  position:absolute;
+  pointer-events:none;
+  z-index:0;
+}
+
+[data-theme="dark"][data-cool-mode] .main::before{
+  --cool-wave-shift:0px;
+  inset:-24%;
+  border-radius:50%;
+  background:
+    repeating-radial-gradient(circle at 50% 50%,
+      #512079 calc(var(--cool-wave-shift) + 0px),
+      #552481 calc(var(--cool-wave-shift) + 70px),
+      #5b2a8a calc(var(--cool-wave-shift) + 140px),
+      #613194 calc(var(--cool-wave-shift) + 210px),
+      #67379d calc(var(--cool-wave-shift) + 280px),
+      #5d2e8f calc(var(--cool-wave-shift) + 350px),
+      #512079 calc(var(--cool-wave-shift) + 420px));
+  filter:blur(72px) saturate(102%);
+  opacity:.42;
+  transform-origin:50% 50%;
+  animation:coolWave .8s linear infinite;
+}
+
+[data-theme="dark"][data-cool-mode] .main::after{
+  --cool-wave-shift:0px;
+  inset:-18%;
+  border-radius:50%;
+  background:
+    repeating-radial-gradient(circle at 50% 50%,
+      rgba(86,37,128,.26) calc(var(--cool-wave-shift) + 0px),
+      rgba(92,43,137,.25) calc(var(--cool-wave-shift) + 84px),
+      rgba(100,52,149,.24) calc(var(--cool-wave-shift) + 168px),
+      rgba(111,64,162,.22) calc(var(--cool-wave-shift) + 252px),
+      rgba(100,52,149,.24) calc(var(--cool-wave-shift) + 336px),
+      rgba(86,37,128,.26) calc(var(--cool-wave-shift) + 420px));
+  filter:blur(92px) saturate(100%);
+  opacity:.22;
+  transform-origin:50% 50%;
+  animation:coolWave .8s linear infinite;
+  animation-delay:-.4s;
+}
+
+[data-theme="dark"][data-cool-mode] .topbar,
+[data-theme="dark"][data-cool-mode] .status-bar,
+[data-theme="dark"][data-cool-mode] .messages,
+[data-theme="dark"][data-cool-mode] .input-area{
+  position:relative;
+  z-index:1;
+}
+
+[data-theme="dark"][data-cool-mode] .messages{
+  background:transparent;
+  overflow-x:hidden;
+}
+
+[data-theme="dark"][data-cool-mode] .input-area{
+  background:linear-gradient(180deg,rgba(58,17,91,0),rgba(76,22,128,.26) 26%,rgba(58,17,91,.62) 100%);
+}
+
+[data-theme="dark"][data-cool-mode] .input-inner{
+  background:rgba(72,27,105,.72);
+  border-color:rgba(216,180,254,.30);
+  box-shadow:0 1px 2px rgba(0,0,0,.34),0 8px 28px rgba(88,28,135,.30),0 0 0 1px rgba(168,85,247,.10);
+  -webkit-backdrop-filter:blur(18px) saturate(130%);
+  backdrop-filter:blur(18px) saturate(130%);
+}
+
+[data-theme="dark"][data-cool-mode] .input-inner:focus-within{
+  border-color:rgba(233,213,255,.46);
+  box-shadow:0 1px 2px rgba(0,0,0,.34),0 10px 34px rgba(126,34,206,.40),0 0 0 3px rgba(192,132,252,.18);
+}
+
+[data-theme="dark"][data-cool-mode] .send-btn{
+  background:#d8b4fe;
+  color:#1a0b2a;
+}
+
+[data-theme="dark"][data-cool-mode] .send-btn:hover{
+  background:#f0ddff;
+}
+
+@keyframes coolWave{
+  0%{
+    --cool-wave-shift:0px;
+  }
+  100%{
+    --cool-wave-shift:420px;
+  }
 }
 
 .welcome,
@@ -1147,9 +1256,11 @@ input::placeholder{
 }
 
 .settings-theme-btn{
+  width:36px;
   min-width:36px;
+  flex:0 0 36px;
   height:36px;
-  padding:0 10px;
+  padding:0;
   border:1px solid var(--border);
   border-radius:999px;
   background:transparent;
@@ -1164,6 +1275,27 @@ input::placeholder{
 .settings-theme-btn:hover{
   background:var(--bg-hover);
   color:var(--text);
+}
+
+.settings-cool-btn.active{
+  color:#8e35ff;
+  background:rgba(142,53,255,.12);
+  border-color:rgba(142,53,255,.30);
+  box-shadow:0 0 0 3px rgba(142,53,255,.08);
+}
+
+[data-theme="dark"] .settings-cool-btn.active{
+  color:#d7aefb;
+  background:rgba(176,88,255,.18);
+  border-color:rgba(215,174,251,.36);
+  box-shadow:0 0 0 3px rgba(176,88,255,.12);
+}
+
+@media (prefers-reduced-motion:reduce){
+  [data-theme="dark"][data-cool-mode] .main::before,
+  [data-theme="dark"][data-cool-mode] .main::after{
+    animation:none;
+  }
 }
 
 .settings-page-close:hover{
