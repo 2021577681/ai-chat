@@ -1116,12 +1116,16 @@ function formatMessageForCompression(m, idx) {
 async function manualCompress() {
   const c = currentChat();
   if (!c || c.messages.length < 4) { toast('对话太短，无需压缩'); return; }
-  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating) {
-    toast('此对话已有任务正在执行，请稍等');
+  if (c.debate && c.debate.type === 'debate_mode' && typeof manualCompressDebate === 'function') {
+    if (typeof isDebateRunning === 'function' && isDebateRunning(c.id)) {
+      toast('辩论正在发言或评审，请稍等');
+      return;
+    }
+    await manualCompressDebate(c);
     return;
   }
-  if (c.debate && c.debate.type === 'debate_mode' && typeof manualCompressDebate === 'function') {
-    await manualCompressDebate(c);
+  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating) {
+    toast('此对话已有任务正在执行，请稍等');
     return;
   }
   if (!state.settings.apiKey) { toast('请先配置 API Key'); return; }

@@ -472,6 +472,12 @@ function isDebateWaitingManualTimed(chatId) {
     && _debateManualWaitDuration(chat.debate.waitingManual.reason) > 0);
 }
 
+function isDebateCompressing(chatId) {
+  const chat = chatId ? chatById(chatId) : null;
+  return !!(chat && chat.debate && chat.debate.type === 'debate_mode'
+    && chat.debate._compression && chat.debate._compression.running);
+}
+
 function isDebatePausable(chatId) {
   return isDebateRunning(chatId) || isDebateWaitingManualTimed(chatId);
 }
@@ -617,6 +623,36 @@ function _debatePauseWaitingManual(chat) {
   _debateRenderRefresh(chat);
   if (typeof toast === 'function') toast('已暂停辩论审核倒计时');
   return true;
+}
+
+function _debatePauseManualWaitForCompression(chat) {
+  if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual' || !chat.debate.waitingManual) return null;
+  const waiting = chat.debate.waitingManual;
+  const reason = waiting.reason;
+  const duration = _debateManualWaitDuration(reason);
+  if (!duration) return null;
+  const remainingMs = _debateManualWaitRemainingMs(chat, waiting);
+  _debateClearFinalJudgeTimeout(chat);
+  _debateClearManualPassTimeout(chat);
+  waiting.remainingMs = remainingMs;
+  waiting.pausedForCompression = true;
+  waiting.pausedForCompressionAt = Date.now();
+  chat.debate.updatedAt = Date.now();
+  saveData();
+  _debateRenderRefresh(chat);
+  return { reason, remainingMs };
+}
+
+function _debateResumeManualWaitAfterCompression(chat, paused) {
+  if (!paused || !chat || !chat.debate || chat.debate.status !== 'waiting_manual' || !chat.debate.waitingManual) return;
+  const waiting = chat.debate.waitingManual;
+  if (waiting.reason !== paused.reason) return;
+  delete waiting.pausedForCompression;
+  delete waiting.pausedForCompressionAt;
+  _debateArmManualWaitTimer(chat, waiting, paused.remainingMs);
+  chat.debate.updatedAt = Date.now();
+  saveData();
+  _debateRenderRefresh(chat);
 }
 
 function _debateResumeWaitingManual(chat) {
@@ -878,6 +914,10 @@ function _debatePauseForManual(chat, round, speechMsg, review, reason) {
 function debateManualPass(chatId) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  if (isDebateCompressing(chat.id)) {
+    if (typeof toast === 'function') toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
+    return;
+  }
   _debateClearFinalJudgeTimeout(chat);
   _debateClearManualPassTimeout(chat);
   delete chat.debate.waitingManual;
@@ -894,6 +934,10 @@ function debateManualPass(chatId) {
 function debateManualWin(chatId, side) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  if (isDebateCompressing(chat.id)) {
+    if (typeof toast === 'function') toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
+    return;
+  }
   _debateClearFinalJudgeTimeout(chat);
   _debateClearManualPassTimeout(chat);
   const waiting = chat.debate.waitingManual || {};
@@ -1125,6 +1169,10 @@ async function _debateCompressRound(chat, round, options = {}) {
 
 async function compressDebateChat(chat, options = {}) {
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
+  if (isDebateCompressing(chat.id)) {
+    if (options.reason === 'manual' && typeof toast === 'function') toast('辩论历史正在压缩，请稍等', 3000);
+    return false;
+  }
   const rounds = _debateStaleCompressibleRounds(chat);
   if (!rounds.length) {
     if (options.reason === 'manual' && typeof toast === 'function') toast('当前没有可压缩的已完成旧局');
@@ -1140,6 +1188,13 @@ async function compressDebateChat(chat, options = {}) {
     signal,
     isStopped: options.isStopped || (shouldTouchGlobalGenerating ? () => !!state.stopRequested : undefined)
   };
+  const pausedManualWait = _debatePauseManualWaitForCompression(chat);
+  chat.debate._compression = {
+    running: true,
+    reason: options.reason || 'manual',
+    startedAt: Date.now()
+  };
+  chat.debate.updatedAt = Date.now();
 
   try {
     if (shouldTouchGlobalGenerating) {
@@ -1177,6 +1232,11 @@ async function compressDebateChat(chat, options = {}) {
     if (typeof toast === 'function') toast('辩论压缩失败：' + (e.message || e), 4000);
     return false;
   } finally {
+    if (chat && chat.debate) {
+      delete chat.debate._compression;
+      chat.debate.updatedAt = Date.now();
+      saveData();
+    }
     if (shouldTouchGlobalGenerating) {
       if (foregroundTaskCreated && typeof clearChatTask === 'function') {
         clearChatTask(chat.id);
@@ -1187,11 +1247,16 @@ async function compressDebateChat(chat, options = {}) {
       }
       if (typeof updateSendBtn === 'function') updateSendBtn();
     }
+    _debateResumeManualWaitAfterCompression(chat, pausedManualWait);
   }
 }
 
 async function manualCompressDebate(chat) {
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
+  if (isDebateCompressing(chat.id)) {
+    if (typeof toast === 'function') toast('辩论历史正在压缩，请稍等', 3000);
+    return false;
+  }
   const roleErr = _debateValidateRole('judge', _debateNormalizeRoleConfig((chat.debate.roles && chat.debate.roles.judge) || {}));
   if (roleErr) {
     if (typeof toast === 'function') toast(roleErr, 4000);
@@ -1218,6 +1283,7 @@ async function manualCompressDebate(chat) {
 async function autoCompressDebateCheck(chat, options = {}) {
   if (!state.settings.compressAutoEnabled) return false;
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
+  if (isDebateCompressing(chat.id)) return false;
   const limit = _debateContextLimit(chat);
   const tokens = _debateEstimateSpeakerContextTokens(chat);
   const pct = tokens / limit * 100;
@@ -1837,6 +1903,7 @@ function _debatePauseForFinalJudge(chat, round, finalResult) {
 function _debateFinalJudgeTimeout(chatId) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  if (isDebateCompressing(chat.id)) return;
   const waiting = chat.debate.waitingManual || {};
   if (waiting.reason !== 'max_exchanges') return;
   const pick = waiting.finalJudgePick;
@@ -1861,6 +1928,7 @@ function _debateFinalJudgeTimeout(chatId) {
 function _debateManualPassTimeout(chatId) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  if (isDebateCompressing(chat.id)) return;
   const waiting = chat.debate.waitingManual || {};
   if (waiting.reason !== 'threshold') return;
   _debateClearManualPassTimeout(chat);
@@ -2132,18 +2200,12 @@ function recoverInterruptedDebates() {
     }
     // 恢复 max_exchanges 的倒计时
     if (chat.debate.status === 'waiting_manual' && chat.debate.waitingManual && chat.debate.waitingManual.reason === 'max_exchanges') {
-      _debateClearFinalJudgeTimeout(chat);
-      const remaining = Math.max(1000, (chat.debate.waitingManual.at || Date.now()) + 120000 - Date.now());
-      chat.debate._finalJudgeTimeoutId = setTimeout(() => _debateFinalJudgeTimeout(chat.id), remaining);
-      chat.debate._finalJudgeTimeoutAt = Date.now() + remaining;
-      _debateStartFinalJudgeCountdown(chat);
+      const remaining = Math.max(1000, Number(chat.debate.waitingManual.remainingMs) || (chat.debate.waitingManual.at || Date.now()) + 120000 - Date.now());
+      _debateArmManualWaitTimer(chat, chat.debate.waitingManual, remaining);
     }
     if (chat.debate.status === 'waiting_manual' && chat.debate.waitingManual && chat.debate.waitingManual.reason === 'threshold') {
-      _debateClearManualPassTimeout(chat);
-      const remaining = Math.max(1000, (chat.debate.waitingManual.at || Date.now()) + 30000 - Date.now());
-      chat.debate._manualPassTimeoutId = setTimeout(() => _debateManualPassTimeout(chat.id), remaining);
-      chat.debate._manualPassTimeoutAt = Date.now() + remaining;
-      _debateStartManualPassCountdown(chat);
+      const remaining = Math.max(1000, Number(chat.debate.waitingManual.remainingMs) || (chat.debate.waitingManual.at || Date.now()) + 30000 - Date.now());
+      _debateArmManualWaitTimer(chat, chat.debate.waitingManual, remaining);
     }
   }
   return changed;
@@ -2163,6 +2225,7 @@ window.isDebateRunning = isDebateRunning;
 window.isAnyDebateRunning = isAnyDebateRunning;
 window.isDebateWaitingManual = isDebateWaitingManual;
 window.isDebateWaitingManualTimed = isDebateWaitingManualTimed;
+window.isDebateCompressing = isDebateCompressing;
 window.isDebatePausable = isDebatePausable;
 window.isAnyDebatePausable = isAnyDebatePausable;
 window.renderDebateSpeechMsg = renderDebateSpeechMsg;
