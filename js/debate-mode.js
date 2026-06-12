@@ -460,16 +460,47 @@ function isAnyDebateRunning() {
   return Object.keys(DEBATE_RUNTIME).some(id => !!DEBATE_RUNTIME[id]);
 }
 
+function isDebateWaitingManual(chatId) {
+  const chat = chatId ? chatById(chatId) : null;
+  return !!(chat && chat.debate && chat.debate.type === 'debate_mode'
+    && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual);
+}
+
+function isDebateWaitingManualTimed(chatId) {
+  const chat = chatId ? chatById(chatId) : null;
+  return !!(chat && isDebateWaitingManual(chatId)
+    && _debateManualWaitDuration(chat.debate.waitingManual.reason) > 0);
+}
+
+function isDebatePausable(chatId) {
+  return isDebateRunning(chatId) || isDebateWaitingManualTimed(chatId);
+}
+
+function isAnyDebatePausable() {
+  return isAnyDebateRunning()
+    || (state && Array.isArray(state.chats) && state.chats.some(chat =>
+      chat && chat.debate && chat.debate.type === 'debate_mode'
+      && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual
+      && _debateManualWaitDuration(chat.debate.waitingManual.reason) > 0
+    ));
+}
+
 function requestStopDebate(chatId) {
+  const chat = chatId ? chatById(chatId) : null;
   const runtime = chatId ? DEBATE_RUNTIME[chatId] : null;
-  if (!runtime) return false;
+  if (!runtime) {
+    if (chat && chat.debate && chat.debate.status === 'waiting_manual') {
+      return _debatePauseWaitingManual(chat);
+    }
+    return false;
+  }
   runtime.stopRequested = true;
   if (runtime.ctrl) {
     try { runtime.ctrl.abort(); } catch (e) {}
   }
-  const chat = chatById(chatId);
   if (chat && chat.debate) {
     _debateClearFinalJudgeTimeout(chat);
+    _debateClearManualPassTimeout(chat);
     chat.debate.status = 'stopped';
     chat.debate.updatedAt = Date.now();
     saveData();
@@ -501,6 +532,9 @@ function continueDebate(chatId) {
     return true;
   }
   if (chat.debate.status === 'completed') return false;
+  if (chat.debate.waitingManual && (chat.debate.status === 'stopped' || chat.debate.waitingManual.paused)) {
+    return _debateResumeWaitingManual(chat);
+  }
   if (chat.debate.status === 'waiting_manual') {
     if (typeof switchChat === 'function') switchChat(chat.id);
     if (typeof toast === 'function') toast('该辩论正在等待人工审核，请使用评委卡片按钮');
@@ -515,6 +549,94 @@ function continueDebate(chatId) {
     console.error('[debate] continue failed:', e);
     if (typeof toast === 'function') toast('继续辩论失败：' + (e.message || e), 5000);
   });
+  return true;
+}
+
+function _debateManualWaitDuration(reason) {
+  if (reason === 'threshold') return 30000;
+  if (reason === 'max_exchanges') return 120000;
+  return 0;
+}
+
+function _debateManualWaitTimeoutAt(chat, reason) {
+  if (!chat || !chat.debate) return 0;
+  if (reason === 'threshold') return Number(chat.debate._manualPassTimeoutAt) || 0;
+  if (reason === 'max_exchanges') return Number(chat.debate._finalJudgeTimeoutAt) || 0;
+  return 0;
+}
+
+function _debateManualWaitRemainingMs(chat, waiting) {
+  const reason = waiting && waiting.reason;
+  const duration = _debateManualWaitDuration(reason);
+  if (!duration) return 0;
+  const timeoutAt = _debateManualWaitTimeoutAt(chat, reason);
+  if (timeoutAt) return Math.max(1000, timeoutAt - Date.now());
+  const stored = Number(waiting.remainingMs) || 0;
+  if (stored > 0) return Math.max(1000, stored);
+  const startedAt = Number(waiting.at) || Date.now();
+  return Math.max(1000, startedAt + duration - Date.now());
+}
+
+function _debateArmManualWaitTimer(chat, waiting, remainingMs) {
+  if (!chat || !chat.debate || !waiting) return;
+  const reason = waiting.reason;
+  const duration = _debateManualWaitDuration(reason);
+  if (!duration) return;
+  const remaining = Math.max(1000, Number(remainingMs) || _debateManualWaitRemainingMs(chat, waiting));
+  waiting.at = Date.now() - Math.max(0, duration - remaining);
+  delete waiting.remainingMs;
+  delete waiting.paused;
+  delete waiting.pausedAt;
+  if (reason === 'threshold') {
+    _debateClearManualPassTimeout(chat);
+    chat.debate._manualPassTimeoutId = setTimeout(() => _debateManualPassTimeout(chat.id), remaining);
+    chat.debate._manualPassTimeoutAt = Date.now() + remaining;
+    _debateStartManualPassCountdown(chat);
+  } else if (reason === 'max_exchanges') {
+    _debateClearFinalJudgeTimeout(chat);
+    chat.debate._finalJudgeTimeoutId = setTimeout(() => _debateFinalJudgeTimeout(chat.id), remaining);
+    chat.debate._finalJudgeTimeoutAt = Date.now() + remaining;
+    _debateStartFinalJudgeCountdown(chat);
+  }
+}
+
+function _debatePauseWaitingManual(chat) {
+  if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual' || !chat.debate.waitingManual) return false;
+  const waiting = chat.debate.waitingManual;
+  const remaining = _debateManualWaitRemainingMs(chat, waiting);
+  _debateClearFinalJudgeTimeout(chat);
+  _debateClearManualPassTimeout(chat);
+  waiting.paused = true;
+  waiting.pausedAt = Date.now();
+  if (_debateManualWaitDuration(waiting.reason)) waiting.remainingMs = remaining;
+  chat.debate.status = 'stopped';
+  chat.debate.error = 'paused';
+  chat.debate.updatedAt = Date.now();
+  if (typeof clearChatTask === 'function') clearChatTask(chat.id);
+  saveData();
+  _debateRenderRefresh(chat);
+  if (typeof toast === 'function') toast('已暂停辩论审核倒计时');
+  return true;
+}
+
+function _debateResumeWaitingManual(chat) {
+  if (!chat || !chat.debate || !chat.debate.waitingManual) return false;
+  const waiting = chat.debate.waitingManual;
+  const remaining = _debateManualWaitRemainingMs(chat, waiting);
+  chat.debate.status = 'waiting_manual';
+  chat.debate.error = '';
+  chat.debate.updatedAt = Date.now();
+  if (_debateManualWaitDuration(waiting.reason)) {
+    _debateArmManualWaitTimer(chat, waiting, remaining);
+  } else {
+    delete waiting.remainingMs;
+    delete waiting.paused;
+    delete waiting.pausedAt;
+  }
+  saveData();
+  if (typeof switchChat === 'function') switchChat(chat.id);
+  _debateRenderRefresh(chat);
+  if (typeof toast === 'function') toast('已恢复辩论人工审核');
   return true;
 }
 
@@ -731,6 +853,7 @@ function _debateAddJudgeCard(chat, round, speechMsg, review) {
 
 function _debatePauseForManual(chat, round, speechMsg, review, reason) {
   const meta = chat.debate;
+  _debateClearManualPassTimeout(chat);
   meta.status = 'waiting_manual';
   meta.waitingManual = {
     round: round.index,
@@ -743,6 +866,11 @@ function _debatePauseForManual(chat, round, speechMsg, review, reason) {
   meta.updatedAt = Date.now();
   delete DEBATE_RUNTIME[chat.id];
   if (typeof clearChatTask === 'function') clearChatTask(chat.id);
+  if (reason === 'threshold') {
+    meta._manualPassTimeoutId = setTimeout(() => _debateManualPassTimeout(chat.id), 30000);
+    meta._manualPassTimeoutAt = Date.now() + 30000;
+    _debateStartManualPassCountdown(chat);
+  }
   saveData();
   _debateRenderRefresh(chat);
 }
@@ -751,6 +879,7 @@ function debateManualPass(chatId) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   _debateClearFinalJudgeTimeout(chat);
+  _debateClearManualPassTimeout(chat);
   delete chat.debate.waitingManual;
   chat.debate.status = 'running';
   chat.debate.updatedAt = Date.now();
@@ -766,6 +895,7 @@ function debateManualWin(chatId, side) {
   const chat = chatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   _debateClearFinalJudgeTimeout(chat);
+  _debateClearManualPassTimeout(chat);
   const waiting = chat.debate.waitingManual || {};
   const round = _debateEnsureRound(chat.debate, waiting.round || chat.debate.currentRound || 1);
   _debateSetRoundWinner(chat, round, side, 'manual');
@@ -1728,6 +1858,23 @@ function _debateFinalJudgeTimeout(chatId) {
   }
 }
 
+function _debateManualPassTimeout(chatId) {
+  const chat = chatById(chatId);
+  if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
+  const waiting = chat.debate.waitingManual || {};
+  if (waiting.reason !== 'threshold') return;
+  _debateClearManualPassTimeout(chat);
+  delete chat.debate.waitingManual;
+  chat.debate.status = 'running';
+  chat.debate.updatedAt = Date.now();
+  saveData();
+  _debateRenderRefresh(chat);
+  if (typeof toast === 'function') toast('人工审核超时未操作，已默认通过', 3000);
+  startDebate(chat.id).catch(e => {
+    console.error('[debate] manual threshold timeout continue failed:', e);
+  });
+}
+
 function _debateClearFinalJudgeTimeout(chat) {
   if (!chat || !chat.debate) return;
   if (chat.debate._finalJudgeTimeoutId) {
@@ -1739,6 +1886,19 @@ function _debateClearFinalJudgeTimeout(chat) {
     chat.debate._finalJudgeCountdownId = null;
   }
   chat.debate._finalJudgeTimeoutAt = null;
+}
+
+function _debateClearManualPassTimeout(chat) {
+  if (!chat || !chat.debate) return;
+  if (chat.debate._manualPassTimeoutId) {
+    clearTimeout(chat.debate._manualPassTimeoutId);
+    chat.debate._manualPassTimeoutId = null;
+  }
+  if (chat.debate._manualPassCountdownId) {
+    clearInterval(chat.debate._manualPassCountdownId);
+    chat.debate._manualPassCountdownId = null;
+  }
+  chat.debate._manualPassTimeoutAt = null;
 }
 
 function _debateStartFinalJudgeCountdown(chat) {
@@ -1767,6 +1927,32 @@ function _debateStartFinalJudgeCountdown(chat) {
   }, 1000);
 }
 
+function _debateStartManualPassCountdown(chat) {
+  if (!chat || !chat.debate) return;
+  if (chat.debate._manualPassCountdownId) clearInterval(chat.debate._manualPassCountdownId);
+  chat.debate._manualPassCountdownId = setInterval(() => {
+    if (!chat.debate._manualPassTimeoutAt) {
+      clearInterval(chat.debate._manualPassCountdownId);
+      chat.debate._manualPassCountdownId = null;
+      return;
+    }
+    const remaining = Math.max(0, Math.ceil((chat.debate._manualPassTimeoutAt - Date.now()) / 1000));
+    const el = document.getElementById('debateManualPassTimer');
+    if (el) {
+      el.textContent = `⏱ ${remaining}秒后默认通过`;
+      if (remaining <= 10) el.style.color = 'var(--warning)';
+    }
+    if (remaining <= 0) {
+      clearInterval(chat.debate._manualPassCountdownId);
+      chat.debate._manualPassCountdownId = null;
+    }
+    if (chat.debate.status !== 'waiting_manual') {
+      clearInterval(chat.debate._manualPassCountdownId);
+      chat.debate._manualPassCountdownId = null;
+    }
+  }, 1000);
+}
+
 function renderDebateJudgeMsg(m, idx) {
   if (m._debateFinalJudge && typeof renderDebateFinalJudgeMsg === 'function') {
     return renderDebateFinalJudgeMsg(m, idx);
@@ -1777,6 +1963,11 @@ function renderDebateJudgeMsg(m, idx) {
   const waiting = chat && chat.debate && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual;
   const showActions = waiting && waiting.round === d.round && waiting.side === d.side && waiting.speechSeq === d.speechSeq;
   const reason = d.reason || m.content || '';
+  let countdownHtml = '';
+  if (showActions && waiting.reason === 'threshold' && chat.debate._manualPassTimeoutAt) {
+    const remaining = Math.max(0, Math.ceil((chat.debate._manualPassTimeoutAt - Date.now()) / 1000));
+    countdownHtml = `<div class="debate-timeout-timer" id="debateManualPassTimer">⏱ ${remaining}秒后默认通过</div>`;
+  }
   return `
     <div class="message debate-judge-message" data-idx="${idx}">
       <div class="avatar assistant">评</div>
@@ -1792,7 +1983,8 @@ function renderDebateJudgeMsg(m, idx) {
               <button class="btn btn-primary" onclick="debateManualPass('${escapeHtml(chat.id)}')">通过</button>
               <button class="btn" onclick="debateManualWin('${escapeHtml(chat.id)}','pro')">判正方胜利</button>
               <button class="btn" onclick="debateManualWin('${escapeHtml(chat.id)}','con')">判反方胜利</button>
-            </div>` : ''}
+            </div>
+            ${countdownHtml}` : ''}
         </div>
       </div>
     </div>`;
@@ -1946,6 +2138,13 @@ function recoverInterruptedDebates() {
       chat.debate._finalJudgeTimeoutAt = Date.now() + remaining;
       _debateStartFinalJudgeCountdown(chat);
     }
+    if (chat.debate.status === 'waiting_manual' && chat.debate.waitingManual && chat.debate.waitingManual.reason === 'threshold') {
+      _debateClearManualPassTimeout(chat);
+      const remaining = Math.max(1000, (chat.debate.waitingManual.at || Date.now()) + 30000 - Date.now());
+      chat.debate._manualPassTimeoutId = setTimeout(() => _debateManualPassTimeout(chat.id), remaining);
+      chat.debate._manualPassTimeoutAt = Date.now() + remaining;
+      _debateStartManualPassCountdown(chat);
+    }
   }
   return changed;
 }
@@ -1962,6 +2161,10 @@ window.requestStopDebate = requestStopDebate;
 window.stopCurrentDebate = stopCurrentDebate;
 window.isDebateRunning = isDebateRunning;
 window.isAnyDebateRunning = isAnyDebateRunning;
+window.isDebateWaitingManual = isDebateWaitingManual;
+window.isDebateWaitingManualTimed = isDebateWaitingManualTimed;
+window.isDebatePausable = isDebatePausable;
+window.isAnyDebatePausable = isAnyDebatePausable;
 window.renderDebateSpeechMsg = renderDebateSpeechMsg;
 window.renderDebateJudgeMsg = renderDebateJudgeMsg;
 window.renderDebateFinalJudgeMsg = renderDebateFinalJudgeMsg;

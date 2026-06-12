@@ -490,7 +490,7 @@ function isChatGenerating(chatOrId) {
   const id = typeof chatOrId === 'string' ? chatOrId : (chatOrId && chatOrId.id);
   if (typeof isConcurrentChatRunning === 'function' && isConcurrentChatRunning(id)) return true;
   // ⭐ 辩论模式：检查是否正在运行
-  if (id && typeof isDebateRunning === 'function' && isDebateRunning(id)) return true;
+  if (id && typeof isDebatePausable === 'function' && isDebatePausable(id)) return true;
   const task = chatTaskById(id);
   return !!(task && task.isGenerating);
 }
@@ -502,7 +502,7 @@ function isCurrentChatGenerating() {
 function isAnyChatGenerating() {
   return Object.values(ensureChatTasks()).some(t => t && t.isGenerating)
     || (typeof isAnyConcurrentChatRunning === 'function' && isAnyConcurrentChatRunning())
-    || (typeof isAnyDebateRunning === 'function' && isAnyDebateRunning());
+    || (typeof isAnyDebatePausable === 'function' && isAnyDebatePausable());
 }
 
 function beginChatTask(chatId, abortCtrl, opts = {}) {

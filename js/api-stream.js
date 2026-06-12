@@ -92,7 +92,7 @@ function stopGenerate() {
   }
   // ⭐ 辩论模式停止：如果当前对话是辩论模式且正在运行，优先停止
   if (c && c.debate && c.debate.type === 'debate_mode' && chatId
-      && typeof isDebateRunning === 'function' && isDebateRunning(chatId)) {
+      && typeof isDebatePausable === 'function' && isDebatePausable(chatId)) {
     if (typeof requestStopDebate === 'function') requestStopDebate(chatId);
     state.stopRequested = true;
     if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
@@ -134,15 +134,17 @@ function updateSendBtn() {
   const btn = document.getElementById('sendBtn');
   if (!btn) return;
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  const c = (typeof currentChat === 'function') ? currentChat() : null;
+  const debateWaitingManual = !!(c && c.debate && c.debate.type === 'debate_mode'
+    && typeof isDebateWaitingManualTimed === 'function' && isDebateWaitingManualTimed(c.id));
   const currentGenerating = (typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : !!state.isGenerating;
   if (currentGenerating) {
     btn.textContent = '■';
     btn.classList.add('stop');
-    document.getElementById('inputInfo').textContent = '生成中...';
+    document.getElementById('inputInfo').textContent = debateWaitingManual ? '辩论等待人工审核，可暂停倒计时' : '生成中...';
   } else {
     btn.textContent = '↑';
     btn.classList.remove('stop');
-    const c = (typeof currentChat === 'function') ? currentChat() : null;
     if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
       let info = `⚡ 并发请求 · ${c.concurrent.agentCount || 1} AI · ${c.concurrent.useTools ? '允许工具' : '禁用工具'}`;
       if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
