@@ -79,6 +79,14 @@ function switchChat(id) {
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
+function isTaskQueueSidebarGroupedChat(chat) {
+  return !!(chat
+    && chat.taskQueue
+    && chat.taskQueue.type === 'task_queue_item'
+    && chat.taskQueue.groupId
+    && chat.taskQueue.groupFinalized);
+}
+
 function sidebarChats() {
   return (state.chats || [])
     .map((chat, index) => ({ chat, index }))
@@ -92,6 +100,201 @@ function sidebarChats() {
       return a.index - b.index;
     })
     .map(item => item.chat);
+}
+
+function taskQueueGroupChats(groupId) {
+  return sidebarChats().filter(c =>
+    isTaskQueueSidebarGroupedChat(c) && c.taskQueue.groupId === groupId
+  );
+}
+
+function taskQueueGroupExpanded(chats) {
+  return (chats || []).some(c => c && c.taskQueue && c.taskQueue.groupExpanded);
+}
+
+function sortTaskQueueGroupChats(chats) {
+  return (chats || []).slice().sort((a, b) => {
+    const am = a.taskQueue || {};
+    const bm = b.taskQueue || {};
+    const ao = Number(am.order) || 0;
+    const bo = Number(bm.order) || 0;
+    if (ao !== bo) return ao - bo;
+    const ai = Number(am.taskIndex) || 0;
+    const bi = Number(bm.taskIndex) || 0;
+    if (ai !== bi) return ai - bi;
+    return (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0);
+  });
+}
+
+function taskQueueGroupTitle(chats) {
+  const sorted = sortTaskQueueGroupChats(chats);
+  const explicit = sorted.find(c => c.taskQueue && String(c.taskQueue.groupTitle || '').trim());
+  if (explicit && explicit.taskQueue.groupTitle) return explicit.taskQueue.groupTitle;
+  const first = sorted.find(c => c && c.taskQueue && Number(c.taskQueue.taskIndex) === 1) || sorted[0];
+  return _chatFirstUserTitle(first) || _chatDisplayTitle(first) || '队列任务';
+}
+
+function taskQueueGroupMetaText(chats) {
+  const sorted = sortTaskQueueGroupChats(chats);
+  const orders = sorted.map(c => Number(c.taskQueue && c.taskQueue.order) || 0).filter(Boolean);
+  const maxOrder = orders.length ? Math.max(...orders) : 0;
+  const done = sorted.filter(c => (c.taskQueue && c.taskQueue.status) === 'done').length;
+  const skipped = sorted.filter(c => (c.taskQueue && c.taskQueue.status) === 'skipped').length;
+  const parts = [];
+  if (maxOrder) parts.push(`最终序号 ${maxOrder}`);
+  parts.push(`${sorted.length} 个对话`);
+  if (done || skipped) parts.push(`完成 ${done}${skipped ? ` · 跳过 ${skipped}` : ''}`);
+  return parts.join(' · ');
+}
+
+function _chatDisplayTitle(chat) {
+  if (!chat) return '';
+  const explicit = String(chat.title || '').trim();
+  if (explicit && explicit !== '新对话' && explicit !== '队列任务') return explicit;
+  return _chatFirstUserTitle(chat) || explicit;
+}
+
+function _chatFirstUserTitle(chat) {
+  const firstUser = chat && Array.isArray(chat.messages) ? chat.messages.find(m => m && m.role === 'user') : null;
+  const text = _chatMessagePlainText(firstUser).replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const sentence = text.match(/^(.{1,80}?[。！？!?\.](?:\s|$)|.{1,80})/);
+  return (sentence ? sentence[1] : text).trim().slice(0, 80);
+}
+
+function _chatMessagePlainText(msg) {
+  if (!msg) return '';
+  if (typeof msg.content === 'string') return msg.content;
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .filter(part => part && part.type === 'text')
+      .map(part => part.text || '')
+      .join(' ');
+  }
+  return '';
+}
+
+function sidebarChatEntries() {
+  const ordered = sidebarChats();
+  const groups = new Map();
+  for (const chat of ordered) {
+    if (!isTaskQueueSidebarGroupedChat(chat)) continue;
+    const groupId = chat.taskQueue.groupId;
+    if (!groups.has(groupId)) groups.set(groupId, []);
+    groups.get(groupId).push(chat);
+  }
+
+  const entries = [];
+  const emittedGroups = new Set();
+  for (const chat of ordered) {
+    if (!isTaskQueueSidebarGroupedChat(chat)) {
+      entries.push({ type: 'chat', chat });
+      continue;
+    }
+    const groupId = chat.taskQueue.groupId;
+    if (emittedGroups.has(groupId)) continue;
+    emittedGroups.add(groupId);
+    const chats = sortTaskQueueGroupChats(groups.get(groupId) || []);
+    const expanded = taskQueueGroupExpanded(chats);
+    entries.push({ type: 'taskQueueGroup', groupId, chats, expanded });
+    if (expanded) {
+      chats.forEach(child => entries.push({ type: 'chat', chat: child, childOfGroup: groupId }));
+    }
+  }
+  return entries;
+}
+
+function toggleTaskQueueChatGroup(groupId) {
+  const chats = taskQueueGroupChats(groupId);
+  if (!chats.length) return;
+  const nextExpanded = !taskQueueGroupExpanded(chats);
+  for (const chat of chats) {
+    if (!chat.taskQueue) continue;
+    chat.taskQueue.groupExpanded = nextExpanded;
+  }
+  saveData();
+  renderChatList();
+}
+
+function setTaskQueueGroupMeta(groupId, patch) {
+  const chats = taskQueueGroupChats(groupId);
+  if (!chats.length) return false;
+  for (const chat of chats) {
+    chat.taskQueue = { ...(chat.taskQueue || {}), ...patch, updatedAt: Date.now() };
+  }
+  return true;
+}
+
+function isTaskQueueGroupPinned(chats) {
+  return (chats || []).some(c => !!c.pinnedAt);
+}
+
+function togglePinTaskQueueGroup(groupId, e) {
+  if (e) e.stopPropagation();
+  const chats = taskQueueGroupChats(groupId);
+  if (!chats.length) return;
+  const shouldUnpin = isTaskQueueGroupPinned(chats);
+  const pinnedAt = Date.now();
+  for (const chat of chats) {
+    if (shouldUnpin) delete chat.pinnedAt;
+    else chat.pinnedAt = pinnedAt;
+  }
+  saveData();
+  renderChatList();
+  if (typeof toast === 'function') toast(shouldUnpin ? '已取消置顶' : '已置顶');
+}
+
+function renameTaskQueueGroup(groupId, e) {
+  if (e) e.stopPropagation();
+  const chats = taskQueueGroupChats(groupId);
+  if (!chats.length) return;
+  const raw = prompt('重命名对话', taskQueueGroupTitle(chats));
+  if (raw === null) return;
+  const title = raw.trim();
+  if (!title) {
+    if (typeof toast === 'function') toast('名称不能为空');
+    return;
+  }
+  setTaskQueueGroupMeta(groupId, { groupTitle: title.slice(0, 80) });
+  saveData();
+  renderChatList();
+  if (typeof toast === 'function') toast('已重命名');
+}
+
+function deleteTaskQueueGroup(groupId, e) {
+  if (e) e.stopPropagation();
+  const chats = taskQueueGroupChats(groupId);
+  if (!chats.length) return;
+  if (!confirm(`删除这个任务队列对话组？\n将删除其中 ${chats.length} 个对话。`)) return;
+  const ids = new Set(chats.map(c => c.id));
+  for (const chat of chats) {
+    if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id) && typeof _abortCurrentTaskIfAny === 'function') {
+      _abortCurrentTaskIfAny(chat.id);
+    }
+  }
+  state.chats = state.chats.filter(c => !ids.has(c.id));
+  if (state.currentId && ids.has(state.currentId)) state.currentId = sidebarChats()[0]?.id || null;
+  if (state.taskQueue && Array.isArray(state.taskQueue.items)) {
+    for (const item of state.taskQueue.items) {
+      if (!item || !ids.has(item.chatId)) continue;
+      item.chatId = null;
+      item.sidebarGroupId = '';
+      item.promptHash = '';
+    }
+    if (state.taskQueue.sidebarGroupId === groupId) {
+      state.taskQueue.sidebarGroupId = null;
+      state.taskQueue.sidebarGroupStartedAt = null;
+      state.taskQueue.sidebarGroupFinalizedAt = null;
+    }
+    if (typeof saveTaskQueue === 'function') saveTaskQueue();
+    if (typeof renderTaskQueueModal === 'function') renderTaskQueueModal();
+  }
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  saveData();
+  renderChatList();
+  renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
 function togglePinChat(id, e) {
@@ -208,26 +411,7 @@ function clearCurrentChat() {
 function renderChatList() {
   const list = document.getElementById('chatList');
   if (!list) return;
-  list.innerHTML = sidebarChats().map(c => {
-    const isGenerating = typeof isChatGenerating === 'function' && isChatGenerating(c.id);
-    const isPinned = !!c.pinnedAt;
-    const isConcurrent = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
-    const isDebate = !!(c.debate && c.debate.type === 'debate_mode');
-    const title = c.title || '新对话';
-    const statusIcon = isGenerating ? '⏳' : (isDebate ? '⚖️' : (isConcurrent ? '⚡' : (isPinned ? '📌' : '💬')));
-    return `
-      <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned ? 'pinned' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
-        <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span><span class="chat-item-name">${escapeHtml(title)}</span></span>
-        <span class="chat-item-menu-wrap">
-          <button class="chat-item-menu-btn" type="button" title="对话操作" aria-label="对话操作">⋯</button>
-          <span class="chat-item-menu" role="menu">
-            <button class="chat-item-menu-entry" type="button" data-chat-action="pin" role="menuitem"><span class="chat-item-menu-icon">📌</span><span class="chat-item-menu-label">${isPinned ? '取消置顶' : '置顶'}</span></button>
-            <button class="chat-item-menu-entry" type="button" data-chat-action="rename" role="menuitem"><span class="chat-item-menu-icon">✏️</span><span class="chat-item-menu-label">重命名</span></button>
-            <button class="chat-item-menu-entry danger" type="button" data-chat-action="delete" role="menuitem"><span class="chat-item-menu-icon">🗑</span><span class="chat-item-menu-label">删除</span></button>
-          </span>
-        </span>
-      </div>`;
-  }).join('');
+  list.innerHTML = sidebarChatEntries().map(renderSidebarChatEntry).join('');
   list.onclick = handleChatListClick;
   list.onkeydown = handleChatListKeydown;
   list.onmouseover = handleChatListPointerOver;
@@ -236,12 +420,88 @@ function renderChatList() {
   list.onfocusout = handleChatListFocusOut;
 }
 
+function renderSidebarChatEntry(entry) {
+  if (entry && entry.type === 'taskQueueGroup') return renderTaskQueueSidebarGroup(entry);
+  return renderSidebarChatItem(entry.chat, { childOfGroup: entry.childOfGroup });
+}
+
+function renderTaskQueueSidebarGroup(entry) {
+  const chats = entry.chats || [];
+  const active = chats.some(c => c.id === state.currentId);
+  const generating = chats.some(c => typeof isChatGenerating === 'function' && isChatGenerating(c.id));
+  const pinned = isTaskQueueGroupPinned(chats);
+  const title = taskQueueGroupTitle(chats);
+  const meta = taskQueueGroupMetaText(chats);
+  const statusIcon = generating ? '⏳' : '🧾';
+  return `
+    <div class="chat-item chat-group-item ${active ? 'active' : ''} ${pinned ? 'pinned' : ''} ${entry.expanded ? 'expanded' : 'collapsed'}" data-chat-group-id="${escapeHtml(entry.groupId)}" tabindex="0" title="${escapeHtml(title + (meta ? ' · ' + meta : ''))}">
+      <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span><span class="chat-item-name">${escapeHtml(title)}</span></span>
+      <span class="chat-item-menu-wrap">
+        <button class="chat-item-menu-btn" type="button" title="对话操作" aria-label="对话操作">⋯</button>
+        <span class="chat-item-menu" role="menu">
+          <button class="chat-item-menu-entry" type="button" data-group-action="pin" role="menuitem"><span class="chat-item-menu-icon">📌</span><span class="chat-item-menu-label">${pinned ? '取消置顶' : '置顶'}</span></button>
+          <button class="chat-item-menu-entry" type="button" data-group-action="rename" role="menuitem"><span class="chat-item-menu-icon">✏️</span><span class="chat-item-menu-label">重命名</span></button>
+          <button class="chat-item-menu-entry danger" type="button" data-group-action="delete" role="menuitem"><span class="chat-item-menu-icon">🗑</span><span class="chat-item-menu-label">删除</span></button>
+        </span>
+      </span>
+    </div>`;
+}
+
+function renderSidebarChatItem(c, options = {}) {
+  const isGenerating = typeof isChatGenerating === 'function' && isChatGenerating(c.id);
+  const isPinned = !!c.pinnedAt;
+  const isConcurrent = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
+  const isDebate = !!(c.debate && c.debate.type === 'debate_mode');
+  const isTaskChild = !!options.childOfGroup;
+  const taskMeta = c.taskQueue || {};
+  const title = _chatDisplayTitle(c) || '新对话';
+  const statusIcon = isGenerating ? '⏳' : (isTaskChild ? '↳' : (isDebate ? '⚖️' : (isConcurrent ? '⚡' : (isPinned ? '📌' : '💬'))));
+  const taskBadge = isTaskChild && taskMeta.taskIndex
+    ? `<span class="chat-task-index">#${escapeHtml(taskMeta.taskIndex)}</span>`
+    : '';
+  const menu = isTaskChild ? '' : `
+      <span class="chat-item-menu-wrap">
+        <button class="chat-item-menu-btn" type="button" title="对话操作" aria-label="对话操作">⋯</button>
+        <span class="chat-item-menu" role="menu">
+          <button class="chat-item-menu-entry" type="button" data-chat-action="pin" role="menuitem"><span class="chat-item-menu-icon">📌</span><span class="chat-item-menu-label">${isPinned ? '取消置顶' : '置顶'}</span></button>
+          <button class="chat-item-menu-entry" type="button" data-chat-action="rename" role="menuitem"><span class="chat-item-menu-icon">✏️</span><span class="chat-item-menu-label">重命名</span></button>
+          <button class="chat-item-menu-entry danger" type="button" data-chat-action="delete" role="menuitem"><span class="chat-item-menu-icon">🗑</span><span class="chat-item-menu-label">删除</span></button>
+        </span>
+      </span>`;
+  return `
+    <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned && !isTaskChild ? 'pinned' : ''} ${isTaskChild ? 'chat-group-child' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
+      <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span>${taskBadge}<span class="chat-item-name">${escapeHtml(title)}</span></span>
+      ${menu}
+    </div>`;
+}
+
 function handleChatListClick(e) {
   const list = document.getElementById('chatList');
   const target = e.target;
   if (!target || typeof target.closest !== 'function') return;
   const item = target.closest('.chat-item');
   if (!item || !list || !list.contains(item)) return;
+  const groupId = item.dataset.chatGroupId;
+  if (groupId && !item.dataset.chatId) {
+    const menuBtn = target.closest('.chat-item-menu-btn');
+    if (menuBtn) {
+      e.stopPropagation();
+      openChatItemMenu(menuBtn.closest('.chat-item-menu-wrap'));
+      return;
+    }
+    const groupActionBtn = target.closest('[data-group-action]');
+    if (groupActionBtn) {
+      e.stopPropagation();
+      const action = groupActionBtn.dataset.groupAction;
+      if (action === 'pin') togglePinTaskQueueGroup(groupId, e);
+      else if (action === 'rename') renameTaskQueueGroup(groupId, e);
+      else if (action === 'delete') deleteTaskQueueGroup(groupId, e);
+      return;
+    }
+    e.stopPropagation();
+    toggleTaskQueueChatGroup(groupId);
+    return;
+  }
   const id = item.dataset.chatId;
   const menuBtn = target.closest('.chat-item-menu-btn');
   if (menuBtn) {
@@ -299,7 +559,8 @@ function handleChatListKeydown(e) {
   if (!item || target.closest('button')) return;
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
-    switchChat(item.dataset.chatId);
+    if (item.dataset.chatGroupId && !item.dataset.chatId) toggleTaskQueueChatGroup(item.dataset.chatGroupId);
+    else switchChat(item.dataset.chatId);
   }
 }
 

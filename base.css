@@ -31,6 +31,10 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .chat-item-menu-entry:hover,.chat-item-menu-entry:focus-visible{outline:none;background:var(--bg-hover);color:var(--primary)}
 .chat-item-menu-entry.danger{color:var(--danger)}
 .chat-item-menu-entry.danger:hover,.chat-item-menu-entry.danger:focus-visible{background:rgba(239,68,68,.1);color:var(--danger)}
+.chat-group-child{margin-left:18px;padding-left:10px;padding-right:8px;font-size:12.5px}
+.chat-group-child::before{content:'';position:absolute;left:-9px;top:50%;width:10px;border-top:1px solid var(--border)}
+.chat-group-child::after{content:'';width:28px;height:1px;flex:0 0 28px}
+.chat-task-index{flex:0 0 auto;font-family:var(--font-mono);font-size:10.5px;color:var(--text-secondary);background:var(--bg-hover);border-radius:999px;padding:1px 5px}
 .sidebar-footer{padding:12px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap}
 .icon-btn{flex:1;min-width:0;padding:8px;background:transparent;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text);font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
 .icon-btn:hover{background:var(--bg-hover)}

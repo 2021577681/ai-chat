@@ -15,7 +15,10 @@ function _taskQueueDefaults() {
     paused: false,
     loaded: false,
     activeOrder: null,
-    stopAllRequested: false
+    stopAllRequested: false,
+    sidebarGroupId: null,
+    sidebarGroupStartedAt: null,
+    sidebarGroupFinalizedAt: null
   };
 }
 
@@ -32,6 +35,9 @@ function ensureTaskQueue() {
   q.loaded = !!q.loaded;
   q.stopAllRequested = !!q.stopAllRequested;
   q.activeOrder = _taskQueuePositiveInt(q.activeOrder, null);
+  q.sidebarGroupId = q.sidebarGroupId || null;
+  q.sidebarGroupStartedAt = q.sidebarGroupStartedAt || null;
+  q.sidebarGroupFinalizedAt = q.sidebarGroupFinalizedAt || null;
   return q;
 }
 
@@ -60,6 +66,7 @@ function _taskQueueNormalizeItem(raw) {
     outputUpdatedAt: item.outputUpdatedAt || null,
     outputWarning: item.outputWarning || '',
     promptHash: item.promptHash || '',
+    sidebarGroupId: item.sidebarGroupId || '',
     status,
     chatId: item.chatId || null,
     error: item.error || '',
@@ -80,6 +87,9 @@ function loadTaskQueue() {
       q.items = Array.isArray(parsed.items) ? parsed.items.map(_taskQueueNormalizeItem).filter(it => it.text) : [];
       q.defaultMode = ['normal', 'outline', 'reflection'].includes(parsed.defaultMode) ? parsed.defaultMode : 'normal';
       q.defaultUseTools = !!parsed.defaultUseTools;
+      q.sidebarGroupId = parsed.sidebarGroupId || null;
+      q.sidebarGroupStartedAt = parsed.sidebarGroupStartedAt || null;
+      q.sidebarGroupFinalizedAt = parsed.sidebarGroupFinalizedAt || null;
       _taskQueueNormalizeDependencyRefs(q);
     }
   } catch (e) {
@@ -90,6 +100,8 @@ function loadTaskQueue() {
   q.activeOrder = null;
   q.stopAllRequested = false;
   q.loaded = true;
+  _taskQueueRecoverFinishedSidebarGroup(q);
+  saveTaskQueue();
   renderTaskQueueBadge();
 }
 
@@ -113,6 +125,7 @@ function saveTaskQueue() {
         outputUpdatedAt: it.outputUpdatedAt || null,
         outputWarning: it.outputWarning || '',
         promptHash: it.promptHash || '',
+        sidebarGroupId: it.sidebarGroupId || '',
         status: it.status,
         chatId: it.chatId || null,
         error: it.error || '',
@@ -123,7 +136,10 @@ function saveTaskQueue() {
         skippedAt: it.skippedAt || null
       })),
       defaultMode: q.defaultMode,
-      defaultUseTools: !!q.defaultUseTools
+      defaultUseTools: !!q.defaultUseTools,
+      sidebarGroupId: q.sidebarGroupId || null,
+      sidebarGroupStartedAt: q.sidebarGroupStartedAt || null,
+      sidebarGroupFinalizedAt: q.sidebarGroupFinalizedAt || null
     }));
   } catch (e) {
     console.warn('[task-queue] 保存失败:', e);
@@ -151,6 +167,7 @@ function _taskQueueCreateItem(options = {}) {
     outputUpdatedAt: null,
     outputWarning: '',
     promptHash: '',
+    sidebarGroupId: options.sidebarGroupId || '',
     status: 'pending',
     chatId: null,
     error: '',
@@ -594,6 +611,128 @@ function _taskQueueItemTitle(item) {
   return text.length > 48 ? text.slice(0, 48) + '...' : text || '空任务';
 }
 
+function _taskQueueNewSidebarGroupId() {
+  return 'tq_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function _taskQueuePrepareSidebarGroup(q = ensureTaskQueue()) {
+  if (!q.sidebarGroupId || q.sidebarGroupFinalizedAt) {
+    q.sidebarGroupId = _taskQueueNewSidebarGroupId();
+    q.sidebarGroupStartedAt = Date.now();
+    q.sidebarGroupFinalizedAt = null;
+  }
+  return q.sidebarGroupId;
+}
+
+function _taskQueueApplyChatSidebarMeta(chat, item, q = ensureTaskQueue()) {
+  if (!chat || !item) return;
+  const groupId = _taskQueuePrepareSidebarGroup(q);
+  const indexMap = _taskQueueTaskIndexMap(q);
+  const taskIndex = indexMap.get(item.id) || 0;
+  const prev = chat.taskQueue && chat.taskQueue.groupId === groupId ? chat.taskQueue : {};
+  chat.taskQueue = {
+    ...prev,
+    type: 'task_queue_item',
+    groupId,
+    groupStartedAt: q.sidebarGroupStartedAt || Date.now(),
+    groupFinalized: !!prev.groupFinalized,
+    groupExpanded: !!prev.groupExpanded,
+    taskId: item.id,
+    taskIndex,
+    order: _taskQueuePositiveInt(item.order, 1),
+    status: item.status || 'pending',
+    updatedAt: Date.now()
+  };
+  item.sidebarGroupId = groupId;
+}
+
+function _taskQueueAllItemsFinished(q = ensureTaskQueue()) {
+  return !!(q.items && q.items.length && q.items.every(it => TASK_QUEUE_DONE_STATUSES.has(it.status)));
+}
+
+function _taskQueueFinalizeSidebarGroupIfFinished(q = ensureTaskQueue()) {
+  if (!_taskQueueAllItemsFinished(q) || !q.sidebarGroupId || q.sidebarGroupFinalizedAt) return false;
+  const groupId = q.sidebarGroupId;
+  const finishedAt = Date.now();
+  const indexMap = _taskQueueTaskIndexMap(q);
+  let changed = false;
+  for (const item of q.items || []) {
+    if (!item || item.sidebarGroupId !== groupId || !item.chatId) continue;
+    const chat = typeof chatById === 'function' ? chatById(item.chatId) : null;
+    if (!chat) continue;
+    chat.taskQueue = {
+      ...(chat.taskQueue || {}),
+      type: 'task_queue_item',
+      groupId,
+      groupStartedAt: q.sidebarGroupStartedAt || finishedAt,
+      groupFinalized: true,
+      groupExpanded: false,
+      groupFinalizedAt: finishedAt,
+      taskId: item.id,
+      taskIndex: indexMap.get(item.id) || 0,
+      order: _taskQueuePositiveInt(item.order, 1),
+      status: item.status,
+      updatedAt: finishedAt
+    };
+    changed = true;
+  }
+  if (!changed) return false;
+  q.sidebarGroupFinalizedAt = finishedAt;
+  if (typeof saveData === 'function') saveData();
+  if (typeof renderChatList === 'function') renderChatList();
+  return true;
+}
+
+function _taskQueueSyncFinalizedSidebarMeta(q = ensureTaskQueue()) {
+  const indexMap = _taskQueueTaskIndexMap(q);
+  let changed = false;
+  for (const item of q.items || []) {
+    if (!item || !item.chatId || !item.sidebarGroupId) continue;
+    const chat = typeof chatById === 'function' ? chatById(item.chatId) : null;
+    const prev = chat && chat.taskQueue;
+    if (!prev || prev.type !== 'task_queue_item' || prev.groupId !== item.sidebarGroupId || !prev.groupFinalized) continue;
+    const nextIndex = indexMap.get(item.id) || 0;
+    const nextOrder = _taskQueuePositiveInt(item.order, 1);
+    if (prev.taskIndex === nextIndex && prev.order === nextOrder && prev.status === item.status) continue;
+    chat.taskQueue = {
+      ...prev,
+      taskIndex: nextIndex,
+      order: nextOrder,
+      status: item.status,
+      updatedAt: Date.now()
+    };
+    changed = true;
+  }
+  if (changed && typeof saveData === 'function') saveData();
+  if (changed && typeof renderChatList === 'function') renderChatList();
+  return changed;
+}
+
+function _taskQueueRecoverFinishedSidebarGroup(q = ensureTaskQueue()) {
+  if (!_taskQueueAllItemsFinished(q)) return false;
+  const itemsWithChats = (q.items || []).filter(item => item && item.chatId);
+  if (!itemsWithChats.length) return false;
+  const finalizedChatsReady = q.sidebarGroupFinalizedAt && itemsWithChats.every(item => {
+    if (!item.sidebarGroupId) return false;
+    const chat = typeof chatById === 'function' ? chatById(item.chatId) : null;
+    return !!(chat
+      && chat.taskQueue
+      && chat.taskQueue.type === 'task_queue_item'
+      && chat.taskQueue.groupId === item.sidebarGroupId
+      && chat.taskQueue.groupFinalized);
+  });
+  if (finalizedChatsReady) return false;
+  const existingGroupId = itemsWithChats.find(item => item.sidebarGroupId)?.sidebarGroupId || q.sidebarGroupId;
+  q.sidebarGroupId = existingGroupId || _taskQueueNewSidebarGroupId();
+  q.sidebarGroupStartedAt = q.sidebarGroupStartedAt || Math.min(...itemsWithChats.map(item => item.startedAt || item.createdAt || Date.now()));
+  const hadFinalizedAt = q.sidebarGroupFinalizedAt;
+  q.sidebarGroupFinalizedAt = null;
+  for (const item of itemsWithChats) item.sidebarGroupId = q.sidebarGroupId;
+  const changed = _taskQueueFinalizeSidebarGroupIfFinished(q);
+  if (!changed && hadFinalizedAt) q.sidebarGroupFinalizedAt = hadFinalizedAt;
+  return changed;
+}
+
 function _taskQueueParseIndexList(value) {
   if (Array.isArray(value)) {
     const indexes = [];
@@ -1029,6 +1168,7 @@ async function taskQueueUpdateItemOrder(id, value) {
     item.outputWarning = '';
   }
   _taskQueueNormalizeDependencyRefs(ensureTaskQueue());
+  _taskQueueSyncFinalizedSidebarMeta(ensureTaskQueue());
   saveTaskQueue();
   renderTaskQueueModal();
 }
@@ -1148,6 +1288,7 @@ function _taskQueueResetForFreshRun(item) {
   item.outputWarning = '';
   item.outputBuilding = false;
   item.promptHash = '';
+  item.sidebarGroupId = '';
   item.chatId = null;
   item.startedAt = null;
   item.finishedAt = null;
@@ -1249,6 +1390,7 @@ async function startTaskQueue() {
   q.running = true;
   q.paused = false;
   q.stopAllRequested = false;
+  _taskQueuePrepareSidebarGroup(q);
   q.items.forEach(it => {
     if (it.status === 'paused') {
       _taskQueueResetForFreshRun(it);
@@ -1287,8 +1429,10 @@ async function startTaskQueue() {
     q.paused = keepPaused;
     q.activeOrder = null;
     q.stopAllRequested = false;
+    const finalizedSidebarGroup = _taskQueueFinalizeSidebarGroupIfFinished(q);
     saveTaskQueue();
     renderTaskQueueModal();
+    if (finalizedSidebarGroup && typeof toast === 'function') toast('任务队列对话已折叠到侧栏');
     if (typeof toast === 'function') {
       const next = _taskQueueNextRunnableOrder(q);
       const blocked = _taskQueueFirstBlockedOrder(q);
@@ -1484,6 +1628,7 @@ function _taskQueueEnsureChatForItem(item, dependencyContext = '') {
   const userContent = _taskQueueComposeTaskPrompt(item, dependencyContext);
   const promptHash = _taskQueueStringHash(userContent);
   if (c) {
+    _taskQueueApplyChatSidebarMeta(c, item);
     const lastUser = (Array.isArray(c.messages) ? c.messages.slice().reverse().find(m => m.role === 'user') : null);
     const lastUserSame = lastUser && String(lastUser.content || '') === userContent;
     if (item.promptHash !== promptHash && !lastUserSame) {
@@ -1502,6 +1647,7 @@ function _taskQueueEnsureChatForItem(item, dependencyContext = '') {
   state.chats.unshift(c);
   item.chatId = c.id;
   item.promptHash = promptHash;
+  _taskQueueApplyChatSidebarMeta(c, item);
   saveData();
   if (typeof renderChatList === 'function') renderChatList();
   return c;
