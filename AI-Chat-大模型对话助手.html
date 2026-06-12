@@ -787,7 +787,8 @@
 
     <div class="modal-footer" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-primary" onclick="saveProjectInstructionsSettingsFromUi()">保存设置</button>
-      <button class="btn" onclick="initProjectInstructions(true)">检测/读取</button>
+      <button class="btn" onclick="initProjectInstructions(false)">检测/读取</button>
+      <button class="btn" onclick="generateProjectInstructionsDraft()">AI 生成/刷新草稿</button>
       <button class="btn" onclick="fillDefaultProjectInstructionsDraft()">填入默认内容</button>
       <button class="btn" onclick="createDefaultProjectInstructions(true)">创建默认 AGENTS.md</button>
       <button class="btn btn-primary" onclick="saveProjectInstructionsFromUi()">保存到项目</button>

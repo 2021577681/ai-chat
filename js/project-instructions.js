@@ -21,55 +21,42 @@ function defaultProjectInstructionsContent() {
 
 ## 项目定位
 
-这是一个本地运行的 AI Chat / Agent 工具项目。前端主体是单页 HTML + 原生 JavaScript，后端是本地 Python 服务，用于代理 LLM 请求、执行受控文件/终端/MCP 等工具。
-
-## 关键文件
-
-- \`AI-Chat-大模型对话助手.html\`：主页面结构、弹窗和脚本加载顺序。
-- \`base.css\`：基础界面样式。
-- \`gemini-theme.css\`：主题和统一设置页相关样式。
-- \`js/state.js\`：全局状态、设置默认值、数据持久化。
-- \`js/api-core.js\`：请求体构造、主模型调用、辅助调用和 agent loop。
-- \`js/api-adapters.js\`：不同模型 API 的消息格式适配。
-- \`js/project-memory.js\`：AI 自动维护的项目长期记忆。
-- \`js/project-instructions.js\`：人工维护的项目指令读取、保存和注入。
-- \`js/settings-page.js\`：统一设置页的导航、代理和弹窗停靠逻辑。
-- \`local_terminal_server.py\` 与 \`server/\`：本地工具服务和沙箱后端。
+待确认：简要说明这个项目是什么、主要面向谁、最重要的目标是什么。
 
 ## 启动与验证
 
-- 启动本地后端：\`python local_terminal_server.py\`
-- 打开前端页面：\`AI-Chat-大模型对话助手.html\`
-- 如果浏览器直连 LLM 遇到 CORS，启用“通过本地服务代理”。
-- 没有统一测试命令时，至少做静态检查：确认脚本加载顺序、全局函数名、DOM id 和设置页导航项一致。
+- 启动命令：待确认。
+- 测试命令：待确认。
+- 构建命令：待确认。
+- 修改后至少验证：待确认。
 
-## 架构约定
+## 架构地图
 
-- 新功能优先按独立 \`js/*.js\` 模块添加，避免把大型逻辑继续塞进 HTML。
-- 新设置项需要同时更新：
-  - \`js/state.js\` 默认值；
-  - 对应设置模块的 ensure/render/save 逻辑；
-  - \`AI-Chat-大模型对话助手.html\` 的设置面板和脚本加载顺序；
-  - 如需统一设置页入口，同步更新 \`js/settings-page.js\`。
-- 模型请求的长期背景应通过 system prompt 注入，不直接写入聊天消息历史。
-- 人工维护的项目指令和 AI 自动维护的项目记忆要分层：
-  - \`AGENTS.md\`：稳定规则、命令、约定和偏好；
-  - \`.agent/memory.md\`：AI 总结的长期背景、坑点和待办。
-- 本地工具读写必须走沙箱后端，避免绕过已有权限和路径检查。
+- 核心入口：待确认。
+- 主要模块：待确认。
+- 数据存储：待确认。
+- 外部服务：待确认。
 
-## 编辑偏好
+## 修改约定
 
-- 保持改动小而聚焦，不做无关重构。
-- 代码默认使用 ASCII；现有中文 UI 文案可以继续使用中文。
-- DOM id、全局函数名、设置项 key 要保持语义清晰，避免隐式耦合。
-- 修改 UI 时保持现有设置页风格：紧凑、工具型、信息密度适中。
+- 保持改动小而聚焦。
+- 优先遵循项目已有模式和命名。
+- 新增依赖前先确认必要性。
+- 不要把临时日志、调试输出或大段生成内容写进长期文件。
+
+## 代码风格
+
+- 待确认。
+
+## 已知坑
+
+- 待确认。
 
 ## 注意事项
 
 - 不要记录 API Key、Cookie、Token、私钥、账号等敏感信息。
-- 不要把大段工具输出、日志或临时调试内容写进长期指令。
 - 如果不确定项目事实，写“待确认”，不要编造。
-- 修改脚本加载顺序时要确认依赖关系，例如 \`state.js\` 早于读取设置的模块，提示注入模块早于 API adapter。
+- \`AGENTS.md\` 是人工维护的项目规则；自动总结和临时任务记录应放到项目自己的记忆文件或任务记录中。
 `;
 }
 
@@ -127,6 +114,14 @@ async function _piBackend(action, params = {}) {
   const r = await callAgentBackend(action, params);
   if (typeof r === 'string') throw new Error(r);
   return r;
+}
+
+async function _piFileInfo(path) {
+  return await _piBackend('file_info', { path });
+}
+
+function _piIsMissingFileInfo(info) {
+  return !!(info && info.ok === false && /路径不存在|not found|does not exist/i.test(String(info.error || '')));
 }
 
 function withProjectInstructionsPrompt(basePrompt) {
@@ -215,11 +210,7 @@ function saveProjectInstructionsSettingsFromUi() {
   }
 
   toast('项目指令已开启');
-  if (!wasEnabled || previousPath !== cfg.path || !PROJECT_INSTRUCTIONS_RUNTIME.content) {
-    initProjectInstructions(true);
-  } else {
-    initProjectInstructions(false);
-  }
+  initProjectInstructions(false);
 }
 
 async function initProjectInstructions(createIfMissing = false) {
@@ -246,7 +237,7 @@ async function initProjectInstructions(createIfMissing = false) {
 
     const shouldCreate = createIfMissing || cfg.autoCreate;
     if (shouldCreate) {
-      await createDefaultProjectInstructions(false, { skipExistingCheck: true });
+      await createDefaultProjectInstructions(false);
       return;
     }
 
@@ -262,12 +253,13 @@ async function loadProjectInstructionsFile(showToast = true) {
   const cfg = ensureProjectInstructionsSettings();
   if (!cfg.enabled) return false;
   try {
-    const info = await _piBackend('file_info', { path: cfg.path });
+    const info = await _piFileInfo(cfg.path);
     if (!info.ok) {
       PROJECT_INSTRUCTIONS_RUNTIME.content = '';
       PROJECT_INSTRUCTIONS_RUNTIME.exists = false;
       PROJECT_INSTRUCTIONS_RUNTIME.loadedPath = '';
       _piSetTextarea('');
+      if (!_piIsMissingFileInfo(info)) throw new Error(info.error || '文件信息读取失败');
       return false;
     }
     const r = await _piBackend('read_file', { path: cfg.path });
@@ -286,32 +278,26 @@ async function loadProjectInstructionsFile(showToast = true) {
   }
 }
 
-async function createDefaultProjectInstructions(showToast = true, options = {}) {
+async function createDefaultProjectInstructions(showToast = true) {
   const cfg = ensureProjectInstructionsSettings();
   if (!cfg.enabled) {
     toast('请先开启项目指令');
     return false;
   }
-  if (!options.skipExistingCheck) {
-    try {
-      const info = await _piBackend('file_info', { path: cfg.path });
-      if (info.ok) {
-        const r = await _piBackend('read_file', { path: cfg.path });
-        if (!r.ok) throw new Error(r.error || '读取失败');
-        PROJECT_INSTRUCTIONS_RUNTIME.content = r.content || '';
-        PROJECT_INSTRUCTIONS_RUNTIME.exists = true;
-        PROJECT_INSTRUCTIONS_RUNTIME.loadedPath = cfg.path;
-        _piSetTextarea(PROJECT_INSTRUCTIONS_RUNTIME.content);
-        _piStatus(`文件已存在，已读取而未覆盖：${cfg.path}`);
-        if (showToast) toast('AGENTS.md 已存在，未覆盖');
-        if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-        return false;
-      }
-    } catch (e) {
-      _piStatus('检查项目指令失败：' + e.message, 'error');
-      if (showToast) toast('检查项目指令失败：' + e.message, 5000);
+  try {
+    const info = await _piFileInfo(cfg.path);
+    if (info.ok) {
+      const loaded = await loadProjectInstructionsFile(false);
+      if (!loaded) throw new Error('文件存在，但读取失败');
+      _piStatus(`文件已存在，已读取而未覆盖：${cfg.path}`);
+      if (showToast) toast('AGENTS.md 已存在，未覆盖');
       return false;
     }
+    if (!_piIsMissingFileInfo(info)) throw new Error(info.error || '文件信息读取失败');
+  } catch (e) {
+    _piStatus('检查项目指令失败：' + e.message, 'error');
+    if (showToast) toast('检查项目指令失败：' + e.message, 5000);
+    return false;
   }
 
   const content = defaultProjectInstructionsContent();
@@ -334,12 +320,139 @@ async function createDefaultProjectInstructions(showToast = true, options = {}) 
   }
 }
 
+function _piEntryLines(title, entries) {
+  if (!entries || !entries.length) return `${title}: (empty)`;
+  const rows = entries.slice(0, 120).map(e => {
+    const suffix = e.type === 'dir' ? '/' : ` (${formatSize(e.size || 0)})`;
+    return `- ${e.name}${suffix}`;
+  });
+  if (entries.length > rows.length) rows.push(`- ... ${entries.length - rows.length} more`);
+  return `${title}:\n${rows.join('\n')}`;
+}
+
+async function _piSafeList(path) {
+  try {
+    const r = await _piBackend('list_dir', { path });
+    if (r.ok) return r.entries || [];
+  } catch (e) {}
+  return [];
+}
+
+async function _piSafeRead(path, maxChars = 12000) {
+  try {
+    const r = await _piBackend('read_file', { path });
+    if (!r.ok || !r.content) return '';
+    const content = r.content.slice(0, maxChars);
+    return `\n--- ${path} ---\n${content}${r.content.length > maxChars ? '\n...[truncated]' : ''}\n`;
+  } catch (e) {
+    return '';
+  }
+}
+
+async function collectProjectInstructionsContext() {
+  _piStatus('正在扫描项目目录...');
+  const root = await _piSafeList('.');
+  const skipDirs = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', 'env', 'dist', 'build', '.agent']);
+  const preferredDirs = ['src', 'app', 'pages', 'components', 'lib', 'server', 'js', 'docs', 'tests', 'test', 'skill', 'lms_tool'];
+  const dirs = root
+    .filter(e => e.type === 'dir' && !skipDirs.has(e.name))
+    .map(e => e.name);
+  const dirsToList = [...new Set([
+    ...preferredDirs.filter(d => dirs.includes(d)),
+    ...dirs.slice(0, 8)
+  ])].slice(0, 14);
+
+  const sections = [];
+  sections.push(_piEntryLines('Root directory', root));
+  for (const dir of dirsToList) {
+    sections.push(_piEntryLines(`${dir}/`, await _piSafeList(dir)));
+  }
+
+  const rootFiles = new Set(root.filter(e => e.type === 'file').map(e => e.name));
+  const candidates = [
+    'AGENTS.md', 'CLAUDE.md', 'README.md',
+    'package.json', 'pnpm-lock.yaml', 'yarn.lock',
+    'requirements.txt', 'pyproject.toml', 'setup.py',
+    'Cargo.toml', 'go.mod', 'pom.xml',
+    'Dockerfile', 'docker-compose.yml',
+    '.gitignore'
+  ].filter(f => rootFiles.has(f));
+
+  const fileParts = [];
+  for (const f of candidates) {
+    fileParts.push(await _piSafeRead(f, f === 'README.md' ? 20000 : 12000));
+  }
+
+  return [
+    `Workspace: ${PROJECT_INSTRUCTIONS_RUNTIME.workspace || '(unknown)'}`,
+    '',
+    '# Directory Summary',
+    sections.join('\n\n'),
+    '',
+    '# Key Files',
+    fileParts.join('\n').trim() || '(no key files read)'
+  ].join('\n');
+}
+
+function _piCleanDraft(text) {
+  let out = (text || '').trim();
+  out = out.replace(/^```(?:markdown|md)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  if (!out.startsWith('#')) out = '# AGENTS.md\n\n' + out;
+  if (!/^#\s+AGENTS\.md\b/i.test(out.split('\n')[0] || '')) {
+    out = out.replace(/^# .*\n?/, '# AGENTS.md\n');
+  }
+  return out.trim();
+}
+
+async function generateProjectInstructionsDraft() {
+  const cfg = ensureProjectInstructionsSettings();
+  if (!cfg.enabled) {
+    toast('请先开启项目指令');
+    return;
+  }
+  if (!state.settings.apiKey) {
+    toast('请先配置 API Key，才能让 AI 生成 AGENTS.md 草稿', 4500);
+    return;
+  }
+  try {
+    if (!PROJECT_INSTRUCTIONS_RUNTIME.workspace) {
+      const info = await _piWorkspaceInfo();
+      PROJECT_INSTRUCTIONS_RUNTIME.workspace = info.workspace || '';
+    }
+    const context = await collectProjectInstructionsContext();
+    _piStatus('正在调用模型生成 AGENTS.md 草稿...');
+    const rolePrompt = [
+      '你是项目级 AGENTS.md 规则整理助手。请基于用户提供的项目目录摘要和关键文件内容，生成一份给 coding agent 使用的 AGENTS.md。',
+      '这份文件应该像 Claude Code 的 CLAUDE.md / Codex 的 AGENTS.md：记录稳定、每次改代码都应该遵守的项目规则。',
+      '要求：',
+      '1. 只输出 Markdown，不要解释。',
+      '2. 内容要具体、短小、可长期维护；不要写流水账或临时任务。',
+      '3. 必须包含这些小节：项目定位、启动与验证、架构地图、修改约定、代码风格、已知坑、注意事项。',
+      '4. 优先记录可执行命令、关键文件、加载顺序、模块边界、测试要求和不要做的事。',
+      '5. 不要记录 API Key、Cookie、Token、私钥、个人账号、真实密钥、会话值等敏感信息。',
+      '6. 对不确定的信息明确写“待确认”，不要编造。',
+      '7. 如果已有 AGENTS.md 或 CLAUDE.md，请保留其中仍然正确的规则，修正明显过时或与当前项目不符的内容。'
+    ].join('\n');
+    const raw = await callOnceWithRole([
+      { role: 'user', content: `请为这个工作区生成 AGENTS.md 项目指令草稿。\n\n${context}` }
+    ], state.settings.currentModel, rolePrompt, {
+      sourceLabel: '项目指令 · 生成草稿'
+    });
+    const draft = _piCleanDraft(raw);
+    _piSetTextarea(draft);
+    _piStatus('AGENTS.md 草稿已生成。请检查内容，确认后点击“保存到项目”。');
+    const modal = document.getElementById('projectInstructionsModal');
+    if (modal) modal.classList.add('show');
+  } catch (e) {
+    _piStatus('生成 AGENTS.md 草稿失败：' + e.message, 'error');
+    toast('生成 AGENTS.md 草稿失败：' + e.message, 5000);
+  }
+}
+
 function fillDefaultProjectInstructionsDraft() {
   const content = defaultProjectInstructionsContent();
   _piSetTextarea(content);
-  PROJECT_INSTRUCTIONS_RUNTIME.content = content;
   _piStatus('默认内容已填入编辑框，点击“保存到项目”写入文件。');
-  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
 async function saveProjectInstructionsFromUi() {
@@ -387,6 +500,7 @@ window.saveProjectInstructionsSettingsFromUi = saveProjectInstructionsSettingsFr
 window.initProjectInstructions = initProjectInstructions;
 window.loadProjectInstructionsFile = loadProjectInstructionsFile;
 window.createDefaultProjectInstructions = createDefaultProjectInstructions;
+window.generateProjectInstructionsDraft = generateProjectInstructionsDraft;
 window.fillDefaultProjectInstructionsDraft = fillDefaultProjectInstructionsDraft;
 window.saveProjectInstructionsFromUi = saveProjectInstructionsFromUi;
 window.clearLoadedProjectInstructions = clearLoadedProjectInstructions;

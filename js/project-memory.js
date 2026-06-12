@@ -366,9 +366,9 @@ async function generateProjectMemoryDraft() {
     ], state.settings.currentModel, rolePrompt);
     const draft = _pmCleanDraft(raw);
     _pmSetTextarea(draft);
-    PROJECT_MEMORY_RUNTIME.content = draft;
     _pmStatus('草稿已生成。请检查内容，确认后点击“保存到项目”。');
-    openProjectMemorySettings();
+    const modal = document.getElementById('projectMemoryModal');
+    if (modal) modal.classList.add('show');
   } catch (e) {
     _pmStatus('生成项目记忆草稿失败：' + e.message, 'error');
     toast('生成项目记忆失败：' + e.message, 5000);
