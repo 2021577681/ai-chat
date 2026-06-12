@@ -83,6 +83,12 @@ let state = {
       path: '.agent/memory.md',
       maxChars: 12000,
       declinedWorkspaces: []
+    },
+    projectInstructions: {
+      enabled: true,
+      path: 'AGENTS.md',
+      maxChars: 16000,
+      autoCreate: false
     }
   },
   pendingAttachments: [],

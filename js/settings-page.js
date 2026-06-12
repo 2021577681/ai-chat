@@ -10,6 +10,7 @@ const SETTINGS_PAGE_SECTIONS = {
   concurrentRequests: { open: 'openConcurrentRequests', close: 'closeConcurrentRequests', modalId: 'concurrentRequestsModal' },
   debateMode: { open: 'openDebateMode', close: 'closeDebateMode', modalId: 'debateModeModal' },
   mcpSkill: { open: 'openMcpSkillSettings', close: 'closeMcpSkillSettings', modalId: 'mcpSkillModal' },
+  projectInstructions: { open: 'openProjectInstructionsSettings', close: 'closeProjectInstructionsSettings', modalId: 'projectInstructionsModal' },
   projectMemory: { open: 'openProjectMemorySettings', close: 'closeProjectMemorySettings', modalId: 'projectMemoryModal' },
   jsonEditor: { open: 'openJsonEditor', close: 'closeJsonEditor', modalId: 'jsonEditorModal' },
   backup: { open: 'openBackup', close: 'closeBackup', modalId: 'backupModal' },
@@ -49,6 +50,7 @@ function initSettingsPage() {
     'openConcurrentRequests',
     'openDebateMode',
     'openMcpSkillSettings',
+    'openProjectInstructionsSettings',
     'openProjectMemorySettings',
     'openJsonEditor',
     'openBackup',
@@ -66,6 +68,7 @@ function initSettingsPage() {
     'closeConcurrentRequests',
     'closeDebateMode',
     'closeMcpSkillSettings',
+    'closeProjectInstructionsSettings',
     'closeProjectMemorySettings',
     'closeJsonEditor',
     'closeBackup',
@@ -87,6 +90,7 @@ function initSettingsPage() {
   window.openConcurrentRequests = function() { openSettingsPage('concurrentRequests'); };
   window.openDebateMode = function() { openSettingsPage('debateMode'); };
   window.openMcpSkillSettings = function() { openSettingsPage('mcpSkill'); };
+  window.openProjectInstructionsSettings = function() { openSettingsPage('projectInstructions'); };
   window.openProjectMemorySettings = function() { openSettingsPage('projectMemory'); };
   window.openJsonEditor = function() { openSettingsPage('jsonEditor'); };
   window.openBackup = function() { openSettingsPage('backup'); };
@@ -105,6 +109,7 @@ function initSettingsPage() {
   window.closeConcurrentRequests = function() { closeSettingsProxy('concurrentRequests'); };
   window.closeDebateMode = function() { closeSettingsProxy('debateMode'); };
   window.closeMcpSkillSettings = function() { closeSettingsProxy('mcpSkill'); };
+  window.closeProjectInstructionsSettings = function() { closeSettingsProxy('projectInstructions'); };
   window.closeProjectMemorySettings = function() { closeSettingsProxy('projectMemory'); };
   window.closeJsonEditor = function() { closeSettingsProxy('jsonEditor'); };
   window.closeBackup = function() { closeSettingsProxy('backup'); };

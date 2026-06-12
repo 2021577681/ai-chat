@@ -737,6 +737,66 @@
   </div>
 </div>
 
+<!-- ============ 项目指令 ============ -->
+<div class="modal-mask" id="projectInstructionsModal">
+  <div class="modal wide">
+    <h2>📘 项目指令 <button class="modal-close" onclick="closeProjectInstructionsSettings()">×</button></h2>
+    <div class="json-help" style="margin-bottom:12px;">
+      项目指令来自 <code>AGENTS.md</code>，用于记录人工维护的稳定规则、命令和项目约定。开启后会作为独立指令层注入，不会自动覆盖项目记忆。
+    </div>
+
+    <div class="project-memory-toggle-row">
+      <div>
+        <div class="project-memory-toggle-title">启用项目指令</div>
+        <div class="form-hint">开启后会读取 AGENTS.md；文件不存在且允许自动创建时，会写入一份默认内容。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="projectInstructionsEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="project-memory-toggle-row">
+      <div>
+        <div class="project-memory-toggle-title">缺失时自动创建 AGENTS.md</div>
+        <div class="form-hint">只在目标文件不存在时创建默认内容；不会覆盖已有文件。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="projectInstructionsAutoCreate"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-row two-cols">
+      <div>
+        <label>指令文件路径</label>
+        <input type="text" id="projectInstructionsPath" placeholder="AGENTS.md">
+        <div class="form-hint">相对于当前 workspace。建议保持默认路径。</div>
+      </div>
+      <div>
+        <label>注入最大字符数</label>
+        <input type="number" id="projectInstructionsMaxChars" min="1000" step="1000">
+        <div class="form-hint">超过上限会截断后注入，避免长期规则挤占上下文。</div>
+      </div>
+    </div>
+
+    <div class="project-memory-meta">
+      <span>当前 workspace：</span>
+      <code id="projectInstructionsWorkspace">尚未检测</code>
+    </div>
+    <div id="projectInstructionsStatus" class="project-memory-status"></div>
+
+    <div class="form-group">
+      <label>AGENTS.md 内容</label>
+      <textarea id="projectInstructionsContent" rows="18" placeholder="开启后可读取或创建 AGENTS.md"></textarea>
+    </div>
+
+    <div class="modal-footer" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="saveProjectInstructionsSettingsFromUi()">保存设置</button>
+      <button class="btn" onclick="initProjectInstructions(true)">检测/读取</button>
+      <button class="btn" onclick="fillDefaultProjectInstructionsDraft()">填入默认内容</button>
+      <button class="btn" onclick="createDefaultProjectInstructions(true)">创建默认 AGENTS.md</button>
+      <button class="btn btn-primary" onclick="saveProjectInstructionsFromUi()">保存到项目</button>
+      <button class="btn" onclick="clearLoadedProjectInstructions()">卸载当前指令</button>
+      <button class="btn" onclick="closeProjectInstructionsSettings()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 项目记忆 ============ -->
 <div class="modal-mask" id="projectMemoryModal">
   <div class="modal wide">
@@ -1131,6 +1191,7 @@
     <button class="settings-nav-item" data-settings-section="concurrentRequests" data-desc="让多个独立 AI 同时执行同一条指令，并汇总到一个对话。" onclick="openSettingsSection('concurrentRequests')"><span>⚡</span><span>并发请求</span></button>
     <button class="settings-nav-item" data-settings-section="debateMode" data-desc="配置正反方和评委模型，自动创建多局辩论对话。" onclick="openSettingsSection('debateMode')"><span>⚖️</span><span>辩论模式</span></button>
     <button class="settings-nav-item" data-settings-section="mcpSkill" data-desc="管理可注入的 Skill 根目录和 MCP 工具摘要。" onclick="openSettingsSection('mcpSkill')"><span>🔌</span><span>MCP / Skill</span></button>
+    <button class="settings-nav-item" data-settings-section="projectInstructions" data-desc="管理 AGENTS.md 项目规则、默认内容和注入策略。" onclick="openSettingsSection('projectInstructions')"><span>📘</span><span>项目指令</span></button>
     <button class="settings-nav-item" data-settings-section="projectMemory" data-desc="管理当前项目的长期记忆文件和注入策略。" onclick="openSettingsSection('projectMemory')"><span>🧠</span><span>项目记忆</span></button>
     <button class="settings-nav-item" data-settings-section="jsonEditor" data-desc="查看实际请求、响应、模板、请求头和历史。" onclick="openSettingsSection('jsonEditor')"><span>{ }</span><span>JSON 查看器</span></button>
     <button class="settings-nav-item" data-settings-section="backup" data-desc="导出和导入配置、工具、归档和模式设置。" onclick="openSettingsSection('backup')"><span>💾</span><span>备份恢复</span></button>
@@ -1232,6 +1293,7 @@
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/utils.js"></script>
+<script src="js/project-instructions.js"></script>
 <script src="js/project-memory.js"></script>
 <script src="js/mcp-skills.js"></script>
 <script src="js/rate-limiter.js"></script> 

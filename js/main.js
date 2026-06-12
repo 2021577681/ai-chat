@@ -123,6 +123,11 @@ async function init() {
   // 8. 更新 Token 显示
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 
+  // ⭐ 8.4 项目指令：默认读取已存在的 AGENTS.md，并作为人工维护规则注入
+  if (typeof initProjectInstructions === 'function') {
+    setTimeout(() => initProjectInstructions(false), 500);
+  }
+
   // ⭐ 8.5 项目记忆：只有显式开启后才检测/读取/生成
   if (typeof initProjectMemory === 'function') {
     setTimeout(() => initProjectMemory(false), 800);
@@ -163,7 +168,7 @@ async function init() {
       // ⭐ 顺序：先关最上层（图片预览、终端确认）→ 普通模态 → LMS 抽屉
       const modals = [
         'imgPreview', 'termConfirmMask',
-        'toolEditModal', 'backupModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
+        'toolEditModal', 'backupModal', 'projectInstructionsModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
         'planModal', 'outlineModal', 'taskQueueModal', 'concurrentRequestsModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'

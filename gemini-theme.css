@@ -1444,6 +1444,7 @@ body.settings-page-open .settings-docked-mask.show{
 }
 
 .settings-page-content .settings-section-mcpSkill,
+.settings-page-content .settings-section-projectInstructions,
 .settings-page-content .settings-section-projectMemory,
 .settings-page-content .settings-section-backup{
   width:min(1000px,100%);

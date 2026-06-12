@@ -150,10 +150,17 @@ function saveProjectMemorySettingsFromUi() {
   const enabledEl = document.getElementById('projectMemoryEnabled');
   const pathEl = document.getElementById('projectMemoryPath');
   const maxEl = document.getElementById('projectMemoryMaxChars');
+  const previousPath = cfg.path || PROJECT_MEMORY_DEFAULTS.path;
   cfg.enabled = !!(enabledEl && enabledEl.checked);
   cfg.path = (pathEl && pathEl.value.trim()) || PROJECT_MEMORY_DEFAULTS.path;
   const maxChars = parseInt(maxEl && maxEl.value);
   cfg.maxChars = isNaN(maxChars) ? PROJECT_MEMORY_DEFAULTS.maxChars : Math.max(1000, maxChars);
+  if (previousPath !== cfg.path) {
+    PROJECT_MEMORY_RUNTIME.content = '';
+    PROJECT_MEMORY_RUNTIME.exists = false;
+    PROJECT_MEMORY_RUNTIME.loadedPath = '';
+    _pmSetTextarea('');
+  }
   persistSettings();
   if (!cfg.enabled) {
     PROJECT_MEMORY_RUNTIME.content = '';
@@ -166,7 +173,7 @@ function saveProjectMemorySettingsFromUi() {
     return;
   }
   toast('项目记忆已开启');
-  if (!wasEnabled || !PROJECT_MEMORY_RUNTIME.content) {
+  if (!wasEnabled || previousPath !== cfg.path || !PROJECT_MEMORY_RUNTIME.content) {
     initProjectMemory(true);
   } else {
     initProjectMemory(false);

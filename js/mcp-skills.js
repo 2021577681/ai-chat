@@ -469,6 +469,9 @@ function getActiveSkillPrompt() {
 
 function withActiveSkillPrompt(basePrompt) {
   let out = basePrompt || '';
+  if (typeof withProjectInstructionsPrompt === 'function') {
+    out = withProjectInstructionsPrompt(out);
+  }
   if (typeof withProjectMemoryPrompt === 'function') {
     out = withProjectMemoryPrompt(out);
   }
