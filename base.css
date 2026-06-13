@@ -64,7 +64,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .model-trigger-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:18px}
 .model-trigger-caret{margin-left:auto;font-size:10px;line-height:1;color:var(--text-secondary);transition:transform .15s ease}
 .model-picker.open .model-trigger-caret{transform:rotate(180deg)}
-.model-menu{position:absolute;left:0;top:calc(100% + 8px);z-index:90;width:max(100%,180px);max-width:min(420px,calc(100vw - 32px));max-height:320px;overflow:auto;padding:6px;border:1px solid var(--border);border-radius:12px;background:var(--bg-sidebar);box-shadow:0 12px 34px rgba(15,23,42,.16);display:flex;flex-direction:column;gap:2px}
+.model-menu{position:absolute;left:0;top:calc(100% + 8px);z-index:260;width:max(100%,180px);max-width:min(420px,calc(100vw - 32px));max-height:320px;overflow:auto;padding:6px;border:1px solid var(--border);border-radius:12px;background:var(--bg-sidebar);box-shadow:0 12px 34px rgba(15,23,42,.16);display:flex;flex-direction:column;gap:2px}
 .model-menu[hidden]{display:none}
 .model-option{width:100%;min-height:32px;padding:0 8px 0 12px;border:none;border-radius:8px;background:transparent;color:var(--text-secondary);font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",Arial,sans-serif;font-size:13px;font-weight:400;line-height:1.35;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;text-align:left}
 .model-option:hover,.model-option:focus,.model-option.active{background:var(--bg-hover);color:var(--text);outline:none}

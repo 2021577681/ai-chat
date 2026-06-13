@@ -615,6 +615,10 @@ body{
   z-index:1;
 }
 
+[data-theme="dark"][data-cool-mode] .topbar{
+  z-index:5;
+}
+
 [data-theme="dark"][data-cool-mode] .messages{
   background:transparent;
   overflow-x:hidden;
