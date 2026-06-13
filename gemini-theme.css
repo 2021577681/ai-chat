@@ -1316,11 +1316,13 @@ input::placeholder{
 }
 
 .settings-page-content{
+  --settings-footer-bleed:36px;
+  --settings-footer-button-bottom-gap:0px;
   flex:1;
   min-height:0;
   overflow-x:hidden;
   overflow-y:auto;
-  padding:24px 42px 48px;
+  padding:24px 42px var(--settings-footer-bleed);
   scroll-behavior:smooth;
   scrollbar-gutter:stable;
 }
@@ -1348,13 +1350,16 @@ input::placeholder{
 
 .settings-page-content .modal-footer{
   position:sticky;
-  bottom:-48px;
+  bottom:calc(-1 * var(--settings-footer-bleed));
   z-index:2;
-  margin:22px -42px -48px;
-  padding:14px 42px;
-  background:color-mix(in srgb,var(--bg-chat) 92%,transparent);
+  margin:22px -42px calc(-1 * var(--settings-footer-bleed));
+  padding:14px 42px calc(var(--settings-footer-bleed) + var(--settings-footer-button-bottom-gap));
+  justify-content:flex-start;
+  align-items:center;
+  gap:8px!important;
+  background:var(--bg-chat);
   border-top:1px solid var(--border);
-  backdrop-filter:blur(8px);
+  backdrop-filter:none;
 }
 
 .settings-page-content .backup-export-actions{
@@ -1475,7 +1480,7 @@ body.settings-page-open .settings-docked-mask.show{
 }
 
 [data-theme="dark"] .settings-page-content .modal-footer{
-  background:rgba(19,19,20,.92);
+  background:#131314;
   border-top-color:rgba(232,234,237,.12);
 }
 
