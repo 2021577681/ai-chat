@@ -383,7 +383,10 @@ function saveAndClose() {
 }
 
 function saveSettings() {
-  state.settings.currentModel = document.getElementById('modelSelect').value;
+  const modelSelect = document.getElementById('modelSelect');
+  if (modelSelect) state.settings.currentModel = modelSelect.value;
+  const effortSelect = document.getElementById('effortSelect');
+  if (effortSelect) state.settings.reasoningEffort = effortSelect.value;
   persistSettings();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   if (document.getElementById('settingsModal')?.classList.contains('show')) {
@@ -424,7 +427,64 @@ function refreshModelSelect() {
     sel.value = list[0];
     state.settings.currentModel = list[0];
   }
+  refreshReasoningEffortSelect();
 }
+
+function refreshReasoningEffortSelect() {
+  const sel = document.getElementById('effortSelect');
+  if (!sel) return;
+  const allowed = ['', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const value = allowed.includes(state.settings.reasoningEffort) ? state.settings.reasoningEffort : '';
+  sel.value = value;
+  state.settings.reasoningEffort = value;
+  const label = document.getElementById('effortTriggerLabel');
+  if (label) label.textContent = value || '不设置';
+  document.querySelectorAll('.effort-option').forEach(btn => {
+    const active = btn.dataset.effort === value;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+function toggleReasoningEffortMenu(event) {
+  if (event) event.stopPropagation();
+  const picker = document.getElementById('effortPicker');
+  const menu = document.getElementById('effortMenu');
+  const trigger = document.getElementById('effortTrigger');
+  if (!picker || !menu) return;
+  const nextOpen = menu.hidden;
+  menu.hidden = !nextOpen;
+  picker.classList.toggle('open', nextOpen);
+  if (trigger) trigger.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  if (nextOpen) refreshReasoningEffortSelect();
+}
+
+function closeReasoningEffortMenu() {
+  const picker = document.getElementById('effortPicker');
+  const menu = document.getElementById('effortMenu');
+  const trigger = document.getElementById('effortTrigger');
+  if (menu) menu.hidden = true;
+  if (picker) picker.classList.remove('open');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+function setReasoningEffort(value, event) {
+  if (event) event.stopPropagation();
+  const sel = document.getElementById('effortSelect');
+  if (sel) sel.value = value;
+  state.settings.reasoningEffort = value;
+  refreshReasoningEffortSelect();
+  saveSettings();
+  closeReasoningEffortMenu();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.effort-picker')) closeReasoningEffortMenu();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeReasoningEffortMenu();
+});
 
 async function testConnection() {
   const r = document.getElementById('testResult');

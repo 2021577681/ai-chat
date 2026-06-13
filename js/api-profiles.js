@@ -29,7 +29,8 @@ const PROFILE_SETTINGS_KEYS = [
   'systemPrompt',
   'useCustomJson',
   'jsonTemplate',
-  'jsonHeaders'
+  'jsonHeaders',
+  'reasoningEffort'
 ];
 
 // ============ 读写工具 ============

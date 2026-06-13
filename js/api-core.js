@@ -21,6 +21,16 @@ function buildRequestBody(history, modelOverride, streamOverride, options = {}) 
     : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(history) : buildOpenAIMessages(history));
   const toolsEnabled = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   const tools = toolsEnabled ? buildToolsArray({ force: true }) : null;
+  const applyReasoningEffort = (targetBody) => {
+    const allowed = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+    const effort = String(s.reasoningEffort || '').trim();
+    if (!allowed.has(effort) || !targetBody || typeof targetBody !== 'object') return targetBody;
+    const outputConfig = targetBody.output_config && typeof targetBody.output_config === 'object' && !Array.isArray(targetBody.output_config)
+      ? targetBody.output_config
+      : {};
+    targetBody.output_config = { ...outputConfig, effort };
+    return targetBody;
+  };
   
   // ⭐ 先构造默认请求体
   let body;
@@ -116,7 +126,7 @@ function buildRequestBody(history, modelOverride, streamOverride, options = {}) 
       }
       
       console.log('[自定义模板] ✓ 已应用自定义字段');
-      return templateObj;
+      return applyReasoningEffort(templateObj);
       
     } catch (e) {
       console.error('[自定义模板] 解析失败:', e);
@@ -127,7 +137,7 @@ function buildRequestBody(history, modelOverride, streamOverride, options = {}) 
     }
   }
   
-  return body;
+  return applyReasoningEffort(body);
 }
 
 function buildHeaders() {

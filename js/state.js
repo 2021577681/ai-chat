@@ -62,6 +62,7 @@ let state = {
     useCustomJson: false,
     jsonTemplate: '',
     jsonHeaders: '{}',
+    reasoningEffort: '',
     // ⭐ 跨域代理：通过本地服务（local_terminal_server.py）转发 LLM 请求
     // 默认开启 —— 大部分用户用本地项目时都会遇到 CORS 问题
     useLocalProxy: true,

@@ -98,6 +98,40 @@
           <input type="file" id="imgInput" accept="image/*" multiple style="display:none" onchange="onPickImages(event)">
           <input type="file" id="fileInput" multiple style="display:none" onchange="onPickFiles(event)">
           <div class="input-info" id="inputInfo">准备就绪</div>
+          <div class="effort-picker" id="effortPicker">
+            <select class="effort-select-native" id="effortSelect" onchange="saveSettings()" tabindex="-1" aria-hidden="true">
+              <option value="">不设置</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max">max</option>
+            </select>
+            <button type="button" class="effort-trigger" id="effortTrigger" onclick="toggleReasoningEffortMenu(event)" title="模型思考程度" aria-haspopup="listbox" aria-expanded="false">
+              <span class="effort-trigger-label" id="effortTriggerLabel">不设置</span>
+              <span class="effort-trigger-caret">▾</span>
+            </button>
+            <div class="effort-menu" id="effortMenu" role="listbox" hidden>
+              <button type="button" class="effort-option" data-effort="" onclick="setReasoningEffort('', event)" role="option">
+                <span class="effort-option-text">不设置</span><span class="effort-option-check">✓</span>
+              </button>
+              <button type="button" class="effort-option" data-effort="low" onclick="setReasoningEffort('low', event)" role="option">
+                <span class="effort-option-text">low</span><span class="effort-option-check">✓</span>
+              </button>
+              <button type="button" class="effort-option" data-effort="medium" onclick="setReasoningEffort('medium', event)" role="option">
+                <span class="effort-option-text">medium</span><span class="effort-option-check">✓</span>
+              </button>
+              <button type="button" class="effort-option" data-effort="high" onclick="setReasoningEffort('high', event)" role="option">
+                <span class="effort-option-text">high</span><span class="effort-option-check">✓</span>
+              </button>
+              <button type="button" class="effort-option" data-effort="xhigh" onclick="setReasoningEffort('xhigh', event)" role="option">
+                <span class="effort-option-text">xhigh</span><span class="effort-option-check">✓</span>
+              </button>
+              <button type="button" class="effort-option" data-effort="max" onclick="setReasoningEffort('max', event)" role="option">
+                <span class="effort-option-text">max</span><span class="effort-option-check">✓</span>
+              </button>
+            </div>
+          </div>
           <button class="send-btn" id="sendBtn" onclick="onSend()">↑</button>
         </div>
       </div>

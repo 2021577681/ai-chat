@@ -909,6 +909,41 @@ input::placeholder{
   color:var(--text-secondary);
 }
 
+.effort-trigger{
+  background:var(--bg-soft);
+  border-color:transparent;
+  border-radius:999px;
+  color:var(--text-secondary);
+}
+
+.effort-trigger:hover,
+.effort-trigger:focus,
+.effort-picker.open .effort-trigger{
+  background:var(--bg-hover);
+  border-color:transparent;
+  color:var(--text);
+}
+
+.effort-menu{
+  min-width:146px;
+  background:var(--gemini-surface);
+  border-color:var(--border);
+  border-radius:16px;
+  box-shadow:var(--gemini-shadow-lg);
+}
+
+.effort-option{
+  border-radius:12px;
+  color:var(--text-secondary);
+}
+
+.effort-option:hover,
+.effort-option:focus,
+.effort-option.active{
+  background:var(--bg-hover);
+  color:var(--text);
+}
+
 .send-btn{
   border-radius:50%;
   background:#202124;
