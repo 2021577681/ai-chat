@@ -387,6 +387,7 @@ function saveSettings() {
   if (modelSelect) state.settings.currentModel = modelSelect.value;
   const effortSelect = document.getElementById('effortSelect');
   if (effortSelect) state.settings.reasoningEffort = effortSelect.value;
+  refreshModelPickerState();
   persistSettings();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   if (document.getElementById('settingsModal')?.classList.contains('show')) {
@@ -427,7 +428,69 @@ function refreshModelSelect() {
     sel.value = list[0];
     state.settings.currentModel = list[0];
   }
+  renderModelPickerMenu(list);
+  refreshModelPickerState();
   refreshReasoningEffortSelect();
+}
+
+function renderModelPickerMenu(list) {
+  const menu = document.getElementById('modelMenu');
+  if (!menu) return;
+  const items = (list || []).filter(Boolean);
+  if (!items.length) {
+    menu.innerHTML = '<div class="model-option-empty">暂无模型</div>';
+    return;
+  }
+  menu.innerHTML = items.map(m => `
+    <button type="button" class="model-option" data-model="${escapeHtml(m)}" onclick="setCurrentModelFromPicker(this.dataset.model, event)" role="option" title="${escapeHtml(m)}">
+      <span class="model-option-name">${escapeHtml(m)}</span>
+      <span class="model-option-check">✓</span>
+    </button>
+  `).join('');
+}
+
+function refreshModelPickerState() {
+  const sel = document.getElementById('modelSelect');
+  const value = sel ? (sel.value || state.settings.currentModel || '') : (state.settings.currentModel || '');
+  const label = document.getElementById('modelTriggerLabel');
+  if (label) label.textContent = value || '选择模型';
+  document.querySelectorAll('.model-option').forEach(btn => {
+    const active = btn.dataset.model === value;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+function toggleModelMenu(event) {
+  if (event) event.stopPropagation();
+  const picker = document.getElementById('modelPicker');
+  const menu = document.getElementById('modelMenu');
+  const trigger = document.getElementById('modelTrigger');
+  if (!picker || !menu) return;
+  const nextOpen = menu.hidden;
+  menu.hidden = !nextOpen;
+  picker.classList.toggle('open', nextOpen);
+  if (trigger) trigger.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  if (nextOpen) refreshModelPickerState();
+}
+
+function closeModelMenu() {
+  const picker = document.getElementById('modelPicker');
+  const menu = document.getElementById('modelMenu');
+  const trigger = document.getElementById('modelTrigger');
+  if (menu) menu.hidden = true;
+  if (picker) picker.classList.remove('open');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+function setCurrentModelFromPicker(value, event) {
+  if (event) event.stopPropagation();
+  const sel = document.getElementById('modelSelect');
+  if (sel) sel.value = value;
+  state.settings.currentModel = value;
+  refreshModelPickerState();
+  saveSettings();
+  closeModelMenu();
 }
 
 function refreshReasoningEffortSelect() {
@@ -479,11 +542,15 @@ function setReasoningEffort(value, event) {
 }
 
 document.addEventListener('click', e => {
+  if (!e.target.closest('.model-picker')) closeModelMenu();
   if (!e.target.closest('.effort-picker')) closeReasoningEffortMenu();
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeReasoningEffortMenu();
+  if (e.key === 'Escape') {
+    closeModelMenu();
+    closeReasoningEffortMenu();
+  }
 });
 
 async function testConnection() {

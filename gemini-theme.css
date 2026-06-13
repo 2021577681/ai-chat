@@ -271,7 +271,7 @@ body{
   border-bottom-color:rgba(232,234,237,.10);
 }
 
-.model-select,
+.model-trigger,
 .task-queue-controls select,
 .task-queue-item select{
   background:#f8f8f7;
@@ -280,9 +280,33 @@ body{
   color:var(--text);
 }
 
-.model-select:hover,
-.model-select:focus{
+.model-trigger:hover,
+.model-trigger:focus,
+.model-picker.open .model-trigger{
   background:#f2f2f1;
+}
+
+.model-trigger{
+  border-radius:999px;
+}
+
+.model-menu{
+  background:var(--gemini-surface);
+  border-color:var(--border);
+  border-radius:18px;
+  box-shadow:var(--gemini-shadow-lg);
+}
+
+.model-option{
+  border-radius:12px;
+  color:var(--text-secondary);
+}
+
+.model-option:hover,
+.model-option:focus,
+.model-option.active{
+  background:var(--bg-hover);
+  color:var(--text);
 }
 
 .topbar-btn.tool-active,
@@ -1774,14 +1798,15 @@ body.settings-page-open .settings-docked-mask.show{
   background:rgba(232,234,237,.08);
 }
 
-[data-theme="dark"] .model-select,
+[data-theme="dark"] .model-trigger,
 [data-theme="dark"] .task-queue-controls select,
 [data-theme="dark"] .task-queue-item select{
   background:#242528;
 }
 
-[data-theme="dark"] .model-select:hover,
-[data-theme="dark"] .model-select:focus{
+[data-theme="dark"] .model-trigger:hover,
+[data-theme="dark"] .model-trigger:focus,
+[data-theme="dark"] .model-picker.open .model-trigger{
   background:#2f3033;
 }
 

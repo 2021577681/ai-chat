@@ -61,7 +61,14 @@
     <!-- 顶部工具栏 -->
     <div class="topbar">
       <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
-      <select class="model-select" id="modelSelect" onchange="saveSettings()"></select>
+      <div class="model-picker" id="modelPicker">
+        <select class="model-select" id="modelSelect" onchange="saveSettings()" tabindex="-1" aria-hidden="true"></select>
+        <button type="button" class="model-trigger" id="modelTrigger" onclick="toggleModelMenu(event)" title="选择模型" aria-haspopup="listbox" aria-expanded="false">
+          <span class="model-trigger-label" id="modelTriggerLabel">选择模型</span>
+          <span class="model-trigger-caret">▾</span>
+        </button>
+        <div class="model-menu" id="modelMenu" role="listbox" hidden></div>
+      </div>
       <div class="topbar-spacer"></div>
       <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式">📋 计划</button>
       <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）">📑 大纲</button>
