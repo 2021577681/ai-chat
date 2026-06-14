@@ -457,8 +457,7 @@ class GitMixin:
             x, y, path = line[0], line[1], line[3:]
             if ' -> ' in path:
                 path = path.split(' -> ', 1)[1]
-            if path.startswith('"') and path.endswith('"'):
-                path = path[1:-1]
+            path = self._decode_git_path(path)
             if x == '?' and y == '?':
                 untracked.append({'path': path, 'status': '?'})
             else:
@@ -548,6 +547,66 @@ class GitMixin:
         return self._send_json(200, {'ok': True, 'findings': findings})
 
     # ============ 通用工具 ============
+    def _git_display_cmd(self, cmd):
+        """Force git to emit UTF-8 paths instead of C-quoted octal escapes."""
+        if not isinstance(cmd, (list, tuple)) or not cmd:
+            return cmd
+        cmd = list(cmd)
+        if cmd[0] != 'git':
+            return cmd
+        if len(cmd) >= 3 and cmd[1] == '-c' and cmd[2].startswith('core.quotepath='):
+            return cmd
+        return ['git', '-c', 'core.quotepath=false'] + cmd[1:]
+
+    def _decode_git_path(self, path):
+        """Decode git's quoted path format, e.g. "\\344\\270\\255.txt"."""
+        if not isinstance(path, str) or len(path) < 2:
+            return path
+        if not (path.startswith('"') and path.endswith('"')):
+            return path
+
+        raw = path[1:-1]
+        out = bytearray()
+        escapes = {
+            'a': 7, 'b': 8, 't': 9, 'n': 10,
+            'v': 11, 'f': 12, 'r': 13,
+            '"': 34, '\\': 92,
+        }
+        i = 0
+        while i < len(raw):
+            ch = raw[i]
+            if ch != '\\':
+                out.extend(ch.encode('utf-8'))
+                i += 1
+                continue
+
+            i += 1
+            if i >= len(raw):
+                out.append(ord('\\'))
+                break
+
+            esc = raw[i]
+            if esc in '01234567':
+                digits = esc
+                i += 1
+                for _ in range(2):
+                    if i < len(raw) and raw[i] in '01234567':
+                        digits += raw[i]
+                        i += 1
+                    else:
+                        break
+                out.append(int(digits, 8))
+                continue
+
+            mapped = escapes.get(esc)
+            if mapped is not None:
+                out.append(mapped)
+            else:
+                out.extend(esc.encode('utf-8'))
+            i += 1
+
+        return out.decode('utf-8', errors='replace')
+
     def _git_run(self, cmd, cwd, timeout=10, max_output=512 * 1024):
         """运行 git 命令，返回 dict(ok, stdout, stderr)。强制不走交互、强制 UTF-8。"""
         env = os.environ.copy()
@@ -555,8 +614,9 @@ class GitMixin:
         env['LC_ALL'] = 'C.UTF-8'
         env['LANG'] = 'C.UTF-8'
         try:
+            run_cmd = self._git_display_cmd(cmd)
             proc = subprocess.run(
-                cmd, cwd=cwd, timeout=timeout,
+                run_cmd, cwd=cwd, timeout=timeout,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 env=env,
             )
