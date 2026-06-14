@@ -149,7 +149,7 @@
     <!-- 沙箱信息：放在侧栏顶部，减少主对话区干扰 -->
     <div class="workspace-bar sidebar-workspace" id="workspaceBar" title="AI 工具调用被限制在此目录内">
       <div class="workspace-head">
-        <span class="workspace-icon">🛡️</span>
+        <img class="workspace-icon" src="icon/保护_protect.png" alt="">
         <span class="workspace-label">沙箱目录</span>
         <span class="workspace-status" id="workspaceStatus">●</span>
         <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
@@ -163,7 +163,7 @@
     
     <!-- 侧边栏底部：设置 + 主题 -->
     <div class="sidebar-footer">
-      <button class="icon-btn" onclick="openSettings()">⚙ 设置</button>
+      <button class="icon-btn" onclick="openSettings()"><img class="icon-btn-img" src="icon/配置_config.png" alt="">设置</button>
     </div>
   </aside>
   
@@ -181,22 +181,22 @@
         <div class="model-menu" id="modelMenu" role="listbox" hidden></div>
       </div>
       <div class="topbar-spacer"></div>
-      <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><svg class="topbar-btn-icon"><use href="#icon-topbar-plan"></use></svg><span>计划</span></button>
-      <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）"><svg class="topbar-btn-icon"><use href="#icon-topbar-outline"></use></svg><span>大纲</span></button>
-      <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用"><svg class="topbar-btn-icon"><use href="#icon-topbar-tools"></use></svg><span>工具</span></button>
-      <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手"><svg class="topbar-btn-icon"><use href="#icon-topbar-learning"></use></svg><span>学习</span></button>
-      <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）"><svg class="topbar-btn-icon"><use href="#icon-topbar-trace"></use></svg><span>Trace</span></button>
-      <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话"><svg class="topbar-btn-icon"><use href="#icon-topbar-check"></use></svg><span>体检</span></button>
+      <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
+      <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
+      <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
+      <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
+      <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）"><img class="topbar-btn-icon" src="icon/日志_log.png" alt=""><span>Trace</span></button>
+      <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话"><img class="topbar-btn-icon" src="icon/健康_health.png" alt=""><span>体检</span></button>
     </div>
     
     <!-- Token + 频率统计栏（合并为单栏，左 Token 右 Rate） -->
     <div class="status-bar">
       <div class="token-stats-bar" id="tokenStats">
-        <span class="token-empty"><svg class="status-icon"><use href="#icon-status-chart"></use></svg>暂无对话</span>
+        <span class="token-empty"><img class="status-icon" src="icon/分析_analysis.png" alt="">暂无对话</span>
       </div>
       <div class="status-bar-divider"></div>
       <div class="rate-stats-bar" id="rateStats">
-        <span class="rate-empty"><svg class="status-icon"><use href="#icon-status-speed"></use></svg>加载中...</span>
+        <span class="rate-empty"><img class="status-icon" src="icon/速度_speed-one.png" alt="">加载中...</span>
       </div>
     </div>
     

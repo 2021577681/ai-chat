@@ -367,7 +367,11 @@ body{
 }
 
 .sidebar-workspace .workspace-icon{
-  font-size:14px;
+  width:14px;
+  height:14px;
+  flex:0 0 14px;
+  display:block;
+  object-fit:contain;
 }
 
 .sidebar-workspace .workspace-label{
@@ -463,6 +467,7 @@ body{
   border-radius:999px;
 }
 
+.token-msgs,
 .token-count.token-input,
 .token-count.token-output,
 .token-count.token-cache,
@@ -471,6 +476,12 @@ body{
 .rate-item.warning,
 .rate-item.danger{
   box-shadow:none;
+}
+
+.token-msgs{
+  color:#c5221f;
+  border-color:#f4aaa3;
+  background:#fce8e6;
 }
 
 .token-count.token-input{
@@ -537,6 +548,52 @@ body{
 .rate-item.danger{
   border-color:#f4aaa3;
   background:#fce8e6;
+}
+
+.rate-metric{
+  width:64px;
+  display:inline-grid;
+  grid-template-columns:13px 1fr;
+  justify-content:initial;
+  justify-items:center;
+  padding:1px 7px;
+  box-shadow:none;
+  font-variant-numeric:tabular-nums;
+}
+
+.rate-metric .status-icon{
+  grid-column:1;
+  justify-self:center;
+}
+
+.rate-minute.safe{
+  color:#137333;
+  border-color:#a8dab5;
+  background:#e6f4ea;
+}
+
+.rate-minute.warning{
+  color:#b06000;
+  border-color:#fdd663;
+  background:#fef7e0;
+}
+
+.rate-minute.danger{
+  color:#c5221f;
+  border-color:#f4aaa3;
+  background:#fce8e6;
+}
+
+.rate-today{
+  color:#0b57d0;
+  border-color:#a8c7fa;
+  background:#e8f0fe;
+}
+
+.rate-total{
+  color:#8430ce;
+  border-color:#d7aefb;
+  background:#f3e8fd;
 }
 
 .messages{
@@ -1796,6 +1853,13 @@ body.settings-page-open .settings-docked-mask.show{
   border-color:rgba(232,234,237,.12);
 }
 
+[data-theme="dark"] .topbar-btn-icon,
+[data-theme="dark"] .status-icon,
+[data-theme="dark"] .icon-btn-img,
+[data-theme="dark"] .workspace-icon{
+  filter:brightness(0) invert(1) opacity(.88);
+}
+
 [data-theme="dark"] .sidebar-collapse-btn:hover,
 [data-theme="dark"] .menu-toggle:hover,
 [data-theme="dark"] .btn-new:hover,
@@ -1852,6 +1916,12 @@ body.settings-page-open .settings-docked-mask.show{
   color:#aecbfa;
 }
 
+[data-theme="dark"] .token-msgs{
+  color:#f28b82;
+  border-color:rgba(242,139,130,.35);
+  background:rgba(242,139,130,.14);
+}
+
 [data-theme="dark"] .token-count.token-input{
   color:#aecbfa;
   border-color:rgba(138,180,248,.35);
@@ -1904,6 +1974,36 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .rate-item.danger{
   border-color:rgba(242,139,130,.35);
   background:rgba(242,139,130,.14);
+}
+
+[data-theme="dark"] .rate-minute.safe{
+  color:#81c995;
+  border-color:rgba(129,201,149,.35);
+  background:rgba(129,201,149,.15);
+}
+
+[data-theme="dark"] .rate-minute.warning{
+  color:#fdd663;
+  border-color:rgba(253,214,99,.35);
+  background:rgba(253,214,99,.14);
+}
+
+[data-theme="dark"] .rate-minute.danger{
+  color:#f28b82;
+  border-color:rgba(242,139,130,.35);
+  background:rgba(242,139,130,.14);
+}
+
+[data-theme="dark"] .rate-today{
+  color:#a8c7fa;
+  border-color:rgba(168,199,250,.35);
+  background:rgba(168,199,250,.14);
+}
+
+[data-theme="dark"] .rate-total{
+  color:#d7aefb;
+  border-color:rgba(215,174,251,.35);
+  background:rgba(215,174,251,.14);
 }
 
 [data-theme="dark"] .message:has(.avatar.user) .msg-body{

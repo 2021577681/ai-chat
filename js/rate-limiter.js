@@ -218,10 +218,7 @@ function updateRateDisplay(extraText) {
   
   const now = Date.now();
   const oneMinuteAgo = now - 60000;
-  const fiveMinAgo = now - 300000;
-  
   const last1min = _requestLog.timestamps.filter(t => t > oneMinuteAgo).length;
-  const last5min = _requestLog.timestamps.filter(t => t > fiveMinAgo).length;
   
   const s = state.settings;
   const maxPerMin = s.rateMaxPerMinute || 20;
@@ -234,15 +231,14 @@ function updateRateDisplay(extraText) {
   
   if (_requestLog.paused) {
     html = `
-      <span class="rate-paused"><svg class="status-icon"><use href="#icon-status-pause"></use></svg>已暂停</span>
-      <button class="rate-btn rate-resume" onclick="toggleRatePause()"><svg class="status-icon"><use href="#icon-status-play"></use></svg>继续</button>
+      <span class="rate-paused"><img class="status-icon" src="icon/暂停_pause.png" alt="">已暂停</span>
+      <button class="rate-btn rate-resume" onclick="toggleRatePause()"><img class="status-icon" src="icon/速度_speed-one.png" alt="">继续</button>
     `;
   } else {
     html = `
-      <span class="rate-item ${rateClass}" title="最近 1 分钟请求数"><svg class="status-icon"><use href="#icon-status-speed"></use></svg>${last1min}/${maxPerMin}分</span>
-      <span class="rate-item" title="最近 5 分钟请求数"><svg class="status-icon"><use href="#icon-status-chart"></use></svg>${last5min}/5分</span>
-      <span class="rate-item" title="今日总请求数"><svg class="status-icon"><use href="#icon-status-calendar"></use></svg>${_requestLog.todayCount}</span>
-      <span class="rate-item" title="累计请求数"><svg class="status-icon"><use href="#icon-status-sum"></use></svg>${_requestLog.totalRequests}</span>
+      <span class="rate-item rate-metric rate-minute ${rateClass}" title="最近 1 分钟请求数"><img class="status-icon" src="icon/速度_speed-one.png" alt="">${last1min}</span>
+      <span class="rate-item rate-metric rate-today" title="今日总请求数"><img class="status-icon" src="icon/日历_calendar-dot.png" alt="">${_requestLog.todayCount}</span>
+      <span class="rate-item rate-metric rate-total" title="累计请求数"><img class="status-icon" src="icon/条形图_chart-histogram-two.png" alt="">${_requestLog.totalRequests}</span>
     `;
     
     if (extraText) {
@@ -250,8 +246,8 @@ function updateRateDisplay(extraText) {
     }
     
     html += `
-      <button class="rate-btn" onclick="openRateSettings()" title="频率设置"><svg class="status-icon"><use href="#icon-status-sliders"></use></svg></button>
-      <button class="rate-btn rate-pause" onclick="toggleRatePause()" title="暂停所有请求"><svg class="status-icon"><use href="#icon-status-pause"></use></svg></button>
+      <button class="rate-btn" onclick="openRateSettings()" title="频率设置"><img class="status-icon" src="icon/设置配置_setting-config.png" alt=""></button>
+      <button class="rate-btn rate-pause" onclick="toggleRatePause()" title="暂停所有请求"><img class="status-icon" src="icon/暂停_pause.png" alt=""></button>
     `;
   }
   

@@ -432,10 +432,9 @@ function renderTaskQueueSidebarGroup(entry) {
   const pinned = isTaskQueueGroupPinned(chats);
   const title = taskQueueGroupTitle(chats);
   const meta = taskQueueGroupMetaText(chats);
-  const statusIcon = generating ? '⏳' : '🧾';
   return `
     <div class="chat-item chat-group-item ${active ? 'active' : ''} ${pinned ? 'pinned' : ''} ${entry.expanded ? 'expanded' : 'collapsed'}" data-chat-group-id="${escapeHtml(entry.groupId)}" tabindex="0" title="${escapeHtml(title + (meta ? ' · ' + meta : ''))}">
-      <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span><span class="chat-item-name">${escapeHtml(title)}</span></span>
+      <span class="chat-item-title"><span class="chat-item-name">${escapeHtml(title)}</span></span>
       <span class="chat-item-menu-wrap">
         <button class="chat-item-menu-btn" type="button" title="对话操作" aria-label="对话操作">⋯</button>
         <span class="chat-item-menu" role="menu">
@@ -455,7 +454,6 @@ function renderSidebarChatItem(c, options = {}) {
   const isTaskChild = !!options.childOfGroup;
   const taskMeta = c.taskQueue || {};
   const title = _chatDisplayTitle(c) || '新对话';
-  const statusIcon = isGenerating ? '⏳' : (isTaskChild ? '↳' : (isDebate ? '⚖️' : (isConcurrent ? '⚡' : (isPinned ? '📌' : '💬'))));
   const taskBadge = isTaskChild && taskMeta.taskIndex
     ? `<span class="chat-task-index">#${escapeHtml(taskMeta.taskIndex)}</span>`
     : '';
@@ -470,7 +468,7 @@ function renderSidebarChatItem(c, options = {}) {
       </span>`;
   return `
     <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned && !isTaskChild ? 'pinned' : ''} ${isTaskChild ? 'chat-group-child' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
-      <span class="chat-item-title"><span class="chat-item-status">${statusIcon}</span>${taskBadge}<span class="chat-item-name">${escapeHtml(title)}</span></span>
+      <span class="chat-item-title">${taskBadge}<span class="chat-item-name">${escapeHtml(title)}</span></span>
       ${menu}
     </div>`;
 }
