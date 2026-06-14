@@ -234,15 +234,15 @@ function updateRateDisplay(extraText) {
   
   if (_requestLog.paused) {
     html = `
-      <span class="rate-paused">⏸ 已暂停</span>
-      <button class="rate-btn rate-resume" onclick="toggleRatePause()">▶️ 继续</button>
+      <span class="rate-paused"><svg class="status-icon"><use href="#icon-status-pause"></use></svg>已暂停</span>
+      <button class="rate-btn rate-resume" onclick="toggleRatePause()"><svg class="status-icon"><use href="#icon-status-play"></use></svg>继续</button>
     `;
   } else {
     html = `
-      <span class="rate-item ${rateClass}" title="最近 1 分钟请求数">⚡ ${last1min}/${maxPerMin}分</span>
-      <span class="rate-item" title="最近 5 分钟请求数">📊 ${last5min}/5分</span>
-      <span class="rate-item" title="今日总请求数">📅 ${_requestLog.todayCount}</span>
-      <span class="rate-item" title="累计请求数">∑ ${_requestLog.totalRequests}</span>
+      <span class="rate-item ${rateClass}" title="最近 1 分钟请求数"><svg class="status-icon"><use href="#icon-status-speed"></use></svg>${last1min}/${maxPerMin}分</span>
+      <span class="rate-item" title="最近 5 分钟请求数"><svg class="status-icon"><use href="#icon-status-chart"></use></svg>${last5min}/5分</span>
+      <span class="rate-item" title="今日总请求数"><svg class="status-icon"><use href="#icon-status-calendar"></use></svg>${_requestLog.todayCount}</span>
+      <span class="rate-item" title="累计请求数"><svg class="status-icon"><use href="#icon-status-sum"></use></svg>${_requestLog.totalRequests}</span>
     `;
     
     if (extraText) {
@@ -250,8 +250,8 @@ function updateRateDisplay(extraText) {
     }
     
     html += `
-      <button class="rate-btn" onclick="openRateSettings()" title="频率设置">⚙</button>
-      <button class="rate-btn rate-pause" onclick="toggleRatePause()" title="暂停所有请求">⏸</button>
+      <button class="rate-btn" onclick="openRateSettings()" title="频率设置"><svg class="status-icon"><use href="#icon-status-sliders"></use></svg></button>
+      <button class="rate-btn rate-pause" onclick="toggleRatePause()" title="暂停所有请求"><svg class="status-icon"><use href="#icon-status-pause"></use></svg></button>
     `;
   }
   

@@ -459,7 +459,7 @@ function updateTokenDisplay() {
   if (!el) return;
   const c = currentChat();
   if (!c || !c.messages.length) {
-    el.innerHTML = '<span class="token-empty">📊 暂无对话</span>';
+    el.innerHTML = '<span class="token-empty"><svg class="status-icon"><use href="#icon-status-chart"></use></svg>暂无对话</span>';
     return;
   }
   
@@ -515,13 +515,13 @@ function updateTokenDisplay() {
   // 构建详细信息
   let extras = '';
   if (outputTokens > 0) {
-    extras += `<span class="token-count token-output" title="累计输出 token（${totalRequests} 次请求）">📤 ${formatNumber(outputTokens)}</span>`;
+    extras += `<span class="token-count token-output" title="累计输出 token（${totalRequests} 次请求）"><svg class="status-icon"><use href="#icon-status-output"></use></svg>${formatNumber(outputTokens)}</span>`;
   }
   if (cacheRead > 0) {
-    extras += `<span class="token-count token-cache" title="缓存命中（节省成本）">💾 ${formatNumber(cacheRead)}</span>`;
+    extras += `<span class="token-count token-cache" title="缓存命中（节省成本）"><svg class="status-icon"><use href="#icon-status-cache"></use></svg>${formatNumber(cacheRead)}</span>`;
   }
   if (thinking > 0) {
-    extras += `<span class="token-count token-thinking" title="思考 token（extended thinking）">💭 ${formatNumber(thinking)}</span>`;
+    extras += `<span class="token-count token-thinking" title="思考 token（extended thinking）"><svg class="status-icon"><use href="#icon-status-thinking"></use></svg>${formatNumber(thinking)}</span>`;
   }
   
   const showRefreshBtn = state.settings.apiFormat === 'anthropic';
@@ -533,16 +533,16 @@ function updateTokenDisplay() {
     : `输入 token 占上下文 ${pct}%`;
   
   el.innerHTML = `
-    <span class="token-msgs" title="消息数">💬 ${msgCount}</span>
-    <span class="token-count token-input" title="${inputTitle}">${accuracyIcon} 📥 ${formatNumber(inputTokens)} / ${formatNumber(limit)}</span>
+    <span class="token-msgs" title="消息数"><svg class="status-icon"><use href="#icon-status-message"></use></svg>${msgCount}</span>
+    <span class="token-count token-input" title="${inputTitle}"><span class="token-accuracy">${accuracyIcon}</span><svg class="status-icon"><use href="#icon-status-input"></use></svg>${formatNumber(inputTokens)} / ${formatNumber(limit)}</span>
     ${extras}
     <div class="token-bar" title="${barTitle}">
       <div class="token-bar-fill ${pctClass}" style="width:${pct}%"></div>
     </div>
     <span class="token-pct ${pctClass}">${pct}%</span>
-    <button class="token-compress-btn" onclick="manualCompress()" title="压缩对话历史">🗜️</button>
-    <button class="token-compress-btn" onclick="showTokenDetails()" title="查看详细统计">📊</button>
-    ${showRefreshBtn ? `<button class="token-compress-btn" onclick="refreshAccurateTokenCount(true)" title="从 API 获取精确值">🎯</button>` : ''}
+    <button class="token-compress-btn" onclick="manualCompress()" title="压缩对话历史"><svg class="status-icon"><use href="#icon-status-compress"></use></svg></button>
+    <button class="token-compress-btn" onclick="showTokenDetails()" title="查看详细统计"><svg class="status-icon"><use href="#icon-status-chart"></use></svg></button>
+    ${showRefreshBtn ? `<button class="token-compress-btn" onclick="refreshAccurateTokenCount(true)" title="从 API 获取精确值"><svg class="status-icon"><use href="#icon-status-target"></use></svg></button>` : ''}
   `;
 }
 

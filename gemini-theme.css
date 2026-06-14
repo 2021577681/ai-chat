@@ -417,6 +417,7 @@ body{
 .workspace-path,
 .token-msgs,
 .token-count,
+.rate-item,
 .rate-chip,
 .json-stats,
 .resp-meta{
@@ -1944,6 +1945,13 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .api-profile-menu{
   background:#1e1f20;
   border-color:rgba(232,234,237,.12);
+}
+
+[data-theme="dark"] .settings-page-content > .modal,
+[data-theme="dark"] .settings-page-content > .settings-docked-panel{
+  background:transparent;
+  border-color:transparent;
+  box-shadow:none;
 }
 
 [data-theme="dark"] .input-inner{
