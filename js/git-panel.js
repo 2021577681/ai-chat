@@ -42,7 +42,7 @@ function _buildGitModal() {
       <h2>
         <span>📜 Git 管理</span>
         <span class="git-branch-badge" id="gitBranchBadge" title="点击切换/管理分支" onclick="_toggleBranchMenu(event)"></span>
-        <button class="git-btn git-btn-small" id="gitRemoteBtn" onclick="_openRemotePanel()" title="远程仓库 / 推送拉取 / 用户配置">⚙ 配置</button>
+        <button class="git-btn git-btn-small" id="gitRemoteBtn" onclick="_openRemotePanel()" title="远程仓库 / 推送拉取 / 用户配置">🌐 远程仓库</button>
         <button class="modal-close" onclick="closeGitPanel()" style="margin-left:auto;">×</button>
       </h2>
       <div id="gitBranchMenu" class="git-branch-menu" hidden></div>
@@ -90,14 +90,27 @@ async function _refreshGitPanel() {
   _setBranchBadge(check.branch || '(unknown)');
   // 提示用户名邮箱缺失
   const missingUser = !check.userName || !check.userEmail;
+  const userNameLabel = check.userName || '未配置用户名';
+  const userEmailLabel = check.userEmail || '未配置邮箱';
+  const userTitle = `${userNameLabel} <${userEmailLabel}>`;
   body.innerHTML = `
     ${missingUser ? `
       <div class="git-warning-bar">
         ⚠️ 当前仓库未配置 user.name 或 user.email，提交时可能报错。
         <button class="git-btn-link" onclick="_showGitConfigInline()">立即配置 →</button>
       </div>
-      <div id="gitConfigInline" hidden></div>
     ` : ''}
+    <div class="git-user-bar">
+      <div class="git-user-meta">
+        <span class="git-user-label">本地提交作者</span>
+        <span class="git-user-value" title="${escapeHtml(userTitle)}">${escapeHtml(userTitle)}</span>
+      </div>
+      <div class="git-user-actions">
+        <button class="git-btn git-btn-small" onclick="_openRemotePanel()" title="配置 origin、推送、拉取和凭证说明">🌐 远程仓库</button>
+        <button class="git-btn git-btn-small" onclick="_showGitConfigInline()" title="修改当前仓库的 user.name / user.email">👤 修改</button>
+      </div>
+    </div>
+    <div id="gitConfigInline" hidden></div>
     <div class="git-main-grid">
       <div class="git-left-col">
         <div class="git-section-title">📂 工作区改动</div>
@@ -109,8 +122,12 @@ async function _refreshGitPanel() {
               <input type="checkbox" id="gitCommitAll" checked>
               <span>包含所有未暂存改动</span>
             </label>
-            <button class="git-btn git-btn-primary" onclick="_onCommit()">💬 提交</button>
+            <div class="git-commit-buttons">
+              <button class="git-btn" onclick="_onCommitAndPush()" title="提交后推送到 origin/当前分支">⬆️ 提交并推送</button>
+              <button class="git-btn git-btn-primary" onclick="_onCommit()">💬 提交</button>
+            </div>
           </div>
+          <div id="gitCommitRemoteStatus" class="git-sync-log git-commit-remote-log" hidden></div>
         </div>
       </div>
       <div class="git-right-col">
@@ -420,23 +437,66 @@ async function _stageUntracked() {
   await _loadStatus();
 }
 
-async function _onCommit() {
+function _setCommitRemoteLog(msg, isError) {
+  const box = document.getElementById('gitCommitRemoteStatus');
+  if (!box) return;
+  box.hidden = false;
+  box.className = 'git-sync-log git-commit-remote-log' + (isError ? ' error' : '');
+  box.textContent = msg;
+}
+
+async function _hasOriginRemote() {
+  const r = await callGit('remote_list');
+  if (!r.ok) return { ok: false, error: r.error || '无法读取远程仓库配置' };
+  const hasOrigin = (r.remotes || []).some(remote => remote.name === 'origin');
+  if (!hasOrigin) return { ok: false, error: '未配置 origin 远程仓库，请先点「🌐 远程仓库」添加远程 URL。' };
+  return { ok: true };
+}
+
+async function _commitFromForm() {
   const msgEl = document.getElementById('gitCommitMsg');
   const msg = (msgEl.value || '').trim();
   if (!msg) {
     toast('⚠️ 请输入提交信息');
     msgEl.focus();
-    return;
+    return { ok: false };
   }
   const all = document.getElementById('gitCommitAll').checked;
   const r = await callGit('commit', { message: msg, all });
   if (!r.ok) {
     toast('❌ 提交失败：' + (r.error || ''), 5000);
+    return { ok: false, error: r.error || '' };
+  }
+  return { ok: true, msgEl, output: r.output || '' };
+}
+
+async function _onCommit() {
+  const result = await _commitFromForm();
+  if (!result.ok) return;
+  toast('✅ 已提交');
+  result.msgEl.value = '';
+  await Promise.all([_loadStatus(), _loadHistory()]);
+}
+
+async function _onCommitAndPush() {
+  _setCommitRemoteLog('检查远程仓库配置…', false);
+  const remoteCheck = await _hasOriginRemote();
+  if (!remoteCheck.ok) {
+    _setCommitRemoteLog('❌ ' + remoteCheck.error, true);
+    toast('❌ 无法推送：未配置 origin', 4000);
     return;
   }
-  toast('✅ 已提交');
-  msgEl.value = '';
+
+  const result = await _commitFromForm();
+  if (!result.ok) {
+    _setCommitRemoteLog('❌ 提交失败，未执行推送。' + (result.error ? '\n' + result.error : ''), true);
+    return;
+  }
+
+  result.msgEl.value = '';
   await Promise.all([_loadStatus(), _loadHistory()]);
+  const pushed = await _pushCurrentBranch(false, _setCommitRemoteLog);
+  if (pushed) await Promise.all([_loadStatus(), _loadHistory()]);
 }
 
 // ============ 内联配置（user.name / user.email）============
@@ -456,6 +516,7 @@ function _showGitConfigInline() {
       </div>
       <div class="git-form-actions">
         <button class="git-btn git-btn-primary" onclick="_saveGitConfig()">保存</button>
+        <button class="git-btn git-btn-danger" onclick="_clearGitConfig()">清空作者</button>
         <button class="git-btn" onclick="document.getElementById('gitConfigInline').hidden=true">取消</button>
       </div>
     </div>
@@ -480,6 +541,18 @@ async function _saveGitConfig() {
   await _refreshGitPanel();
 }
 
+async function _clearGitConfig() {
+  const ok = confirm('确定清空当前仓库的 Git 用户名和邮箱？\n\n清空后本地提交可能会因为缺少作者信息而失败；已有提交历史不会被删除。');
+  if (!ok) return;
+  const r1 = await callGit('config_set', { key: 'user.name', value: '' });
+  const r2 = await callGit('config_set', { key: 'user.email', value: '' });
+  if (!r1.ok || !r2.ok) return toast('❌ 清空失败');
+  toast('✓ 已清空本仓库作者');
+  const panel = document.getElementById('gitRemotePanel');
+  if (panel) await _refreshRemotePanel();
+  await _refreshGitPanel();
+}
+
 // ============ 全局导出（Phase 1）============
 window.openGitPanel = openGitPanel;
 window.closeGitPanel = closeGitPanel;
@@ -492,9 +565,11 @@ window._stageAll = _stageAll;
 window._unstageAll = _unstageAll;
 window._stageUntracked = _stageUntracked;
 window._onCommit = _onCommit;
+window._onCommitAndPush = _onCommitAndPush;
 window._doInit = _doInit;
 window._showGitConfigInline = _showGitConfigInline;
 window._saveGitConfig = _saveGitConfig;
+window._clearGitConfig = _clearGitConfig;
 
 // ============================================================
 // ============ 🆕 Phase 2：版本回退 / 分支 / 远程 / 推送 ============
@@ -822,13 +897,40 @@ async function _refreshRemotePanel() {
   const ahead = (st && st.ahead) || 0;
   const behind = (st && st.behind) || 0;
   const hasOrigin = remotes.find(r => r.name === 'origin');
+  const authorName = ((uname && uname.value) || '').trim();
+  const authorEmail = ((uemail && uemail.value) || '').trim();
+  const authorConfigured = !!(authorName && authorEmail);
   body.innerHTML = `
     <!-- 用户信息 -->
-    <section class="git-remote-section">
-      <h3>👤 用户信息（git config）</h3>
-      <div class="git-form-row"><label>用户名</label><input id="cfgRpUserName" value="${escapeHtml((uname && uname.value) || '')}" placeholder="alice" /></div>
-      <div class="git-form-row"><label>邮箱</label><input id="cfgRpUserEmail" value="${escapeHtml((uemail && uemail.value) || '')}" placeholder="me@example.com" /></div>
-      <div class="git-form-actions"><button class="git-btn git-btn-primary" onclick="_savePanelUser()">💾 保存</button></div>
+    <section class="git-remote-section git-author-section">
+      <div class="git-section-head">
+        <div>
+          <h3>👤 本地提交作者</h3>
+          <p>写入新 commit 的 author 信息，不是 GitHub / Gitee 登录凭证。</p>
+        </div>
+        <span class="git-author-status ${authorConfigured ? 'ok' : 'warn'}">
+          ${authorConfigured ? '已配置' : '未配置'}
+        </span>
+      </div>
+      <div class="git-author-card">
+        <div class="git-author-grid">
+          <label class="git-author-field">
+            <span>用户名</span>
+            <input id="cfgRpUserName" value="${escapeHtml(authorName)}" placeholder="alice" />
+          </label>
+          <label class="git-author-field">
+            <span>邮箱</span>
+            <input id="cfgRpUserEmail" value="${escapeHtml(authorEmail)}" placeholder="me@example.com" />
+          </label>
+        </div>
+        <div class="git-author-actions">
+          <span class="git-author-note">清空不会删除已有提交；若没有全局作者，新提交会被 Git 拒绝。</span>
+          <div class="git-author-buttons">
+            <button class="git-btn git-btn-primary" onclick="_savePanelUser()">💾 保存作者</button>
+            <button class="git-btn git-btn-danger" onclick="_clearGitConfig()">清空作者</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- 远程仓库 -->
@@ -910,6 +1012,8 @@ async function _savePanelUser() {
   const r2 = await callGit('config_set', { key: 'user.email', value: email });
   if (!r1.ok || !r2.ok) return toast('❌ 保存失败');
   toast('✅ 已保存');
+  await _refreshRemotePanel();
+  await _refreshGitPanel();
 }
 
 async function _addRemote() {
@@ -952,42 +1056,63 @@ function _syncLog(msg, isError) {
   box.textContent = msg;
 }
 
-async function _doPush(force) {
+async function _getCurrentBranch() {
+  if (GIT_STATE.status && GIT_STATE.status.branch) return GIT_STATE.status.branch;
+  const st = await callGit('status');
+  if (st.ok) {
+    GIT_STATE.status = st;
+    return st.branch || '';
+  }
+  return '';
+}
+
+async function _pushCurrentBranch(force, logFn) {
+  const log = typeof logFn === 'function' ? logFn : _syncLog;
   const branch = (GIT_STATE.status && GIT_STATE.status.branch) || '';
-  if (!branch) return toast('❌ 无法确定当前分支');
+  const currentBranch = branch || await _getCurrentBranch();
+  if (!currentBranch) {
+    log('❌ 无法确定当前分支', true);
+    toast('❌ 无法确定当前分支');
+    return false;
+  }
   // 🔍 先扫敏感信息
   toast('🔍 扫描敏感信息…');
-  const scan = await callGit('scan_diff', { remote: 'origin', branch });
+  const scan = await callGit('scan_diff', { remote: 'origin', branch: currentBranch });
   if (scan.ok && scan.findings && scan.findings.length) {
     const ok = await _showSensitiveWarning(scan.findings, force);
-    if (!ok) return;
+    if (!ok) return false;
   }
   // 强制推送 → 再确认一次
   if (force) {
     const ok = await _confirmDangerous({
-      title: `强制推送 origin/${branch}`,
+      title: `强制推送 origin/${currentBranch}`,
       intro: '将使用 --force-with-lease：仅当远程没有你不知道的新提交时才允许覆盖。仍可能影响协作者，请确认无他人正在使用同一分支。',
       danger: true,
     });
-    if (!ok) return;
+    if (!ok) return false;
   }
-  _syncLog('⬆️ 推送中…', false);
+  log('⬆️ 推送中…', false);
   const r = await callGit('push', {
     remote: 'origin',
-    branch,
+    branch: currentBranch,
     forceWithLease: force,
     confirm: force ? '我确定' : '',
   });
   if (!r.ok) {
-    _syncLog('❌ 推送失败：\n' + (r.error || ''), true);
+    log('❌ 推送失败：\n' + (r.error || ''), true);
     if (r.authFailed) {
-      _syncLog((r.error || '') + '\n\n👉 看起来是凭证问题，点上面的「📖 查看详细教程」获取帮助。', true);
+      log((r.error || '') + '\n\n👉 看起来是凭证问题，点「⚙ 配置」里的凭证教程获取帮助。', true);
     }
-    return;
+    return false;
   }
-  _syncLog('✅ 推送成功\n\n' + (r.output || ''), false);
+  log('✅ 推送成功\n\n' + (r.output || ''), false);
   toast('✅ 已推送');
-  await _refreshRemotePanel();
+  return true;
+}
+
+async function _doPush(force) {
+  const pushed = await _pushCurrentBranch(force, _syncLog);
+  if (pushed) await _refreshRemotePanel();
 }
 
 async function _doPull() {

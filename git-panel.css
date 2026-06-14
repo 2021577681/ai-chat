@@ -71,6 +71,32 @@
   font-size: 12.5px; color: var(--text); margin-bottom: 12px;
 }
 
+.git-user-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; margin-bottom: 12px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+}
+.git-user-meta {
+  min-width: 0; display: flex; align-items: baseline; gap: 8px;
+  font-size: 12.5px;
+}
+.git-user-label {
+  flex-shrink: 0; color: var(--text-secondary); font-weight: 600;
+}
+.git-user-value {
+  min-width: 0; color: var(--text);
+  font-family: 'SF Mono', Consolas, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.git-user-actions {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
+}
+@media (max-width: 560px) {
+  .git-user-bar { align-items: stretch; flex-direction: column; }
+  .git-user-actions { display: flex; }
+  .git-user-actions .git-btn { flex: 1; justify-content: center; }
+}
+
 /* —— 初始化向导 —— */
 .git-init-wizard { padding: 12px; max-width: 600px; margin: 0 auto; }
 .git-init-header { text-align: center; margin-bottom: 24px; }
@@ -198,9 +224,21 @@
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px; margin-top: 8px;
 }
+.git-commit-buttons {
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  gap: 6px; flex-wrap: wrap;
+}
+.git-commit-remote-log {
+  margin-top: 8px; max-height: 120px;
+}
 .git-checkbox {
   display: flex; align-items: center; gap: 6px; cursor: pointer;
   font-size: 12px; color: var(--text-secondary);
+}
+@media (max-width: 560px) {
+  .git-commit-actions { align-items: stretch; flex-direction: column; }
+  .git-commit-buttons { justify-content: stretch; }
+  .git-commit-buttons .git-btn { flex: 1; justify-content: center; }
 }
 
 /* —— 提交历史 —— */
@@ -461,6 +499,63 @@
 .git-remote-section h3 {
   margin: 0 0 10px; font-size: 14px;
   color: var(--text); font-weight: 600;
+}
+.git-section-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.git-section-head h3 { margin-bottom: 3px; }
+.git-section-head p {
+  margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-secondary);
+}
+.git-author-card {
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-input);
+}
+.git-author-status {
+  flex-shrink: 0; display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+}
+.git-author-status.ok {
+  background: rgba(16,185,129,.14); color: #059669;
+}
+.git-author-status.warn {
+  background: rgba(245,158,11,.16); color: #b45309;
+}
+.git-author-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.git-author-field {
+  min-width: 0; display: flex; flex-direction: column; gap: 5px;
+  font-size: 12px; color: var(--text-secondary); font-weight: 500;
+}
+.git-author-field input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg); color: var(--text);
+  font-size: 13px; box-sizing: border-box;
+}
+.git-author-field input:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+}
+.git-author-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 12px;
+}
+.git-author-note {
+  min-width: 0; color: var(--text-secondary); font-size: 11.5px; line-height: 1.5;
+}
+.git-author-buttons {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px;
+}
+@media (max-width: 700px) {
+  .git-section-head,
+  .git-author-actions {
+    align-items: stretch; flex-direction: column;
+  }
+  .git-author-grid { grid-template-columns: 1fr; }
+  .git-author-buttons { display: flex; }
+  .git-author-buttons .git-btn { flex: 1; justify-content: center; }
 }
 .git-remote-table {
   width: 100%; border-collapse: collapse;
