@@ -256,6 +256,7 @@ function injectBuiltinTools() {
   } catch (e) {}
   const existingNames = new Set(state.tools.map(t => t.name));
   const currentSignatures = BUILTIN_TOOLS.map(t => t.name);
+  const builtinByName = new Map(BUILTIN_TOOLS.map(t => [t.name, t]));
   
   // ⭐ 可选工具组：首次安装默认不注入（用户在工具面板手动一键启用）
   // 既减少给模型的工具数量，也降低对外暴露的工具特征
@@ -269,6 +270,16 @@ function injectBuiltinTools() {
   ]);
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || OPTIONAL_TOOL_PREFIXES.some(p => name.startsWith(p));
+
+  let refreshed = 0;
+  state.tools = state.tools.map(tool => {
+    if (!tool || !OPTIONAL_TOOL_PREFIXES.some(p => String(tool.name || '').startsWith(p))) return tool;
+    const builtin = builtinByName.get(tool.name);
+    if (!builtin) return tool;
+    const next = JSON.parse(JSON.stringify(builtin));
+    if (JSON.stringify(tool) !== JSON.stringify(next)) refreshed++;
+    return next;
+  });
   
   let added = 0;
   for (const tool of BUILTIN_TOOLS) {
@@ -281,9 +292,10 @@ function injectBuiltinTools() {
       }
     }
   }
-  if (added > 0) {
+  if (added > 0 || refreshed > 0) {
     persistTools();
-    console.log(`[内置工具] 自动加载了 ${added} 个工具`);
+    if (added > 0) console.log(`[内置工具] 自动加载了 ${added} 个工具`);
+    if (refreshed > 0) console.log(`[内置工具] 刷新了 ${refreshed} 个 LMS 工具`);
   }
   storage.set(BUILTIN_TOOLS_LOADED_KEY, JSON.stringify(currentSignatures));
 }

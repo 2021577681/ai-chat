@@ -10,7 +10,9 @@
   python lms.py todos              # 列出未完成作业（按紧急度排序）
   python lms.py homework <hw_id>   # 查看某项作业的详细要求
   python lms.py materials <cid>    # 列出某门课的所有课件
-  python lms.py download <upload_id> [文件名]    # 下载允许下载的文件
+  python lms.py download <upload_id> [文件名]    # 下载服务器返回可用地址的文件
+  python lms.py probe-upload <upload_id> [--course cid]  # 诊断某个附件 URL 来源
+  python lms.py crawl-urls --course <cid>        # 扫描课程附件 URL 来源
   python lms.py find <关键词>      # 在课程名里搜索（拿到 course_id）
 
 第一次使用：
@@ -29,6 +31,7 @@ import base64
 import argparse
 import re
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlparse, urlunparse, parse_qsl
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
@@ -67,7 +70,14 @@ def _load_cookie() -> str:
     sys.exit(1)
 
 
-COOKIE_STR = _load_cookie()
+COOKIE_STR = None
+
+
+def get_cookie_str() -> str:
+    global COOKIE_STR
+    if COOKIE_STR is None:
+        COOKIE_STR = _load_cookie()
+    return COOKIE_STR
 
 BASE_URL  = "https://lms.xjtu.edu.cn"
 CST       = timezone(timedelta(hours=8))
@@ -76,6 +86,8 @@ DL_DIR    = Path(__file__).parent / "downloads"
 DATA_DIR.mkdir(exist_ok=True)
 DL_DIR.mkdir(exist_ok=True)
 
+URL_KEY_HINTS = ("url", "href", "link", "path")
+
 
 # ====================================================================
 #                          基础工具函数
@@ -83,8 +95,9 @@ DL_DIR.mkdir(exist_ok=True)
 
 def build_session():
     """构造已登录的 session"""
+    cookie_str = get_cookie_str()
     s = requests.Session()
-    for kv in COOKIE_STR.split(";"):
+    for kv in cookie_str.split(";"):
         kv = kv.strip()
         if "=" in kv:
             k, v = kv.split("=", 1)
@@ -167,19 +180,204 @@ def strip_html(html):
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def filename_from_url(url):
+    """从 URL 的 name= 参数或路径里推断文件名。"""
+    if not url:
+        return None
+    m = re.search(r"[?&]name=([^&]+)", url)
+    if m:
+        return unquote(m.group(1))
+    path = url.split("?", 1)[0].rstrip("/")
+    if "/" in path:
+        name = unquote(path.rsplit("/", 1)[-1])
+        if name:
+            return name
+    return None
+
+
+def normalize_lms_url(raw):
+    """把 API 中返回的绝对/相对资源地址规范化为可请求 URL。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("//"):
+        return "https:" + raw
+    if raw.startswith(("http://", "https://")):
+        return raw
+    if raw.startswith("/"):
+        return urljoin(BASE_URL, raw)
+    return None
+
+
+def extract_url_candidates_with_paths(obj):
+    """从 LMS 已返回的对象中提取直链候选，并保留字段路径。"""
+    candidates = []
+    seen = set()
+
+    def add(path, raw):
+        url = normalize_lms_url(raw)
+        if url and url not in seen:
+            seen.add(url)
+            candidates.append((path, url))
+
+    def walk(value, path=""):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                key_l = str(key).lower()
+                child_path = f"{path}.{key}" if path else str(key)
+                if isinstance(child, str) and any(h in key_l for h in URL_KEY_HINTS):
+                    add(child_path, child)
+                elif isinstance(child, (dict, list, tuple)):
+                    walk(child, child_path)
+        elif isinstance(value, (list, tuple)):
+            for i, child in enumerate(value):
+                walk(child, f"{path}[{i}]")
+
+    walk(obj)
+    return candidates
+
+
+def extract_url_candidates(obj):
+    """从 LMS 已返回的 upload 元信息中提取直链候选，不猜测接口。"""
+    return [url for _, url in extract_url_candidates_with_paths(obj)]
+
+
+def looks_like_upload(obj):
+    return (
+        isinstance(obj, dict)
+        and obj.get("id") is not None
+        and any(k in obj for k in ("name", "size", "allow_download"))
+    )
+
+
+def iter_uploads(obj):
+    if looks_like_upload(obj):
+        yield obj
+    if isinstance(obj, dict):
+        for value in obj.values():
+            yield from iter_uploads(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from iter_uploads(value)
+
+
+def find_cached_upload(upload_id):
+    """在 data/*.json 缓存中找 upload 元信息，用于直链兜底。"""
+    for path in sorted(DATA_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for upload in iter_uploads(data):
+            try:
+                if int(upload.get("id")) == int(upload_id):
+                    return upload, path
+            except Exception:
+                continue
+    return None, None
+
+
+def summarize_url(url, show_full=False):
+    """默认隐藏 query 值，避免把临时签名 URL 打进日志。"""
+    if show_full:
+        return url
+    try:
+        parsed = urlparse(url)
+        query_keys = parse_qsl(parsed.query, keep_blank_values=True)
+        safe_query = "&".join(f"{k}=<redacted>" for k, _ in query_keys[:8])
+        if len(query_keys) > 8:
+            safe_query += "&..."
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", safe_query, ""))
+    except Exception:
+        return "<invalid-url>"
+
+
+def probe_remote_url(session, url):
+    """轻量测试 URL 是否可访问，不下载正文。"""
+    info = {
+        "ok": False,
+        "method": "",
+        "status": None,
+        "final_url": "",
+        "content_type": "",
+        "content_length": "",
+        "content_range": "",
+        "content_disposition": "",
+        "error": "",
+    }
+    headers = {
+        "Referer": f"{BASE_URL}/user/index",
+        "Range": "bytes=0-0",
+    }
+    try:
+        r = session.head(url, allow_redirects=True, timeout=20, headers={"Referer": headers["Referer"]})
+        info.update({
+            "method": "HEAD",
+            "status": r.status_code,
+            "final_url": r.url,
+            "content_type": r.headers.get("Content-Type", ""),
+            "content_length": r.headers.get("Content-Length", ""),
+            "content_range": r.headers.get("Content-Range", ""),
+            "content_disposition": r.headers.get("Content-Disposition", ""),
+        })
+        r.close()
+        if r.status_code not in (405, 501):
+            info["ok"] = 200 <= r.status_code < 400
+            return info
+    except Exception as e:
+        info["error"] = f"HEAD: {e}"
+
+    try:
+        r = session.get(url, allow_redirects=True, timeout=20, headers=headers, stream=True)
+        info.update({
+            "method": "GET Range",
+            "status": r.status_code,
+            "final_url": r.url,
+            "content_type": r.headers.get("Content-Type", ""),
+            "content_length": r.headers.get("Content-Length", ""),
+            "content_range": r.headers.get("Content-Range", ""),
+            "content_disposition": r.headers.get("Content-Disposition", ""),
+        })
+        info["ok"] = 200 <= r.status_code < 400
+        r.close()
+    except Exception as e:
+        info["error"] = (info["error"] + " | " if info["error"] else "") + f"GET: {e}"
+    return info
+
+
+def cache_course_activities(cid, data):
+    (DATA_DIR / f"course_{cid}_activities.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def load_course_uploads(session, cid):
+    data = api_get(session, f"/api/courses/{cid}/activities")
+    if not data:
+        return None, []
+    cache_course_activities(cid, data)
+    rows = []
+    for activity in data.get("activities", []) or []:
+        for upload in activity.get("uploads", []) or []:
+            if looks_like_upload(upload):
+                rows.append((activity, upload))
+    return data, rows
+
+
 # ====================================================================
 #                          命令实现
 # ====================================================================
 
 def cmd_login(args):
     """检查 Cookie 是否有效 + 显示过期时间"""
+    cookie_str = get_cookie_str()
     print("=" * 60)
     print("🔐 Cookie 状态检查")
     print("=" * 60)
 
     # 解析 session cookie 拿过期时间
     session_val = ""
-    for kv in COOKIE_STR.split(";"):
+    for kv in cookie_str.split(";"):
         kv = kv.strip()
         if kv.startswith("session="):
             session_val = kv.split("=", 1)[1]
@@ -330,8 +528,8 @@ def cmd_homework(args):
         for u in uploads:
             flag = "✅可下载" if u.get("allow_download") else "🔒仅在线"
             print(f"  📄 {u.get('name')}  ({fmt_size(u.get('size', 0))})  [{flag}]  id={u.get('id')}")
-            if u.get("allow_download"):
-                print(f"     💡 下载: python lms.py download {u.get('id')}")
+            action = "下载" if u.get("allow_download") else "尝试下载（服务器授权时可用）"
+            print(f"     💡 {action}: python lms.py download {u.get('id')}")
     print()
 
 
@@ -344,6 +542,12 @@ def cmd_materials(args):
     if not acts_data:
         print(f"❌ 无法获取课程 {cid} 的活动列表")
         return
+
+    cache_course_activities(cid, acts_data)
+    if mods_data:
+        (DATA_DIR / f"course_{cid}_modules.json").write_text(
+            json.dumps(mods_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     acts = acts_data.get("activities", [])
     mods = (mods_data or {}).get("modules", [])
@@ -369,9 +573,9 @@ def cmd_materials(args):
             for u in uploads:
                 total_files += 1
                 total_size += u.get("size", 0)
-                hint = ""
-                if u.get("allow_download"):
-                    hint = f"  💡 python lms.py download {u.get('id')}"
+                hint = f"  💡 python lms.py download {u.get('id')}"
+                if not u.get("allow_download"):
+                    hint += "  (尝试)"
                 print(f"      📄 {u.get('name')}  ({fmt_size(u.get('size', 0))})  id={u.get('id')}{hint}")
         print()
 
@@ -381,30 +585,33 @@ def cmd_materials(args):
 
 
 def cmd_download(args):
-    """下载一个文件（需要 allow_download=true 才能成功）"""
+    """下载一个文件（服务器给当前账号返回可用 URL 才能成功）"""
     upload_id = args.id
     s = build_session()
+    cached_upload, cached_from = find_cached_upload(upload_id)
 
     # 第 1 步：获取签名 URL
-    print(f"📡 获取下载链接（upload_id={upload_id}）...")
+    print(f"📡 获取服务器授权下载链接（upload_id={upload_id}）...")
     data = api_get(s, f"/api/uploads/{upload_id}/url")
-    if not data or not data.get("url"):
-        print("❌ 该文件不允许下载（老师设置了禁止下载）")
+    real_url = data.get("url") if data else None
+    source = "授权接口"
+
+    if not real_url and cached_upload:
+        candidates = extract_url_candidates(cached_upload)
+        if candidates:
+            real_url = candidates[0]
+            source = f"缓存直链 ({cached_from.name})"
+
+    if not real_url:
+        print("❌ 服务器没有返回可用下载地址。")
+        print("   你可以先运行 materials/homework 刷新缓存后再试；如果仍失败，说明当前账号未获服务端授权，或该 API 没有暴露直链。")
         return
 
-    real_url = data["url"]
-
     # 文件名：参数指定 > URL 里的 name= > 默认
-    fname = args.name
-    if not fname:
-        m = re.search(r"name=([^&]+)", real_url)
-        if m:
-            from urllib.parse import unquote
-            fname = unquote(m.group(1))
-        else:
-            fname = f"upload_{upload_id}.bin"
+    fname = args.name or (cached_upload or {}).get("name") or filename_from_url(real_url) or f"upload_{upload_id}.bin"
 
     out = DL_DIR / fname
+    print(f"🔗 链接来源: {source}")
     print(f"📥 下载中: {fname}")
 
     r = s.get(real_url, timeout=120, stream=True)
@@ -423,6 +630,205 @@ def cmd_download(args):
                 bar = "█" * int(pct / 2) + "·" * (50 - int(pct / 2))
                 print(f"\r  [{bar}] {pct:5.1f}%  {fmt_size(written)}/{fmt_size(total)}", end="")
     print(f"\n✅ 完成: {out}  ({fmt_size(written)})")
+
+
+def print_url_probe(source, url, session, show_url=False, do_probe=True):
+    print(f"  🔎 来源: {source}")
+    print(f"     URL : {summarize_url(url, show_url)}")
+    if not do_probe:
+        return
+    info = probe_remote_url(session, url)
+    status = info["status"] if info["status"] is not None else "ERR"
+    print(f"     测试: {info['method'] or '-'} {status}  ok={info['ok']}")
+    if info["final_url"] and info["final_url"] != url:
+        print(f"     跳转: {summarize_url(info['final_url'], show_url)}")
+    details = []
+    if info["content_type"]:
+        details.append(f"Content-Type={info['content_type']}")
+    if info["content_length"]:
+        details.append(f"Content-Length={info['content_length']}")
+    if info["content_range"]:
+        details.append(f"Content-Range={info['content_range']}")
+    if info["content_disposition"]:
+        details.append(f"Content-Disposition={info['content_disposition']}")
+    if details:
+        print("     响应: " + " | ".join(details))
+    if info["error"]:
+        print(f"     错误: {info['error']}")
+
+
+def inspect_upload_sources(session, upload_id, cached_upload=None, show_url=False, do_probe=True):
+    """打印某个 upload_id 的 URL 来源诊断。"""
+    found = []
+
+    print(f"📡 1) 请求授权接口 /api/uploads/{upload_id}/url")
+    data = api_get(session, f"/api/uploads/{upload_id}/url")
+    if data and data.get("url"):
+        found.append(("api:/api/uploads/{id}/url", data["url"]))
+        print("   ✅ 授权接口返回 url")
+    else:
+        print("   ❌ 授权接口未返回 url")
+        if isinstance(data, dict):
+            print(f"   返回字段: {', '.join(data.keys()) or '(空对象)'}")
+
+    if cached_upload:
+        print("\n📦 2) 检查课件/作业 JSON 中的 upload 元信息")
+        print(f"   id={cached_upload.get('id')} name={cached_upload.get('name')} allow_download={cached_upload.get('allow_download')}")
+        candidates = extract_url_candidates_with_paths(cached_upload)
+        if candidates:
+            for path, url in candidates:
+                found.append((f"upload字段:{path}", url))
+            print(f"   ✅ 找到 {len(candidates)} 个 URL 字段")
+        else:
+            print("   ❌ upload 元信息里没有 URL 字段")
+    else:
+        print("\n📦 2) 未找到课件/作业 JSON 中的 upload 元信息")
+
+    unique = []
+    seen = set()
+    for source, url in found:
+        if url in seen:
+            continue
+        seen.add(url)
+        unique.append((source, url))
+
+    print("\n🧪 3) URL 连通性探测")
+    if not unique:
+        print("   没有可探测 URL")
+        return False
+    for source, url in unique:
+        print_url_probe(source, url, session, show_url=show_url, do_probe=do_probe)
+    return True
+
+
+def cmd_probe_upload(args):
+    """诊断单个 upload_id 的下载 URL 来源。"""
+    upload_id = args.id
+    s = build_session()
+    cached_upload = None
+    cached_from = None
+
+    if args.course:
+        print(f"📚 先从课程 {args.course} 活动列表查找 upload_id={upload_id}")
+        _, rows = load_course_uploads(s, args.course)
+        for _, upload in rows:
+            try:
+                if int(upload.get("id")) == int(upload_id):
+                    cached_upload = upload
+                    cached_from = f"course_{args.course}_activities"
+                    break
+            except Exception:
+                continue
+        if not cached_upload:
+            print(f"   课程 {args.course} 的 activities 中没有这个 upload_id")
+
+    if not cached_upload:
+        cached_upload, cached_from = find_cached_upload(upload_id)
+
+    if not cached_upload and args.scan_courses:
+        print("📚 未命中缓存，开始扫描当前账号课程列表...")
+        courses_data = api_get(s, "/api/my-courses")
+        for c in (courses_data or {}).get("courses", []) or []:
+            cid = c.get("id")
+            if not cid:
+                continue
+            _, rows = load_course_uploads(s, cid)
+            for _, upload in rows:
+                try:
+                    if int(upload.get("id")) == int(upload_id):
+                        cached_upload = upload
+                        cached_from = f"course_{cid}_activities"
+                        break
+                except Exception:
+                    continue
+            if cached_upload:
+                print(f"   命中课程 {cid}: {c.get('name', '')}")
+                break
+
+    if cached_from:
+        print(f"📦 upload 元信息来源: {cached_from}")
+
+    ok = inspect_upload_sources(
+        s,
+        upload_id,
+        cached_upload=cached_upload,
+        show_url=args.show_url,
+        do_probe=not args.no_probe,
+    )
+    if not ok:
+        print("\n结论: 目前没有从授权接口或已抓取 JSON 中找到可用 URL。")
+
+
+def cmd_crawl_urls(args):
+    """扫描课程附件，定位 URL 字段和授权接口结果。"""
+    s = build_session()
+    course_ids = []
+
+    if args.course:
+        course_ids = args.course
+    else:
+        data = api_get(s, "/api/my-courses")
+        if not data:
+            print("❌ 获取课程列表失败")
+            return
+        courses = data.get("courses", []) or []
+        if args.max_courses:
+            courses = courses[:args.max_courses]
+        course_ids = [c.get("id") for c in courses if c.get("id")]
+
+    total = 0
+    hits = 0
+    for cid in course_ids:
+        print("\n" + "=" * 80)
+        print(f"📚 课程 {cid}")
+        print("=" * 80)
+        data, rows = load_course_uploads(s, cid)
+        if data is None:
+            print("❌ activities 获取失败")
+            continue
+        if not rows:
+            print("（没有附件）")
+            continue
+
+        for activity, upload in rows:
+            if args.locked_only and upload.get("allow_download"):
+                continue
+            total += 1
+            upload_id = upload.get("id")
+            title = activity.get("title") or activity.get("name") or "?"
+            name = upload.get("name") or "?"
+            flag = "可下载" if upload.get("allow_download") else "仅在线"
+            print(f"\n[{upload_id}] {title} / {name}  ({flag}, {fmt_size(upload.get('size', 0))})")
+
+            sources = []
+            api_data = api_get(s, f"/api/uploads/{upload_id}/url")
+            if api_data and api_data.get("url"):
+                sources.append(("api:/api/uploads/{id}/url", api_data["url"]))
+            for path, url in extract_url_candidates_with_paths(upload):
+                sources.append((f"upload字段:{path}", url))
+
+            unique = []
+            seen = set()
+            for source, url in sources:
+                if url in seen:
+                    continue
+                seen.add(url)
+                unique.append((source, url))
+
+            if unique:
+                hits += 1
+                for source, url in unique:
+                    print_url_probe(source, url, s, show_url=args.show_url, do_probe=not args.no_probe)
+            else:
+                print("  ❌ 授权接口和 upload JSON 都没有 URL")
+            if args.limit and total >= args.limit:
+                print(f"\n达到 --limit {args.limit}，停止扫描")
+                print(f"扫描 {total} 个附件，{hits} 个附件找到 URL 来源")
+                return
+
+    print("\n" + "─" * 80)
+    print(f"扫描 {total} 个附件，{hits} 个附件找到 URL 来源")
+    print("─" * 80)
 
 
 def cmd_find(args):
@@ -468,9 +874,24 @@ def main():
     p_mat = sub.add_parser("materials", help="列出课件")
     p_mat.add_argument("cid", type=int, help="课程 ID（用 courses / find 查到）")
 
-    p_dl = sub.add_parser("download", help="下载文件")
+    p_dl = sub.add_parser("download", help="下载文件（服务器返回 URL 时可用）")
     p_dl.add_argument("id", type=int, help="upload_id")
     p_dl.add_argument("name", nargs="?", default=None, help="自定义保存文件名（可选）")
+
+    p_probe = sub.add_parser("probe-upload", help="诊断单个 upload_id 的 URL 来源")
+    p_probe.add_argument("id", type=int, help="upload_id")
+    p_probe.add_argument("--course", type=int, default=None, help="可选：指定课程 ID，直接从该课 activities 里找 upload")
+    p_probe.add_argument("--scan-courses", action="store_true", help="缓存未命中时扫描当前账号全部课程")
+    p_probe.add_argument("--show-url", action="store_true", help="显示完整 URL（可能包含临时签名参数）")
+    p_probe.add_argument("--no-probe", action="store_true", help="只列 URL 来源，不做 HEAD/Range 连通性测试")
+
+    p_crawl = sub.add_parser("crawl-urls", help="扫描课程附件，定位下载 URL 来源")
+    p_crawl.add_argument("--course", type=int, action="append", help="课程 ID，可重复传；不传则扫描当前账号课程")
+    p_crawl.add_argument("--max-courses", type=int, default=0, help="未指定 --course 时最多扫描多少门课，0 表示全部")
+    p_crawl.add_argument("--locked-only", action="store_true", help="只扫描 allow_download=false 的附件")
+    p_crawl.add_argument("--limit", type=int, default=0, help="最多扫描多少个附件，0 表示不限")
+    p_crawl.add_argument("--show-url", action="store_true", help="显示完整 URL（可能包含临时签名参数）")
+    p_crawl.add_argument("--no-probe", action="store_true", help="只列 URL 来源，不做 HEAD/Range 连通性测试")
 
     p_fn = sub.add_parser("find", help="搜索课程")
     p_fn.add_argument("keyword", help="课程名关键词")
@@ -483,6 +904,8 @@ def main():
         "homework":  cmd_homework,
         "materials": cmd_materials,
         "download":  cmd_download,
+        "probe-upload": cmd_probe_upload,
+        "crawl-urls": cmd_crawl_urls,
         "find":      cmd_find,
     }[args.cmd](args)
 

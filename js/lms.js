@@ -7,6 +7,8 @@
 
 const LMS_COOKIE_KEY = 'lms_cookie_v1';
 const LMS_CACHE_KEY  = 'lms_cache_v1';
+const LMS_UPLOAD_CACHE = new Map();
+const LMS_URL_KEY_HINTS = ['url', 'href', 'link', 'path'];
 
 // ============ Cookie 管理 ============
 
@@ -169,6 +171,120 @@ function lmsStripHtml(html) {
              .replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function lmsNormalizeUrl(raw) {
+  raw = String(raw || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('//')) return 'https:' + raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('/')) {
+    try { return new URL(raw, 'https://lms.xjtu.edu.cn').href; } catch (e) { return ''; }
+  }
+  return '';
+}
+
+function lmsExtractUrlCandidates(value) {
+  const urls = [];
+  const add = raw => {
+    const url = lmsNormalizeUrl(raw);
+    if (url && !urls.includes(url)) urls.push(url);
+  };
+  const walk = v => {
+    if (!v) return;
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    if (typeof v !== 'object') return;
+    Object.keys(v).forEach(k => {
+      const child = v[k];
+      const key = String(k).toLowerCase();
+      if (typeof child === 'string' && LMS_URL_KEY_HINTS.some(h => key.includes(h))) {
+        add(child);
+      } else if (child && typeof child === 'object') {
+        walk(child);
+      }
+    });
+  };
+  walk(value);
+  return urls;
+}
+
+function lmsLooksLikeUpload(value) {
+  return value && typeof value === 'object'
+    && value.id != null
+    && ('name' in value || 'size' in value || 'allow_download' in value);
+}
+
+function lmsRegisterUpload(upload) {
+  if (!lmsLooksLikeUpload(upload)) return;
+  const id = Number(upload.id);
+  if (!Number.isFinite(id)) return;
+  const prev = LMS_UPLOAD_CACHE.get(id) || {};
+  const urls = [...(prev.urlCandidates || [])];
+  lmsExtractUrlCandidates(upload).forEach(url => {
+    if (!urls.includes(url)) urls.push(url);
+  });
+  LMS_UPLOAD_CACHE.set(id, {
+    id,
+    name: upload.name || prev.name || '',
+    size: upload.size || prev.size || 0,
+    allowDownload: Boolean(upload.allow_download || prev.allowDownload),
+    urlCandidates: urls,
+    cachedAt: Date.now()
+  });
+}
+
+function lmsRegisterUploads(value) {
+  if (!value) return;
+  if (lmsLooksLikeUpload(value)) {
+    lmsRegisterUpload(value);
+  }
+  if (Array.isArray(value)) {
+    value.forEach(lmsRegisterUploads);
+  } else if (typeof value === 'object') {
+    Object.values(value).forEach(lmsRegisterUploads);
+  }
+}
+
+function lmsGetCachedUpload(uploadId) {
+  return LMS_UPLOAD_CACHE.get(Number(uploadId)) || null;
+}
+
+function lmsFilenameFromUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url, 'https://lms.xjtu.edu.cn');
+    const byName = u.searchParams.get('name');
+    if (byName) return byName;
+    const last = decodeURIComponent((u.pathname || '').split('/').filter(Boolean).pop() || '');
+    return last || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function lmsGetProxyServerUrl() {
+  return (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl)
+    ? TERMINAL_CONFIG.serverUrl : 'http://localhost:8765';
+}
+
+async function lmsEnsureProxyToken() {
+  if (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token) return true;
+  if (typeof fetchTerminalToken === 'function') {
+    return Boolean(await fetchTerminalToken(false));
+  }
+  return false;
+}
+
+function lmsCanProxyDownload(url) {
+  try {
+    const u = new URL(url, 'https://lms.xjtu.edu.cn');
+    return u.origin === 'https://lms.xjtu.edu.cn';
+  } catch (e) {
+    return false;
+  }
+}
+
 // ============ 工具：把 LMS 返回数据格式化为 Markdown ============
 
 function lmsRenderCourses(courses) {
@@ -228,6 +344,7 @@ function lmsRenderHomeworkDetail(data) {
   const d     = data.data || {};
   const desc  = lmsStripHtml(d.description || '');
   const uploads = data.uploads || [];
+  lmsRegisterUploads(uploads);
 
   const out = [`## 📝 ${title}\n`];
   out.push('| 字段 | 内容 |');
@@ -250,18 +367,17 @@ function lmsRenderHomeworkDetail(data) {
       const ok = u.allow_download;
       const cell = ok
         ? `✅ \`upload_id=${u.id}\``
-        : '🔒 仅在线';
+        : `🔒 \`upload_id=${u.id}\`（可尝试）`;
       out.push(`| ${u.name} | ${lmsFmtSize(u.size)} | ${cell} |`);
     });
     out.push('');
-    if (uploads.some(u => u.allow_download)) {
-      out.push('> 💡 用 `lms_download` 工具下载，或在 🎓 学习面板里点下载按钮。');
-    }
+    out.push('> 💡 用 `lms_download` 工具下载；标记为“仅在线”的文件会在服务器返回可用地址时下载。');
   }
   return out.join('\n');
 }
 
 function lmsRenderMaterials(activities, modules, cid) {
+  lmsRegisterUploads(activities);
   const modName = {};
   (modules || []).forEach(m => { modName[m.id] = m.name || '未分组'; });
   const materials = (activities || []).filter(a => a.type === 'material');
@@ -291,7 +407,7 @@ function lmsRenderMaterials(activities, modules, cid) {
         totalSize += u.size || 0;
         const cell = u.allow_download
           ? `✅ \`upload_id=${u.id}\``
-          : '🔒 仅在线';
+          : `🔒 \`upload_id=${u.id}\`（可尝试）`;
         out.push(`| ${m.title || '?'} | ${u.name} | ${lmsFmtSize(u.size)} | ${cell} |`);
       });
     });
@@ -379,35 +495,83 @@ async function lmsToolFindCourse(keyword) {
 }
 
 /**
- * 下载文件：先拿签名 URL → 浏览器直接弹下载窗口
+ * 下载文件：先拿授权 URL，必要时使用已加载的附件直链兜底。
  */
-async function lmsToolDownload(uploadId, filename) {
-  const r = await lmsApiGet(`/api/uploads/${uploadId}/url`);
-  if (!r.ok) return `❌ ${r.message || r.error}`;
-  const realUrl = r.data && r.data.url;
-  if (!realUrl) {
-    return '❌ 该文件不允许下载（老师设置了禁止下载），无法获取下载地址。';
-  }
-  // 解析默认文件名
-  let fname = filename;
-  if (!fname) {
-    const m = realUrl.match(/[?&]name=([^&]+)/);
-    if (m) {
-      try { fname = decodeURIComponent(m[1]); } catch (e) { fname = `upload_${uploadId}`; }
-    } else {
-      fname = `upload_${uploadId}`;
-    }
-  }
-  // 浏览器直接下载
+function lmsTriggerBrowserDownload(url, fname) {
   const a = document.createElement('a');
-  a.href = realUrl;
+  a.href = url;
   a.download = fname;
   a.target = '_blank';
   a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
   setTimeout(() => a.remove(), 1000);
-  return `✅ 已触发下载：**${fname}**\n\n浏览器应该弹出了保存窗口（或直接下到了默认下载目录）。`;
+}
+
+async function lmsDownloadViaProxy(url, fname) {
+  const cookie = lmsGetCookie();
+  if (!cookie) return { ok: false, error: '尚未配置 LMS Cookie' };
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url, 'https://lms.xjtu.edu.cn');
+  } catch (e) {
+    return { ok: false, error: '下载 URL 格式无效' };
+  }
+
+  const qs = new URLSearchParams({
+    path: parsed.pathname + parsed.search,
+    download: '1'
+  }).toString();
+  const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-proxy?${qs}`, {
+    method: 'GET',
+    headers: {
+      'X-Token': TERMINAL_CONFIG.token,
+      'X-LMS-Cookie': cookie,
+    }
+  });
+  if (!resp.ok) {
+    let text = '';
+    try { text = (await resp.text()).slice(0, 200); } catch (e) {}
+    return { ok: false, error: `下载失败 (${resp.status})${text ? ': ' + text : ''}` };
+  }
+
+  const blob = await resp.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    lmsTriggerBrowserDownload(blobUrl, fname);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+  }
+  return { ok: true };
+}
+
+async function lmsToolDownload(uploadId, filename) {
+  const r = await lmsApiGet(`/api/uploads/${uploadId}/url`);
+  const cached = lmsGetCachedUpload(uploadId);
+  let realUrl = (r.ok && r.data && r.data.url) ? r.data.url : '';
+  let source = realUrl ? '授权接口' : '';
+  if (!realUrl && cached && cached.urlCandidates && cached.urlCandidates.length) {
+    realUrl = cached.urlCandidates[0];
+    source = 'LMS 返回的直链';
+  }
+  if (!realUrl) {
+    const extra = r.ok ? '' : `\n\n接口返回：${r.message || r.error || '未知错误'}`;
+    return '❌ 服务器没有返回可用下载地址。请先打开课件/作业详情刷新附件信息后再试；如果仍失败，说明当前账号未获得服务端可下载地址。' + extra;
+  }
+  // 解析默认文件名
+  const fname = filename || (cached && cached.name) || lmsFilenameFromUrl(realUrl) || `upload_${uploadId}`;
+
+  if (lmsCanProxyDownload(realUrl)) {
+    const viaProxy = await lmsDownloadViaProxy(realUrl, fname);
+    if (!viaProxy.ok) return `❌ ${viaProxy.error}`;
+  } else {
+    lmsTriggerBrowserDownload(realUrl, fname);
+  }
+  return `✅ 已触发下载：**${fname}**\n\n链接来源：${source}。浏览器应该弹出了保存窗口（或直接下到了默认下载目录）。`;
 }
 
 async function lmsToolSetCookie(cookie) {

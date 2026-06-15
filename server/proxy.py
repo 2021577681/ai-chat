@@ -311,6 +311,7 @@ class ProxyMixin:
         Query:
           path  : LMS API 路径，如 /api/todos
           raw   : =1 时不解析 JSON，直接透传响应体
+          download : =1 时以二进制响应透传，供前端触发文件下载
         """
         from urllib.parse import urlparse, parse_qs, urlencode
         import urllib.request
@@ -330,12 +331,13 @@ class ProxyMixin:
         qs = parse_qs(parsed.query)
         lms_path = (qs.get('path', [''])[0] or '').strip()
         raw_mode = qs.get('raw', ['0'])[0] == '1'
+        download_mode = qs.get('download', ['0'])[0] == '1'
 
         if not lms_path.startswith('/'):
             self._send_json(400, {'ok': False, 'error': 'path 必须以 / 开头'})
             return
 
-        passthrough = {k: v for k, v in qs.items() if k not in ('path', 'raw')}
+        passthrough = {k: v for k, v in qs.items() if k not in ('path', 'raw', 'download')}
         extra = ('&' + urlencode(passthrough, doseq=True)) if passthrough else ''
         target_url = f'https://lms.xjtu.edu.cn{lms_path}'
         if '?' in lms_path:
@@ -359,16 +361,31 @@ class ProxyMixin:
         })
 
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=(120 if download_mode else 20)) as resp:
                 body = resp.read()
                 status = resp.status
                 ct = resp.headers.get('Content-Type', '')
+                content_len = resp.headers.get('Content-Length', '')
+                content_disp = resp.headers.get('Content-Disposition', '')
         except urllib.error.HTTPError as e:
+            err_body = b''
             try:
-                body_text = e.read().decode('utf-8', errors='replace')
+                err_body = e.read()
             except Exception:
-                body_text = str(e)
+                err_body = str(e).encode('utf-8', errors='replace')
+            body_text = err_body.decode('utf-8', errors='replace')
             print(f'  ⚠️ HTTP {e.code}: {body_text[:200]}')
+            if download_mode:
+                origin = self.headers.get('Origin', '')
+                self.send_response(e.code)
+                self.send_header('Content-Type', e.headers.get('Content-Type', 'text/plain; charset=utf-8') if e.headers else 'text/plain; charset=utf-8')
+                self.send_header('X-Upstream-Status', str(e.code))
+                self._write_cors_headers(origin)
+                self.send_header('Content-Length', str(len(err_body)))
+                self.end_headers()
+                try: self.wfile.write(err_body)
+                except Exception: pass
+                return
             self._send_json(200, {
                 'ok': False,
                 'status': e.code,
@@ -379,6 +396,24 @@ class ProxyMixin:
         except Exception as e:
             print(f'  ❌ 请求失败: {e}')
             self._send_json(200, {'ok': False, 'error': f'请求失败: {e}'})
+            return
+
+        if download_mode:
+            origin = self.headers.get('Origin', '')
+            self.send_response(status)
+            self.send_header('Content-Type', ct or 'application/octet-stream')
+            self.send_header('X-Upstream-Status', str(status))
+            self._write_cors_headers(origin)
+            if content_len:
+                self.send_header('Content-Length', content_len)
+            else:
+                self.send_header('Content-Length', str(len(body)))
+            if content_disp:
+                self.send_header('Content-Disposition', content_disp)
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            try: self.wfile.write(body)
+            except Exception: pass
             return
 
         if not raw_mode and 'json' in ct.lower():

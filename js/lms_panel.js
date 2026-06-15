@@ -365,6 +365,7 @@ function lmsPanelRenderMaterials() {
     groups[mid].forEach(m => {
       const ups = m.uploads || [];
       ups.forEach(u => {
+        if (typeof lmsRegisterUpload === 'function') lmsRegisterUpload(u);
         const dl = u.allow_download;
         // 🛡️ 把文件名作为合法 JS 字符串字面量嵌入 onclick：先 JSON.stringify 再 HTML escape
         // 避免 "escapeHtml 再当 JS 字符串" 的层级混乱
@@ -379,7 +380,7 @@ function lmsPanelRenderMaterials() {
             <div class="lms-material-actions">
               ${dl
                 ? `<button class="lms-mini-btn lms-btn-primary" onclick="lmsPanelDownload(${u.id}, ${nameForJs})">⬇️ 下载</button>`
-                : `<span class="lms-locked">🔒 仅在线</span>`}
+                : `<button class="lms-mini-btn" title="服务器返回可用地址时可下载" onclick="lmsPanelDownload(${u.id}, ${nameForJs})">🔒 尝试</button>`}
             </div>
           </div>
         `;
@@ -437,6 +438,7 @@ async function lmsPanelFetchMaterials(cid) {
     lmsApiGet(`/api/courses/${cid}/modules`),
   ]);
   if (ra.ok) {
+    if (typeof lmsRegisterUploads === 'function') lmsRegisterUploads(ra.data.activities || []);
     LMS_PANEL_STATE.cache.materialsByCid[cid] = {
       activities: ra.data.activities || [],
       modules: (rm.ok && rm.data && rm.data.modules) || [],

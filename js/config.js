@@ -518,7 +518,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'lms_materials',
-    description: '🎓【LMS】列出某门课的全部课件资料（PPT/PDF/文档），并标注是否允许下载。需要先用 lms_courses 或 lms_find_course 拿到课程 ID。',
+    description: '🎓【LMS】列出某门课的全部课件资料（PPT/PDF/文档），并给出 upload_id。即使界面标记为仅在线，也可以把 upload_id 交给 lms_download 尝试服务器是否返回可用地址。需要先用 lms_courses 或 lms_find_course 拿到课程 ID。',
     parameters: {
       type: 'object',
       properties: { course_id: { type: 'number', description: '课程 ID' } },
@@ -538,11 +538,11 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'lms_download',
-    description: '🎓【LMS】下载一个文件到本地（通过浏览器下载窗口）。需要 upload_id —— 从 lms_materials 或 lms_homework 输出里找到 ✅ 标记的那些。注意：老师设置了 🔒 的文件无法下载。',
+    description: '🎓【LMS】下载一个文件到本地（通过浏览器下载窗口）。需要 upload_id —— 从 lms_materials 或 lms_homework 输出里找到。工具会先请求 LMS 授权下载 URL；如果课件详情里已经返回直链，也会尝试使用该直链。服务器没有返回可用地址时会失败。',
     parameters: {
       type: 'object',
       properties: {
-        upload_id: { type: 'number', description: 'upload_id（必须是允许下载的）' },
+        upload_id: { type: 'number', description: 'upload_id（从 lms_materials 或 lms_homework 输出里拿）' },
         filename:  { type: 'string', description: '保存为的文件名（可选，默认使用原文件名）' }
       },
       required: ['upload_id']
