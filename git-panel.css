@@ -220,6 +220,31 @@
   outline: none; border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(59,130,246,.15);
 }
+.git-branch-target-control {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; align-items: center;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-input); overflow: hidden;
+  transition: border-color .15s, box-shadow .15s;
+}
+.git-branch-target-control:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+}
+.git-remote-prefix {
+  flex: 0 0 auto;
+  padding: 0 8px; height: 30px;
+  display: inline-flex; align-items: center;
+  border-right: 1px solid var(--border);
+  background: var(--bg); color: var(--text-secondary);
+  font-family: 'SF Mono', Consolas, monospace; font-size: 12px;
+}
+.git-branch-target-control input {
+  flex: 1 1 auto; min-width: 0; height: 30px;
+  border: 0; outline: none; background: transparent;
+  color: var(--text); padding: 0 9px;
+  font-size: 12.5px; font-family: 'SF Mono', Consolas, monospace;
+}
 .git-commit-actions {
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px; margin-top: 8px;
@@ -548,12 +573,55 @@
 .git-author-buttons {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px;
 }
+.git-proxy-card {
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-input);
+}
+.git-proxy-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text); cursor: pointer;
+  margin-bottom: 10px;
+}
+.git-proxy-grid {
+  display: grid; grid-template-columns: 120px 1fr;
+  gap: 10px; align-items: end;
+}
+.git-proxy-field {
+  min-width: 0; display: flex; flex-direction: column; gap: 5px;
+  font-size: 12px; color: var(--text-secondary); font-weight: 500;
+}
+.git-proxy-field input,
+.git-proxy-field select {
+  width: 100%; height: 34px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text);
+  font-size: 13px; box-sizing: border-box;
+}
+.git-proxy-field input:focus,
+.git-proxy-field select:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+}
+.git-proxy-preview,
+.git-proxy-warning {
+  margin-top: 10px; font-size: 11.5px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+.git-proxy-preview code,
+.git-proxy-warning code {
+  background: var(--bg); padding: 1px 5px; border-radius: 3px;
+  font-family: 'SF Mono', Consolas, monospace; font-size: 11.5px;
+}
+.git-proxy-warning {
+  color: #b45309;
+}
 @media (max-width: 700px) {
   .git-section-head,
   .git-author-actions {
     align-items: stretch; flex-direction: column;
   }
   .git-author-grid { grid-template-columns: 1fr; }
+  .git-proxy-grid { grid-template-columns: 1fr; }
   .git-author-buttons { display: flex; }
   .git-author-buttons .git-btn { flex: 1; justify-content: center; }
 }
@@ -593,6 +661,8 @@
 
 /* ---- 同步状态 ---- */
 .git-sync-status {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 6px 10px;
   font-size: 12.5px; margin-bottom: 10px; color: var(--text-secondary);
 }
 .git-sync-status code {
@@ -605,6 +675,12 @@
 }
 .git-sync-ahead { background: rgba(34,197,94,.15); color: #16a34a; }
 .git-sync-behind { background: rgba(239,68,68,.15); color: #dc2626; }
+.git-sync-target {
+  display: grid; grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center; gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px; color: var(--text-secondary);
+}
 .git-sync-actions {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin-bottom: 10px;
@@ -626,6 +702,9 @@
   border-color: #ef4444;
   background: rgba(239,68,68,.05);
   color: #b91c1c;
+}
+@media (max-width: 560px) {
+  .git-sync-target { grid-template-columns: 1fr; }
 }
 
 /* ---- 凭证信息卡 ---- */

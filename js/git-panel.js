@@ -11,6 +11,8 @@ const GIT_STATE = {
   selectedFile: null,  // 当前选中的文件（看 diff 用）
   selectedFileSource: null, // 'unstaged' | 'staged' | 'untracked'
   selectedCommit: null, // 当前选中的提交
+  remoteTargetBranch: '', // 提交/推送时使用的远程目标分支（origin/<name>）
+  remoteTargetBranchEdited: false,
   loading: false,
 };
 
@@ -87,7 +89,9 @@ async function _refreshGitPanel() {
   }
 
   // 已在仓库内 → 主视图
-  _setBranchBadge(check.branch || '(unknown)');
+  const currentBranch = check.branch || '';
+  _ensureRemoteTargetBranch(currentBranch);
+  _setBranchBadge(currentBranch || '(unknown)');
   // 提示用户名邮箱缺失
   const missingUser = !check.userName || !check.userEmail;
   const userNameLabel = check.userName || '未配置用户名';
@@ -123,7 +127,7 @@ async function _refreshGitPanel() {
               <span>包含所有未暂存改动</span>
             </label>
             <div class="git-commit-buttons">
-              <button class="git-btn" onclick="_onCommitAndPush()" title="提交后推送到 origin/当前分支">⬆️ 提交并推送</button>
+              <button class="git-btn" onclick="_onCommitAndPush()" title="提交后推送到指定 origin/远程分支">⬆️ 提交并推送</button>
               <button class="git-btn git-btn-primary" onclick="_onCommit()">💬 提交</button>
             </div>
           </div>
@@ -451,6 +455,134 @@ async function _hasOriginRemote() {
   const hasOrigin = (r.remotes || []).some(remote => remote.name === 'origin');
   if (!hasOrigin) return { ok: false, error: '未配置 origin 远程仓库，请先点「🌐 远程仓库」添加远程 URL。' };
   return { ok: true };
+}
+
+function _normalizeRemoteBranchName(name) {
+  let s = String(name || '').trim();
+  s = s.replace(/^refs\/heads\//, '');
+  s = s.replace(/^origin\//, '');
+  return s;
+}
+
+function _isValidRemoteBranchName(name) {
+  const s = _normalizeRemoteBranchName(name);
+  if (!s || !/^[A-Za-z0-9_\-./]+$/.test(s)) return false;
+  if (s.startsWith('-') || s.startsWith('/') || s.startsWith('.')) return false;
+  if (s.endsWith('/') || s.endsWith('.') || s.endsWith('.lock')) return false;
+  if (s.includes('..') || s.includes('//') || s.includes('@{')) return false;
+  return true;
+}
+
+function _ensureRemoteTargetBranch(fallbackBranch) {
+  const fallback = _normalizeRemoteBranchName(fallbackBranch || '');
+  if (!GIT_STATE.remoteTargetBranchEdited && fallback) {
+    GIT_STATE.remoteTargetBranch = fallback;
+    return fallback;
+  }
+  const branch = _normalizeRemoteBranchName(GIT_STATE.remoteTargetBranch || fallback);
+  if (!GIT_STATE.remoteTargetBranch && branch) GIT_STATE.remoteTargetBranch = branch;
+  return branch;
+}
+
+function _setRemoteTargetBranch(name, userEdited) {
+  const branch = _normalizeRemoteBranchName(name);
+  if (typeof userEdited === 'boolean') GIT_STATE.remoteTargetBranchEdited = userEdited;
+  GIT_STATE.remoteTargetBranch = branch;
+  ['gitSyncTargetBranch'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value !== branch) el.value = branch;
+  });
+  _updateRemoteTargetPreview();
+  return branch;
+}
+
+function _onRemoteTargetBranchInput(el) {
+  const value = String((el && el.value) || '').trim();
+  GIT_STATE.remoteTargetBranchEdited = true;
+  GIT_STATE.remoteTargetBranch = value;
+  _updateRemoteTargetPreview();
+}
+
+function _normalizeRemoteTargetBranchInput(el) {
+  const fallback = (GIT_STATE.status && GIT_STATE.status.branch) || '';
+  const raw = String((el && el.value) || '').trim();
+  if (!raw) {
+    _setRemoteTargetBranch(fallback, false);
+    return;
+  }
+  const branch = _normalizeRemoteBranchName(raw);
+  _setRemoteTargetBranch(branch || fallback, true);
+}
+
+function _getRemoteTargetBranch(fallbackBranch) {
+  const syncInput = document.getElementById('gitSyncTargetBranch');
+  const raw = (syncInput && syncInput.value) ||
+    GIT_STATE.remoteTargetBranch ||
+    fallbackBranch ||
+    '';
+  const branch = _normalizeRemoteBranchName(raw);
+  if (branch) GIT_STATE.remoteTargetBranch = branch;
+  return branch;
+}
+
+function _remoteTargetLabel(branch) {
+  return `origin/${branch || '?'}`;
+}
+
+function _updateRemoteTargetPreview() {
+  const fallback = (GIT_STATE.status && GIT_STATE.status.branch) || '';
+  const branch = _normalizeRemoteBranchName(GIT_STATE.remoteTargetBranch || fallback);
+  const label = _remoteTargetLabel(branch);
+  ['gitRemoteTargetPreview', 'gitSyncTargetPreview'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = label;
+  });
+}
+
+function _parseLocalGitProxy(value) {
+  const raw = String(value || '').trim();
+  const m = raw.match(/^(https?|socks5h?):\/\/(?:127\.0\.0\.1|localhost):(\d{1,5})\/?$/i);
+  if (!m) return { raw, local: false, scheme: 'http', port: '' };
+  const scheme = m[1].toLowerCase() === 'https' ? 'http' : m[1].toLowerCase();
+  return { raw, local: true, scheme, port: m[2] };
+}
+
+function _getProxyPanelState(httpProxyValue, httpsProxyValue) {
+  const httpProxy = String(httpProxyValue || '').trim();
+  const httpsProxy = String(httpsProxyValue || '').trim();
+  const primary = _parseLocalGitProxy(httpProxy || httpsProxy);
+  const enabled = !!(httpProxy || httpsProxy);
+  return {
+    enabled,
+    scheme: primary.local ? primary.scheme : 'http',
+    port: primary.local ? primary.port : '',
+    httpProxy,
+    httpsProxy,
+    custom: enabled && !primary.local,
+  };
+}
+
+function _getGitProxyInput() {
+  const enabled = !!(document.getElementById('gitProxyEnabled')?.checked);
+  const scheme = document.getElementById('gitProxyScheme')?.value || 'http';
+  const portText = (document.getElementById('gitProxyPort')?.value || '').trim();
+  if (!enabled) return { enabled: false };
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { enabled: true, error: '端口必须是 1-65535 的整数' };
+  }
+  if (!['http', 'socks5h'].includes(scheme)) {
+    return { enabled: true, error: '代理类型无效' };
+  }
+  return { enabled: true, url: `${scheme}://127.0.0.1:${port}` };
+}
+
+function _updateGitProxyPreview() {
+  const preview = document.getElementById('gitProxyPreview');
+  if (!preview) return;
+  const scheme = document.getElementById('gitProxyScheme')?.value || 'http';
+  const port = (document.getElementById('gitProxyPort')?.value || '').trim() || '<端口>';
+  preview.textContent = `${scheme}://127.0.0.1:${port}`;
 }
 
 async function _commitFromForm() {
@@ -885,21 +1017,29 @@ async function _openRemotePanel() {
 async function _refreshRemotePanel() {
   const body = document.getElementById('gitRemoteBody');
   if (!body) return;
-  // 并行拿：用户配置 + 远程列表 + 当前分支
-  const [uname, uemail, rl, st] = await Promise.all([
+  // 并行拿：用户配置 + 远程列表 + 当前分支 + 代理配置
+  const [uname, uemail, rl, st, httpProxyCfg, httpsProxyCfg] = await Promise.all([
     callGit('config_get', { key: 'user.name' }),
     callGit('config_get', { key: 'user.email' }),
     callGit('remote_list'),
     callGit('status'),
+    callGit('config_get', { key: 'http.proxy' }),
+    callGit('config_get', { key: 'https.proxy' }),
   ]);
   const remotes = (rl && rl.remotes) || [];
   const branch = (st && st.branch) || '';
   const ahead = (st && st.ahead) || 0;
   const behind = (st && st.behind) || 0;
+  const remoteTargetBranch = _ensureRemoteTargetBranch(branch);
+  const remoteTargetLabel = _remoteTargetLabel(remoteTargetBranch);
   const hasOrigin = remotes.find(r => r.name === 'origin');
   const authorName = ((uname && uname.value) || '').trim();
   const authorEmail = ((uemail && uemail.value) || '').trim();
   const authorConfigured = !!(authorName && authorEmail);
+  const proxyState = _getProxyPanelState(
+    (httpProxyCfg && httpProxyCfg.value) || '',
+    (httpsProxyCfg && httpsProxyCfg.value) || ''
+  );
   body.innerHTML = `
     <!-- 用户信息 -->
     <section class="git-remote-section git-author-section">
@@ -958,17 +1098,82 @@ async function _refreshRemotePanel() {
       </div>
     </section>
 
+    <!-- 网络代理 -->
+    <section class="git-remote-section">
+      <div class="git-section-head">
+        <div>
+          <h3>🛜 本地代理</h3>
+          <p>写入当前仓库的 Git 代理配置，影响 GitHub 等 HTTPS 远程访问。</p>
+        </div>
+        <span class="git-author-status ${proxyState.enabled ? 'ok' : 'warn'}">
+          ${proxyState.enabled ? '已启用' : '未启用'}
+        </span>
+      </div>
+      <div class="git-proxy-card">
+        <label class="git-proxy-toggle">
+          <input type="checkbox" id="gitProxyEnabled" ${proxyState.enabled ? 'checked' : ''}>
+          <span>启用本地代理</span>
+        </label>
+        <div class="git-proxy-grid">
+          <label class="git-proxy-field">
+            <span>类型</span>
+            <select id="gitProxyScheme" onchange="_updateGitProxyPreview()">
+              <option value="http" ${proxyState.scheme === 'http' || proxyState.scheme === 'https' ? 'selected' : ''}>HTTP</option>
+              <option value="socks5h" ${proxyState.scheme === 'socks5h' ? 'selected' : ''}>SOCKS5</option>
+            </select>
+          </label>
+          <label class="git-proxy-field">
+            <span>本地端口</span>
+            <input id="gitProxyPort" type="number" min="1" max="65535" inputmode="numeric" value="${escapeHtml(proxyState.port)}" placeholder="7890" oninput="_updateGitProxyPreview()" />
+          </label>
+        </div>
+        <div class="git-proxy-preview">
+          将保存为 <code>http.proxy</code> / <code>https.proxy</code>：<code id="gitProxyPreview">${escapeHtml(proxyState.scheme)}://127.0.0.1:${escapeHtml(proxyState.port || '<端口>')}</code>
+        </div>
+        ${proxyState.custom ? `
+          <div class="git-proxy-warning">
+            已检测到非本地端口格式的代理配置：<code>${escapeHtml(proxyState.httpProxy || proxyState.httpsProxy)}</code>。保存会覆盖它。
+          </div>
+        ` : ''}
+        <div class="git-author-actions">
+          <span class="git-author-note">只保存端口和代理类型，不保存账号、密码或 token。</span>
+          <div class="git-author-buttons">
+            <button class="git-btn git-btn-primary" onclick="_saveGitProxyConfig()">💾 保存代理</button>
+            <button class="git-btn" onclick="_clearGitProxyConfig()">清空代理</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- 同步 -->
     <section class="git-remote-section">
       <h3>⬆⬇ 同步</h3>
       <div class="git-sync-status">
-        当前分支：<code>${escapeHtml(branch || '(未知)')}</code>
+        <span>当前分支：<code>${escapeHtml(branch || '(未知)')}</code></span>
+        <span>远程目标：<code id="gitSyncTargetPreview">${escapeHtml(remoteTargetLabel)}</code></span>
         ${ahead ? `<span class="git-sync-ahead">↑${ahead}</span>` : ''}
         ${behind ? `<span class="git-sync-behind">↓${behind}</span>` : ''}
       </div>
+      <label class="git-sync-target">
+        <span>远程分支</span>
+        <div class="git-branch-target-control">
+          <span class="git-remote-prefix">origin/</span>
+          <input
+            type="text"
+            id="gitSyncTargetBranch"
+            value="${escapeHtml(remoteTargetBranch)}"
+            placeholder="${escapeHtml(branch || 'main')}"
+            autocomplete="off"
+            spellcheck="false"
+            title="远程目标分支，可与当前本地分支不同"
+            oninput="_onRemoteTargetBranchInput(this)"
+            onblur="_normalizeRemoteTargetBranchInput(this)"
+          />
+        </div>
+      </label>
       <div class="git-sync-actions">
-        <button class="git-btn git-btn-primary" ${hasOrigin ? '' : 'disabled'} onclick="_doPush(false)">⬆️ 推送 origin/${escapeHtml(branch || '?')}</button>
-        <button class="git-btn" ${hasOrigin ? '' : 'disabled'} onclick="_doPull()">⬇️ 拉取</button>
+        <button class="git-btn git-btn-primary" ${hasOrigin ? '' : 'disabled'} onclick="_doPush(false)">⬆️ 推送到远程分支</button>
+        <button class="git-btn" ${hasOrigin ? '' : 'disabled'} onclick="_doPull()">⬇️ 拉取远程分支</button>
         <button class="git-btn" ${hasOrigin ? '' : 'disabled'} onclick="_doFetch()">🔄 抓取 (fetch)</button>
         <button class="git-btn git-btn-warn" ${hasOrigin ? '' : 'disabled'} onclick="_doPush(true)" title="--force-with-lease，比强制推送安全">⚡ 强制推送</button>
       </div>
@@ -1014,6 +1219,28 @@ async function _savePanelUser() {
   toast('✅ 已保存');
   await _refreshRemotePanel();
   await _refreshGitPanel();
+}
+
+async function _saveGitProxyConfig() {
+  const cfg = _getGitProxyInput();
+  if (cfg.error) return toast('⚠️ ' + cfg.error, 4000);
+  if (!cfg.enabled) {
+    await _clearGitProxyConfig();
+    return;
+  }
+  const r1 = await callGit('config_set', { key: 'http.proxy', value: cfg.url });
+  const r2 = await callGit('config_set', { key: 'https.proxy', value: cfg.url });
+  if (!r1.ok || !r2.ok) return toast('❌ 保存代理失败', 5000);
+  toast('✅ 已保存 Git 代理');
+  await _refreshRemotePanel();
+}
+
+async function _clearGitProxyConfig() {
+  const r1 = await callGit('config_unset', { key: 'http.proxy' });
+  const r2 = await callGit('config_unset', { key: 'https.proxy' });
+  if (!r1.ok || !r2.ok) return toast('❌ 清空代理失败', 5000);
+  toast('✅ 已清空 Git 代理');
+  await _refreshRemotePanel();
 }
 
 async function _addRemote() {
@@ -1075,9 +1302,17 @@ async function _pushCurrentBranch(force, logFn) {
     toast('❌ 无法确定当前分支');
     return false;
   }
+  const targetBranch = _getRemoteTargetBranch(currentBranch);
+  if (!_isValidRemoteBranchName(targetBranch)) {
+    log('❌ 远程分支名无效。请只使用字母、数字、点、斜杠、下划线和连字符，且不要以 /、.、- 开头。', true);
+    toast('❌ 远程分支名无效', 4000);
+    return false;
+  }
+  _setRemoteTargetBranch(targetBranch);
+  const targetLabel = _remoteTargetLabel(targetBranch);
   // 🔍 先扫敏感信息
-  toast('🔍 扫描敏感信息…');
-  const scan = await callGit('scan_diff', { remote: 'origin', branch: currentBranch });
+  toast(`🔍 扫描 ${targetLabel} 的敏感信息…`);
+  const scan = await callGit('scan_diff', { remote: 'origin', branch: targetBranch });
   if (scan.ok && scan.findings && scan.findings.length) {
     const ok = await _showSensitiveWarning(scan.findings, force);
     if (!ok) return false;
@@ -1085,16 +1320,18 @@ async function _pushCurrentBranch(force, logFn) {
   // 强制推送 → 再确认一次
   if (force) {
     const ok = await _confirmDangerous({
-      title: `强制推送 origin/${currentBranch}`,
+      title: `强制推送 ${currentBranch} -> ${targetLabel}`,
       intro: '将使用 --force-with-lease：仅当远程没有你不知道的新提交时才允许覆盖。仍可能影响协作者，请确认无他人正在使用同一分支。',
       danger: true,
     });
     if (!ok) return false;
   }
-  log('⬆️ 推送中…', false);
+  log(`⬆️ 推送到 ${targetLabel} 中…`, false);
   const r = await callGit('push', {
     remote: 'origin',
-    branch: currentBranch,
+    branch: targetBranch,
+    sourceBranch: currentBranch,
+    targetBranch,
     forceWithLease: force,
     confirm: force ? '我确定' : '',
   });
@@ -1105,7 +1342,7 @@ async function _pushCurrentBranch(force, logFn) {
     }
     return false;
   }
-  log('✅ 推送成功\n\n' + (r.output || ''), false);
+  log(`✅ 已推送到 ${targetLabel}\n\n` + (r.output || ''), false);
   toast('✅ 已推送');
   return true;
 }
@@ -1116,8 +1353,15 @@ async function _doPush(force) {
 }
 
 async function _doPull() {
-  const branch = (GIT_STATE.status && GIT_STATE.status.branch) || '';
-  _syncLog('⬇️ 拉取中…', false);
+  const localBranch = (GIT_STATE.status && GIT_STATE.status.branch) || await _getCurrentBranch();
+  const branch = _getRemoteTargetBranch(localBranch);
+  if (!_isValidRemoteBranchName(branch)) {
+    _syncLog('❌ 远程分支名无效。请先修正远程分支。', true);
+    toast('❌ 远程分支名无效', 4000);
+    return;
+  }
+  _setRemoteTargetBranch(branch);
+  _syncLog(`⬇️ 从 ${_remoteTargetLabel(branch)} 拉取到 ${localBranch || '当前分支'}…`, false);
   const r = await callGit('pull', { remote: 'origin', branch });
   if (!r.ok) {
     _syncLog('❌ 拉取失败：\n' + (r.error || ''), true);
@@ -1239,6 +1483,11 @@ window._savePanelUser = _savePanelUser;
 window._addRemote = _addRemote;
 window._editRemoteUrl = _editRemoteUrl;
 window._removeRemote = _removeRemote;
+window._onRemoteTargetBranchInput = _onRemoteTargetBranchInput;
+window._normalizeRemoteTargetBranchInput = _normalizeRemoteTargetBranchInput;
+window._updateGitProxyPreview = _updateGitProxyPreview;
+window._saveGitProxyConfig = _saveGitProxyConfig;
+window._clearGitProxyConfig = _clearGitProxyConfig;
 window._doPush = _doPush;
 window._doPull = _doPull;
 window._doFetch = _doFetch;

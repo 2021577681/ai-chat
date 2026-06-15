@@ -51,7 +51,7 @@ class GitMixin:
         sub = body.get('subcommand') or body.get('sub') or ''
         ALLOWED = {
             'check', 'status', 'log', 'diff', 'add', 'unstage', 'commit',
-            'checkout_file', 'show_file', 'init', 'config_get', 'config_set',
+            'checkout_file', 'show_file', 'init', 'config_get', 'config_set', 'config_unset',
             'branch_list', 'branch_create', 'branch_switch',
             'revert', 'reset_mixed', 'reset_hard',
             'branch_delete', 'branch_rename',
@@ -93,6 +93,14 @@ class GitMixin:
                     return self._send_json(200, {'ok': False, 'error': '缺少 key'})
                 r = self._git_run(['git', 'config', key, value], cwd_abs, timeout=5)
                 if not r['ok']:
+                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self._send_json(200, {'ok': True})
+            if sub == 'config_unset':
+                key = body.get('key', '')
+                if not key:
+                    return self._send_json(200, {'ok': False, 'error': '缺少 key'})
+                r = self._git_run(['git', 'config', '--unset-all', key], cwd_abs, timeout=5)
+                if not r['ok'] and r.get('returncode') != 5:
                     return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
                 return self._send_json(200, {'ok': True})
 
@@ -330,10 +338,10 @@ class GitMixin:
 
             if sub == 'pull':
                 remote = (body.get('remote') or 'origin').strip()
-                branch = (body.get('branch') or '').strip()
+                branch = self._normalize_branch_name(body.get('branch') or '', remote)
                 if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
                     return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
-                if branch and not re.match(r'^[A-Za-z0-9_\-./]+$', branch):
+                if branch and not self._is_safe_branch_name(branch):
                     return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
                 cmd = ['git', 'pull', remote]
                 if branch: cmd.append(branch)
@@ -344,19 +352,36 @@ class GitMixin:
 
             if sub == 'push':
                 remote = (body.get('remote') or 'origin').strip()
-                branch = (body.get('branch') or '').strip()
+                branch = self._normalize_branch_name(body.get('branch') or '', remote)
+                source_branch = self._normalize_branch_name(body.get('sourceBranch') or '', remote, strip_remote=False)
+                target_branch = self._normalize_branch_name(body.get('targetBranch') or '', remote)
                 force_lease = bool(body.get('forceWithLease'))
                 if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
                     return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
-                if branch and not re.match(r'^[A-Za-z0-9_\-./]+$', branch):
+                if branch and not self._is_safe_branch_name(branch):
                     return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
+                if source_branch and not self._is_safe_branch_name(source_branch):
+                    return self._send_json(200, {'ok': False, 'error': '无效的本地分支名'})
+                if target_branch and not self._is_safe_branch_name(target_branch):
+                    return self._send_json(200, {'ok': False, 'error': '无效的远程分支名'})
                 if force_lease and body.get('confirm') != '我确定':
                     return self._send_json(200, {'ok': False, 'error': '强制推送需要确认（confirm="我确定"）'})
                 cmd = ['git', 'push']
                 if force_lease:
                     cmd.append('--force-with-lease')
                 cmd.append(remote)
-                if branch: cmd.append(branch)
+                if target_branch:
+                    source_branch = source_branch or branch
+                    if not source_branch:
+                        cur = self._git_run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd_abs, timeout=5)
+                        source_branch = self._normalize_branch_name(cur['stdout'], remote, strip_remote=False) if cur['ok'] else ''
+                    if not source_branch or source_branch == 'HEAD':
+                        return self._send_json(200, {'ok': False, 'error': '无法确定要推送的本地分支'})
+                    if not self._is_safe_branch_name(source_branch):
+                        return self._send_json(200, {'ok': False, 'error': '无效的本地分支名'})
+                    cmd.append(f'{source_branch}:{target_branch}')
+                elif branch:
+                    cmd.append(branch)
                 r = self._git_run(cmd, cwd_abs, timeout=120)
                 if not r['ok']:
                     err = r['stderr'] or r['stdout']
@@ -524,23 +549,24 @@ class GitMixin:
 
     def _git_scan_diff(self, body, cwd_abs):
         remote = (body.get('remote') or 'origin').strip()
-        branch = (body.get('branch') or '').strip()
+        branch = self._normalize_branch_name(body.get('branch') or '', remote)
         if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
             return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
-        if branch and not re.match(r'^[A-Za-z0-9_\-./]+$', branch):
+        if branch and not self._is_safe_branch_name(branch):
             return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
         # 先 fetch 一下，确保远程引用是最新的（失败不致命）
         self._git_run(['git', 'fetch', remote], cwd_abs, timeout=30)
         range_ref = f'{remote}/{branch}..HEAD' if branch else f'{remote}/HEAD..HEAD'
         r = self._git_run(['git', 'diff', range_ref], cwd_abs, timeout=20, max_output=4 * 1024 * 1024)
+        file_list_cmd = ['git', 'diff', '--name-only', range_ref]
         if not r['ok']:
             r2 = self._git_run(['git', 'diff', '--root', 'HEAD'], cwd_abs, timeout=20, max_output=4 * 1024 * 1024)
             if not r2['ok']:
                 return self._send_json(200, {'ok': True, 'findings': [], 'note': '无法获取 diff，跳过扫描'})
             diff_text = r2['stdout']
+            file_list_cmd = ['git', 'diff', '--root', '--name-only', 'HEAD']
         else:
             diff_text = r['stdout']
-        file_list_cmd = ['git', 'diff', '--name-only', range_ref]
         fr = self._git_run(file_list_cmd, cwd_abs, timeout=10)
         file_names = [ln.strip() for ln in (fr['stdout'].splitlines() if fr['ok'] else []) if ln.strip()]
         findings = self._scan_sensitive_in_diff(diff_text, file_names)
@@ -642,6 +668,25 @@ class GitMixin:
             "# Secrets / local config\n.env\n.lms_cookie\n*.local.json\n\n"
             "# Build artifacts\ndist/\nbuild/\n*.log\n"
         )
+
+    def _normalize_branch_name(self, name, remote='origin', strip_remote=True):
+        branch = (name or '').strip()
+        if branch.startswith('refs/heads/'):
+            branch = branch[len('refs/heads/'):]
+        if strip_remote and remote and branch.startswith(remote + '/'):
+            branch = branch[len(remote) + 1:]
+        return branch
+
+    def _is_safe_branch_name(self, name):
+        if not name or len(name) > 200:
+            return False
+        if not re.match(r'^[A-Za-z0-9_\-./]+$', name):
+            return False
+        if name.startswith(('-', '/', '.')) or name.endswith(('/', '.', '.lock')):
+            return False
+        if '..' in name or '//' in name or '@{' in name:
+            return False
+        return True
 
     def _is_safe_remote_url(self, url):
         """只允许 https:// 或 git@host:path 形式的 URL，防止 file:// / ssh:// 等被滥用。"""
