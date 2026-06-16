@@ -87,15 +87,13 @@ body{
 }
 
 .logo-icon{
-  width:24px;
-  height:24px;
+  width:28px;
+  height:28px;
   border-radius:50%;
-  background:
-    radial-gradient(circle at 50% 50%,#fff 0 18%,transparent 19%),
-    conic-gradient(from 10deg,#4285f4,#34a853,#fbbc04,#ea4335,#4285f4);
-  color:transparent;
-  font-size:0;
-  box-shadow:0 0 0 3px rgba(66,133,244,.10);
+  background:transparent;
+  color:var(--text);
+  font-size:20px;
+  box-shadow:none;
 }
 
 .sidebar-collapse-btn,
@@ -880,20 +878,18 @@ body{
 }
 
 .avatar{
-  width:30px;
-  height:30px;
+  width:36px;
+  height:36px;
   border-radius:50%;
-  font-size:12px;
+  font-size:18px;
   box-shadow:none;
 }
 
 .avatar.assistant,
 .avatar.tool,
 .message.summary-msg .avatar{
-  background:
-    radial-gradient(circle at 50% 50%,#fff 0 18%,transparent 19%),
-    conic-gradient(from 10deg,#4285f4,#34a853,#fbbc04,#ea4335,#8e35ff,#4285f4)!important;
-  color:transparent;
+  background:linear-gradient(135deg,#10b981,#059669)!important;
+  color:#fff;
 }
 
 .avatar.user{
@@ -1103,8 +1099,13 @@ input::placeholder{
 }
 
 .input-tool{
-  border-radius:999px;
-  color:var(--text-secondary);
+  color:var(--text);
+}
+
+#uploadBtn{
+  font-size:22px;
+  font-weight:300;
+  line-height:1;
 }
 
 .input-tool:hover{

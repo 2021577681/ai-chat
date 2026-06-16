@@ -724,6 +724,9 @@ function updatePlanPanel(msgIdx, targetChat) {
 }
 
 function renderMsg(m, idx) {
+  const cur = currentChat();
+  const isTaskQueue = cur && cur.taskQueue && cur.taskQueue.type === 'task_queue_item';
+  const assistantLabel = isTaskQueue ? 'AI 助手' : 'Snake';
   if (m && m.debate && m.debate.kind === 'speech' && typeof renderDebateSpeechMsg === 'function') {
     return renderDebateSpeechMsg(m, idx);
   }
@@ -858,9 +861,9 @@ function renderMsg(m, idx) {
   
   return `
     <div class="message" data-idx="${idx}">
-      <div class="avatar ${isUser ? 'user' : 'assistant'}">${isUser ? '我' : 'AI'}</div>
+      <div class="avatar ${isUser ? 'user' : 'assistant'}">${isUser ? '我' : '🐍'}</div>
       <div class="msg-body">
-        <div class="msg-role">${isUser ? '你' : 'AI 助手'}
+        <div class="msg-role">${isUser ? '你' : assistantLabel}
           ${hasPlanBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,var(--primary),var(--success));">📋 计划</span>' : ''}
           ${hasOutlineBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);">📑 大纲</span>' : ''}
           ${hasRefBadge ? '<span class="msg-badge">🎭 师生</span>' : ''}

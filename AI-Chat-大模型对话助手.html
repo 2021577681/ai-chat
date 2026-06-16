@@ -140,8 +140,8 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">
-        <div class="logo-icon">AI</div>
-        <span>Chat</span>
+        <div class="logo-icon">🐍</div>
+        <span>SNAKE</span>
       </div>
       <button class="sidebar-collapse-btn" onclick="collapseSidebar()" title="收起侧栏">◀</button>
     </div>
@@ -211,9 +211,7 @@
         <div class="pending-atts" id="pendingAtts"></div>
         <textarea id="input" placeholder="输入消息，Enter 发送 / Shift+Enter 换行 / 可拖拽或粘贴图片..." rows="1"></textarea>
         <div class="input-bar">
-          <button class="input-tool" onclick="document.getElementById('imgInput').click()" title="上传图片">🖼️</button>
-          <button class="input-tool" onclick="document.getElementById('fileInput').click()" title="上传文件">📎</button>
-          <input type="file" id="imgInput" accept="image/*" multiple style="display:none" onchange="onPickImages(event)">
+          <button class="input-tool" id="uploadBtn" onclick="document.getElementById('fileInput').click()" title="上传文件">+</button>
           <input type="file" id="fileInput" multiple style="display:none" onchange="onPickFiles(event)">
           <div class="input-info" id="inputInfo">准备就绪</div>
           <div class="effort-picker" id="effortPicker">
