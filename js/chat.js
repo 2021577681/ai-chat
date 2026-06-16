@@ -562,20 +562,20 @@ function handleChatListKeydown(e) {
   }
 }
 
+function syncChatStartState(isStartState) {
+  const main = document.querySelector('.main');
+  if (main) main.classList.toggle('chat-start-state', !!isStartState);
+}
+
 function renderMessages() {
   const inner = document.getElementById('messagesInner');
   const c = currentChat();
-  if (!c || c.messages.length === 0) {
+  const hasVisibleMessages = !!(c && Array.isArray(c.messages) && c.messages.some(m => m && !m._hiddenFromUI));
+  syncChatStartState(!hasVisibleMessages);
+  if (!hasVisibleMessages) {
     inner.innerHTML = `
       <div class="welcome">
-        <h1>👋 你好，我是你的 AI 助手</h1>
-        <p>📋 计划模式 · 🎭 师生 · 🛠 工具 · 🖼️ 图片 · 📎 文件 · 💾 备份 · 🗜️ 压缩</p>
-        <div class="suggestions">
-          <div class="suggestion" onclick="useSuggestion('请帮我写一篇 2000 字的科普文章介绍量子计算')"><strong>📋 计划模式</strong><span>复杂任务先规划再执行</span></div>
-          <div class="suggestion" onclick="useSuggestion('用 Python 写一个二分查找')"><strong>💻 代码</strong><span>代码 + 公式渲染</span></div>
-          <div class="suggestion" onclick="useSuggestion('用表格列出五种排序算法')"><strong>📊 表格</strong><span>Markdown 表格</span></div>
-          <div class="suggestion" onclick="useSuggestion('帮我创建一个 hello.py 写个 Hello World')"><strong>🛠 工具</strong><span>让 AI 操作文件</span></div>
-        </div>
+        <h1><span class="welcome-icon" aria-hidden="true">👋</span><span class="welcome-title">你好，我是你的 AI 助手</span></h1>
       </div>`;
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
     return;
@@ -660,6 +660,7 @@ function appendMsgNode(idx, targetChat) {
   
   const inner = document.getElementById('messagesInner');
   if (!inner) return false;
+  syncChatStartState(false);
   
   // 已存在则走 refreshMsgNode
   const existing = inner.querySelector(`.message[data-idx="${idx}"]`);
