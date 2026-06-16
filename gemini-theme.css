@@ -798,6 +798,15 @@ body{
   background:linear-gradient(180deg,rgba(58,17,91,0),rgba(76,22,128,.26) 26%,rgba(58,17,91,.62) 100%);
 }
 
+[data-theme="dark"][data-cool-mode] .main.chat-start-state .input-area{
+  position:absolute;
+  background:transparent;
+}
+
+[data-theme="dark"][data-cool-mode] .main.chat-start-state .messages{
+  position:static;
+}
+
 [data-theme="dark"][data-cool-mode] .input-inner{
   background:rgba(72,27,105,.72);
   border-color:rgba(216,180,254,.30);
