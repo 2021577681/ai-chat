@@ -73,6 +73,51 @@ let state = {
     //    供"体检"功能测试 AI 是否还记得上下文（中段消息最易丢）
     beaconEnabled: false,       // 默认关闭，避免增加不必要 token
     beaconInterval: 5,          // 每 N 条用户消息埋一个（1 表示每条都埋，5 表示每 5 条）
+    privacyGuard: {
+      enabled: false,
+      replacementMode: 'mask',
+      fakeTemplates: {
+        EMAIL: 'user{seq}@example.com',
+        PHONE: '1380000{n4}',
+        ID: '11010119900101{id3}X',
+        BANK_CARD: '622202000000{bank4}',
+        IP: '10.0.0.{ip}',
+        URL: 'https://example.com/resource-{seq}',
+        FILE_PATH: '/tmp/masked/path-{seq}',
+        NAME: '用户{seq}',
+        CUSTOM: '[FAKE_CUSTOM_{seq}]',
+        CUSTOM_REGEX: '[FAKE_CUSTOM_REGEX_{seq}]',
+        SECRET: '[FAKE_SECRET_{seq}]',
+        PASSWORD: '[FAKE_PASSWORD_{seq}]',
+        COOKIE: '[FAKE_COOKIE_{seq}]',
+        PRIVATE_KEY: '[FAKE_PRIVATE_KEY_{seq}]'
+      },
+      stripHighRisk: true,
+      includeSystemPrompt: true,
+      includeToolResults: true,
+      includeAssistantHistory: true,
+      includeTextAttachments: true,
+      binaryAttachmentPolicy: 'strip',
+      addSafetyInstruction: true,
+      detector: {
+        secrets: true,
+        email: true,
+        phone: true,
+        idCard: true,
+        bankCard: true,
+        ipv4: false,
+        url: false,
+        filePath: false,
+        personName: false,
+        customTerms: true,
+        customRegex: false
+      },
+      customTerms: '',
+      customRegex: '',
+      responseGuardEnabled: true,
+      responseGuardMarker: '[[END_PRIVACY_SAFE_RESPONSE]]',
+      responseGuardAction: 'trim'
+    },
     mcpSkill: {
       mcpServers: [],
       skillRoots: ['skill'],

@@ -310,7 +310,8 @@ body{
 .topbar-btn.tool-active,
 .topbar-btn.reflect-active,
 .topbar-btn.plan-active,
-.topbar-btn.outline-active{
+.topbar-btn.outline-active,
+.topbar-btn.privacy-active{
   border-color:transparent;
   box-shadow:none;
 }
@@ -333,6 +334,11 @@ body{
 .topbar-btn.outline-active{
   background:linear-gradient(135deg,#e8f0fe,#f1e7ff);
   color:#0b57d0;
+}
+
+.topbar-btn.privacy-active{
+  background:#fef7e0;
+  color:#a14200;
 }
 
 .workspace-bar,
@@ -1691,6 +1697,10 @@ body.settings-page-open .settings-docked-mask.show{
   width:min(1040px,100%);
 }
 
+.settings-page-content .settings-section-privacy{
+  width:min(980px,100%);
+}
+
 .settings-page-content .settings-section-mcpSkill,
 .settings-page-content .settings-section-projectInstructions,
 .settings-page-content .settings-section-projectMemory,
@@ -2036,6 +2046,11 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .topbar-btn.outline-active{
   background:linear-gradient(135deg,rgba(138,180,248,.18),rgba(198,140,255,.14));
   color:#aecbfa;
+}
+
+[data-theme="dark"] .topbar-btn.privacy-active{
+  background:rgba(253,214,99,.18);
+  color:#fdd663;
 }
 
 [data-theme="dark"] .token-msgs{

@@ -65,6 +65,7 @@ async function init() {
     const btn = document.getElementById('outlineBtn');
     if (btn) btn.classList.add('outline-active');
   }
+  if (typeof updatePrivacyGuardButton === 'function') updatePrivacyGuardButton();
   
   // 6. 更新底部状态信息
   updateSendBtn();
@@ -170,7 +171,7 @@ async function init() {
       const modals = [
         'imgPreview', 'termConfirmMask',
         'toolEditModal', 'backupModal', 'projectInstructionsModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
-        'planModal', 'outlineModal', 'taskQueueModal', 'concurrentRequestsModal', 'settingsModal', 'jsonEditorModal',
+        'planModal', 'outlineModal', 'privacyModal', 'taskQueueModal', 'concurrentRequestsModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'
       ];

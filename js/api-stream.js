@@ -133,6 +133,7 @@ function stopGenerate() {
 function updateSendBtn() {
   const btn = document.getElementById('sendBtn');
   if (!btn) return;
+  const privacySuffix = typeof getPrivacyGuardInputInfoSuffix === 'function' ? getPrivacyGuardInputInfoSuffix() : '';
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
   const c = (typeof currentChat === 'function') ? currentChat() : null;
   const debateWaitingManual = !!(c && c.debate && c.debate.type === 'debate_mode'
@@ -146,11 +147,11 @@ function updateSendBtn() {
     if (hasDraft && canGuide && !debateWaitingManual) {
       btn.textContent = '↑';
       btn.classList.remove('stop');
-      document.getElementById('inputInfo').textContent = '发送中途引导，AI 会调整当前任务';
+      document.getElementById('inputInfo').textContent = '发送中途引导，AI 会调整当前任务' + privacySuffix;
     } else {
       btn.textContent = '■';
       btn.classList.add('stop');
-      document.getElementById('inputInfo').textContent = debateWaitingManual ? '辩论等待人工审核，可暂停倒计时' : '生成中...';
+      document.getElementById('inputInfo').textContent = (debateWaitingManual ? '辩论等待人工审核，可暂停倒计时' : '生成中...') + privacySuffix;
     }
   } else {
     btn.textContent = '↑';
@@ -158,6 +159,7 @@ function updateSendBtn() {
     if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
       let info = `⚡ 并发请求 · ${c.concurrent.agentCount || 1} AI · ${c.concurrent.useTools ? '允许工具' : '禁用工具'}`;
       if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+      info += privacySuffix;
       document.getElementById('inputInfo').textContent = info;
       return;
     }
@@ -165,6 +167,7 @@ function updateSendBtn() {
       const statusText = typeof _debateStatusText === 'function' ? _debateStatusText(c.debate.status) : (c.debate.status || '空闲');
       let info = `⚖️ 辩论模式 · ${statusText} · 禁用工具`;
       if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+      info += privacySuffix;
       document.getElementById('inputInfo').textContent = info;
       return;
     }
@@ -175,6 +178,7 @@ function updateSendBtn() {
     if (state.settings.useTools && state.tools.length) info += ` · 🛠 ${state.tools.length}工具`;
     if (state.settings.compressAutoEnabled) info += ` · 🗜️ 自动压缩`;
     if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+    info += privacySuffix;
     document.getElementById('inputInfo').textContent = info;
   }
 }

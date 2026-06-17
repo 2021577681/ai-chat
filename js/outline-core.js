@@ -344,7 +344,7 @@ function outlineBuildResponsesInput(history, conversationMessages) {
   const appendViaAdapter = (msg) => {
     if (!msg) return;
     if (typeof buildOpenAIResponsesInput === 'function') {
-      out.push(...buildOpenAIResponsesInput([msg]));
+      out.push(...buildOpenAIResponsesInput([msg], { includeResponseGuard: false }));
     } else {
       out.push(msg);
     }
@@ -733,13 +733,23 @@ async function callAPIWithOutline(options = {}) {
       // ----- 构造请求 -----
       const tools = forceNoTools ? [] : buildOutlineTools({ useTools: taskUseTools });
       let body;
+      const buildOutlineRoundBody = () => {
+        const safeHistory = typeof privacyGuardPrepareHistory === 'function'
+          ? privacyGuardPrepareHistory(history, { format: s.apiFormat || 'openai' })
+          : history;
+        const safeConversationMessages = typeof privacyGuardPrepareHistory === 'function'
+          ? privacyGuardPrepareHistory(conversationMessages, { format: s.apiFormat || 'openai' })
+          : conversationMessages;
+        const safeSystemPrompt = typeof privacyGuardSanitizeAuxiliarySystemText === 'function'
+          ? privacyGuardSanitizeAuxiliarySystemText(typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt)
+          : (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt);
       
       if (s.apiFormat === 'anthropic') {
         const baseMsgs = (typeof buildAnthropicMessages === 'function') 
-          ? buildAnthropicMessages(history) : [];
+          ? buildAnthropicMessages(safeHistory, { includeResponseGuard: false }) : [];
         const allMsgs = [...baseMsgs];
         
-        for (const m of conversationMessages) {
+        for (const m of safeConversationMessages) {
           if (m.role === 'assistant') {
             const parts = [];
             if (m.content && m.content.trim()) parts.push({ type: 'text', text: m.content });
@@ -790,14 +800,14 @@ async function callAPIWithOutline(options = {}) {
           max_tokens: parseInt(s.maxTokens),
           temperature: parseFloat(s.temperature),
           stream: false,
-          system: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt)
+          system: safeSystemPrompt
         };
         if (tools.length) body.tools = tools;
       } else if (s.apiFormat === 'responses') {
         body = {
           model,
-          input: outlineBuildResponsesInput(history, conversationMessages),
-          instructions: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt),
+          input: outlineBuildResponsesInput(safeHistory, safeConversationMessages),
+          instructions: safeSystemPrompt,
           temperature: parseFloat(s.temperature),
           max_output_tokens: parseInt(s.maxTokens),
           stream: false
@@ -805,11 +815,11 @@ async function callAPIWithOutline(options = {}) {
         if (tools.length) body.tools = tools;
       } else {
         const baseMsgs = (typeof buildOpenAIMessages === 'function')
-          ? buildOpenAIMessages(history).filter(m => m.role !== 'system') : [];
+          ? buildOpenAIMessages(safeHistory, { includeResponseGuard: false }).filter(m => m.role !== 'system') : [];
         const allMsgs = [
-          { role: 'system', content: (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt) },
+          { role: 'system', content: safeSystemPrompt },
           ...baseMsgs,
-          ...conversationMessages
+          ...safeConversationMessages
         ];
         const fixedMsgs = (typeof fixOpenAIMessageSequence === 'function')
           ? fixOpenAIMessageSequence(allMsgs)
@@ -823,6 +833,11 @@ async function callAPIWithOutline(options = {}) {
         };
         if (tools.length) body.tools = tools;
       }
+      return body;
+      };
+      body = typeof withPrivacyGuardRequest === 'function'
+        ? withPrivacyGuardRequest(buildOutlineRoundBody, { source: 'outline', silentReport: true })
+        : buildOutlineRoundBody();
       
       if (typeof ensureContextBeforeAgentRun === 'function') {
         aiMsg.outline.progressText = `🗜️ 第 ${loop + 1}/${maxRounds} 轮 · 检查上下文...`;
@@ -924,6 +939,9 @@ async function callAPIWithOutline(options = {}) {
         }
       }
       
+      if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
+        privacyGuardFinalizeAssistantMessage(assistantMsg, { source: 'outline' });
+      }
       conversationMessages.push(assistantMsg);
       if (assistantMsg.content) finalAnswer = assistantMsg.content;
       
@@ -1257,12 +1275,25 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   
   // ----- 构造请求（不带 tools 字段）-----
   let body;
-  
+  const buildOutlineFinalBody = () => {
+  const safeHistory = typeof privacyGuardPrepareHistory === 'function'
+    ? privacyGuardPrepareHistory(history, { format: s.apiFormat || 'openai' })
+    : history;
+  const safeConversationMessages = typeof privacyGuardPrepareHistory === 'function'
+    ? privacyGuardPrepareHistory(conversationMessages, { format: s.apiFormat || 'openai' })
+    : conversationMessages;
+  const safeFinalSystemPrompt = typeof privacyGuardSanitizeAuxiliarySystemText === 'function'
+    ? privacyGuardSanitizeAuxiliarySystemText(finalSystemPrompt)
+    : finalSystemPrompt;
+  const safeFinalUserMsg = typeof privacyGuardPrepareHistory === 'function'
+    ? (privacyGuardPrepareHistory([{ role: 'user', content: finalUserMsg }], { format: s.apiFormat || 'openai' })[0]?.content || finalUserMsg)
+    : finalUserMsg;
+
   if (s.apiFormat === 'anthropic') {
-    const baseMsgs = (typeof buildAnthropicMessages === 'function') ? buildAnthropicMessages(history) : [];
+    const baseMsgs = (typeof buildAnthropicMessages === 'function') ? buildAnthropicMessages(safeHistory, { includeResponseGuard: false }) : [];
     const allMsgs = [...baseMsgs];
     
-    for (const m of conversationMessages) {
+    for (const m of safeConversationMessages) {
       if (m.role === 'assistant') {
         const parts = [];
         if (m.content && m.content.trim()) parts.push({ type: 'text', text: m.content });
@@ -1305,7 +1336,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
     // 追加最终强制收尾的 user 消息（同样要注意 user 合并）
     {
       const last = allMsgs[allMsgs.length - 1];
-      const finalParts = [{ type: 'text', text: finalUserMsg }];
+      const finalParts = [{ type: 'text', text: safeFinalUserMsg }];
       if (last && last.role === 'user' && Array.isArray(last.content)) {
         last.content.push(...finalParts);
       } else if (last && last.role === 'user' && typeof last.content === 'string') {
@@ -1324,19 +1355,19 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
       max_tokens: parseInt(s.maxTokens),
       temperature: parseFloat(s.temperature),
       stream: false,
-      system: finalSystemPrompt
+      system: safeFinalSystemPrompt
       // 🔑 关键：不传 tools 字段
     };
   } else if (s.apiFormat === 'responses') {
     const allMessages = [
-      ...(history || []),
-      ...(conversationMessages || []),
-      { role: 'user', content: finalUserMsg }
+      ...(safeHistory || []),
+      ...(safeConversationMessages || []),
+      { role: 'user', content: safeFinalUserMsg }
     ];
     body = {
       model,
       input: outlineBuildResponsesInput(allMessages, []),
-      instructions: finalSystemPrompt,
+      instructions: safeFinalSystemPrompt,
       temperature: parseFloat(s.temperature),
       max_output_tokens: parseInt(s.maxTokens),
       stream: false
@@ -1344,12 +1375,12 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
     };
   } else {
     const baseMsgs = (typeof buildOpenAIMessages === 'function')
-      ? buildOpenAIMessages(history).filter(m => m.role !== 'system') : [];
+      ? buildOpenAIMessages(safeHistory, { includeResponseGuard: false }).filter(m => m.role !== 'system') : [];
     const allMsgs = [
-      { role: 'system', content: finalSystemPrompt },
+      { role: 'system', content: safeFinalSystemPrompt },
       ...baseMsgs,
-      ...conversationMessages,
-      { role: 'user', content: finalUserMsg }
+      ...safeConversationMessages,
+      { role: 'user', content: safeFinalUserMsg }
     ];
     const fixedMsgs = (typeof fixOpenAIMessageSequence === 'function')
       ? fixOpenAIMessageSequence(allMsgs)
@@ -1363,6 +1394,11 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
       // 🔑 关键：不传 tools 字段
     };
   }
+  return body;
+  };
+  body = typeof withPrivacyGuardRequest === 'function'
+    ? withPrivacyGuardRequest(buildOutlineFinalBody, { source: 'outline-final', silentReport: true })
+    : buildOutlineFinalBody();
   
   // ----- 限速 -----
   if (typeof applyRateLimit === 'function') await applyRateLimit(abortSignal);

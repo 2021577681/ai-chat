@@ -6,6 +6,7 @@ const SETTINGS_PAGE_SECTIONS = {
   outline: { open: 'openOutlineSettings', close: 'closeOutlineSettings', modalId: 'outlineModal' },
   reflection: { open: 'openReflectionSettings', close: 'closeReflectionSettings', modalId: 'reflectionModal' },
   tools: { open: 'openTools', close: 'closeTools', modalId: 'toolsModal' },
+  privacy: { open: 'openPrivacySettings', close: 'closePrivacySettings', modalId: 'privacyModal' },
   taskQueue: { open: 'openTaskQueue', close: 'closeTaskQueue', modalId: 'taskQueueModal' },
   concurrentRequests: { open: 'openConcurrentRequests', close: 'closeConcurrentRequests', modalId: 'concurrentRequestsModal' },
   debateMode: { open: 'openDebateMode', close: 'closeDebateMode', modalId: 'debateModeModal' },
@@ -46,6 +47,7 @@ function initSettingsPage() {
     'openOutlineSettings',
     'openReflectionSettings',
     'openTools',
+    'openPrivacySettings',
     'openTaskQueue',
     'openConcurrentRequests',
     'openDebateMode',
@@ -64,6 +66,7 @@ function initSettingsPage() {
     'closeOutlineSettings',
     'closeReflectionSettings',
     'closeTools',
+    'closePrivacySettings',
     'closeTaskQueue',
     'closeConcurrentRequests',
     'closeDebateMode',
@@ -86,6 +89,7 @@ function initSettingsPage() {
   window.openOutlineSettings = function() { openSettingsPage('outline'); };
   window.openReflectionSettings = function() { openSettingsPage('reflection'); };
   window.openTools = function() { openSettingsPage('tools'); };
+  window.openPrivacySettings = function() { openSettingsPage('privacy'); };
   window.openTaskQueue = function() { openSettingsPage('taskQueue'); };
   window.openConcurrentRequests = function() { openSettingsPage('concurrentRequests'); };
   window.openDebateMode = function() { openSettingsPage('debateMode'); };
@@ -105,6 +109,7 @@ function initSettingsPage() {
   window.closeOutlineSettings = function() { closeSettingsProxy('outline'); };
   window.closeReflectionSettings = function() { closeSettingsProxy('reflection'); };
   window.closeTools = function() { closeSettingsProxy('tools'); };
+  window.closePrivacySettings = function() { closeSettingsProxy('privacy'); };
   window.closeTaskQueue = function() { closeSettingsProxy('taskQueue'); };
   window.closeConcurrentRequests = function() { closeSettingsProxy('concurrentRequests'); };
   window.closeDebateMode = function() { closeSettingsProxy('debateMode'); };

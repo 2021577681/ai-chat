@@ -5,15 +5,31 @@
 // 加载顺序：在 api-adapters.js 之后
 
 function buildRequestBody(history, modelOverride, streamOverride, options = {}) {
+  if (typeof withPrivacyGuardRequest === 'function') {
+    return withPrivacyGuardRequest(
+      () => _buildRequestBodyInternal(history, modelOverride, streamOverride, options),
+      { source: 'main', silentReport: options.showPrivacyReport !== true }
+    );
+  }
+  return _buildRequestBodyInternal(history, modelOverride, streamOverride, options);
+}
+
+function _buildRequestBodyInternal(history, modelOverride, streamOverride, options = {}) {
   const s = state.settings;
   const model = modelOverride || s.currentModel;
   const stream = streamOverride !== undefined ? streamOverride : !!s.stream;
   
   // ⭐ system 保持稳定（不混入动态摘要），最大化 prompt cache 命中率
   // 摘要由各适配器自行注入到 messages 数组中（OpenAI: 作为 system message；Anthropic: prepend 到首条 user）
-  const systemContent = typeof getEffectiveSystemPrompt === 'function'
+  let systemContent = typeof getEffectiveSystemPrompt === 'function'
     ? getEffectiveSystemPrompt()
     : (s.systemPrompt || '');
+  const usesTopLevelSystem = s.apiFormat === 'anthropic'
+    || s.apiFormat === 'responses'
+    || !!(s.useCustomJson && s.jsonTemplate && s.jsonTemplate.trim());
+  if (usesTopLevelSystem && typeof privacyGuardSanitizeSystemText === 'function') {
+    systemContent = privacyGuardSanitizeSystemText(systemContent, { includeResponseGuard: true });
+  }
   
   // 准备所有占位符的值
   const apiMessages = s.apiFormat === 'anthropic' 
@@ -492,7 +508,7 @@ async function callAPI(roundLimit, options = {}) {
   const url = buildFullUrl(s.baseUrl, s.apiPath);
   let body;
   try {
-    body = buildRequestBody(c.messages.slice(0, -1), undefined, undefined, { useTools: taskUseTools });
+    body = buildRequestBody(c.messages.slice(0, -1), undefined, undefined, { useTools: taskUseTools, showPrivacyReport: true });
   } catch (e) {
     c.messages[lastIdx].content = `❌ 构造请求失败：${e.message}`;
     if (isTaskVisible()) renderMessages();
@@ -1012,6 +1028,12 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
   if (streamUsage && typeof recordUsageFromResponse === 'function') {
     recordUsageFromResponse(c, streamUsage, { model: reqCtx?.body?.model });
   }
+  if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
+    privacyGuardFinalizeAssistantMessage(c.messages[lastIdx], { source: 'main-stream' });
+    if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx, c);
+    else updateLastMsg(c, lastIdx);
+  }
   
   // ⭐ 保存原始响应到全局（仅本会话，刷新失效）
   if (typeof recordRawResponse === 'function') {
@@ -1106,6 +1128,9 @@ async function handleNonStream(txt, c, lastIdx, ct, reqCtx) {
       recordUsageFromResponse(c, j.usage, { model: reqCtx?.body?.model });
     }
   }
+  if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
+    privacyGuardFinalizeAssistantMessage(c.messages[lastIdx], { source: 'main-nonstream' });
+  }
 }
 
 async function callOnceWithRole(history, model, rolePrompt, options = {}) {
@@ -1139,35 +1164,43 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
   }
   const tempMessages = history.filter(m => m.role !== 'system' && m.role !== 'tool');
   let body;
-  if (s.apiFormat === 'anthropic') {
-    body = {
-      model,
-      messages: buildAnthropicMessages(tempMessages),
-      max_tokens: parseInt(s.maxTokens),
-      temperature: parseFloat(s.temperature),
-      stream: false,
-      system: rolePrompt
-    };
-  } else if (s.apiFormat === 'responses') {
-    body = {
-      model,
-      input: buildOpenAIResponsesInput(tempMessages),
-      instructions: rolePrompt,
-      temperature: parseFloat(s.temperature),
-      max_output_tokens: parseInt(s.maxTokens),
-      stream: false
-    };
-  } else {
-    const msgs = [{ role: 'system', content: rolePrompt }];
+  const buildHelperBody = () => {
+    const helperRolePrompt = typeof privacyGuardSanitizeSystemText === 'function'
+      ? privacyGuardSanitizeSystemText(rolePrompt, { includeResponseGuard: false })
+      : rolePrompt;
+    if (s.apiFormat === 'anthropic') {
+      return {
+        model,
+        messages: buildAnthropicMessages(tempMessages),
+        max_tokens: parseInt(s.maxTokens),
+        temperature: parseFloat(s.temperature),
+        stream: false,
+        system: helperRolePrompt
+      };
+    }
+    if (s.apiFormat === 'responses') {
+      return {
+        model,
+        input: buildOpenAIResponsesInput(tempMessages),
+        instructions: helperRolePrompt,
+        temperature: parseFloat(s.temperature),
+        max_output_tokens: parseInt(s.maxTokens),
+        stream: false
+      };
+    }
+    const msgs = [{ role: 'system', content: helperRolePrompt }];
     for (const m of buildOpenAIMessages(tempMessages)) if (m.role !== 'system') msgs.push(m);
-    body = {
+    return {
       model,
       messages: msgs,
       temperature: parseFloat(s.temperature),
       max_tokens: parseInt(s.maxTokens),
       stream: false
     };
-  }
+  };
+  body = typeof withPrivacyGuardRequest === 'function'
+    ? withPrivacyGuardRequest(buildHelperBody, { source: 'helper', silentReport: true })
+    : buildHelperBody();
   
   // ⭐ 自动重试：把"发请求 + 读响应 + 解析"整体包成可重试单元
   // 复用主对话的 _isRetryableError / _retryDelay / _sleepAbortable
@@ -1364,45 +1397,53 @@ async function runAgentLoop({
     
     // ----- 构造请求 -----
     // 用现有适配器把内部 messages 转成 API 格式
-    const apiMessages = s.apiFormat === 'anthropic'
-      ? buildAnthropicMessages(messages)
-      : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(messages) : buildOpenAIMessages(messages));
-    
-    let body;
-    if (s.apiFormat === 'anthropic') {
-      body = {
-        model,
-        messages: apiMessages,
-        max_tokens: _max,
-        temperature: _temp,
-        stream
-      };
-      if (effectiveSystemPrompt) body.system = effectiveSystemPrompt;
-      // 最后一轮不带 tools，强制收尾
-      if (tools && round < maxRounds) body.tools = tools;
-    } else if (s.apiFormat === 'responses') {
-      body = {
-        model,
-        input: apiMessages,
-        max_output_tokens: _max,
-        temperature: _temp,
-        stream
-      };
-      if (effectiveSystemPrompt) body.instructions = effectiveSystemPrompt;
-      if (tools && round < maxRounds) body.tools = tools;
-    } else {
-      const msgs = effectiveSystemPrompt ? [{ role: 'system', content: effectiveSystemPrompt }] : [];
-      for (const m of apiMessages) if (m.role !== 'system') msgs.push(m);
-      body = {
-        model,
-        messages: msgs,
-        max_tokens: _max,
-        temperature: _temp,
-        stream
-      };
-      if (tools && round < maxRounds) body.tools = tools;
-      if (stream) body.stream_options = { include_usage: true };
-    }
+    const buildLoopBody = () => {
+      const apiMessages = s.apiFormat === 'anthropic'
+        ? buildAnthropicMessages(messages)
+        : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(messages) : buildOpenAIMessages(messages));
+      const loopSystemPrompt = typeof privacyGuardSanitizeSystemText === 'function'
+        ? privacyGuardSanitizeSystemText(effectiveSystemPrompt, { includeResponseGuard: true })
+        : effectiveSystemPrompt;
+      let nextBody;
+      if (s.apiFormat === 'anthropic') {
+        nextBody = {
+          model,
+          messages: apiMessages,
+          max_tokens: _max,
+          temperature: _temp,
+          stream
+        };
+        if (loopSystemPrompt) nextBody.system = loopSystemPrompt;
+        // 最后一轮不带 tools，强制收尾
+        if (tools && round < maxRounds) nextBody.tools = tools;
+      } else if (s.apiFormat === 'responses') {
+        nextBody = {
+          model,
+          input: apiMessages,
+          max_output_tokens: _max,
+          temperature: _temp,
+          stream
+        };
+        if (loopSystemPrompt) nextBody.instructions = loopSystemPrompt;
+        if (tools && round < maxRounds) nextBody.tools = tools;
+      } else {
+        const msgs = loopSystemPrompt ? [{ role: 'system', content: loopSystemPrompt }] : [];
+        for (const m of apiMessages) if (m.role !== 'system') msgs.push(m);
+        nextBody = {
+          model,
+          messages: msgs,
+          max_tokens: _max,
+          temperature: _temp,
+          stream
+        };
+        if (tools && round < maxRounds) nextBody.tools = tools;
+        if (stream) nextBody.stream_options = { include_usage: true };
+      }
+      return nextBody;
+    };
+    const body = typeof withPrivacyGuardRequest === 'function'
+      ? withPrivacyGuardRequest(buildLoopBody, { source: 'agent-loop', silentReport: true })
+      : buildLoopBody();
     
     if (typeof applyRateLimit === 'function') await applyRateLimit(signal);
     
@@ -1632,6 +1673,10 @@ async function runAgentLoop({
       totalUsage = totalUsage ? { ...totalUsage, ...usage } : usage;
     }
     
+    if (typeof privacyGuardFinalizeText === 'function') {
+      assistantText = privacyGuardFinalizeText(assistantText, { source: 'agent-loop' });
+    }
+
     // 把 assistant 消息加入内部 messages
     const assistantMsg = { role: 'assistant', content: assistantText };
     if (assistantResponsesOutput) assistantMsg._responsesOutput = assistantResponsesOutput;

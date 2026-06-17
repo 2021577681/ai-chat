@@ -1061,9 +1061,20 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
     }
     
     let body;
+    const buildPlanBody = () => {
+    const safeSystemPrompt = typeof privacyGuardSanitizeAuxiliarySystemText === 'function'
+      ? privacyGuardSanitizeAuxiliarySystemText(effectiveSystemPrompt)
+      : effectiveSystemPrompt;
+    const safeUserPrompt = typeof privacyGuardPrepareHistory === 'function'
+      ? (privacyGuardPrepareHistory([{ role: 'user', content: userPrompt }], { format: s.apiFormat || 'openai' })[0]?.content || userPrompt)
+      : userPrompt;
+    const safeConversationMessages = typeof privacyGuardPrepareHistory === 'function'
+      ? privacyGuardPrepareHistory(conversationMessages, { format: s.apiFormat || 'openai' })
+      : conversationMessages;
+
     if (s.apiFormat === 'anthropic') {
-      const anthMsgs = [{ role: 'user', content: userPrompt }];
-      for (const m of conversationMessages) {
+      const anthMsgs = [{ role: 'user', content: safeUserPrompt }];
+      for (const m of safeConversationMessages) {
         if (m.role === 'assistant') {
           const parts = [];
           if (m.content && m.content.trim()) parts.push({ type: 'text', text: m.content });
@@ -1095,14 +1106,14 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
         max_tokens: parseInt(s.maxTokens),
         temperature: parseFloat(s.temperature),
         stream: false,
-        system: effectiveSystemPrompt
+        system: safeSystemPrompt
       };
       if (tools) body.tools = tools;
     } else {
       const oaiMsgs = [
-        { role: 'system', content: effectiveSystemPrompt },
-        { role: 'user', content: userPrompt },
-        ...conversationMessages
+        { role: 'system', content: safeSystemPrompt },
+        { role: 'user', content: safeUserPrompt },
+        ...safeConversationMessages
       ];
       body = {
         model, messages: oaiMsgs,
@@ -1112,6 +1123,11 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
       };
       if (tools) body.tools = tools;
     }
+    return body;
+    };
+    body = typeof withPrivacyGuardRequest === 'function'
+      ? withPrivacyGuardRequest(buildPlanBody, { source: 'plan', silentReport: true })
+      : buildPlanBody();
     
     // 应用频率限制（超限自动等待，等待期间可被 abortCtrl 中断）
     if (typeof applyRateLimit === 'function') {
@@ -1198,6 +1214,9 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
       }
     }
     
+    if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
+      privacyGuardFinalizeAssistantMessage(assistantMsg, { source: 'plan' });
+    }
     conversationMessages.push(assistantMsg);
     if (assistantMsg.content) collectedTexts.push(assistantMsg.content);
     

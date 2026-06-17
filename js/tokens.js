@@ -371,13 +371,16 @@ async function fetchAnthropicTokenCount(chat) {
   if (!s.apiKey) return null;
   
   try {
-    const messages = buildAnthropicMessages(chat.messages);
+    const messages = buildAnthropicMessages(chat.messages, { includeResponseGuard: false });
     if (!messages.length) return null;
     
     const body = { model: s.currentModel, messages: messages };
-    const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+    let systemPrompt = typeof getEffectiveSystemPrompt === 'function'
       ? getEffectiveSystemPrompt()
       : (s.systemPrompt || '');
+    if (typeof privacyGuardSanitizeAuxiliarySystemText === 'function') {
+      systemPrompt = privacyGuardSanitizeAuxiliarySystemText(systemPrompt);
+    }
     if (systemPrompt) body.system = systemPrompt;
     const tools = buildToolsArray();
     if (tools) body.tools = tools;

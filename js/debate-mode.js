@@ -1611,53 +1611,64 @@ async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
     const initialMessages = options.initialMessages || [];
     const systemPrompt = options.systemPrompt || '';
 
-    // 构造初始消息列表
-    const messages = [];
-    if (systemPrompt && s.apiFormat !== 'anthropic') {
-      messages.push({ role: 'system', content: systemPrompt });
-    }
-    for (const m of initialMessages) {
-      if (m.role !== 'system') messages.push(m);
-    }
-
-    // 构造请求体
-    const apiMessages = s.apiFormat === 'anthropic'
-      ? (typeof buildAnthropicMessages === 'function' ? buildAnthropicMessages(messages) : messages)
-      : (s.apiFormat === 'responses' ? (typeof buildOpenAIResponsesInput === 'function' ? buildOpenAIResponsesInput(messages) : messages) : (typeof buildOpenAIMessages === 'function' ? buildOpenAIMessages(messages) : messages));
-
     let body;
-    if (s.apiFormat === 'anthropic') {
-      body = {
-        model: cfg.model,
-        messages: apiMessages,
-        max_tokens: parseInt(s.maxTokens) || 4096,
-        temperature: parseFloat(s.temperature) || 0.7,
-        stream
-      };
-      if (systemPrompt) body.system = systemPrompt;
-    } else if (s.apiFormat === 'responses') {
-      body = {
-        model: cfg.model,
-        input: apiMessages,
-        max_output_tokens: parseInt(s.maxTokens) || 4096,
-        temperature: parseFloat(s.temperature) || 0.7,
-        stream
-      };
-      if (systemPrompt) body.instructions = systemPrompt;
-    } else {
-      const msgs = systemPrompt ? [{ role: 'system', content: systemPrompt }] : [];
+    const buildDebateBody = () => {
+      // 构造初始消息列表
+      const messages = [];
+      const safeSystemPrompt = typeof privacyGuardSanitizeAuxiliarySystemText === 'function'
+        ? privacyGuardSanitizeAuxiliarySystemText(systemPrompt)
+        : systemPrompt;
+      if (safeSystemPrompt && s.apiFormat !== 'anthropic') {
+        messages.push({ role: 'system', content: safeSystemPrompt });
+      }
+      for (const m of initialMessages) {
+        if (m.role !== 'system') messages.push(m);
+      }
+
+      // 构造请求体
+      const apiMessages = s.apiFormat === 'anthropic'
+        ? (typeof buildAnthropicMessages === 'function' ? buildAnthropicMessages(messages, { includeResponseGuard: false }) : messages)
+        : (s.apiFormat === 'responses' ? (typeof buildOpenAIResponsesInput === 'function' ? buildOpenAIResponsesInput(messages, { includeResponseGuard: false }) : messages) : (typeof buildOpenAIMessages === 'function' ? buildOpenAIMessages(messages, { includeResponseGuard: false }) : messages));
+
+      if (s.apiFormat === 'anthropic') {
+        const nextBody = {
+          model: cfg.model,
+          messages: apiMessages,
+          max_tokens: parseInt(s.maxTokens) || 4096,
+          temperature: parseFloat(s.temperature) || 0.7,
+          stream
+        };
+        if (safeSystemPrompt) nextBody.system = safeSystemPrompt;
+        return nextBody;
+      }
+      if (s.apiFormat === 'responses') {
+        const nextBody = {
+          model: cfg.model,
+          input: apiMessages,
+          max_output_tokens: parseInt(s.maxTokens) || 4096,
+          temperature: parseFloat(s.temperature) || 0.7,
+          stream
+        };
+        if (safeSystemPrompt) nextBody.instructions = safeSystemPrompt;
+        return nextBody;
+      }
+      const msgs = safeSystemPrompt ? [{ role: 'system', content: safeSystemPrompt }] : [];
       for (const m of apiMessages) {
         if (m.role !== 'system') msgs.push(m);
       }
-      body = {
+      const nextBody = {
         model: cfg.model,
         messages: msgs,
         max_tokens: parseInt(s.maxTokens) || 4096,
         temperature: parseFloat(s.temperature) || 0.7,
         stream
       };
-      if (stream) body.stream_options = { include_usage: true };
-    }
+      if (stream) nextBody.stream_options = { include_usage: true };
+      return nextBody;
+    };
+    body = typeof withPrivacyGuardRequest === 'function'
+      ? withPrivacyGuardRequest(buildDebateBody, { source: 'debate', silentReport: true })
+      : buildDebateBody();
 
     // 构造 URL 和 headers
     const url = typeof buildFullUrl === 'function'
@@ -1796,6 +1807,9 @@ async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
       if (chat) recordUsageFromResponse(chat, usage, { model: cfg.model });
     }
 
+    if (typeof privacyGuardFinalizeText === 'function') {
+      finalText = privacyGuardFinalizeText(finalText, { source: 'debate' });
+    }
     return { finalText, messages };
   } finally {
     state.settings = { ...state.settings, ...originalSettings };

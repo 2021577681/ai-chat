@@ -83,6 +83,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .topbar-btn.tool-active{background:var(--tool);color:#fff;border-color:var(--tool)}
 .topbar-btn.reflect-active{background:linear-gradient(135deg,var(--student),var(--teacher));color:#fff;border-color:transparent}
 .topbar-btn.plan-active{background:linear-gradient(135deg,var(--primary),var(--success));color:#fff;border-color:transparent}
+.topbar-btn.privacy-active{background:var(--warning);color:#fff;border-color:var(--warning)}
 
 /* 沙箱信息栏（替代原 URL 预览栏） */
 .workspace-bar{padding:8px 20px;background:var(--bg-input);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary)}
@@ -579,6 +580,29 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .btn-primary{background:var(--primary);color:#fff;border-color:var(--primary)}
 .btn-primary:hover{background:var(--primary-hover)}
 .btn-warning{background:var(--warning);color:#fff;border-color:var(--warning)}
+
+/* 隐私脱敏 */
+.privacy-settings-panel{width:min(980px,95vw)}
+.privacy-section{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:14px;margin-bottom:14px}
+.privacy-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.privacy-section-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px}
+.privacy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 12px;margin-top:10px}
+.privacy-check{display:flex!important;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);font-size:13px;font-weight:400!important;cursor:pointer;line-height:1.2}
+.privacy-check input{width:14px!important;height:14px!important;flex:0 0 14px;margin:0}
+.privacy-check span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:18px}
+.privacy-status{font-size:12px;color:var(--text-secondary);background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px}
+.privacy-help{border-left:3px solid var(--warning)}
+.privacy-subsection-title{font-size:12px;font-weight:600;color:var(--text);margin:14px 0 8px}
+.privacy-template-help{margin-top:2px;line-height:1.7}
+.privacy-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 12px;margin-top:10px}
+.privacy-template-field{display:flex;flex-direction:column;gap:7px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px}
+.privacy-template-field label{font-size:12px;font-weight:600;color:var(--text-secondary)}
+.privacy-template-field input{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono);line-height:1.35}
+.privacy-template-field input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(79,70,229,.12)}
+.privacy-section .form-hint{line-height:1.7;margin-top:6px}
+.privacy-section .form-row{margin-top:12px;gap:14px}
+.privacy-section .form-row > div{display:flex;flex-direction:column;gap:8px}
+.privacy-section .form-row label{margin-bottom:0;line-height:1.45}
 
 /* ============ 💰 定价管理面板 ============ */
 .pricing-modal .json-help{

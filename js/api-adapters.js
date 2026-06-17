@@ -5,11 +5,17 @@
 
 // ============ API 调用核心 ============
 
-function buildOpenAIMessages(history) {
+function buildOpenAIMessages(history, options = {}) {
+  history = typeof privacyGuardPrepareHistory === 'function'
+    ? privacyGuardPrepareHistory(history, { format: 'openai', ...options })
+    : history;
   const out = [];
-  const systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+  let systemPrompt = typeof getEffectiveSystemPrompt === 'function'
     ? getEffectiveSystemPrompt()
     : state.settings.systemPrompt;
+  if (typeof privacyGuardSanitizeSystemText === 'function') {
+    systemPrompt = privacyGuardSanitizeSystemText(systemPrompt, { includeResponseGuard: options.includeResponseGuard !== false });
+  }
   if (systemPrompt) out.push({ role: 'system', content: systemPrompt });
   
   for (const m of history) {
@@ -109,7 +115,10 @@ function fixOpenAIMessageSequence(messages) {
 }
 
 // ============ OpenAI Responses API ============
-function buildOpenAIResponsesInput(history) {
+function buildOpenAIResponsesInput(history, options = {}) {
+  history = typeof privacyGuardPrepareHistory === 'function'
+    ? privacyGuardPrepareHistory(history, { format: 'responses', ...options })
+    : history;
   const out = [];
   
   for (const m of history) {
@@ -181,7 +190,10 @@ function buildOpenAIResponsesInput(history) {
 }
 
 // ⭐ 关键修复：支持 PDF 和图片
-function buildAnthropicMessages(history) {
+function buildAnthropicMessages(history, options = {}) {
+  history = typeof privacyGuardPrepareHistory === 'function'
+    ? privacyGuardPrepareHistory(history, { format: 'anthropic', ...options })
+    : history;
   const out = [];
   
   // ⭐ 收集摘要：Anthropic 的 system 字段保持稳定，摘要在循环结束后 prepend 到首条 user 消息

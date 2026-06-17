@@ -215,30 +215,41 @@ async function _silentApiCall(historyMessages) {
   
   // 构造请求体（参考 buildRequestBody 但不依赖 currentChat）
   let body;
+  const buildBeaconBody = () => {
+  const safeSystemPrompt = typeof privacyGuardSanitizeAuxiliarySystemText === 'function'
+    ? privacyGuardSanitizeAuxiliarySystemText(s.systemPrompt || '')
+    : (s.systemPrompt || '');
   if (s.apiFormat === 'anthropic') {
     const msgs = (typeof buildAnthropicMessages === 'function')
-      ? buildAnthropicMessages(historyMessages)
+      ? buildAnthropicMessages(historyMessages, { includeResponseGuard: false })
       : historyMessages.map(m => ({ role: m.role, content: m.content }));
-    body = {
+    const nextBody = {
       model: s.currentModel,
       max_tokens: Math.min(parseInt(s.maxTokens) || 2048, 1024),  // 体检不需要很长回答
       messages: msgs,
       stream: false
     };
-    if (s.systemPrompt) body.system = s.systemPrompt;
-    if (_temp !== undefined) body.temperature = _temp;
-  } else {
+    if (safeSystemPrompt) nextBody.system = safeSystemPrompt;
+    if (_temp !== undefined) nextBody.temperature = _temp;
+    return nextBody;
+  }
+  {
     const msgs = (typeof buildOpenAIMessages === 'function')
-      ? buildOpenAIMessages(historyMessages)
+      ? buildOpenAIMessages(historyMessages, { includeResponseGuard: false })
       : historyMessages.map(m => ({ role: m.role, content: m.content }));
-    body = {
+    const nextBody = {
       model: s.currentModel,
       messages: msgs,
       max_tokens: Math.min(parseInt(s.maxTokens) || 2048, 1024),
       stream: false
     };
-    if (_temp !== undefined) body.temperature = _temp;
+    if (_temp !== undefined) nextBody.temperature = _temp;
+    return nextBody;
   }
+  };
+  body = typeof withPrivacyGuardRequest === 'function'
+    ? withPrivacyGuardRequest(buildBeaconBody, { source: 'beacon', silentReport: true })
+    : buildBeaconBody();
   
   // 构造 URL + Headers
   const url = (typeof buildFullUrl === 'function')
