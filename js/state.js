@@ -76,6 +76,8 @@ let state = {
     privacyGuard: {
       enabled: false,
       replacementMode: 'mask',
+      localRestoreEnabled: false,
+      localRestoreRetention: 'request',
       fakeTemplates: {
         EMAIL: 'user{seq}@example.com',
         PHONE: '1380000{n4}',
@@ -99,6 +101,9 @@ let state = {
       includeTextAttachments: true,
       binaryAttachmentPolicy: 'strip',
       addSafetyInstruction: true,
+      safetyInstructionText: '隐私模式已启用：输入中的 [MASK_*] 或 [REDACTED_*] 是本地脱敏占位符。不要猜测、补全、还原或输出任何被脱敏的真实隐私值。',
+      localRestoreInstructionText: '隐私本地还原模式已启用：输入中的 [MASK_*] 是真实隐私数据的稳定占位符。你可以像使用真实值一样引用、比较、传递这些占位符，尤其是在工具调用参数中必须原样使用占位符；本地客户端会在必要时还原。不要声称因为数据被隐藏或脱敏而无法继续；不要猜测、补全或输出真实隐私值。',
+      responseGuardInstructionText: '回答结束时必须单独输出完整结束标记 {marker}，标记后不要再输出任何内容。',
       detector: {
         secrets: true,
         email: true,
@@ -117,6 +122,18 @@ let state = {
       responseGuardEnabled: true,
       responseGuardMarker: '[[END_PRIVACY_SAFE_RESPONSE]]',
       responseGuardAction: 'trim'
+    },
+    shellAudit: {
+      enabled: false,
+      profileId: '__current',
+      model: '',
+      prompt: [
+        '你是本地 Shell 命令安全审核员。你只能根据用户当前轮消息和待执行的 Shell 命令做判断，不要假设你看过完整上下文。',
+        '目标：判断该命令是否是完成当前用户请求所必要，以及是否存在读取无关文件、窃取密钥/Token/Cookie/私钥、破坏文件、绕过权限、联网外传、安装或执行不明代码等风险。',
+        '如果命令只读取或修改与用户当前请求直接相关的工作区文件，且没有明显外传或破坏风险，可以放行。',
+        '如果命令访问用户未要求的敏感路径或凭证文件、枚举大量无关文件、上传/发送数据到外部、执行远程脚本、删除/覆盖大范围文件、提升权限、修改系统设置，必须拦截。',
+        '只输出严格 JSON，不要输出 Markdown，不要解释 JSON 外的内容。格式：{"allow":true|false,"risk":"low|medium|high","necessary":true|false,"reason":"一句话理由","concerns":["风险点1"]}'
+      ].join('\n')
     },
     mcpSkill: {
       mcpServers: [],

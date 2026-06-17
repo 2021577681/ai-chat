@@ -940,7 +940,7 @@ async function callAPIWithOutline(options = {}) {
       }
       
       if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
-        privacyGuardFinalizeAssistantMessage(assistantMsg, { source: 'outline' });
+        privacyGuardFinalizeAssistantMessage(assistantMsg, { source: 'outline', context: body, includeResponseGuard: false });
       }
       conversationMessages.push(assistantMsg);
       if (assistantMsg.content) finalAnswer = assistantMsg.content;
@@ -975,6 +975,9 @@ async function callAPIWithOutline(options = {}) {
         const fname = tc.function?.name || '';
         let args = {};
         try { args = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
+        if (typeof privacyGuardRestoreToolCallArguments === 'function') {
+          args = privacyGuardRestoreToolCallArguments(args, { context: body });
+        }
         
         const isOutlineTool = OUTLINE_TOOL_NAMES.has(fname);
         let result;
@@ -1439,14 +1442,18 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   }
   
   // ----- 解析 -----
+  let finalText = '';
   if (s.apiFormat === 'anthropic') {
     const contents = j.content || [];
-    return contents.filter(p => p.type === 'text').map(p => p.text).join('') || '';
+    finalText = contents.filter(p => p.type === 'text').map(p => p.text).join('') || '';
   } else if (s.apiFormat === 'responses') {
-    return (typeof extractResponsesText === 'function' ? extractResponsesText(j) : '') || '';
+    finalText = (typeof extractResponsesText === 'function' ? extractResponsesText(j) : '') || '';
   } else {
-    return j.choices?.[0]?.message?.content || '';
+    finalText = j.choices?.[0]?.message?.content || '';
   }
+  return typeof privacyGuardFinalizeText === 'function'
+    ? privacyGuardFinalizeText(finalText, { source: 'outline-final', context: body, includeResponseGuard: false })
+    : finalText;
 }
 
 // ============ 大纲工具处理（本地虚拟工具，不发请求）============

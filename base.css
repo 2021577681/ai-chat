@@ -590,6 +590,9 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .privacy-check{display:flex!important;align-items:center;gap:10px;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);font-size:13px;font-weight:400!important;cursor:pointer;line-height:1.2}
 .privacy-check input{width:14px!important;height:14px!important;flex:0 0 14px;margin:0}
 .privacy-check span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:18px}
+.privacy-restore-row{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.privacy-template-field input:disabled{opacity:.55;background:var(--bg-hover);cursor:not-allowed}
+.privacy-restore-note{margin-top:8px}
 .privacy-status{font-size:12px;color:var(--text-secondary);background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px}
 .privacy-help{border-left:3px solid var(--warning)}
 .privacy-subsection-title{font-size:12px;font-weight:600;color:var(--text);margin:14px 0 8px}
@@ -599,6 +602,8 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .privacy-template-field label{font-size:12px;font-weight:600;color:var(--text-secondary)}
 .privacy-template-field input{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:var(--font-mono);line-height:1.35}
 .privacy-template-field input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(79,70,229,.12)}
+.privacy-prompt-preview{margin-top:12px}
+.privacy-prompt-preview pre{margin:0;padding:10px 12px;max-height:180px;overflow:auto;white-space:pre-wrap;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);color:var(--text);font-size:12.5px;line-height:1.6;font-family:var(--font-mono)}
 .privacy-section .form-hint{line-height:1.7;margin-top:6px}
 .privacy-section .form-row{margin-top:12px;gap:14px}
 .privacy-section .form-row > div{display:flex;flex-direction:column;gap:8px}
@@ -1142,6 +1147,26 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .perm-task-list{padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;min-height:32px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .perm-task-chip{padding:3px 10px;background:rgba(249,115,22,.15);color:var(--teacher);border-radius:10px;font-size:11.5px;font-weight:600}
 .perm-task-empty{color:var(--text-secondary);font-style:italic;opacity:.7;font-size:12px}
+.shell-audit-panel{padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-top:8px}
+.shell-audit-toggle{display:flex!important;align-items:center;gap:12px;margin:0 0 14px!important;font-weight:400!important;cursor:pointer}
+.shell-audit-toggle input{width:18px!important;height:18px!important;flex:0 0 18px;margin:0;accent-color:var(--primary)}
+.shell-audit-toggle span{display:flex;flex-direction:column;gap:5px;line-height:1.45}
+.shell-audit-toggle strong{font-size:13.5px;color:var(--text)}
+.shell-audit-toggle em{font-style:normal;font-size:12px;color:var(--text-secondary)}
+.shell-audit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.shell-audit-panel .form-group{margin-bottom:12px}
+.shell-audit-panel textarea{font-family:'SF Mono',Monaco,Consolas,monospace;line-height:1.55;min-height:150px}
+.shell-audit-hint{font-size:12px;color:var(--text-secondary);line-height:1.6;margin-top:6px}
+.shell-audit-actions{display:flex;justify-content:flex-end}
+.shell-audit-confirm{border-color:var(--danger)}
+.shell-audit-summary{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.shell-audit-risk,.shell-audit-necessary{display:inline-flex;align-items:center;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700}
+.shell-audit-risk.low{background:rgba(16,185,129,.14);color:var(--success)}
+.shell-audit-risk.medium{background:rgba(245,158,11,.16);color:var(--warning)}
+.shell-audit-risk.high{background:rgba(239,68,68,.14);color:var(--danger)}
+.shell-audit-necessary{background:rgba(148,163,184,.16);color:var(--text-secondary)}
+.shell-audit-reason{padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);font-size:13px;line-height:1.6;margin-bottom:12px;color:var(--text)}
+.shell-audit-concerns{margin:0 0 12px 0;padding:10px 12px 10px 28px;border:1px solid var(--border);border-radius:8px;background:rgba(239,68,68,.08);color:var(--danger);font-size:12.5px;line-height:1.6}
 
 
 /* ============ 计划模式工具调用实时显示 ============ */

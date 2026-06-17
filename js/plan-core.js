@@ -1215,7 +1215,7 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
     }
     
     if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
-      privacyGuardFinalizeAssistantMessage(assistantMsg, { source: 'plan' });
+      privacyGuardFinalizeAssistantMessage(assistantMsg, { source: 'plan', context: body, includeResponseGuard: false });
     }
     conversationMessages.push(assistantMsg);
     if (assistantMsg.content) collectedTexts.push(assistantMsg.content);
@@ -1231,6 +1231,9 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
       const fname = tc.function?.name || '';
       let args = {};
       try { args = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
+      if (typeof privacyGuardRestoreToolCallArguments === 'function') {
+        args = privacyGuardRestoreToolCallArguments(args, { context: body });
+      }
       
       // ⭐ 实时插入"调用中"占位卡片
       let liveEntry = null;

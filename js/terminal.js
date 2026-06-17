@@ -444,6 +444,50 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       }
     }
   }
+
+  if (action === 'execute' && typeof reviewShellCommandWithAI === 'function') {
+    const audit = await reviewShellCommandWithAI({
+      command: requestParams.command || params.command || confirmCommand || '',
+      cwd: requestParams.cwd || params.cwd || '',
+      context: {
+        ...(context && typeof context === 'object' ? context : {}),
+        chatId
+      }
+    });
+    if (audit && audit.aborted) {
+      if (typeof claimConcurrentFileOwnership === 'function') {
+        claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+      }
+      return {
+        ok: false,
+        error: '⏸️ Shell 命令审核已被中途引导中断。'
+      };
+    }
+    if (audit && !audit.autoAllow) {
+      const confirmAudit = typeof shellAuditConfirmRisk === 'function'
+        ? await shellAuditConfirmRisk(audit, {
+            command: requestParams.command || params.command || confirmCommand || '',
+            cwd: requestParams.cwd || params.cwd || '',
+            context: {
+              ...(context && typeof context === 'object' ? context : {}),
+              chatId
+            }
+          })
+        : { allowed: false };
+      if (!confirmAudit.allowed) {
+        if (typeof claimConcurrentFileOwnership === 'function') {
+          claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+        }
+        return {
+          ok: false,
+          error: confirmAudit.aborted
+            ? '⏸️ Shell 命令风险确认已被中途引导中断。'
+            : `🛡️ Shell 命令未通过 AI 安全审核：${audit.reason || '需要用户确认'}`,
+          _userRejected: !confirmAudit.aborted
+        };
+      }
+    }
+  }
   
   // ⭐ 实际请求，封装为函数以便 403 后自动重试一次
   const doFetch = async () => {
@@ -663,6 +707,7 @@ async function executeTerminalCommand(command, cwd, newWindow, context) {
     command,
     { ...(context && typeof context === 'object' ? context : {}), forceConfirm });
   if (typeof r === 'string') return r;
+  if (!r.ok && (r._stopAll || r._userRejected)) return r;
   if (!r.ok) return `❌ ${r.error}`;
   let output = `📂 目录：${r.cwd}\n💻 指令：${command}\n📤 退出码：${r.returncode}\n`;
   if (r.stdout) output += `\n[STDOUT]\n${r.stdout}`;

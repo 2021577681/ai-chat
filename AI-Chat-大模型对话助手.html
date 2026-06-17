@@ -1250,6 +1250,15 @@
     <div id="permissionsList" class="perm-list"></div>
     
     <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+        <span>🛡️ Shell 命令 AI 审核</span>
+      </label>
+      <div id="shellAuditSettings"></div>
+    </div>
+
+    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
     
     <div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
@@ -1274,6 +1283,38 @@
       <button class="btn" onclick="onClearAllPerms()">🗑️ 清空所有永久授权</button>
       <button class="btn" style="color:var(--danger,#d9534f);border-color:var(--danger,#d9534f);" onclick="onClearAllSecrets()">🚨 清除所有凭证</button>
       <button class="btn btn-primary" onclick="closePermissions()">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Shell 命令 AI 审核确认弹窗 ============ -->
+<div class="term-confirm-mask" id="shellAuditConfirmMask">
+  <div class="term-confirm shell-audit-confirm">
+    <div class="term-confirm-header">
+      <span class="icon">🛡️</span>
+      <span>Shell 命令需要人工确认</span>
+    </div>
+    <div class="term-confirm-body">
+      <div class="shell-audit-summary">
+        <span id="shellAuditRisk" class="shell-audit-risk high">高风险</span>
+        <span id="shellAuditNecessary" class="shell-audit-necessary">必要性：存疑</span>
+      </div>
+
+      <div class="term-confirm-label">审核理由</div>
+      <div class="shell-audit-reason" id="shellAuditReason">-</div>
+
+      <div class="term-confirm-label">风险点</div>
+      <ul class="shell-audit-concerns" id="shellAuditConcerns"></ul>
+
+      <div class="term-confirm-label">📂 工作目录</div>
+      <div class="term-confirm-cwd" id="shellAuditCwd">-</div>
+
+      <div class="term-confirm-label">💻 即将执行的命令</div>
+      <div class="term-confirm-cmd" id="shellAuditCmd"></div>
+    </div>
+    <div class="term-confirm-footer">
+      <button class="term-btn deny" onclick="shellAuditConfirmReject(false)">取消执行</button>
+      <button class="term-btn allow" onclick="shellAuditConfirmAccept()">仍然执行</button>
     </div>
   </div>
 </div>
@@ -1455,10 +1496,12 @@
 <script src="js/pricing.js"></script>
 <script src="js/token-usage.js"></script>
 <script src="js/privacy-guard.js"></script>
+<script src="js/api-profiles.js"></script>
 <script src="js/api-adapters.js"></script>
 <script src="js/api-core.js"></script>
 <script src="js/api-stream.js"></script>
 <script src="js/tools.js"></script>
+<script src="js/shell-audit.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/git-panel.js"></script>
 <script src="js/reflection.js"></script>
@@ -1468,7 +1511,6 @@
 <script src="js/outline-core.js"></script>
 <script src="js/outline-render.js"></script>
 <script src="js/settings.js"></script>
-<script src="js/api-profiles.js"></script>
 <script src="js/json-editor.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/permissions.js"></script>

@@ -14,6 +14,21 @@ function buildRequestBody(history, modelOverride, streamOverride, options = {}) 
   return _buildRequestBodyInternal(history, modelOverride, streamOverride, options);
 }
 
+function restorePrivacyToolArgs(args, context) {
+  return typeof privacyGuardRestoreToolCallArguments === 'function'
+    ? privacyGuardRestoreToolCallArguments(args, { context })
+    : args;
+}
+
+function finalizePrivacyAuxiliaryText(text, body, source) {
+  if (typeof privacyGuardFinalizeText !== 'function') return text;
+  return privacyGuardFinalizeText(text, {
+    source,
+    context: body,
+    includeResponseGuard: false
+  });
+}
+
 function _buildRequestBodyInternal(history, modelOverride, streamOverride, options = {}) {
   const s = state.settings;
   const model = modelOverride || s.currentModel;
@@ -653,6 +668,7 @@ async function callAPI(roundLimit, options = {}) {
         const fname = tc.function?.name || '';
         let args = {};
         try { args = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
+        args = restorePrivacyToolArgs(args, { body });
         const result = await executeTool(fname, args, {
           chatId: taskChatId,
           chat: c,
@@ -1029,7 +1045,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
     recordUsageFromResponse(c, streamUsage, { model: reqCtx?.body?.model });
   }
   if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
-    privacyGuardFinalizeAssistantMessage(c.messages[lastIdx], { source: 'main-stream' });
+    privacyGuardFinalizeAssistantMessage(c.messages[lastIdx], { source: 'main-stream', context: reqCtx?.body });
     if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
     if (typeof refreshMsgNode === 'function') refreshMsgNode(lastIdx, c);
     else updateLastMsg(c, lastIdx);
@@ -1129,7 +1145,7 @@ async function handleNonStream(txt, c, lastIdx, ct, reqCtx) {
     }
   }
   if (typeof privacyGuardFinalizeAssistantMessage === 'function') {
-    privacyGuardFinalizeAssistantMessage(c.messages[lastIdx], { source: 'main-nonstream' });
+    privacyGuardFinalizeAssistantMessage(c.messages[lastIdx], { source: 'main-nonstream', context: reqCtx?.body });
   }
 }
 
@@ -1282,9 +1298,15 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
           if (_c) recordUsageFromResponse(_c, usageForRecord, { model });
         }
         
-        if (s.apiFormat === 'anthropic') return (j.content || []).filter(p => p.type === 'text').map(p => p.text).join('') || '';
-        if (s.apiFormat === 'responses') return extractResponsesText(j) || '';
-        return j.choices?.[0]?.message?.content || '';
+        let content = '';
+        if (s.apiFormat === 'anthropic') {
+          content = (j.content || []).filter(p => p.type === 'text').map(p => p.text).join('') || '';
+        } else if (s.apiFormat === 'responses') {
+          content = extractResponsesText(j) || '';
+        } else {
+          content = j.choices?.[0]?.message?.content || '';
+        }
+        return finalizePrivacyAuxiliaryText(content, body, 'helper');
       } catch (attemptErr) {
         lastErr = attemptErr;
         // 用户主动 abort（含桥接外层主对话中止）：不重试，直接抛
@@ -1444,6 +1466,7 @@ async function runAgentLoop({
     const body = typeof withPrivacyGuardRequest === 'function'
       ? withPrivacyGuardRequest(buildLoopBody, { source: 'agent-loop', silentReport: true })
       : buildLoopBody();
+    const privacyContext = body;
     
     if (typeof applyRateLimit === 'function') await applyRateLimit(signal);
     
@@ -1674,7 +1697,7 @@ async function runAgentLoop({
     }
     
     if (typeof privacyGuardFinalizeText === 'function') {
-      assistantText = privacyGuardFinalizeText(assistantText, { source: 'agent-loop' });
+      assistantText = privacyGuardFinalizeText(assistantText, { source: 'agent-loop', context: privacyContext });
     }
 
     // 把 assistant 消息加入内部 messages
@@ -1724,6 +1747,7 @@ async function runAgentLoop({
       
       let args = {};
       try { args = JSON.parse(tc.arguments || '{}'); } catch (e) {}
+      args = restorePrivacyToolArgs(args, { body: privacyContext });
       
       _emit({ type: 'tool_call', id: tc.id, name: tc.name, args });
       
@@ -1732,7 +1756,9 @@ async function runAgentLoop({
       const runToolContext = {
         ...(toolContext && typeof toolContext === 'object' ? toolContext : {}),
         chatId: toolChatId,
-        chat: toolChat || (toolContext && toolContext.chat) || null
+        chat: toolChat || (toolContext && toolContext.chat) || null,
+        signal,
+        isStopped: _isAborted
       };
       const result = await executeTool(tc.name, args, runToolContext);
       

@@ -1808,7 +1808,7 @@ async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
     }
 
     if (typeof privacyGuardFinalizeText === 'function') {
-      finalText = privacyGuardFinalizeText(finalText, { source: 'debate' });
+      finalText = privacyGuardFinalizeText(finalText, { source: 'debate', context: body, includeResponseGuard: false });
     }
     return { finalText, messages };
   } finally {

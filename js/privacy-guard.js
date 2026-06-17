@@ -4,6 +4,8 @@
 const PRIVACY_GUARD_DEFAULTS = {
   enabled: false,
   replacementMode: 'mask',
+  localRestoreEnabled: false,
+  localRestoreRetention: 'request',
   fakeTemplates: {
     EMAIL: 'user{seq}@example.com',
     PHONE: '1380000{n4}',
@@ -27,6 +29,9 @@ const PRIVACY_GUARD_DEFAULTS = {
   includeTextAttachments: true,
   binaryAttachmentPolicy: 'strip',
   addSafetyInstruction: true,
+  safetyInstructionText: '隐私模式已启用：输入中的 [MASK_*] 或 [REDACTED_*] 是本地脱敏占位符。不要猜测、补全、还原或输出任何被脱敏的真实隐私值。',
+  localRestoreInstructionText: '隐私本地还原模式已启用：输入中的 [MASK_*] 是真实隐私数据的稳定占位符。你可以像使用真实值一样引用、比较、传递这些占位符，尤其是在工具调用参数中必须原样使用占位符；本地客户端会在必要时还原。不要声称因为数据被隐藏或脱敏而无法继续；不要猜测、补全或输出真实隐私值。',
+  responseGuardInstructionText: '回答结束时必须单独输出完整结束标记 {marker}，标记后不要再输出任何内容。',
   detector: {
     secrets: true,
     email: true,
@@ -48,6 +53,10 @@ const PRIVACY_GUARD_DEFAULTS = {
 };
 
 const PRIVACY_GUARD_HIGH_RISK_TYPES = new Set(['SECRET', 'PASSWORD', 'COOKIE', 'PRIVATE_KEY']);
+const PRIVACY_GUARD_CONTEXT_PROP = '__privacyGuardContext';
+const PRIVACY_GUARD_SESSION_MAP_KEY = 'aichat_privacy_restore_session_v1';
+const PRIVACY_GUARD_LOCAL_MAP_KEY = 'aichat_privacy_restore_local_v1';
+const PRIVACY_GUARD_RESTORE_MAP_LIMIT = 2000;
 
 const PRIVACY_GUARD_DETECTORS = [
   {
@@ -122,16 +131,24 @@ const PRIVACY_GUARD_DETECTORS = [
 
 let PRIVACY_GUARD_REQUEST_STATE = null;
 let PRIVACY_GUARD_LAST_REPORT = null;
+let PRIVACY_GUARD_CONTEXT_SEQ = 0;
 
 function createPrivacyGuardRequestState(cfg, options = {}) {
+  const retention = normalizePrivacyRestoreRetention(cfg.localRestoreRetention);
+  const restoreMap = cfg.localRestoreEnabled ? loadPrivacyGuardRestoreMap(retention) : {};
   return {
+    id: ++PRIVACY_GUARD_CONTEXT_SEQ,
     cfg,
     options,
+    restoreRetention: retention,
+    restoreScope: createPrivacyRestoreScope(),
     counters: {},
     strippedAttachments: 0,
     textAttachments: 0,
     highRiskCount: 0,
     replacementCounters: {},
+    restoreMap,
+    restoreNewCount: 0,
     lastByType: {},
     warnings: []
   };
@@ -170,7 +187,7 @@ function isPrivacyGuardEnabled() {
 }
 
 function beginPrivacyGuardRequest(options = {}) {
-  const cfg = getPrivacyGuardSettings();
+  const cfg = normalizePrivacyGuardRuntimeConfig(getPrivacyGuardSettings());
   if (!cfg.enabled) {
     PRIVACY_GUARD_REQUEST_STATE = null;
     return null;
@@ -188,6 +205,9 @@ function endPrivacyGuardRequest(reportOptions = {}) {
     strippedAttachments: req.strippedAttachments,
     textAttachments: req.textAttachments,
     highRiskCount: req.highRiskCount,
+    restoreCount: req.restoreNewCount || 0,
+    localRestoreEnabled: !!req.cfg.localRestoreEnabled,
+    localRestoreRetention: req.restoreRetention || 'request',
     warnings: req.warnings.slice(),
     ts: Date.now()
   };
@@ -198,12 +218,157 @@ function endPrivacyGuardRequest(reportOptions = {}) {
 
 function withPrivacyGuardRequest(fn, options = {}) {
   const req = beginPrivacyGuardRequest(options);
+  let result;
   try {
-    const result = fn();
-    return result;
+    result = fn();
   } finally {
-    if (req) endPrivacyGuardRequest({ silent: options.silentReport });
+    if (req) {
+      endPrivacyGuardRequest({ silent: options.silentReport });
+      attachPrivacyGuardContext(result, req);
+    }
   }
+  return result;
+}
+
+function normalizePrivacyGuardRuntimeConfig(cfg) {
+  const out = clonePrivacyValue(cfg || {});
+  if (out.localRestoreEnabled) out.replacementMode = 'mask';
+  out.localRestoreRetention = normalizePrivacyRestoreRetention(out.localRestoreRetention);
+  return out;
+}
+
+function buildPrivacyGuardContext(req) {
+  if (!req) return null;
+  return {
+    id: req.id || 0,
+    enabled: !!req.cfg?.enabled,
+    localRestoreEnabled: !!req.cfg?.localRestoreEnabled,
+    localRestoreRetention: req.restoreRetention || 'request',
+    responseGuardEnabled: !!req.cfg?.responseGuardEnabled,
+    responseGuardMarker: normalizePrivacyMarker(req.cfg?.responseGuardMarker),
+    responseGuardAction: req.cfg?.responseGuardAction || 'trim',
+    restoreMap: { ...(req.restoreMap || {}) }
+  };
+}
+
+function attachPrivacyGuardContext(target, req) {
+  if (!target || !req) return target;
+  const ctx = buildPrivacyGuardContext(req);
+  if (!ctx) return target;
+  try {
+    Object.defineProperty(target, PRIVACY_GUARD_CONTEXT_PROP, {
+      value: ctx,
+      enumerable: false,
+      configurable: true
+    });
+  } catch (e) {
+    try { target[PRIVACY_GUARD_CONTEXT_PROP] = ctx; } catch (err) {}
+  }
+  return target;
+}
+
+function getPrivacyGuardContext(source) {
+  if (source && typeof source === 'object') {
+    if (source[PRIVACY_GUARD_CONTEXT_PROP]) return source[PRIVACY_GUARD_CONTEXT_PROP];
+    if (source.body && typeof source.body === 'object' && source.body[PRIVACY_GUARD_CONTEXT_PROP]) {
+      return source.body[PRIVACY_GUARD_CONTEXT_PROP];
+    }
+  }
+  return null;
+}
+
+function recordPrivacyGuardRestore(req, placeholder, original) {
+  if (!req || !req.cfg?.localRestoreEnabled) return;
+  if (placeholder == null || original == null) return;
+  const key = String(placeholder);
+  if (!key) return;
+  if (Object.prototype.hasOwnProperty.call(req.restoreMap, key)) return;
+  req.restoreMap[key] = String(original);
+  req.restoreNewCount = (req.restoreNewCount || 0) + 1;
+  savePrivacyGuardRestoreEntry(req.restoreRetention || req.cfg.localRestoreRetention, key, original);
+}
+
+function normalizePrivacyRestoreRetention(value) {
+  const v = String(value || 'request').trim();
+  return ['request', 'session', 'local'].includes(v) ? v : 'request';
+}
+
+function createPrivacyRestoreScope() {
+  try {
+    const bytes = new Uint8Array(4);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    }
+  } catch (e) {}
+  return Math.random().toString(36).slice(2, 10).toUpperCase();
+}
+
+function privacyRestoreStorageKey(retention) {
+  const normalized = normalizePrivacyRestoreRetention(retention);
+  if (normalized === 'session') return PRIVACY_GUARD_SESSION_MAP_KEY;
+  if (normalized === 'local') return PRIVACY_GUARD_LOCAL_MAP_KEY;
+  return '';
+}
+
+function loadPrivacyGuardRestoreMap(retention) {
+  const key = privacyRestoreStorageKey(retention);
+  if (!key) return {};
+  try {
+    const raw = retention === 'session'
+      ? (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : '')
+      : (typeof storage !== 'undefined' ? storage.get(key) : '');
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function savePrivacyGuardRestoreEntry(retention, placeholder, original) {
+  const normalized = normalizePrivacyRestoreRetention(retention);
+  if (normalized === 'request') return;
+  const key = privacyRestoreStorageKey(normalized);
+  if (!key) return;
+  const map = loadPrivacyGuardRestoreMap(normalized);
+  map[String(placeholder)] = String(original);
+  prunePrivacyRestoreMap(map);
+  try {
+    const payload = JSON.stringify(map);
+    if (normalized === 'session') {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, payload);
+    } else if (typeof storage !== 'undefined') {
+      storage.set(key, payload);
+    }
+  } catch (e) {
+    console.warn('[privacy] 保存本地还原映射失败:', e.message);
+  }
+}
+
+function prunePrivacyRestoreMap(map) {
+  const keys = Object.keys(map || {});
+  if (keys.length <= PRIVACY_GUARD_RESTORE_MAP_LIMIT) return map;
+  const removeCount = keys.length - PRIVACY_GUARD_RESTORE_MAP_LIMIT;
+  for (const key of keys.slice(0, removeCount)) delete map[key];
+  return map;
+}
+
+function clearPrivacyGuardRestoreStore(retention) {
+  const normalized = normalizePrivacyRestoreRetention(retention);
+  const key = privacyRestoreStorageKey(normalized);
+  if (!key) return;
+  try {
+    if (normalized === 'session') {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key);
+    } else if (typeof storage !== 'undefined') {
+      storage.remove(key);
+    }
+  } catch (e) {}
+}
+
+function clearAllPrivacyGuardRestoreStores() {
+  clearPrivacyGuardRestoreStore('session');
+  clearPrivacyGuardRestoreStore('local');
 }
 
 function showPrivacyGuardReport(report) {
@@ -218,7 +383,7 @@ function showPrivacyGuardReport(report) {
 }
 
 function privacyGuardPrepareHistory(history, options = {}) {
-  const cfg = getPrivacyGuardSettings();
+  const cfg = normalizePrivacyGuardRuntimeConfig(getPrivacyGuardSettings());
   if (!cfg.enabled) return history;
   const req = PRIVACY_GUARD_REQUEST_STATE || createPrivacyGuardRequestState(cfg, options);
   const list = Array.isArray(history) ? history : [];
@@ -387,7 +552,12 @@ function makePrivacyReplacement(match, type, highRisk, req) {
   if (highRisk && req.cfg.stripHighRisk) return `[REDACTED_${safeType}]`;
   if (req.cfg.replacementMode === 'fake') return fakePrivacyValue(safeType, req);
   req.replacementCounters[safeType] = (req.replacementCounters[safeType] || 0) + 1;
-  return `[MASK_${safeType}_${String(req.replacementCounters[safeType]).padStart(2, '0')}]`;
+  const seq = String(req.replacementCounters[safeType]).padStart(2, '0');
+  const placeholder = req.restoreRetention === 'request'
+    ? `[MASK_${safeType}_${seq}]`
+    : `[MASK_${req.restoreScope}_${safeType}_${seq}]`;
+  recordPrivacyGuardRestore(req, placeholder, match);
+  return placeholder;
 }
 
 function fakePrivacyValue(type, req) {
@@ -415,7 +585,7 @@ function formatPrivacyFakeTemplate(template, type, n, seq) {
 }
 
 function privacyGuardSanitizeSystemText(text, options = {}) {
-  const cfg = getPrivacyGuardSettings();
+  const cfg = normalizePrivacyGuardRuntimeConfig(getPrivacyGuardSettings());
   let out = String(text || '');
   if (cfg.enabled && cfg.includeSystemPrompt) {
     const tempReq = PRIVACY_GUARD_REQUEST_STATE || createPrivacyGuardRequestState(cfg, { systemOnly: true });
@@ -429,36 +599,70 @@ function privacyGuardSanitizeSystemText(text, options = {}) {
 }
 
 function privacyGuardSystemSuffix(options = {}) {
-  const cfg = getPrivacyGuardSettings();
+  return buildPrivacyGuardSystemSuffix(getPrivacyGuardSettings(), options);
+}
+
+function buildPrivacyGuardSystemSuffix(inputCfg, options = {}) {
+  const cfg = normalizePrivacyGuardRuntimeConfig(inputCfg || {});
   if (!cfg.enabled) return '';
   const lines = [];
   if (cfg.addSafetyInstruction) {
-    lines.push('隐私模式已启用：输入中的 [MASK_*] 或 [REDACTED_*] 是本地脱敏占位符。不要猜测、补全、还原或输出任何被脱敏的真实隐私值。');
+    const instruction = cfg.localRestoreEnabled
+      ? cfg.localRestoreInstructionText
+      : cfg.safetyInstructionText;
+    const text = String(instruction || '').trim();
+    if (text) lines.push(text);
   }
   if (cfg.responseGuardEnabled && options.includeResponseGuard !== false) {
     const marker = normalizePrivacyMarker(cfg.responseGuardMarker);
-    lines.push(`回答结束时必须单独输出完整结束标记 ${marker}，标记后不要再输出任何内容。`);
+    lines.push(formatPrivacyInstructionTemplate(cfg.responseGuardInstructionText, {
+      marker
+    }));
   }
   return lines.join('\n');
 }
 
+function formatPrivacyInstructionTemplate(template, values = {}) {
+  const fallback = PRIVACY_GUARD_DEFAULTS.responseGuardInstructionText;
+  return String(template || fallback).replace(/\{([A-Za-z0-9_]+)\}/g, (match, key) => {
+    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match;
+  });
+}
+
 function privacyGuardFinalizeAssistantMessage(msg, options = {}) {
   const cfg = getPrivacyGuardSettings();
-  if (!cfg.enabled || !cfg.responseGuardEnabled || !msg || typeof msg.content !== 'string') return msg;
-  const marker = normalizePrivacyMarker(cfg.responseGuardMarker);
-  if (!marker) return msg;
-  const idx = msg.content.indexOf(marker);
-  if (idx >= 0) {
-    msg.content = msg.content.slice(0, idx).trimEnd();
+  const ctx = getPrivacyGuardContext(options && (options.context || options.request || options));
+  const active = !!cfg.enabled || !!ctx?.enabled;
+  if (!active || !msg || typeof msg.content !== 'string') return msg;
+  const responseGuardEnabled = ctx ? !!ctx.responseGuardEnabled : !!cfg.responseGuardEnabled;
+  const responseGuardMarker = ctx?.responseGuardMarker || cfg.responseGuardMarker;
+  const responseGuardAction = ctx?.responseGuardAction || cfg.responseGuardAction;
+  const shouldCheckResponseGuard = responseGuardEnabled
+    && options.includeResponseGuard !== false
+    && options.skipResponseGuard !== true;
+  if (shouldCheckResponseGuard) {
+    const marker = normalizePrivacyMarker(responseGuardMarker);
+    if (marker) {
+      const idx = msg.content.indexOf(marker);
+      if (idx >= 0) {
+        msg.content = msg.content.slice(0, idx).trimEnd();
+        if (Array.isArray(msg._responsesOutput)) {
+          syncPrivacyResponsesOutputText(msg._responsesOutput, msg.content);
+        }
+        msg._privacyGuardMarkerOk = true;
+      } else {
+        msg._privacyGuardMarkerMissing = true;
+        if (responseGuardAction === 'warn') {
+          msg.content = `${msg.content.trimEnd()}\n\n*[隐私防尾注提醒：未检测到结束标记，返回内容可能被中转站追加或模型未遵循标记要求。]*`;
+        }
+      }
+    }
+  }
+  if (ctx?.localRestoreEnabled || cfg.localRestoreEnabled) {
+    msg.content = privacyGuardRestoreText(msg.content, options);
     if (Array.isArray(msg._responsesOutput)) {
       syncPrivacyResponsesOutputText(msg._responsesOutput, msg.content);
     }
-    msg._privacyGuardMarkerOk = true;
-    return msg;
-  }
-  msg._privacyGuardMarkerMissing = true;
-  if (cfg.responseGuardAction === 'warn') {
-    msg.content = `${msg.content.trimEnd()}\n\n*[隐私防尾注提醒：未检测到结束标记，返回内容可能被中转站追加或模型未遵循标记要求。]*`;
   }
   return msg;
 }
@@ -479,6 +683,41 @@ function privacyGuardFinalizeText(text, options = {}) {
   const holder = { content: String(text || '') };
   privacyGuardFinalizeAssistantMessage(holder, options);
   return holder.content;
+}
+
+function privacyGuardRestoreText(text, options = {}) {
+  if (typeof text !== 'string' || !text) return text;
+  const ctx = getPrivacyGuardContext(options && (options.context || options.request || options));
+  const cfg = getPrivacyGuardSettings();
+  const retention = ctx?.localRestoreRetention || cfg.localRestoreRetention;
+  const map = ctx && ctx.localRestoreEnabled
+    ? (ctx.restoreMap || {})
+    : (cfg.enabled && cfg.localRestoreEnabled ? loadPrivacyGuardRestoreMap(retention) : {});
+  const entries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
+  if (!entries.length) return text;
+  let out = text;
+  for (const [placeholder, original] of entries) {
+    out = out.split(placeholder).join(original);
+  }
+  return out;
+}
+
+function privacyGuardRestoreValue(value, options = {}) {
+  const ctx = getPrivacyGuardContext(options && (options.context || options.request || options));
+  const cfg = getPrivacyGuardSettings();
+  if (!ctx?.localRestoreEnabled && !(cfg.enabled && cfg.localRestoreEnabled && normalizePrivacyRestoreRetention(cfg.localRestoreRetention) !== 'request')) return value;
+  if (typeof value === 'string') return privacyGuardRestoreText(value, options);
+  if (Array.isArray(value)) return value.map(v => privacyGuardRestoreValue(v, options));
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  Object.keys(value).forEach(key => {
+    out[key] = privacyGuardRestoreValue(value[key], options);
+  });
+  return out;
+}
+
+function privacyGuardRestoreToolCallArguments(args, options = {}) {
+  return privacyGuardRestoreValue(args, options);
 }
 
 function privacyGuardSanitizeAuxiliarySystemText(text) {
@@ -576,6 +815,7 @@ function closePrivacySettings() {
 function renderPrivacySettings() {
   const mask = buildPrivacySettingsModal();
   const cfg = getPrivacyGuardSettings();
+  const replacementMode = cfg.localRestoreEnabled ? 'mask' : cfg.replacementMode;
   mask.innerHTML = `
     <div class="modal wide privacy-settings-panel">
       <h2>隐私脱敏 <button class="modal-close" onclick="closePrivacySettings()">×</button></h2>
@@ -609,12 +849,35 @@ function renderPrivacySettings() {
           ${privacyCheck('pgDetectCustomTerms', '自定义词表', cfg.detector.customTerms)}
           ${privacyCheck('pgDetectCustomRegex', '自定义正则', cfg.detector.customRegex)}
         </div>
+        <div class="privacy-section-head privacy-restore-row">
+          <div>
+            <div class="privacy-section-title">本地还原</div>
+            <div class="form-hint">仅占位符模式，回复与工具参数可在本地还原。开启后会强制使用占位符，不再允许假数据模式。</div>
+          </div>
+          ${privacySwitch('pgLocalRestoreEnabled', cfg.localRestoreEnabled)}
+        </div>
+        <div class="form-row two-cols privacy-retention-row">
+          <div>
+            <label>本地还原映射保存期限</label>
+            <select id="pgLocalRestoreRetention">
+              <option value="request"${cfg.localRestoreRetention === 'request' ? ' selected' : ''}>仅本次请求</option>
+              <option value="session"${cfg.localRestoreRetention === 'session' ? ' selected' : ''}>当前页面会话，刷新保留</option>
+              <option value="local"${cfg.localRestoreRetention === 'local' ? ' selected' : ''}>永久保存到本地</option>
+            </select>
+            <div class="form-hint">保存期限越长，可恢复历史上下文的能力越强，但真实隐私值在本地保留得越久。</div>
+          </div>
+          <div>
+            <label>映射管理</label>
+            <button type="button" class="btn" onclick="clearPrivacyRestoreMappings()">清空已保存映射</button>
+            <div class="form-hint">清空当前页面会话和永久本地映射，不影响已显示的聊天文本。</div>
+          </div>
+        </div>
         <div class="form-row two-cols">
           <div>
             <label>替换方式</label>
-            <select id="pgReplacementMode">
-              <option value="mask"${cfg.replacementMode === 'mask' ? ' selected' : ''}>类型占位符：[MASK_EMAIL_01]</option>
-              <option value="fake"${cfg.replacementMode === 'fake' ? ' selected' : ''}>假数据：user01@example.com</option>
+            <select id="pgReplacementMode"${cfg.localRestoreEnabled ? ' disabled' : ''}>
+              <option value="mask"${replacementMode === 'mask' ? ' selected' : ''}>类型占位符：[MASK_EMAIL_01]</option>
+              <option value="fake"${replacementMode === 'fake' ? ' selected' : ''}>假数据：user01@example.com</option>
             </select>
             <div class="form-hint">选择“假数据”后会使用下面的模板；高风险内容仍受“高风险内容”策略控制。</div>
           </div>
@@ -624,8 +887,10 @@ function renderPrivacySettings() {
               <option value="true"${cfg.stripHighRisk ? ' selected' : ''}>直接替换为 [REDACTED_*]</option>
               <option value="false"${!cfg.stripHighRisk ? ' selected' : ''}>按普通占位符处理</option>
             </select>
+            <div class="form-hint">密钥、Token、Cookie、密码、私钥默认仍按高风险处理。</div>
           </div>
         </div>
+        <div class="form-hint privacy-restore-note">高风险内容仍按上方策略处理：选择 [REDACTED_*] 时不会存入还原映射。</div>
         <div class="privacy-subsection-title">假数据模板</div>
         <div class="form-hint privacy-template-help">可使用 {seq}、{n}、{n3}、{n4}、{ip}、{id3}、{bank4}、{type} 作为序号占位。留空会恢复该类型默认模板。</div>
         <div class="privacy-template-grid">
@@ -651,6 +916,38 @@ function renderPrivacySettings() {
             </select>
             <div class="form-hint">浏览器端不能可靠替换图片或 PDF 里的隐私文字，默认剥离更稳妥。</div>
           </div>
+        </div>
+      </section>
+
+      <section class="privacy-section">
+        <div class="privacy-section-head">
+          <div>
+            <div class="privacy-section-title">注入给 AI 的提示</div>
+            <div class="form-hint">这些文本会追加到 system prompt 中。开启本地还原后会使用“本地还原提示”，让模型把占位符当作可操作的真实参数引用。</div>
+          </div>
+        </div>
+        <div class="form-row two-cols">
+          <div>
+            <label>普通脱敏提示</label>
+            <textarea id="pgSafetyInstructionText" rows="5">${privacyEscape(cfg.safetyInstructionText)}</textarea>
+            <div class="form-hint">用于未开启本地还原时，强调不要猜测或还原隐私值。</div>
+          </div>
+          <div>
+            <label>本地还原提示</label>
+            <textarea id="pgLocalRestoreInstructionText" rows="5">${privacyEscape(cfg.localRestoreInstructionText)}</textarea>
+            <div class="form-hint">用于开启本地还原时，提示模型可以原样使用占位符完成推理和工具调用。</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>响应结束标记提示</label>
+            <textarea id="pgResponseGuardInstructionText" rows="3">${privacyEscape(cfg.responseGuardInstructionText)}</textarea>
+            <div class="form-hint">可用 {marker} 表示上方设置的结束标记。</div>
+          </div>
+        </div>
+        <div class="privacy-prompt-preview">
+          <div class="privacy-subsection-title">当前注入预览</div>
+          <pre id="pgInstructionPreview">${privacyEscape(buildPrivacyInstructionPreviewFromConfig(cfg))}</pre>
         </div>
       </section>
 
@@ -702,6 +999,16 @@ function renderPrivacySettings() {
       </div>
     </div>
   `;
+  updatePrivacyLocalRestoreUi();
+  const restoreToggle = document.getElementById('pgLocalRestoreEnabled');
+  if (restoreToggle) restoreToggle.addEventListener('change', updatePrivacyLocalRestoreUi);
+  ['pgSafetyInstructionText', 'pgLocalRestoreInstructionText', 'pgResponseGuardInstructionText', 'pgResponseGuardMarker', 'pgResponseGuardEnabled', 'pgAddSafetyInstruction', 'pgLocalRestoreRetention']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', updatePrivacyInstructionPreview);
+      if (el) el.addEventListener('change', updatePrivacyInstructionPreview);
+    });
+  updatePrivacyInstructionPreview();
 }
 
 function privacySwitch(id, checked) {
@@ -734,12 +1041,14 @@ function renderPrivacyFakeTemplateInputs(templates = {}) {
     ['COOKIE', 'Cookie'],
     ['PRIVATE_KEY', '私钥']
   ];
+  const cfg = getPrivacyGuardSettings();
+  const disabled = cfg.localRestoreEnabled ? ' disabled' : '';
   return fields.map(([type, label]) => {
     const value = templates[type] || PRIVACY_GUARD_DEFAULTS.fakeTemplates[type] || '';
     return `
       <div class="privacy-template-field">
         <label for="pgFakeTpl${type}">${privacyEscape(label)}</label>
-        <input id="pgFakeTpl${type}" data-fake-template="${type}" value="${privacyEscape(value)}">
+        <input id="pgFakeTpl${type}" data-fake-template="${type}" value="${privacyEscape(value)}"${disabled}>
       </div>
     `;
   }).join('');
@@ -757,7 +1066,9 @@ function savePrivacySettingsFromUi() {
   const value = id => document.getElementById(id)?.value || '';
 
   cfg.enabled = checked('pgEnabled');
-  cfg.replacementMode = value('pgReplacementMode') || 'mask';
+  cfg.localRestoreEnabled = checked('pgLocalRestoreEnabled');
+  cfg.localRestoreRetention = normalizePrivacyRestoreRetention(value('pgLocalRestoreRetention'));
+  cfg.replacementMode = cfg.localRestoreEnabled ? 'mask' : (value('pgReplacementMode') || 'mask');
   cfg.stripHighRisk = value('pgStripHighRisk') !== 'false';
   cfg.includeSystemPrompt = checked('pgIncludeSystemPrompt');
   cfg.includeToolResults = checked('pgIncludeToolResults');
@@ -765,6 +1076,9 @@ function savePrivacySettingsFromUi() {
   cfg.includeTextAttachments = checked('pgIncludeTextAttachments');
   cfg.binaryAttachmentPolicy = value('pgBinaryAttachmentPolicy') || 'strip';
   cfg.addSafetyInstruction = checked('pgAddSafetyInstruction');
+  cfg.safetyInstructionText = value('pgSafetyInstructionText') || PRIVACY_GUARD_DEFAULTS.safetyInstructionText;
+  cfg.localRestoreInstructionText = value('pgLocalRestoreInstructionText') || PRIVACY_GUARD_DEFAULTS.localRestoreInstructionText;
+  cfg.responseGuardInstructionText = value('pgResponseGuardInstructionText') || PRIVACY_GUARD_DEFAULTS.responseGuardInstructionText;
   cfg.detector = {
     secrets: checked('pgDetectSecrets'),
     email: checked('pgDetectEmail'),
@@ -802,6 +1116,59 @@ function collectPrivacyFakeTemplates() {
   return out;
 }
 
+function updatePrivacyLocalRestoreUi() {
+  const enabled = !!document.getElementById('pgLocalRestoreEnabled')?.checked;
+  const replacementMode = document.getElementById('pgReplacementMode');
+  const retention = document.getElementById('pgLocalRestoreRetention');
+  if (replacementMode) {
+    if (enabled) replacementMode.value = 'mask';
+    replacementMode.disabled = enabled;
+  }
+  if (retention) retention.disabled = !enabled;
+  document.querySelectorAll('[data-fake-template]').forEach(input => {
+    input.disabled = enabled;
+  });
+  updatePrivacyInstructionPreview();
+}
+
+function clearPrivacyRestoreMappings() {
+  clearAllPrivacyGuardRestoreStores();
+  if (typeof toast === 'function') toast('已清空本地还原映射');
+  const status = document.getElementById('privacyLastReport');
+  if (status) status.textContent = renderPrivacyLastReport();
+}
+
+function buildPrivacyInstructionPreviewFromConfig(cfg) {
+  return buildPrivacyGuardSystemSuffix({
+    ...cfg,
+    enabled: true
+  }, { includeResponseGuard: true }) || '（当前不会注入额外提示）';
+}
+
+function getPrivacyInstructionPreviewConfig() {
+  const cfg = getPrivacyGuardSettings();
+  const checked = id => !!document.getElementById(id)?.checked;
+  const value = id => document.getElementById(id)?.value || '';
+  return {
+    ...cfg,
+    enabled: true,
+    localRestoreEnabled: checked('pgLocalRestoreEnabled'),
+    localRestoreRetention: normalizePrivacyRestoreRetention(value('pgLocalRestoreRetention') || cfg.localRestoreRetention),
+    addSafetyInstruction: checked('pgAddSafetyInstruction'),
+    safetyInstructionText: value('pgSafetyInstructionText') || cfg.safetyInstructionText,
+    localRestoreInstructionText: value('pgLocalRestoreInstructionText') || cfg.localRestoreInstructionText,
+    responseGuardEnabled: checked('pgResponseGuardEnabled'),
+    responseGuardMarker: normalizePrivacyMarker(value('pgResponseGuardMarker') || cfg.responseGuardMarker),
+    responseGuardInstructionText: value('pgResponseGuardInstructionText') || cfg.responseGuardInstructionText
+  };
+}
+
+function updatePrivacyInstructionPreview() {
+  const el = document.getElementById('pgInstructionPreview');
+  if (!el) return;
+  el.textContent = buildPrivacyInstructionPreviewFromConfig(getPrivacyInstructionPreviewConfig());
+}
+
 function resetPrivacyGuardDefaults() {
   state.settings.privacyGuard = clonePrivacyGuardDefaults();
   persistSettings();
@@ -818,7 +1185,8 @@ function renderPrivacyLastReport() {
   const types = Object.entries(report.counters || {})
     .map(([k, v]) => `${k}:${v}`)
     .join(' · ') || '无文本命中';
-  return `最近请求：${total} 处文本脱敏 · ${report.strippedAttachments || 0} 个附件剥离 · ${types}`;
+  const restore = report.localRestoreEnabled ? ` · 本地还原映射 ${report.restoreCount || 0} 项` : '';
+  return `最近请求：${total} 处文本脱敏 · ${report.strippedAttachments || 0} 个附件剥离${restore} · ${types}`;
 }
 
 function getPrivacyGuardInputInfoSuffix() {
@@ -836,6 +1204,9 @@ window.privacyGuardSanitizeSystemText = privacyGuardSanitizeSystemText;
 window.privacyGuardSanitizeAuxiliarySystemText = privacyGuardSanitizeAuxiliarySystemText;
 window.privacyGuardFinalizeAssistantMessage = privacyGuardFinalizeAssistantMessage;
 window.privacyGuardFinalizeText = privacyGuardFinalizeText;
+window.privacyGuardRestoreText = privacyGuardRestoreText;
+window.privacyGuardRestoreValue = privacyGuardRestoreValue;
+window.privacyGuardRestoreToolCallArguments = privacyGuardRestoreToolCallArguments;
 window.togglePrivacyGuard = togglePrivacyGuard;
 window.updatePrivacyGuardButton = updatePrivacyGuardButton;
 window.openPrivacySettings = openPrivacySettings;
@@ -843,6 +1214,7 @@ window.closePrivacySettings = closePrivacySettings;
 window.renderPrivacySettings = renderPrivacySettings;
 window.savePrivacySettingsFromUi = savePrivacySettingsFromUi;
 window.resetPrivacyGuardDefaults = resetPrivacyGuardDefaults;
+window.clearPrivacyRestoreMappings = clearPrivacyRestoreMappings;
 window.getPrivacyGuardInputInfoSuffix = getPrivacyGuardInputInfoSuffix;
 
 if (typeof state !== 'undefined') ensurePrivacyGuardSettings();

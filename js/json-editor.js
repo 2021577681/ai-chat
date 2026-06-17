@@ -29,6 +29,7 @@ function _sanitizeReqHeaders(headers) {
 }
 
 function recordRawResponse(entry) {
+  entry = _cloneRawResponseEntry(entry);
   // 若调用方传了 request 字段，把请求头脱敏一份存到 _safeHeaders
   if (entry && entry.request && entry.request.headers) {
     entry.request._safeHeaders = _sanitizeReqHeaders(entry.request.headers);
@@ -45,6 +46,35 @@ function recordRawResponse(entry) {
       refreshJsonResponse();
     }
   }
+}
+
+function _cloneRawResponseEntry(entry) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const out = { ...entry };
+  if (entry.request && typeof entry.request === 'object') {
+    out.request = _cloneRawRequest(entry.request);
+  }
+  return out;
+}
+
+function _cloneRawRequest(req) {
+  const safeHeaders = _sanitizeReqHeaders(req.headers || {});
+  const out = {
+    url: req.url,
+    method: req.method,
+    headers: safeHeaders,
+    _safeHeaders: safeHeaders
+  };
+  if (req.body !== undefined) {
+    out.body = _jsonSafeClone(req.body);
+  }
+  return out;
+}
+
+function _jsonSafeClone(value) {
+  if (typeof value === 'string') return value;
+  try { return JSON.parse(JSON.stringify(value)); }
+  catch (e) { return value; }
 }
 
 const DEFAULT_JSON_TEMPLATE_OPENAI = `{
