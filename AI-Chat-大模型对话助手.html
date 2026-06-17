@@ -184,7 +184,7 @@
       <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
       <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
       <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
-      <button class="topbar-btn" id="privacyBtn" onclick="togglePrivacyGuard()" oncontextmenu="event.preventDefault();openPrivacySettings()" title="隐私脱敏"><img class="topbar-btn-icon" src="icon/保护_protect.png" alt=""><span>隐私</span></button>
+      <button class="topbar-btn" id="privacyBtn" onclick="togglePrivacyGuard()" oncontextmenu="event.preventDefault();openPrivacySettings()" title="隐私模式"><img class="topbar-btn-icon" src="icon/保护_protect.png" alt=""><span>隐私</span></button>
       <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
       <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）"><img class="topbar-btn-icon" src="icon/日志_log.png" alt=""><span>日志</span></button>
       <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话"><img class="topbar-btn-icon" src="icon/健康_health.png" alt=""><span>体检</span></button>
@@ -1249,17 +1249,6 @@
     
     <div id="permissionsList" class="perm-list"></div>
     
-    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
-
-    <div class="form-group">
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
-        <span>🛡️ Shell 命令 AI 审核</span>
-      </label>
-      <div id="shellAuditSettings"></div>
-    </div>
-
-    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
-    
     <div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
         <span>📋 本任务临时允许（任务结束自动清除）</span>
@@ -1379,7 +1368,7 @@
     <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span>📑</span><span>大纲模式</span></button>
     <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span>🎭</span><span>师生讨论</span></button>
     <button class="settings-nav-item" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。" onclick="openSettingsSection('tools')"><span>🛠</span><span>工具管理</span></button>
-    <button class="settings-nav-item" data-settings-section="privacy" data-desc="配置本地脱敏、附件策略和响应防尾注。" onclick="openSettingsSection('privacy')"><span>🔒</span><span>隐私脱敏</span></button>
+    <button class="settings-nav-item" data-settings-section="privacy" data-desc="配置本地脱敏、Shell 审核、附件策略和响应防尾注。" onclick="openSettingsSection('privacy')"><span>🔒</span><span>隐私模式</span></button>
     <button class="settings-nav-item" data-settings-section="taskQueue" data-desc="管理自动任务、依赖关系和队列执行。" onclick="openSettingsSection('taskQueue')"><span>🧾</span><span>任务队列</span></button>
     <button class="settings-nav-item" data-settings-section="concurrentRequests" data-desc="让多个独立 AI 同时执行同一条指令，并汇总到一个对话。" onclick="openSettingsSection('concurrentRequests')"><span>⚡</span><span>并发请求</span></button>
     <button class="settings-nav-item" data-settings-section="debateMode" data-desc="配置正反方和评委模型，自动创建多局辩论对话。" onclick="openSettingsSection('debateMode')"><span>⚖️</span><span>辩论模式</span></button>

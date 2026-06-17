@@ -4,7 +4,6 @@ function openPermissions() {
   document.getElementById('permissionsModal').classList.add('show');
   renderPermissionsList();
   renderTaskPermissionsList();
-  if (typeof renderShellAuditSettings === 'function') renderShellAuditSettings();
 }
 
 function closePermissions() {

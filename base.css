@@ -581,7 +581,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .btn-primary:hover{background:var(--primary-hover)}
 .btn-warning{background:var(--warning);color:#fff;border-color:var(--warning)}
 
-/* 隐私脱敏 */
+/* 隐私模式 */
 .privacy-settings-panel{width:min(980px,95vw)}
 .privacy-section{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:14px;margin-bottom:14px}
 .privacy-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}

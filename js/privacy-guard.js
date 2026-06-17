@@ -482,7 +482,7 @@ function sanitizePrivacyAttachments(attachments, req) {
         req.strippedAttachments += 1;
         if (a.mime === 'application/pdf') {
           a._stripped = true;
-          a._strippedReason = '隐私脱敏模式已剥离 PDF 原始数据；可在隐私设置中改为继续发送。';
+          a._strippedReason = '隐私模式已剥离 PDF 原始数据；可在隐私设置中改为继续发送。';
         }
       }
       return a;
@@ -492,7 +492,7 @@ function sanitizePrivacyAttachments(attachments, req) {
       delete a.data;
       delete a.text;
       a._stripped = true;
-      a._strippedReason = '隐私脱敏模式已剥离二进制附件；可在隐私设置中改为继续发送。';
+      a._strippedReason = '隐私模式已剥离二进制附件；可在隐私设置中改为继续发送。';
       req.strippedAttachments += 1;
     }
     return a;
@@ -777,7 +777,7 @@ function togglePrivacyGuard() {
   persistSettings();
   updatePrivacyGuardButton();
   if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast(cfg.enabled ? '隐私脱敏已开启' : '隐私脱敏已关闭');
+  if (typeof toast === 'function') toast(cfg.enabled ? '隐私模式已开启' : '隐私模式已关闭');
 }
 
 function updatePrivacyGuardButton() {
@@ -787,8 +787,8 @@ function updatePrivacyGuardButton() {
   btn.classList.toggle('privacy-active', !!cfg.enabled);
   btn.setAttribute('aria-pressed', cfg.enabled ? 'true' : 'false');
   btn.title = cfg.enabled
-    ? '隐私脱敏已开启，点击关闭；右键打开设置'
-    : '隐私脱敏已关闭，点击开启；右键打开设置';
+    ? '隐私模式已开启，点击关闭；右键打开设置'
+    : '隐私模式已关闭，点击开启；右键打开设置';
 }
 
 function buildPrivacySettingsModal() {
@@ -818,7 +818,7 @@ function renderPrivacySettings() {
   const replacementMode = cfg.localRestoreEnabled ? 'mask' : cfg.replacementMode;
   mask.innerHTML = `
     <div class="modal wide privacy-settings-panel">
-      <h2>隐私脱敏 <button class="modal-close" onclick="closePrivacySettings()">×</button></h2>
+      <h2>隐私模式 <button class="modal-close" onclick="closePrivacySettings()">×</button></h2>
 
       <div class="json-help privacy-help">
         此功能在本地构造请求体前替换敏感文本，尽量降低不可信中转站看到真实数据的概率。它不能保护上游鉴权 Key，也不能对已发送到中转站的内容做加密；图片/PDF 默认会被剥离。
@@ -990,6 +990,12 @@ function renderPrivacySettings() {
         </div>
       </section>
 
+      <section class="privacy-section">
+        <div class="privacy-section-title">Shell 命令 AI 审核</div>
+        <div class="form-hint">只审核 AI 发起的 execute_action 命令。原有 Shell 权限确认通过后，再由审核模型判断命令是否必要和安全。</div>
+        <div id="shellAuditSettings"></div>
+      </section>
+
       <div class="privacy-status" id="privacyLastReport">${renderPrivacyLastReport()}</div>
 
       <div class="modal-footer">
@@ -1000,6 +1006,7 @@ function renderPrivacySettings() {
     </div>
   `;
   updatePrivacyLocalRestoreUi();
+  if (typeof renderShellAuditSettings === 'function') renderShellAuditSettings();
   const restoreToggle = document.getElementById('pgLocalRestoreEnabled');
   if (restoreToggle) restoreToggle.addEventListener('change', updatePrivacyLocalRestoreUi);
   ['pgSafetyInstructionText', 'pgLocalRestoreInstructionText', 'pgResponseGuardInstructionText', 'pgResponseGuardMarker', 'pgResponseGuardEnabled', 'pgAddSafetyInstruction', 'pgLocalRestoreRetention']
@@ -1190,7 +1197,7 @@ function renderPrivacyLastReport() {
 }
 
 function getPrivacyGuardInputInfoSuffix() {
-  return isPrivacyGuardEnabled() ? ' · 隐私脱敏' : '';
+  return isPrivacyGuardEnabled() ? ' · 隐私模式' : '';
 }
 
 window.ensurePrivacyGuardSettings = ensurePrivacyGuardSettings;
