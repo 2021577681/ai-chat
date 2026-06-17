@@ -533,6 +533,8 @@ function beginChatTask(chatId, abortCtrl, opts = {}) {
     isGenerating: true,
     abortCtrl: abortCtrl || existing.abortCtrl || null,
     stopRequested: opts.resetStop ? false : !!existing.stopRequested,
+    pendingGuidance: existing.pendingGuidance || null,
+    guidanceRequested: !!existing.guidanceRequested,
     startedAt: existing.startedAt || Date.now()
   };
   tasks[chatId] = task;
@@ -561,6 +563,32 @@ function requestStopChatTask(chatId) {
   }
   syncGlobalTaskState(chatId);
   return true;
+}
+
+function setChatTaskGuidance(chatId, message) {
+  if (!chatId || !message) return null;
+  const tasks = ensureChatTasks();
+  const task = tasks[chatId] || beginChatTask(chatId, null);
+  if (!task) return null;
+  task.pendingGuidance = message;
+  task.guidanceRequested = true;
+  syncGlobalTaskState(chatId);
+  return task;
+}
+
+function chatTaskHasGuidance(chatId) {
+  const task = chatTaskById(chatId);
+  return !!(task && task.pendingGuidance);
+}
+
+function takeChatTaskGuidance(chatId) {
+  const task = chatTaskById(chatId);
+  if (!task || !task.pendingGuidance) return null;
+  const guidance = task.pendingGuidance;
+  task.pendingGuidance = null;
+  task.guidanceRequested = false;
+  syncGlobalTaskState(chatId);
+  return guidance;
 }
 
 function clearChatTask(chatId) {

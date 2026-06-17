@@ -221,6 +221,8 @@ window.saveTerminalToken = saveTerminalToken;
 let _termConfirmResolve = null;
 let _currentConfirmCategory = '';
 let _currentConfirmChatId = '';
+let _termConfirmAbortSignal = null;
+let _termConfirmAbortHandler = null;
 let _pendingAutoResend = null;
 let _pendingAutoResendByChat = {};
 let _autoResendTimer = null;
@@ -235,6 +237,11 @@ let _autoResendCancelSeqByChat = {};
 
 function termAskConfirm(title, detail, command, category, context) {
   return new Promise(resolve => {
+    if (_termConfirmAbortSignal && _termConfirmAbortHandler) {
+      try { _termConfirmAbortSignal.removeEventListener('abort', _termConfirmAbortHandler); } catch (_) {}
+    }
+    _termConfirmAbortSignal = null;
+    _termConfirmAbortHandler = null;
     _termConfirmResolve = resolve;
     _currentConfirmCategory = category || '';
     _currentConfirmChatId = resolveToolChatId(context);
@@ -281,7 +288,33 @@ function termAskConfirm(title, detail, command, category, context) {
       } else countEl.textContent = `(${secs}s)`;
     }, 1000);
     btn._timer = timer;
+    const signal = context && context.signal;
+    if (signal) {
+      const abortConfirm = () => {
+        document.getElementById('termConfirmMask').classList.remove('show');
+        if (btn._timer) clearInterval(btn._timer);
+        if (_termConfirmResolve) {
+          _termConfirmResolve({ allowed: false, rejectAll: false, aborted: true });
+          _termConfirmResolve = null;
+        }
+        _currentConfirmChatId = '';
+        _termConfirmAbortSignal = null;
+        _termConfirmAbortHandler = null;
+      };
+      _termConfirmAbortSignal = signal;
+      _termConfirmAbortHandler = abortConfirm;
+      if (signal.aborted) abortConfirm();
+      else signal.addEventListener('abort', abortConfirm, { once: true });
+    }
   });
+}
+
+function cleanupTermConfirmAbortListener() {
+  if (_termConfirmAbortSignal && _termConfirmAbortHandler) {
+    try { _termConfirmAbortSignal.removeEventListener('abort', _termConfirmAbortHandler); } catch (_) {}
+  }
+  _termConfirmAbortSignal = null;
+  _termConfirmAbortHandler = null;
 }
 
 function termConfirmAccept() {
@@ -295,6 +328,7 @@ function termConfirmAccept() {
   }
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: true, rejectAll: false });
     _termConfirmResolve = null;
@@ -313,6 +347,7 @@ function termConfirmAcceptAll() {
   }
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: true, rejectAll: false });
     _termConfirmResolve = null;
@@ -324,6 +359,7 @@ function termConfirmReject() {
   document.getElementById('termConfirmMask').classList.remove('show');
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: false, rejectAll: false });
     _termConfirmResolve = null;
@@ -335,6 +371,7 @@ function termConfirmRejectAll() {
   document.getElementById('termConfirmMask').classList.remove('show');
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: false, rejectAll: true });
     _termConfirmResolve = null;
@@ -376,11 +413,20 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       taskAllow[category];
     
     if (forceConfirm || !alreadyAllowed) {
-      const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, { chatId });
+      const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, {
+        ...(context && typeof context === 'object' ? context : {}),
+        chatId
+      });
       
       if (!result.allowed) {
         if (typeof claimConcurrentFileOwnership === 'function') {
           claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+        }
+        if (result.aborted) {
+          return {
+            ok: false,
+            error: '⏸️ 工具确认已被中途引导中断。'
+          };
         }
         if (result.rejectAll) {
           return {
@@ -404,7 +450,8 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     return await fetch(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
-      body: JSON.stringify({ action, ...requestParams, session_id: getAgentSessionId({ chatId }) })
+      body: JSON.stringify({ action, ...requestParams, session_id: getAgentSessionId({ chatId }) }),
+      signal: context && context.signal ? context.signal : undefined
     });
   };
   
@@ -452,6 +499,9 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   } catch (e) {
     if (typeof claimConcurrentFileOwnership === 'function') {
       claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
+    }
+    if (e && e.name === 'AbortError') {
+      return { ok: false, error: '⏸️ 工具请求已被中断，准备按新的引导继续。' };
     }
     return { ok: false, error: `无法连接后端服务：${e.message}` };
   }

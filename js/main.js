@@ -145,6 +145,7 @@ async function init() {
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+      if (typeof updateSendBtn === 'function') updateSendBtn();
       clearTimeout(window._tokenUpdateTimer);
       window._tokenUpdateTimer = setTimeout(() => {
         if (typeof updateTokenDisplay === 'function') updateTokenDisplay();

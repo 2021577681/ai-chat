@@ -311,7 +311,8 @@ async function _apiFetchWithTimeout(url, init, externalSignal, timeoutMs) {
         ...realInit,
         method: (init && init.method) || 'POST',
         headers: proxyHeaders,
-        body: init && init.body // 原样转发
+        body: init && init.body, // 原样转发
+        signal: timeoutCtrl.signal
       };
     }
   } catch (e) {
@@ -395,16 +396,78 @@ async function callAPI(roundLimit, options = {}) {
   else state.abortCtrl = abortCtrl;
   updateSendBtn();
   if (typeof renderChatList === 'function') renderChatList();
+
+  const currentTask = () => (typeof chatTaskById === 'function' ? chatTaskById(taskChatId) : task);
+  const hasPendingGuidance = () => !!(currentTask() && currentTask().pendingGuidance);
+  const pruneToolCallsToExecuted = (msg, executedIds) => {
+    if (!msg || !msg.tool_calls) return;
+    msg.tool_calls = msg.tool_calls.filter(tc => executedIds.includes(tc.id));
+    if (!msg.tool_calls.length) delete msg.tool_calls;
+    if (Array.isArray(msg._responsesOutput)) {
+      msg._responsesOutput = msg._responsesOutput.filter(item => {
+        if (!item || item.type !== 'function_call') return true;
+        return executedIds.includes(item.call_id || item.id);
+      });
+      if (!msg._responsesOutput.length) delete msg._responsesOutput;
+    }
+  };
+  const appendPendingGuidanceAndContinue = async (nextRoundLimit = roundLimit) => {
+    const guidance = (typeof takeChatTaskGuidance === 'function')
+      ? takeChatTaskGuidance(taskChatId)
+      : (() => {
+          const t = currentTask();
+          if (!t || !t.pendingGuidance) return null;
+          const g = t.pendingGuidance;
+          t.pendingGuidance = null;
+          t.guidanceRequested = false;
+          return g;
+        })();
+    if (!guidance) return false;
+    const t = currentTask();
+    if (t) {
+      t.stopRequested = false;
+      t.guidanceRequested = false;
+    }
+    state.stopRequested = false;
+    c.messages.push(guidance);
+    if (typeof maybeInsertBeacon === 'function') {
+      try { maybeInsertBeacon(c); } catch (e) { console.warn('[beacon] 插入失败:', e); }
+    }
+    saveData();
+    if (isTaskVisible()) renderMessages();
+    if (typeof scrollBottom === 'function') requestAnimationFrame(() => scrollBottom());
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(taskChatId);
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+    await callAPI(Math.max(0, nextRoundLimit), {
+      chatId: taskChatId,
+      useTools: taskUseTools,
+      suppressCompletionSound
+    });
+    return true;
+  };
   
   if (!options.contextChecked && typeof ensureContextBeforeAgentRun === 'function') {
-    const ok = await ensureContextBeforeAgentRun(c, {
-      label: '普通对话',
-      chat: c,
-      chatId: taskChatId,
-      signal: abortCtrl.signal,
-      isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
-    });
+    let ok = false;
+    try {
+      ok = await ensureContextBeforeAgentRun(c, {
+        label: '普通对话',
+        chat: c,
+        chatId: taskChatId,
+        signal: abortCtrl.signal,
+        isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+      });
+    } catch (e) {
+      if (e.name === 'AbortError' && hasPendingGuidance()) {
+        await appendPendingGuidanceAndContinue(roundLimit);
+        return;
+      }
+      throw e;
+    }
     if (!ok) {
+      if (hasPendingGuidance()) {
+        await appendPendingGuidanceAndContinue(roundLimit);
+        return;
+      }
       if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
       else {
         state.isGenerating = false;
@@ -568,13 +631,21 @@ async function callAPI(roundLimit, options = {}) {
           userStoppedAll = true;
           // ⭐ 关键修复：去掉未执行的 tool_calls，避免下次请求时
           //   DeepSeek/OpenAI 报 400："tool_calls must be followed by tool messages"
-          msg.tool_calls = msg.tool_calls.filter(tc => executedToolCallIds.includes(tc.id));
+          pruneToolCallsToExecuted(msg, executedToolCallIds);
           break;
         }
         const fname = tc.function?.name || '';
         let args = {};
         try { args = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
-        const result = await executeTool(fname, args, { chatId: taskChatId, chat: c });
+        const result = await executeTool(fname, args, {
+          chatId: taskChatId,
+          chat: c,
+          signal: abortCtrl.signal,
+          isStopped: () => {
+            const t = currentTask();
+            return !!(t && t.stopRequested) || !!state.stopRequested;
+          }
+        });
         
         let contentText;
         let isError = false;
@@ -636,10 +707,16 @@ async function callAPI(roundLimit, options = {}) {
           if (isTaskVisible()) renderMessages();
         }
         saveData();
+
+        if (hasPendingGuidance()) {
+          pruneToolCallsToExecuted(msg, executedToolCallIds);
+          await appendPendingGuidanceAndContinue(Math.max(0, roundLimit - 1));
+          return;
+        }
         
         if (stopAll) {
           // ⭐ stopAll 也会导致后续 tool_calls 不执行，同样需要清理
-          msg.tool_calls = msg.tool_calls.filter(tc => executedToolCallIds.includes(tc.id));
+          pruneToolCallsToExecuted(msg, executedToolCallIds);
           break;
         }
       }
@@ -649,6 +726,10 @@ async function callAPI(roundLimit, options = {}) {
       // ⭐ 用户点了"停止"：不再递归发下一轮请求
       //   关键修复：避免"工具执行完后照样再发一轮 API"的死循环
       if (task ? task.stopRequested : state.stopRequested) {
+        if (hasPendingGuidance()) {
+          await appendPendingGuidanceAndContinue(Math.max(0, roundLimit - 1));
+          return;
+        }
         // 在最后一条 assistant 消息上留个标记，让用户看清楚是被停了
         const lastMsg = c.messages[c.messages.length - 1];
         if (lastMsg && lastMsg.role === 'tool') {
@@ -686,6 +767,19 @@ async function callAPI(roundLimit, options = {}) {
         msg.tool_calls.map(tc => tc.id || tc.function?.name).join(', '));
       delete msg.tool_calls;
     }
+
+    if (hasPendingGuidance()) {
+      if (c.messages[lastIdx]) c.messages[lastIdx]._endTime = Date.now();
+      if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+      if (typeof refreshMsgNode === 'function') {
+        refreshMsgNode(lastIdx, c);
+      } else {
+        if (isTaskVisible()) renderMessages();
+      }
+      saveData();
+      await appendPendingGuidanceAndContinue(roundLimit);
+      return;
+    }
     
     saveData();
     // ⭐ 完成时标记结束时间，并对当前消息节点做一次"完整"渲染（含 KaTeX）
@@ -700,6 +794,23 @@ async function callAPI(roundLimit, options = {}) {
     if (isTaskVisible() && typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount(taskChatId);
     if (!suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
   } catch (e) {
+    if (e.name === 'AbortError' && hasPendingGuidance()) {
+      if (c.messages[lastIdx]) {
+        if (!c.messages[lastIdx].content && !(c.messages[lastIdx].tool_calls && c.messages[lastIdx].tool_calls.length)) {
+          c.messages[lastIdx].content = '*[已接收中途引导，正在调整]*';
+        }
+        c.messages[lastIdx]._endTime = Date.now();
+      }
+      if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+      if (typeof refreshMsgNode === 'function') {
+        refreshMsgNode(lastIdx, c);
+      } else {
+        if (isTaskVisible()) renderMessages();
+      }
+      saveData();
+      await appendPendingGuidanceAndContinue(roundLimit);
+      return;
+    }
     if (e.name === 'AbortError') c.messages[lastIdx].content += '\n\n*[已停止]*';
     else {
       c.messages[lastIdx].content = `❌ ${e.message}\n\n💡 URL: ${url}`;

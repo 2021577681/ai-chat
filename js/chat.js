@@ -57,6 +57,88 @@ function _consumeOneShotMode() {
   return mode;
 }
 
+function _buildUserMessageFromInput(chat, text, opts = {}) {
+  const userMsg = { role: 'user', content: text };
+  if (opts.midrunGuidance) {
+    userMsg._midrunGuidance = true;
+    userMsg._queuedAt = Date.now();
+  }
+  const allAttachments = [...state.pendingAttachments];
+  const pendingAIForChat = (typeof takePendingAIAttachments === 'function')
+    ? takePendingAIAttachments(chat.id)
+    : (state.pendingAIAttachments || []).splice(0);
+  if (pendingAIForChat && pendingAIForChat.length) {
+    for (const a of pendingAIForChat) {
+      if (!allAttachments.some(ex => ex.id === a.id)) {
+        allAttachments.push(a);
+      }
+    }
+  }
+  if (allAttachments.length) userMsg.attachments = allAttachments.map(a => ({ ...a }));
+  return userMsg;
+}
+
+function _clearComposerAfterSend(input) {
+  if (input) {
+    input.value = '';
+    input.style.height = 'auto';
+  }
+  state.pendingAttachments = [];
+  if (typeof renderPendingAtts === 'function') renderPendingAtts();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+}
+
+function _canGuideCurrentTask(chatId) {
+  const task = (typeof chatTaskById === 'function') ? chatTaskById(chatId) : null;
+  if (!task || !task.isGenerating) return false;
+  return !task.mode || task.mode === 'chat';
+}
+
+function queueMidrunGuidance(chat, input, text) {
+  if (!chat || !input || (!text && !state.pendingAttachments.length)) return false;
+  if (!_canGuideCurrentTask(chat.id)) return false;
+  const userMsg = _buildUserMessageFromInput(chat, text, { midrunGuidance: true });
+  const task = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
+  if (task && task.pendingGuidance) {
+    const previous = task.pendingGuidance;
+    previous.content = [previous.content || '', userMsg.content || ''].filter(Boolean).join('\n\n');
+    if (userMsg.attachments && userMsg.attachments.length) {
+      const merged = Array.isArray(previous.attachments) ? previous.attachments : [];
+      for (const att of userMsg.attachments) {
+        if (!merged.some(ex => ex.id === att.id)) merged.push(att);
+      }
+      previous.attachments = merged;
+    }
+    previous._queuedAt = Date.now();
+  } else if (typeof setChatTaskGuidance === 'function') {
+    setChatTaskGuidance(chat.id, userMsg);
+  } else if (task) {
+    task.pendingGuidance = userMsg;
+    task.guidanceRequested = true;
+  }
+  if (typeof traceUserMessage === 'function') traceUserMessage(text);
+  _clearComposerAfterSend(input);
+
+  const runningTask = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
+  const ctrl = runningTask ? (runningTask.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  if (runningTask) runningTask.stopRequested = true;
+  state.stopRequested = true;
+  if (ctrl) {
+    try { ctrl.abort(); } catch (e) { console.error('[queueMidrunGuidance] 中断失败:', e); }
+  }
+  if (typeof window !== 'undefined' && window._rateWaitAbort) {
+    try { window._rateWaitAbort(ctrl && ctrl.signal); } catch (e) {}
+  }
+  if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
+    try { window.cancelAutoResend(chat.id, false); } catch (e) {}
+  }
+  if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof toast === 'function') toast('已发送中途引导，正在调整当前任务', 1800);
+  return true;
+}
+
 function newChat() {
   const id = 'c_' + Date.now();
   state.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
@@ -1006,6 +1088,7 @@ function addAttachment(file, type) {
       att.data = e.target.result;
       state.pendingAttachments.push(att);
       renderPendingAtts();
+      if (typeof updateSendBtn === 'function') updateSendBtn();
     };
     r.readAsDataURL(file);
   } else if (isTextLike(file)) {
@@ -1014,6 +1097,7 @@ function addAttachment(file, type) {
       att.text = e.target.result;
       state.pendingAttachments.push(att);
       renderPendingAtts();
+      if (typeof updateSendBtn === 'function') updateSendBtn();
     };
     r.readAsText(file);
   } else {
@@ -1022,6 +1106,7 @@ function addAttachment(file, type) {
       att.data = e.target.result;
       state.pendingAttachments.push(att);
       renderPendingAtts();
+      if (typeof updateSendBtn === 'function') updateSendBtn();
     };
     r.readAsDataURL(file);
   }
@@ -1042,6 +1127,7 @@ function removeAttachment(id) {
     state.pendingAIAttachmentsByChat[state.currentId] = state.pendingAIAttachmentsByChat[state.currentId].filter(a => a.id !== id);
   }
   renderPendingAtts();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
 }
 
 function renderPendingAtts() {
@@ -1099,7 +1185,14 @@ async function onSend() {
   // 状态保护
   const currentId = state.currentId;
   const currentGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(currentId) : !!state.isGenerating;
+  const input = document.getElementById('input');
+  const text = input.value.trim();
   if (currentGenerating) {
+    const c = currentChat();
+    if (c && (text || state.pendingAttachments.length)) {
+      console.log('[onSend] 当前对话正在生成，发送中途引导...');
+      if (queueMidrunGuidance(c, input, text)) return;
+    }
     console.log('[onSend] 当前对话正在生成，先停止...');
     stopGenerate();
     await new Promise(r => setTimeout(r, 200));
@@ -1107,8 +1200,6 @@ async function onSend() {
     if (typeof updateSendBtn === 'function') updateSendBtn();
     return;
   }
-  const input = document.getElementById('input');
-  const text = input.value.trim();
 
   const c = currentChat();
 
@@ -1179,20 +1270,7 @@ async function onSend() {
     }
   }
   
-  const userMsg = { role: 'user', content: text };
-  
-  const allAttachments = [...state.pendingAttachments];
-  const pendingAIForChat = (typeof takePendingAIAttachments === 'function')
-    ? takePendingAIAttachments(c.id)
-    : (state.pendingAIAttachments || []).splice(0);
-  if (pendingAIForChat && pendingAIForChat.length) {
-    for (const a of pendingAIForChat) {
-      if (!allAttachments.some(ex => ex.id === a.id)) {
-        allAttachments.push(a);
-      }
-    }
-  }
-  if (allAttachments.length) userMsg.attachments = allAttachments.map(a => ({ ...a }));
+  const userMsg = _buildUserMessageFromInput(c, text);
   
   c.messages.push(userMsg);
   if (c.messages.length === 1) c.title = (text || '附件对话').slice(0, 30);
@@ -1205,11 +1283,8 @@ async function onSend() {
   if (typeof maybeInsertBeacon === 'function') {
     try { maybeInsertBeacon(c); } catch (e) { console.warn('[beacon] 插入失败:', e); }
   }
-  
-  input.value = '';
-  input.style.height = 'auto';
-  state.pendingAttachments = [];
-  renderPendingAtts();
+
+  _clearComposerAfterSend(input);
   renderChatList();
   renderMessages();
   saveData();

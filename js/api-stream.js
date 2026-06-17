@@ -139,9 +139,19 @@ function updateSendBtn() {
     && typeof isDebateWaitingManualTimed === 'function' && isDebateWaitingManualTimed(c.id));
   const currentGenerating = (typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : !!state.isGenerating;
   if (currentGenerating) {
-    btn.textContent = '■';
-    btn.classList.add('stop');
-    document.getElementById('inputInfo').textContent = debateWaitingManual ? '辩论等待人工审核，可暂停倒计时' : '生成中...';
+    const input = document.getElementById('input');
+    const hasDraft = !!(input && input.value.trim()) || !!(state.pendingAttachments && state.pendingAttachments.length);
+    const task = (typeof chatTaskById === 'function' && c) ? chatTaskById(c.id) : null;
+    const canGuide = !!(task && task.isGenerating && (!task.mode || task.mode === 'chat'));
+    if (hasDraft && canGuide && !debateWaitingManual) {
+      btn.textContent = '↑';
+      btn.classList.remove('stop');
+      document.getElementById('inputInfo').textContent = '发送中途引导，AI 会调整当前任务';
+    } else {
+      btn.textContent = '■';
+      btn.classList.add('stop');
+      document.getElementById('inputInfo').textContent = debateWaitingManual ? '辩论等待人工审核，可暂停倒计时' : '生成中...';
+    }
   } else {
     btn.textContent = '↑';
     btn.classList.remove('stop');
