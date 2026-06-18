@@ -13,6 +13,10 @@ const GIT_STATE = {
   selectedCommit: null, // 当前选中的提交
   remoteTargetBranch: '', // 提交/推送时使用的远程目标分支（origin/<name>）
   remoteTargetBranchEdited: false,
+  reflogOpen: false,
+  reflogLoaded: false,
+  reflogEntries: [],
+  origHead: '',
   loading: false,
 };
 
@@ -115,6 +119,23 @@ async function _refreshGitPanel() {
       </div>
     </div>
     <div id="gitConfigInline" hidden></div>
+    <div class="git-recovery-panel">
+      <div class="git-recovery-head">
+        <div class="git-recovery-copy">
+          <div class="git-recovery-title">恢复点 / Reflog</div>
+          <div class="git-recovery-note">可找回被 reset 隐藏的提交；未提交的工作区改动不一定能恢复。</div>
+        </div>
+        <div class="git-recovery-actions">
+          <button class="git-btn git-btn-small" onclick="_undoLastReset()" title="使用 git reset --hard ORIG_HEAD 回到上次 reset 前的 HEAD">
+            ↩ 撤回上次重置
+          </button>
+          <button class="git-btn git-btn-small" id="gitReflogToggleBtn" onclick="_toggleReflogPanel()" title="查看 Git reflog 恢复点">
+            恢复点 ▾
+          </button>
+        </div>
+      </div>
+      <div id="gitReflogPanel" class="git-reflog-panel" hidden></div>
+    </div>
     <div class="git-main-grid">
       <div class="git-left-col">
         <div class="git-section-title">📂 工作区改动</div>
@@ -151,11 +172,25 @@ async function _refreshGitPanel() {
 
   // 并行加载状态 + 历史
   await Promise.all([_loadStatus(), _loadHistory()]);
+  _syncReflogPanelState();
 }
 
 function _setBranchBadge(name) {
   const el = document.getElementById('gitBranchBadge');
   if (el) el.innerHTML = `🌿 ${escapeHtml(name)} ▾`;
+}
+
+function _syncReflogPanelState() {
+  const panel = document.getElementById('gitReflogPanel');
+  const btn = document.getElementById('gitReflogToggleBtn');
+  if (!panel || !btn) return;
+  panel.hidden = !GIT_STATE.reflogOpen;
+  btn.innerHTML = GIT_STATE.reflogOpen ? '恢复点 ▴' : '恢复点 ▾';
+  if (GIT_STATE.reflogOpen && !GIT_STATE.reflogLoaded) {
+    _loadReflog();
+  } else if (GIT_STATE.reflogOpen) {
+    _renderReflogPanel();
+  }
 }
 
 // ============ 初始化向导 ============
@@ -307,6 +342,75 @@ function _relTime(d) {
   if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
   if (diff < 86400 * 7) return Math.floor(diff / 86400) + ' 天前';
   return d.toLocaleString('zh-CN', { hour12: false });
+}
+
+async function _toggleReflogPanel() {
+  GIT_STATE.reflogOpen = !GIT_STATE.reflogOpen;
+  _syncReflogPanelState();
+}
+
+async function _loadReflog() {
+  const panel = document.getElementById('gitReflogPanel');
+  if (!panel) return;
+  panel.hidden = false;
+  panel.innerHTML = `<div class="git-loading git-reflog-loading">加载恢复点…</div>`;
+  const r = await callGit('reflog', { limit: 30 });
+  if (!r.ok) {
+    panel.innerHTML = `<div class="git-error">❌ ${escapeHtml(r.error || '加载恢复点失败')}</div>`;
+    return;
+  }
+  GIT_STATE.reflogLoaded = true;
+  GIT_STATE.reflogEntries = r.entries || [];
+  GIT_STATE.origHead = r.origHead || '';
+  _renderReflogPanel();
+}
+
+function _renderReflogPanel() {
+  const panel = document.getElementById('gitReflogPanel');
+  if (!panel) return;
+  if (!GIT_STATE.reflogEntries.length) {
+    panel.innerHTML = `
+      <div class="git-empty-state-small">
+        还没有可用的 reflog 恢复点。仓库至少需要有过提交或 HEAD 移动记录。
+      </div>
+    `;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="git-reflog-list">
+      ${GIT_STATE.reflogEntries.map(e => _renderReflogRow(e)).join('')}
+    </div>
+  `;
+}
+
+function _renderReflogRow(entry) {
+  const hash = entry.hash || '';
+  const shortHash = entry.shortHash || hash.slice(0, 8);
+  const selector = entry.selector || '';
+  const subject = entry.subject || 'HEAD 记录';
+  const dateText = _formatGitDate(entry.date);
+  return `
+    <div class="git-reflog-row">
+      <div class="git-reflog-main">
+        <div class="git-reflog-subject">${escapeHtml(subject)}</div>
+        <div class="git-reflog-meta">
+          ${selector ? `<code>${escapeHtml(selector)}</code>` : ''}
+          <code>${escapeHtml(shortHash)}</code>
+          ${dateText ? `<span>${escapeHtml(dateText)}</span>` : ''}
+        </div>
+      </div>
+      <button class="git-btn git-btn-small git-btn-warn" onclick="_restoreReflogHash('${hash}')">
+        恢复到这里
+      </button>
+    </div>
+  `;
+}
+
+function _formatGitDate(text) {
+  if (!text) return '';
+  const d = new Date(text);
+  if (Number.isNaN(d.getTime())) return text;
+  return _relTime(d);
 }
 
 // ============ 详情面板 ============
@@ -841,6 +945,64 @@ async function _doResetHard(hash, lostCount) {
   }
   toast('✅ 已重置');
   await _refreshGitPanel();
+}
+
+async function _undoLastReset() {
+  const ok = await _confirmDangerous({
+    title: '撤回上次重置',
+    intro: '将执行 git reset --hard ORIG_HEAD，回到上次 reset/merge 等操作前的 HEAD。当前未提交的工作区改动可能无法恢复。',
+    lossList: _currentDirtyLossList(),
+    danger: true,
+  });
+  if (!ok) return;
+  toast('↩ 正在撤回上次重置…');
+  const r = await callGit('reset_orig_head', { confirm: '我确定' });
+  if (!r.ok) {
+    toast('❌ 撤回失败：' + (r.error || '找不到 ORIG_HEAD'), 7000);
+    return;
+  }
+  toast(`✅ 已恢复到 ${((r.target || '').slice(0, 8) || 'ORIG_HEAD')}`);
+  GIT_STATE.reflogLoaded = false;
+  await _refreshGitPanel();
+}
+
+async function _restoreReflogHash(hash) {
+  if (!hash || !/^[0-9a-f]{4,40}$/i.test(hash)) {
+    toast('❌ 无效的恢复点');
+    return;
+  }
+  const entry = (GIT_STATE.reflogEntries || []).find(e => e.hash === hash) || {};
+  const shortHash = entry.shortHash || hash.slice(0, 8);
+  const label = `${entry.selector || shortHash} ${entry.subject || 'HEAD 记录'}`;
+  const ok = await _confirmDangerous({
+    title: `恢复到 ${shortHash}`,
+    intro: `将执行 git reset --hard ${shortHash}。\n恢复点：${label || shortHash}\n\n这会把当前分支 HEAD、暂存区和工作区都切到该快照。`,
+    lossList: _currentDirtyLossList(),
+    danger: true,
+  });
+  if (!ok) return;
+  toast('⏮ 正在恢复恢复点…');
+  const r = await callGit('reset_to_ref', { commit: hash, confirm: '我确定' });
+  if (!r.ok) {
+    toast('❌ 恢复失败：' + (r.error || ''), 7000);
+    return;
+  }
+  toast(`✅ 已恢复到 ${shortHash}`);
+  GIT_STATE.reflogLoaded = false;
+  await _refreshGitPanel();
+}
+
+function _currentDirtyLossList() {
+  const losses = [];
+  if (GIT_STATE.status) {
+    const staged = (GIT_STATE.status.staged || []).length;
+    const unstaged = (GIT_STATE.status.unstaged || []).length;
+    const untracked = (GIT_STATE.status.untracked || []).length;
+    if (staged) losses.push(`${staged} 个已暂存文件的当前状态`);
+    if (unstaged) losses.push(`${unstaged} 个未暂存文件的当前改动`);
+    if (untracked) losses.push(`${untracked} 个未跟踪文件（Git 可能不会自动恢复）`);
+  }
+  return losses.length ? losses : ['当前工作区状态会被重置到目标提交'];
 }
 
 // ---------- 分支下拉菜单 ----------
@@ -1477,6 +1639,9 @@ window._doBranchDelete = _doBranchDelete;
 window._doRevert = _doRevert;
 window._doResetMixed = _doResetMixed;
 window._doResetHard = _doResetHard;
+window._toggleReflogPanel = _toggleReflogPanel;
+window._undoLastReset = _undoLastReset;
+window._restoreReflogHash = _restoreReflogHash;
 window._openRemotePanel = _openRemotePanel;
 window._refreshRemotePanel = _refreshRemotePanel;
 window._savePanelUser = _savePanelUser;

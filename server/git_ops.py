@@ -6,6 +6,7 @@
 #                check / init / config_* / status / log / diff /
 #                add / unstage / commit / checkout_file / show_file /
 #                branch_* / revert / reset_mixed / reset_hard /
+#                reflog / reset_to_ref / reset_orig_head /
 #                remote_* / fetch / pull / push / scan_diff
 #
 #   内部工具：
@@ -53,7 +54,7 @@ class GitMixin:
             'check', 'status', 'log', 'diff', 'add', 'unstage', 'commit',
             'checkout_file', 'show_file', 'init', 'config_get', 'config_set', 'config_unset',
             'branch_list', 'branch_create', 'branch_switch',
-            'revert', 'reset_mixed', 'reset_hard',
+            'revert', 'reset_mixed', 'reset_hard', 'reflog', 'reset_to_ref', 'reset_orig_head',
             'branch_delete', 'branch_rename',
             'remote_list', 'remote_add', 'remote_remove', 'remote_set_url',
             'push', 'pull', 'fetch',
@@ -116,6 +117,10 @@ class GitMixin:
             # ===== log =====
             if sub == 'log':
                 return self._git_log(body, cwd_abs)
+
+            # ===== reflog =====
+            if sub == 'reflog':
+                return self._git_reflog(body, cwd_abs)
 
             # ===== diff =====
             if sub == 'diff':
@@ -244,6 +249,28 @@ class GitMixin:
                 if not r['ok']:
                     return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
                 return self._send_json(200, {'ok': True, 'output': r['stdout']})
+
+            if sub == 'reset_to_ref':
+                commit = (body.get('commit') or body.get('hash') or '').strip()
+                if not re.match(r'^[0-9a-f]{4,40}$', commit):
+                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                if body.get('confirm') != '我确定':
+                    return self._send_json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
+                r = self._git_run(['git', 'reset', '--hard', commit], cwd_abs, timeout=20)
+                if not r['ok']:
+                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self._send_json(200, {'ok': True, 'output': r['stdout'], 'target': commit})
+
+            if sub == 'reset_orig_head':
+                if body.get('confirm') != '我确定':
+                    return self._send_json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
+                commit, err = self._git_resolve_ref_hash('ORIG_HEAD', cwd_abs)
+                if not commit:
+                    return self._send_json(200, {'ok': False, 'error': err or '找不到 ORIG_HEAD，无法撤回上次重置'})
+                r = self._git_run(['git', 'reset', '--hard', commit], cwd_abs, timeout=20)
+                if not r['ok']:
+                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self._send_json(200, {'ok': True, 'output': r['stdout'], 'target': commit})
 
             # ========== Phase 2：分支删除/重命名 ==========
             if sub == 'branch_delete':
@@ -526,6 +553,41 @@ class GitMixin:
             })
         return self._send_json(200, {'ok': True, 'commits': commits})
 
+    def _git_reflog(self, body, cwd_abs):
+        limit = max(1, min(int(body.get('limit', 30)), 100))
+        fmt = '%H%x1f%h%x1f%gd%x1f%gs%x1f%ci%x1e'
+        r = self._git_run(['git', 'reflog', f'--max-count={limit}', f'--format={fmt}'], cwd_abs, timeout=10)
+        if not r['ok']:
+            no_commits = 'does not have any commits' in (r['stderr'] or '') or 'bad default revision' in (r['stderr'] or '')
+            if no_commits:
+                return self._send_json(200, {'ok': True, 'entries': [], 'origHead': '', 'origHeadShort': ''})
+            return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+        entries = []
+        for rec in r['stdout'].split('\x1e'):
+            rec = rec.strip('\n\r')
+            if not rec:
+                continue
+            parts = rec.split('\x1f')
+            if len(parts) < 5:
+                continue
+            full_hash = parts[0].strip()
+            if not re.match(r'^[0-9a-f]{40}$', full_hash):
+                continue
+            entries.append({
+                'hash': full_hash,
+                'shortHash': parts[1].strip() or full_hash[:8],
+                'selector': parts[2].strip(),
+                'subject': parts[3].strip(),
+                'date': parts[4].strip(),
+            })
+        orig_head, _ = self._git_resolve_ref_hash('ORIG_HEAD', cwd_abs)
+        return self._send_json(200, {
+            'ok': True,
+            'entries': entries,
+            'origHead': orig_head or '',
+            'origHeadShort': (orig_head or '')[:8],
+        })
+
     def _git_diff(self, body, cwd_abs):
         mode = body.get('mode', 'working')
         file = body.get('file')
@@ -546,6 +608,15 @@ class GitMixin:
         if not r['ok']:
             return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
         return self._send_json(200, {'ok': True, 'diff': r['stdout'], 'mode': mode, 'file': file})
+
+    def _git_resolve_ref_hash(self, ref, cwd_abs):
+        r = self._git_run(['git', 'rev-parse', '--verify', ref], cwd_abs, timeout=5)
+        if not r['ok']:
+            return None, r['stderr'] or r['stdout'] or f'找不到 {ref}'
+        full_hash = (r['stdout'] or '').strip().splitlines()[0] if (r['stdout'] or '').strip() else ''
+        if not re.match(r'^[0-9a-f]{40}$', full_hash):
+            return None, f'{ref} 不是有效的提交'
+        return full_hash, ''
 
     def _git_scan_diff(self, body, cwd_abs):
         remote = (body.get('remote') or 'origin').strip()

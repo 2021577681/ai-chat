@@ -97,6 +97,73 @@
   .git-user-actions .git-btn { flex: 1; justify-content: center; }
 }
 
+.git-recovery-panel {
+  margin-bottom: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.git-recovery-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 9px 12px;
+}
+.git-recovery-copy {
+  min-width: 0; display: flex; align-items: baseline; gap: 10px;
+}
+.git-recovery-title {
+  flex-shrink: 0; font-size: 12.5px; font-weight: 700; color: var(--text);
+}
+.git-recovery-note {
+  min-width: 0; font-size: 12px; line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.git-recovery-actions {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
+}
+.git-reflog-panel {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  max-height: 240px;
+  overflow: auto;
+}
+.git-reflog-loading { padding: 14px; }
+.git-reflog-list { padding: 4px 0; }
+.git-reflog-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.git-reflog-row:last-child { border-bottom: none; }
+.git-reflog-row:hover { background: var(--bg-hover); }
+.git-reflog-main { min-width: 0; flex: 1; }
+.git-reflog-subject {
+  font-size: 12.5px; color: var(--text); line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.git-reflog-meta {
+  margin-top: 2px; display: flex; align-items: center; gap: 6px;
+  min-width: 0; font-size: 11px; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.git-reflog-meta code {
+  background: var(--bg-input); padding: 1px 5px; border-radius: 3px;
+  font-family: 'SF Mono', Consolas, monospace; font-size: 10.5px;
+  color: var(--text-secondary);
+}
+@media (max-width: 700px) {
+  .git-recovery-head,
+  .git-recovery-copy {
+    align-items: stretch; flex-direction: column;
+  }
+  .git-recovery-actions { display: flex; }
+  .git-recovery-actions .git-btn { flex: 1; justify-content: center; }
+  .git-recovery-note { white-space: normal; }
+  .git-reflog-row { align-items: stretch; flex-direction: column; }
+  .git-reflog-row .git-btn { justify-content: center; }
+}
+
 /* —— 初始化向导 —— */
 .git-init-wizard { padding: 12px; max-width: 600px; margin: 0 auto; }
 .git-init-header { text-align: center; margin-bottom: 24px; }
