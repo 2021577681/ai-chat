@@ -5,6 +5,7 @@ const SHELL_AUDIT_CURRENT_PROFILE = '__current';
 const SHELL_AUDIT_DEFAULT_PROMPT = [
   '你是本地 Shell 命令安全审核员。你只能根据用户当前轮消息和待执行的 Shell 命令做判断，不要假设你看过完整上下文。',
   '目标：判断该命令是否是完成当前用户请求所必要，以及是否存在读取无关文件、窃取密钥/Token/Cookie/私钥、破坏文件、绕过权限、联网外传、安装或执行不明代码等风险。',
+  '工作区根目录是用户允许当前任务访问的主要范围。如果命令尝试读取、枚举、写入或删除工作区外的本地文件，除非用户当前消息明确要求，否则必须拦截。',
   '如果命令只读取或修改与用户当前请求直接相关的工作区文件，且没有明显外传或破坏风险，可以放行。',
   '如果命令访问用户未要求的敏感路径或凭证文件、枚举大量无关文件、上传/发送数据到外部、执行远程脚本、删除/覆盖大范围文件、提升权限、修改系统设置，必须拦截。',
   '只输出严格 JSON，不要输出 Markdown，不要解释 JSON 外的内容。格式：{"allow":true|false,"risk":"low|medium|high","necessary":true|false,"reason":"一句话理由","concerns":["风险点1"]}'
@@ -113,7 +114,7 @@ function shellAuditRedactedRecordBody(body) {
   };
 }
 
-function shellAuditBuildBody(apiSettings, model, userPrompt, command) {
+function shellAuditBuildBody(apiSettings, model, userPrompt, command, workspaceRoot) {
   const s = apiSettings || {};
   let prompt = getShellAuditSettings().prompt || SHELL_AUDIT_DEFAULT_PROMPT;
   let payload = [
@@ -125,7 +126,11 @@ function shellAuditBuildBody(apiSettings, model, userPrompt, command) {
     '',
     '<shell_command>',
     command || '',
-    '</shell_command>'
+    '</shell_command>',
+    '',
+    '<workspace_root>',
+    workspaceRoot || '(未知)',
+    '</workspace_root>'
   ].join('\n');
   if (typeof privacyGuardSanitizeSystemText === 'function') {
     prompt = privacyGuardSanitizeSystemText(prompt, { includeResponseGuard: false });
@@ -341,6 +346,86 @@ function getCurrentUserPromptForShellAudit(context) {
   return '';
 }
 
+function getShellAuditWorkspaceRoot(context) {
+  if (context && typeof context === 'object') {
+    if (typeof context.workspace === 'string' && context.workspace.trim()) return context.workspace.trim();
+    if (context.terminal && typeof context.terminal.workspace === 'string' && context.terminal.workspace.trim()) return context.terminal.workspace.trim();
+  }
+  if (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.workspace) return String(TERMINAL_CONFIG.workspace || '').trim();
+  const el = typeof document !== 'undefined' ? document.getElementById('workspacePath') : null;
+  const text = el && el.textContent ? el.textContent.trim() : '';
+  return text && text !== '-' ? text : '';
+}
+
+function normalizeShellAuditPath(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/\/$/g, '')
+    .toLowerCase();
+}
+
+function shellAuditIsPathInsideWorkspace(path, workspaceRoot) {
+  const root = normalizeShellAuditPath(workspaceRoot);
+  const target = normalizeShellAuditPath(path);
+  if (!root || !target) return true;
+  return target === root || target.startsWith(root + '/');
+}
+
+function maskShellAuditUrls(command) {
+  return String(command || '').replace(/https?:\/\/\S+/gi, ' ');
+}
+
+function detectShellAuditWorkspaceBoundaryViolation(command, workspaceRoot) {
+  const cmd = maskShellAuditUrls(command);
+  if (!cmd || !workspaceRoot) return { violation: false, reason: '' };
+
+  if (/(^|[\s;&|])~(?=$|[\/\\\s;&|])/.test(cmd)) {
+    return { violation: true, reason: '命令引用了用户主目录 ~' };
+  }
+  if (/(%USERPROFILE%|\$HOME|\$\{HOME\}|\$env:USERPROFILE|\$env:HOME)/i.test(cmd)) {
+    return { violation: true, reason: '命令引用了用户目录环境变量' };
+  }
+  if (/(^|[\s;&|\/\\])\.\.([\/\\]|$|[\s;&|])/.test(cmd)) {
+    return { violation: true, reason: '命令包含父目录跳转 ..' };
+  }
+
+  const unc = /(^|[\s"'`])((?:\\\\|\/\/)[^\\\/\s"'`]+[\\\/][^\s"'`<>|&]+)/g;
+  let m;
+  while ((m = unc.exec(cmd))) {
+    return { violation: true, reason: `命令引用了 UNC/网络路径：${m[2]}` };
+  }
+
+  const winAbs = /(^|[\s"'`])([A-Za-z]:[\\\/][^\s"'`<>|&]*)/g;
+  while ((m = winAbs.exec(cmd))) {
+    const path = trimShellAuditPathToken(m[2]);
+    if (path && !shellAuditIsPathInsideWorkspace(path, workspaceRoot)) {
+      return { violation: true, reason: `命令引用了工作区外绝对路径：${path}` };
+    }
+  }
+
+  if (!/^[A-Za-z]:[\\\/]/.test(String(workspaceRoot || ''))) {
+    const unixAbs = /(^|[\s"'`])((?:\/(?![\/-])[^ \t\r\n"'`<>|&]+))/g;
+    while ((m = unixAbs.exec(cmd))) {
+      const path = trimShellAuditPathToken(m[2]);
+      if (path && !shellAuditIsPathInsideWorkspace(path, workspaceRoot)) {
+        return { violation: true, reason: `命令引用了工作区外绝对路径：${path}` };
+      }
+    }
+  }
+
+  return { violation: false, reason: '' };
+}
+
+function trimShellAuditPathToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[),.;]+$/g, '')
+    .replace(/^["']|["']$/g, '');
+}
+
 async function shellAuditFetch(url, init, apiSettings, signal) {
   const timeoutCtrl = new AbortController();
   let timedOut = false;
@@ -397,13 +482,13 @@ async function shellAuditFetch(url, init, apiSettings, signal) {
   }
 }
 
-async function callShellAuditModel({ command, userPrompt, context }) {
+async function callShellAuditModel({ command, userPrompt, workspaceRoot, context }) {
   const cfg = getShellAuditSettings();
   const apiSettings = shellAuditGetApiSettings(cfg.profileId);
   const model = shellAuditResolveModel(cfg);
   if (!model) throw new Error('未配置审核模型');
   if (!apiSettings.baseUrl || !apiSettings.apiPath) throw new Error('审核 API Profile 未配置接口地址');
-  const bodyBuilder = () => shellAuditBuildBody(apiSettings, model, userPrompt, command);
+  const bodyBuilder = () => shellAuditBuildBody(apiSettings, model, userPrompt, command, workspaceRoot);
   const body = typeof withPrivacyGuardRequest === 'function'
     ? withPrivacyGuardRequest(bodyBuilder, { source: 'shell-audit', silentReport: true })
     : bodyBuilder();
@@ -457,10 +542,25 @@ async function reviewShellCommandWithAI({ command, cwd, context } = {}) {
   if (!cfg.enabled) {
     return { ok: true, allow: true, necessary: true, risk: 'low', reason: 'Shell 审核未启用。', concerns: [], autoAllow: true, skipped: true };
   }
+  const workspaceRoot = getShellAuditWorkspaceRoot(context);
+  const boundary = detectShellAuditWorkspaceBoundaryViolation(String(command || ''), workspaceRoot);
+  if (boundary.violation) {
+    return {
+      ok: true,
+      allow: false,
+      necessary: false,
+      risk: 'high',
+      reason: `命令疑似访问工作区外路径：${boundary.reason}`,
+      concerns: ['本地路径边界检查命中', boundary.reason],
+      autoAllow: false,
+      localBlock: true
+    };
+  }
   try {
     return await callShellAuditModel({
       command: String(command || ''),
       userPrompt: getCurrentUserPromptForShellAudit(context),
+      workspaceRoot,
       context: context || {}
     });
   } catch (error) {
@@ -601,7 +701,7 @@ function renderShellAuditSettings() {
       <div class="form-group">
         <label for="shellAuditPrompt">注入给审核 AI 的 Prompt</label>
         <textarea id="shellAuditPrompt" rows="8" oninput="saveShellAuditSettingsFromUi()">${shellAuditEscape(cfg.prompt || SHELL_AUDIT_DEFAULT_PROMPT)}</textarea>
-        <div class="form-hint shell-audit-hint">审核 AI 只会收到当前轮用户消息和待执行命令，不会收到完整上下文、工具结果或工作目录。</div>
+        <div class="form-hint shell-audit-hint">审核 AI 只会收到当前轮用户消息、待执行命令和工作区根目录，不会收到完整上下文、工具结果或当前工作目录。</div>
       </div>
 
       <div class="shell-audit-actions">
@@ -618,6 +718,11 @@ function saveShellAuditSettingsFromUi() {
   const model = document.getElementById('shellAuditModel');
   const prompt = document.getElementById('shellAuditPrompt');
   if (enabled) cfg.enabled = !!enabled.checked;
+  if (typeof state !== 'undefined' && state.settings?.securityMode) {
+    cfg.enabled = true;
+    if (enabled) enabled.checked = true;
+    if (typeof toast === 'function') toast('安全模式已开启，Shell 审核会保持启用', 1800);
+  }
   if (profile) cfg.profileId = profile.value || SHELL_AUDIT_CURRENT_PROFILE;
   if (model) cfg.model = model.value || '';
   if (prompt) cfg.prompt = prompt.value || SHELL_AUDIT_DEFAULT_PROMPT;

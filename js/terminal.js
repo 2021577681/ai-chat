@@ -446,15 +446,29 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   }
 
   if (action === 'execute' && typeof reviewShellCommandWithAI === 'function') {
+    const auditCommand = requestParams.command || params.command || confirmCommand || '';
+    const auditCwd = requestParams.cwd || params.cwd || '';
+    const auditContext = {
+      ...(context && typeof context === 'object' ? context : {}),
+      chatId,
+      workspace: TERMINAL_CONFIG.workspace || ''
+    };
     const audit = await reviewShellCommandWithAI({
-      command: requestParams.command || params.command || confirmCommand || '',
-      cwd: requestParams.cwd || params.cwd || '',
-      context: {
-        ...(context && typeof context === 'object' ? context : {}),
-        chatId
-      }
+      command: auditCommand,
+      cwd: auditCwd,
+      context: auditContext
     });
     if (audit && audit.aborted) {
+      if (typeof recordShellAuditSecurityEvent === 'function') {
+        recordShellAuditSecurityEvent(audit, {
+          command: auditCommand,
+          cwd: auditCwd,
+          context: auditContext,
+          chatId,
+          workspace: TERMINAL_CONFIG.workspace || '',
+          finalAction: 'aborted'
+        });
+      }
       if (typeof claimConcurrentFileOwnership === 'function') {
         claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
       }
@@ -466,14 +480,21 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     if (audit && !audit.autoAllow) {
       const confirmAudit = typeof shellAuditConfirmRisk === 'function'
         ? await shellAuditConfirmRisk(audit, {
-            command: requestParams.command || params.command || confirmCommand || '',
-            cwd: requestParams.cwd || params.cwd || '',
-            context: {
-              ...(context && typeof context === 'object' ? context : {}),
-              chatId
-            }
+            command: auditCommand,
+            cwd: auditCwd,
+            context: auditContext
           })
         : { allowed: false };
+      if (typeof recordShellAuditSecurityEvent === 'function') {
+        recordShellAuditSecurityEvent(audit, {
+          command: auditCommand,
+          cwd: auditCwd,
+          context: auditContext,
+          chatId,
+          workspace: TERMINAL_CONFIG.workspace || '',
+          finalAction: confirmAudit.allowed ? 'manual_allow' : (confirmAudit.aborted ? 'aborted' : (audit.localBlock ? 'local_block' : 'manual_reject'))
+        });
+      }
       if (!confirmAudit.allowed) {
         if (typeof claimConcurrentFileOwnership === 'function') {
           claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
@@ -486,6 +507,15 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
           _userRejected: !confirmAudit.aborted
         };
       }
+    } else if (audit && typeof recordShellAuditSecurityEvent === 'function') {
+      recordShellAuditSecurityEvent(audit, {
+        command: auditCommand,
+        cwd: auditCwd,
+        context: auditContext,
+        chatId,
+        workspace: TERMINAL_CONFIG.workspace || '',
+        finalAction: 'auto_allow'
+      });
     }
   }
   

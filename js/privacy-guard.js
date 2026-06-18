@@ -212,7 +212,9 @@ function endPrivacyGuardRequest(reportOptions = {}) {
     ts: Date.now()
   };
   PRIVACY_GUARD_LAST_REPORT = report;
-  if (!reportOptions.silent) showPrivacyGuardReport(report);
+  if (typeof recordPrivacySecurityEvent === 'function') {
+    recordPrivacySecurityEvent(report, { source: req.options?.source || reportOptions.source || '' });
+  }
   return report;
 }
 
@@ -773,6 +775,12 @@ function parsePrivacyRegex(pattern) {
 
 function togglePrivacyGuard() {
   const cfg = getPrivacyGuardSettings();
+  if (typeof state !== 'undefined' && state.settings?.securityMode && cfg.enabled) {
+    cfg.enabled = true;
+    updatePrivacyGuardButton();
+    if (typeof toast === 'function') toast('安全模式已开启，隐私模式会保持启用');
+    return;
+  }
   cfg.enabled = !cfg.enabled;
   persistSettings();
   updatePrivacyGuardButton();
@@ -1073,6 +1081,7 @@ function savePrivacySettingsFromUi() {
   const value = id => document.getElementById(id)?.value || '';
 
   cfg.enabled = checked('pgEnabled');
+  if (typeof state !== 'undefined' && state.settings?.securityMode) cfg.enabled = true;
   cfg.localRestoreEnabled = checked('pgLocalRestoreEnabled');
   cfg.localRestoreRetention = normalizePrivacyRestoreRetention(value('pgLocalRestoreRetention'));
   cfg.replacementMode = cfg.localRestoreEnabled ? 'mask' : (value('pgReplacementMode') || 'mask');

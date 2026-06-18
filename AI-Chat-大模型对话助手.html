@@ -169,6 +169,15 @@
   
   <!-- 主区域 -->
   <main class="main">
+    <div class="security-scene" aria-hidden="true">
+      <div class="security-tunnel"></div>
+      <div class="security-ceiling"></div>
+      <div class="security-floor"></div>
+      <div class="security-door security-door-left"></div>
+      <div class="security-door security-door-right"></div>
+      <div class="security-frame security-frame-left"></div>
+      <div class="security-frame security-frame-right"></div>
+    </div>
     <!-- 顶部工具栏 -->
     <div class="topbar">
       <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
@@ -1369,6 +1378,7 @@
     <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span>🎭</span><span>师生讨论</span></button>
     <button class="settings-nav-item" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。" onclick="openSettingsSection('tools')"><span>🛠</span><span>工具管理</span></button>
     <button class="settings-nav-item" data-settings-section="privacy" data-desc="配置本地脱敏、Shell 审核、附件策略和响应防尾注。" onclick="openSettingsSection('privacy')"><span>🔒</span><span>隐私模式</span></button>
+    <button class="settings-nav-item" data-settings-section="securityRecords" data-desc="查看隐私脱敏和 Shell 命令审核的本地安全记录。" onclick="openSettingsSection('securityRecords')"><span>▤</span><span>安全记录</span></button>
     <button class="settings-nav-item" data-settings-section="taskQueue" data-desc="管理自动任务、依赖关系和队列执行。" onclick="openSettingsSection('taskQueue')"><span>🧾</span><span>任务队列</span></button>
     <button class="settings-nav-item" data-settings-section="concurrentRequests" data-desc="让多个独立 AI 同时执行同一条指令，并汇总到一个对话。" onclick="openSettingsSection('concurrentRequests')"><span>⚡</span><span>并发请求</span></button>
     <button class="settings-nav-item" data-settings-section="debateMode" data-desc="配置正反方和评委模型，自动创建多局辩论对话。" onclick="openSettingsSection('debateMode')"><span>⚖️</span><span>辩论模式</span></button>
@@ -1392,6 +1402,7 @@
       <div class="settings-page-actions">
         <button class="settings-theme-btn" onclick="toggleTheme()" id="themeBtn" title="切换主题">🌙</button>
         <button class="settings-theme-btn settings-cool-btn" onclick="toggleCoolMode()" id="coolModeBtn" title="酷炫模式">◎</button>
+        <button class="settings-theme-btn settings-security-btn" onclick="toggleSecurityMode()" id="securityModeBtn" title="安全模式">◇</button>
         <button class="settings-page-close" onclick="closeSettingsPage()" title="关闭">×</button>
       </div>
     </div>
@@ -1484,6 +1495,7 @@
 <script src="js/tokens.js"></script>
 <script src="js/pricing.js"></script>
 <script src="js/token-usage.js"></script>
+<script src="js/security-records.js"></script>
 <script src="js/privacy-guard.js"></script>
 <script src="js/api-profiles.js"></script>
 <script src="js/api-adapters.js"></script>

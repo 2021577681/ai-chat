@@ -20,6 +20,8 @@ let state = {
     maxToolRounds: 15,
     theme: 'light',
     coolMode: false,
+    securityMode: false,
+    securityModeSnapshot: null,
     useTools: false,
     useReflection: false,
     refRounds: 3,
@@ -130,6 +132,7 @@ let state = {
       prompt: [
         '你是本地 Shell 命令安全审核员。你只能根据用户当前轮消息和待执行的 Shell 命令做判断，不要假设你看过完整上下文。',
         '目标：判断该命令是否是完成当前用户请求所必要，以及是否存在读取无关文件、窃取密钥/Token/Cookie/私钥、破坏文件、绕过权限、联网外传、安装或执行不明代码等风险。',
+        '工作区根目录是用户允许当前任务访问的主要范围。如果命令尝试读取、枚举、写入或删除工作区外的本地文件，除非用户当前消息明确要求，否则必须拦截。',
         '如果命令只读取或修改与用户当前请求直接相关的工作区文件，且没有明显外传或破坏风险，可以放行。',
         '如果命令访问用户未要求的敏感路径或凭证文件、枚举大量无关文件、上传/发送数据到外部、执行远程脚本、删除/覆盖大范围文件、提升权限、修改系统设置，必须拦截。',
         '只输出严格 JSON，不要输出 Markdown，不要解释 JSON 外的内容。格式：{"allow":true|false,"risk":"low|medium|high","necessary":true|false,"reason":"一句话理由","concerns":["风险点1"]}'
