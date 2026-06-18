@@ -1387,10 +1387,10 @@ async function regenerate(idx) {
 // assistant"且其 _endTime 已被设置）才折叠；进行中则保持平铺，方便用户实时看进度。
 //
 // 在 renderMessages / refreshMsgNode / appendMsgNode 末尾调用即可。
-function groupToolFlows() {
-  const inner = document.getElementById('messagesInner');
+function groupToolFlows(innerOverride, chatOverride) {
+  const inner = innerOverride || document.getElementById('messagesInner');
   if (!inner) return;
-  const c = currentChat();
+  const c = chatOverride || currentChat();
   if (!c) return;
   
   // ⭐ 1) 先把现有 group 解包，恢复扁平结构（同时记录展开状态以便后续恢复）

@@ -7,6 +7,7 @@ function openBackup() {
   document.getElementById('importPreview').className = 'test-result';
   document.getElementById('importPreview').textContent = '';
   pendingImportData = null;
+  renderExportTxtChatSelect();
 }
 
 function closeBackup() {
@@ -20,6 +21,360 @@ function backupJsonClone(value) {
 function backupReadChecked(id, fallback = false) {
   const el = document.getElementById(id);
   return el ? !!el.checked : fallback;
+}
+
+function backupPlainText(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value, null, 2); } catch (e) { return String(value); }
+}
+
+function backupNormalizeTxt(text) {
+  return backupPlainText(text)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function backupDownloadText(filename, text) {
+  backupDownloadBlob(filename, new Blob([text], { type: 'text/plain;charset=utf-8' }));
+}
+
+function backupDownloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function backupSafeFilename(name) {
+  const cleaned = String(name || 'chat')
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  return cleaned || 'chat';
+}
+
+function backupFormatDateTime(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  try { return new Date(n).toLocaleString(); } catch (e) { return ''; }
+}
+
+function backupChatTitle(chat) {
+  if (!chat) return '未命名对话';
+  if (typeof _chatDisplayTitle === 'function') return _chatDisplayTitle(chat) || chat.title || '未命名对话';
+  return chat.title || '未命名对话';
+}
+
+function backupChatOptionLabel(chat, index) {
+  const title = backupChatTitle(chat);
+  const count = Array.isArray(chat && chat.messages) ? chat.messages.filter(m => m && !m._hiddenFromUI).length : 0;
+  const created = backupFormatDateTime(chat && chat.createdAt);
+  return `${index + 1}. ${title}${count ? ` · ${count} 条` : ''}${created ? ` · ${created}` : ''}`;
+}
+
+function renderExportTxtChatSelect() {
+  const select = document.getElementById('exportTxtChatSelect');
+  if (!select) return;
+  const chats = Array.isArray(state && state.chats) ? state.chats : [];
+  if (!chats.length) {
+    select.innerHTML = '<option value="">暂无对话</option>';
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  const previousIndex = select.value !== '' ? Number(select.value) : NaN;
+  const currentIndex = chats.findIndex(chat => chat && chat.id === state.currentId);
+  const selectedIndex = Number.isInteger(previousIndex) && chats[previousIndex]
+    ? previousIndex
+    : (currentIndex >= 0 ? currentIndex : 0);
+  select.innerHTML = chats.map((chat, index) => {
+    return `<option value="${index}">${escapeHtml(backupChatOptionLabel(chat, index))}</option>`;
+  }).join('');
+  select.value = String(selectedIndex);
+}
+
+function backupDomTextLines(root, extraIgnored = []) {
+  if (!root) return [];
+  const ignoredSelector = [
+    '.avatar',
+    '.msg-actions',
+    '.plan-step-actions',
+    '.plan-approval-btns',
+    '.outline-actions-btns',
+    '.debate-manual-actions',
+    '.debate-final-actions',
+    '.msg-timer',
+    '.timer-done',
+    '.timer-waiting',
+    '.timer-streaming',
+    '.tool-flow-chip-time',
+    '.debate-timeout-timer',
+    '.tool-flow-arrow',
+    '.modal-footer',
+    ...extraIgnored
+  ].join(',');
+  if (root.matches && root.matches(ignoredSelector)) return [];
+  const clone = root.cloneNode(true);
+  clone.querySelectorAll(ignoredSelector).forEach(el => el.remove());
+  if (clone.classList) clone.classList.remove('collapsed');
+  clone.querySelectorAll('.collapsed').forEach(el => el.classList.remove('collapsed'));
+  clone.querySelectorAll('details').forEach(el => { el.open = true; });
+  const wrap = document.createElement('div');
+  wrap.style.position = 'fixed';
+  wrap.style.left = '-10000px';
+  wrap.style.top = '-10000px';
+  wrap.style.width = '900px';
+  wrap.style.opacity = '0';
+  wrap.style.pointerEvents = 'none';
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  let text = '';
+  try {
+    text = clone.innerText || clone.textContent || '';
+  } finally {
+    wrap.remove();
+  }
+  const normalized = backupNormalizeTxt(text);
+  return normalized ? normalized.split('\n').map(line => line.replace(/[ \t]+$/g, '')) : [];
+}
+
+function backupMsgRoleText(msg, chat) {
+  if (!msg) return '消息';
+  if (msg.role === 'user') return '你';
+  if (msg.role === 'tool') return `工具返回：${msg.name || 'tool'}`;
+  if (msg.debate && msg.debate.kind === 'speech' && typeof _debateSideName === 'function') {
+    return _debateSideName(msg.debate.side);
+  }
+  if (msg._debateJudge || (msg.debate && msg.debate.kind === 'judge')) return '评委';
+  if (msg._debateFinalJudge) return '终审裁决';
+  if (msg._debateSummary) return '辩论总结';
+  if (msg._isSummary) return '对话摘要';
+  if (msg._isCompressing) return '系统';
+  return chat && chat.taskQueue && chat.taskQueue.type === 'task_queue_item' ? 'AI 助手' : 'Snake';
+}
+
+function backupSectionFromMessageNode(node, msg, chat) {
+  const lines = backupDomTextLines(node, ['.msg-role']);
+  if (!lines.length) return '';
+  const role = backupMsgRoleText(msg, chat);
+  const first = lines[0] || '';
+  if (first === role || first.startsWith(role + ' ') || first.startsWith(role + '\t')) {
+    lines.shift();
+    while (lines.length && !lines[0]) lines.shift();
+  }
+  return [`【${role}】`, ...lines].join('\n').trim();
+}
+
+function backupRenderChatForTxt(chat) {
+  const holder = document.createElement('div');
+  holder.style.position = 'fixed';
+  holder.style.left = '-10000px';
+  holder.style.top = '-10000px';
+  holder.style.width = '900px';
+  holder.style.visibility = 'hidden';
+  document.body.appendChild(holder);
+  const oldCurrentId = state.currentId;
+  try {
+    if (chat && chat.id) state.currentId = chat.id;
+    const messages = Array.isArray(chat && chat.messages) ? chat.messages : [];
+    if (chat && chat.debate && chat.debate.type === 'debate_mode' && chat.debate.status === 'completed' && typeof renderDebateCompletedChat === 'function') {
+      holder.innerHTML = renderDebateCompletedChat(chat);
+    } else {
+      const visible = [];
+      messages.forEach((m, i) => {
+        if (m && !m._hiddenFromUI) visible.push(i);
+      });
+      holder.innerHTML = visible.map(i => renderMsg(messages[i], i)).join('');
+      if (typeof groupToolFlows === 'function') groupToolFlows(holder, chat);
+    }
+    return holder;
+  } catch (e) {
+    console.warn('[backup] render chat txt failed:', e);
+    holder.remove();
+    throw e;
+  } finally {
+    state.currentId = oldCurrentId;
+  }
+}
+
+function backupPrepareExportDom(root) {
+  const ignoredSelector = [
+    '.avatar',
+    '.msg-actions',
+    '.plan-step-actions',
+    '.plan-approval-btns',
+    '.outline-actions-btns',
+    '.debate-manual-actions',
+    '.debate-final-actions',
+    '.msg-timer',
+    '.timer-done',
+    '.timer-waiting',
+    '.timer-streaming',
+    '.tool-flow-chip-time',
+    '.debate-timeout-timer',
+    '.tool-flow-arrow',
+    '.modal-footer'
+  ].join(',');
+  const clone = root.cloneNode(true);
+  clone.querySelectorAll(ignoredSelector).forEach(el => el.remove());
+  clone.querySelectorAll('.collapsed').forEach(el => el.classList.remove('collapsed'));
+  clone.querySelectorAll('details').forEach(el => { el.open = true; });
+  return clone;
+}
+
+function backupFallbackMessageTxt(msg, chat) {
+  const lines = [`【${backupMsgRoleText(msg, chat)}】`];
+  if (msg && msg.attachments && msg.attachments.length) {
+    lines.push('附件：');
+    msg.attachments.forEach(att => {
+      const size = typeof formatSize === 'function' ? formatSize(att.size || 0) : `${att.size || 0} bytes`;
+      lines.push(`- ${att.name || '附件'} · ${size}${att._stripped ? ' · 数据已丢失' : ''}`);
+    });
+  }
+  if (msg && msg.tool_calls && msg.tool_calls.length) {
+    msg.tool_calls.forEach(tc => {
+      lines.push(`调用工具：${tc.function?.name || tc.name || 'tool'}`);
+      lines.push(backupPlainText(tc.function?.arguments || tc.args || {}));
+    });
+  }
+  if (msg && msg.content) lines.push(backupPlainText(msg.content));
+  return lines.join('\n').trim();
+}
+
+function backupFallbackChatTxt(chat) {
+  return (chat.messages || [])
+    .filter(m => m && !m._hiddenFromUI)
+    .map(m => backupFallbackMessageTxt(m, chat))
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+}
+
+function buildChatTxtExport(chat) {
+  if (!chat) throw new Error('找不到要导出的对话');
+  const title = backupChatTitle(chat);
+  const created = backupFormatDateTime(chat.createdAt);
+  const exportedAt = new Date().toLocaleString();
+  let body = '';
+  let holder = null;
+  try {
+    holder = backupRenderChatForTxt(chat);
+    const sections = [];
+    const directChildren = Array.from(holder.children || []);
+    directChildren.forEach(node => {
+      if (node.classList && node.classList.contains('tool-flow-group')) {
+        const lines = backupDomTextLines(node);
+        if (lines.length) sections.push(lines.join('\n').trim());
+        return;
+      }
+      if (node.classList && node.classList.contains('debate-round-fold')) {
+        const lines = backupDomTextLines(node);
+        if (lines.length) sections.push(lines.join('\n').trim());
+        return;
+      }
+      if (node.classList && node.classList.contains('message')) {
+        const idx = parseInt(node.dataset.idx, 10);
+        sections.push(backupSectionFromMessageNode(node, chat.messages && chat.messages[idx], chat));
+      }
+    });
+    body = sections.filter(Boolean).join('\n\n---\n\n');
+  } catch (e) {
+    body = backupFallbackChatTxt(chat);
+  } finally {
+    if (holder) holder.remove();
+  }
+  return backupNormalizeTxt([
+    `标题：${title}`,
+    chat.id ? `对话 ID：${chat.id}` : '',
+    created ? `创建时间：${created}` : '',
+    `导出时间：${exportedAt}`,
+    '',
+    '==============================',
+    '',
+    body || '（无可见消息）'
+  ].filter(line => line !== null && line !== undefined).join('\n'));
+}
+
+function selectedExportChat() {
+  renderExportTxtChatSelect();
+  const select = document.getElementById('exportTxtChatSelect');
+  const chatIndex = select ? parseInt(select.value, 10) : -1;
+  return Array.isArray(state && state.chats) ? state.chats[chatIndex] : null;
+}
+
+function buildChatDocExport(chat) {
+  if (!chat) throw new Error('找不到要导出的对话');
+  const title = backupChatTitle(chat);
+  const created = backupFormatDateTime(chat.createdAt);
+  const exportedAt = new Date().toLocaleString();
+  let contentHtml = '';
+  let holder = null;
+  try {
+    holder = backupRenderChatForTxt(chat);
+    const docRoot = backupPrepareExportDom(holder);
+    contentHtml = docRoot.innerHTML || '';
+  } finally {
+    if (holder) holder.remove();
+  }
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(title)}</title>
+<style>
+body{font-family:"Microsoft YaHei",Arial,sans-serif;font-size:12pt;line-height:1.55;color:#111;margin:28px;}
+h1{font-size:20pt;margin:0 0 8px;}
+.meta{font-size:10pt;color:#666;margin-bottom:18px;}
+.message,.tool-flow-group,.debate-round-fold{border-top:1px solid #ddd;padding:12px 0;}
+.msg-role,.tool-flow-title{font-weight:bold;margin-bottom:6px;}
+.msg-content,.tool-call-body,.plan-section-body,.outline-section-body,.ref-turn-body{margin:6px 0;}
+pre,code{font-family:Consolas,"Courier New",monospace;background:#f5f5f5;white-space:pre-wrap;}
+pre{padding:8px;border:1px solid #ddd;}
+table{border-collapse:collapse;width:100%;}
+td,th{border:1px solid #ddd;padding:4px 6px;}
+ul,ol{margin-top:4px;}
+.tool-status,.msg-badge,.plan-step-status,.plan-status-badge,.outline-status-badge,.ref-score{font-size:10pt;color:#555;}
+</style>
+</head>
+<body>
+<h1>${escapeHtml(title)}</h1>
+<div class="meta">
+${chat.id ? `对话 ID：${escapeHtml(chat.id)}<br>` : ''}
+${created ? `创建时间：${escapeHtml(created)}<br>` : ''}
+导出时间：${escapeHtml(exportedAt)}
+</div>
+${contentHtml || '<p>（无可见消息）</p>'}
+</body>
+</html>`;
+}
+
+function exportSelectedChatTxt() {
+  const chat = selectedExportChat();
+  if (!chat) { alert('请选择要导出的对话'); return; }
+  const text = buildChatTxtExport(chat);
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  backupDownloadText(`aichat-${backupSafeFilename(backupChatTitle(chat))}-${ts}.txt`, text + '\n');
+  toast('✓ 对话 TXT 已下载');
+}
+
+function exportSelectedChatDoc() {
+  const chat = selectedExportChat();
+  if (!chat) { alert('请选择要导出的对话'); return; }
+  const html = buildChatDocExport(chat);
+  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+  backupDownloadBlob(`aichat-${backupSafeFilename(backupChatTitle(chat))}-${ts}.doc`, blob);
+  toast('✓ 对话 DOC 已下载');
 }
 
 function buildApiProfilesBackup(includeApiKey) {

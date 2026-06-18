@@ -1202,6 +1202,19 @@
       <button class="btn btn-primary" onclick="exportConfig()">📥 下载</button>
       <button class="btn" onclick="copyConfigToClipboard()">📋 复制</button>
     </div>
+
+    <div class="backup-txt-export">
+      <h3 style="font-size:15px;margin:0 0 10px;">📝 导出单个对话</h3>
+      <div class="form-group">
+        <label>选择对话</label>
+        <select id="exportTxtChatSelect"></select>
+        <div class="form-hint">导出为纯文本，按聊天界面可见顺序包含普通消息、工具调用过程和卡片内容。</div>
+      </div>
+      <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
+        <button class="btn btn-primary" onclick="exportSelectedChatTxt()">📝 导出 TXT</button>
+        <button class="btn" onclick="exportSelectedChatDoc()">📄 导出 DOC</button>
+      </div>
+    </div>
     
     <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);">
     
