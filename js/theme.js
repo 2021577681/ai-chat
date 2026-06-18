@@ -116,22 +116,23 @@ function applyTheme() {
 
   const btn = document.getElementById('themeBtn');
   if (btn) {
-    btn.textContent = state.settings.theme === 'dark' ? '☀' : '🌙';
+    btn.classList.toggle('active', state.settings.theme === 'dark');
     btn.setAttribute('aria-pressed', state.settings.theme === 'dark' ? 'true' : 'false');
+    btn.title = state.settings.theme === 'dark' ? '黑暗模式已开启，点击切换到浅色' : '浅色模式已开启，点击切换到黑暗';
   }
 
   const coolBtn = document.getElementById('coolModeBtn');
   if (coolBtn) {
-    coolBtn.textContent = coolMode ? '◉' : '◎';
     coolBtn.classList.toggle('active', coolMode);
     coolBtn.setAttribute('aria-pressed', coolMode ? 'true' : 'false');
+    coolBtn.title = coolMode ? '酷炫模式已开启，点击关闭' : '酷炫模式已关闭，点击开启';
   }
 
   const securityBtn = document.getElementById('securityModeBtn');
   if (securityBtn) {
-    securityBtn.textContent = securityMode ? '◆' : '◇';
     securityBtn.classList.toggle('active', securityMode);
     securityBtn.setAttribute('aria-pressed', securityMode ? 'true' : 'false');
+    securityBtn.title = securityMode ? '安全模式已开启，点击关闭' : '安全模式已关闭，点击开启';
   }
 }
 

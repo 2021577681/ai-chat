@@ -1755,6 +1755,23 @@ input::placeholder{
   flex:0 0 auto;
 }
 
+.settings-nav-icon{
+  width:18px;
+  height:18px;
+  display:block;
+  object-fit:contain;
+}
+
+[data-theme="dark"] .settings-nav-icon{
+  filter:brightness(0) invert(1);
+  opacity:.86;
+}
+
+[data-theme="dark"] .settings-nav-item:hover .settings-nav-icon,
+[data-theme="dark"] .settings-nav-item.active .settings-nav-icon{
+  opacity:1;
+}
+
 .settings-page-main{
   min-width:0;
   min-height:0;
@@ -1829,6 +1846,29 @@ input::placeholder{
 .settings-theme-btn:hover{
   background:var(--bg-hover);
   color:var(--text);
+}
+
+.settings-theme-btn.active{
+  background:rgba(79,70,229,.12);
+  border-color:rgba(79,70,229,.30);
+  box-shadow:0 0 0 3px rgba(79,70,229,.08);
+}
+
+.settings-mode-icon{
+  width:18px;
+  height:18px;
+  display:block;
+  object-fit:contain;
+}
+
+[data-theme="dark"] .settings-mode-icon{
+  filter:brightness(0) invert(1);
+  opacity:.86;
+}
+
+[data-theme="dark"] .settings-theme-btn:hover .settings-mode-icon,
+[data-theme="dark"] .settings-theme-btn.active .settings-mode-icon{
+  opacity:1;
 }
 
 .settings-cool-btn.active{
