@@ -387,6 +387,52 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .slider-val{min-width:36px;text-align:right;font-size:13px;color:var(--text-secondary)}
 .modal-footer{display:flex;gap:10px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap}
 
+/* 音乐播放器 */
+.music-modal .modal{width:min(980px,95vw)}
+.music-layout{display:flex;flex-direction:column;gap:14px}
+.music-now{display:grid;grid-template-columns:120px minmax(0,1fr);gap:16px;align-items:stretch;padding:14px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px}
+.music-cover{height:120px;border-radius:10px;background:linear-gradient(135deg,var(--primary),var(--success));color:#fff;display:flex;align-items:center;justify-content:center;font-size:52px;font-weight:700}
+.music-now-main{min-width:0;display:flex;flex-direction:column;gap:8px}
+.music-title{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.music-sub{font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.music-now audio{width:100%;height:38px}
+.music-progress-meta{display:flex;justify-content:space-between;gap:10px;color:var(--text-secondary);font-size:12px}
+.music-controls,.music-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.music-dir{margin-left:auto;min-width:0;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:12px}
+.music-settings-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px}
+.music-setting{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-secondary)}
+.music-setting input,.music-setting select{width:100%;padding:7px 9px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px}
+.music-check{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px}
+.music-check input{width:auto}
+.music-extra-settings{display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:10px}
+.music-extra-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.music-extra-title{font-size:13px;font-weight:700;color:var(--text)}
+.music-extra-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:end}
+.music-library-panel{display:flex;flex-direction:column;gap:10px}
+.music-library-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.music-library-title-wrap{min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.music-library-summary{font-size:12px;color:var(--text-secondary)}
+.music-library-tools{display:flex;align-items:center;gap:8px;min-width:280px;max-width:480px;flex:1;justify-content:flex-end}
+.music-library-tools input{width:min(320px,100%);padding:8px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px}
+.music-list{display:flex;flex-direction:column;gap:6px;max-height:42vh;overflow:auto;padding-right:2px}
+.music-list.collapsed{display:none}
+.music-track{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:9px;color:var(--text);cursor:pointer;text-align:left}
+.music-track:hover{background:var(--bg-hover)}
+.music-track.active{border-color:var(--primary);background:rgba(79,70,229,.08)}
+.music-track-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:13px}
+.music-track-meta{color:var(--text-secondary);font-size:12px;white-space:nowrap}
+.music-empty{padding:24px;border:1px dashed var(--border);border-radius:10px;color:var(--text-secondary);text-align:center;background:var(--bg-input)}
+@media (max-width:760px){
+  .music-now{grid-template-columns:1fr}
+  .music-cover{height:92px}
+  .music-settings-grid,.music-extra-grid{grid-template-columns:1fr}
+  .music-dir{margin-left:0;max-width:100%}
+  .music-library-head{align-items:stretch;flex-direction:column}
+  .music-library-tools{min-width:0;max-width:none;width:100%;justify-content:flex-start}
+  .music-library-tools input{width:100%}
+  .music-track{grid-template-columns:1fr}
+}
+
 /* 任务队列 */
 .task-queue-modal .modal{width:min(980px,95vw)}
 .task-queue-compose{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg)}

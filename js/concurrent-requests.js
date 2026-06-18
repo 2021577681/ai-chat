@@ -446,6 +446,7 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     controllers: {}
   };
   CONCURRENT_RUNTIME[chat.id] = runtime;
+  if (typeof updateGenerationBgmForTasks === 'function') updateGenerationBgmForTasks();
   _concurrentRenderCurrent(chat);
 
   const maxRoundsRaw = parseInt(state.settings.maxToolRounds, 10);
@@ -546,6 +547,7 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     }
     meta.updatedAt = finishedAt;
     delete CONCURRENT_RUNTIME[chat.id];
+    if (typeof updateGenerationBgmForTasks === 'function') updateGenerationBgmForTasks();
     saveData();
     _concurrentRenderCurrent(chat);
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();

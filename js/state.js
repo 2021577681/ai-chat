@@ -155,6 +155,25 @@ let state = {
       path: 'AGENTS.md',
       maxChars: 16000,
       autoCreate: false
+    },
+    musicPlayer: {
+      volume: 70,
+      muted: false,
+      loopMode: 'list',
+      shuffle: false,
+      autoplayNext: true,
+      playbackRate: 1,
+      rememberPosition: true,
+      completionSoundMode: 'default',
+      completionTrackPath: '',
+      generationBgmEnabled: false,
+      generationBgmTrackPath: '',
+      generationBgmVolume: 35,
+      generationBgmLoop: true,
+      listCollapsed: false,
+      lastSource: '',
+      lastPath: '',
+      lastTime: 0
     }
   },
   pendingAttachments: [],
@@ -604,6 +623,7 @@ function beginChatTask(chatId, abortCtrl, opts = {}) {
   };
   tasks[chatId] = task;
   syncGlobalTaskState(chatId);
+  updateGenerationBgmForTasks();
   return task;
 }
 
@@ -616,6 +636,7 @@ function updateChatTaskController(chatId, abortCtrl) {
   task.abortCtrl = abortCtrl || null;
   tasks[chatId] = task;
   syncGlobalTaskState(chatId);
+  updateGenerationBgmForTasks();
   return task;
 }
 
@@ -661,6 +682,18 @@ function clearChatTask(chatId) {
   const tasks = ensureChatTasks();
   delete tasks[chatId];
   syncGlobalTaskState();
+  updateGenerationBgmForTasks();
+}
+
+function updateGenerationBgmForTasks() {
+  const running = typeof isAnyChatGenerating === 'function'
+    ? isAnyChatGenerating()
+    : Object.values(ensureChatTasks()).some(t => t && t.isGenerating);
+  if (running) {
+    if (typeof startMusicGenerationBgm === 'function') startMusicGenerationBgm();
+  } else if (typeof stopMusicGenerationBgm === 'function') {
+    stopMusicGenerationBgm();
+  }
 }
 
 function setChatTaskMode(chatId, mode, props = {}) {

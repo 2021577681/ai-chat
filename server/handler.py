@@ -19,6 +19,7 @@ from .exec import ExecMixin
 from .files import FilesMixin
 from .git_ops import GitMixin
 from .mcp_skills import McpSkillsMixin
+from .music import MusicMixin
 from .proxy import ProxyMixin
 from .screenshot import ScreenshotMixin
 from .web import WebMixin
@@ -26,7 +27,7 @@ from .web import WebMixin
 
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
-              McpSkillsMixin):
+              McpSkillsMixin, MusicMixin):
     """主 HTTP Handler，通过 mixin 组合所有功能。
     各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
@@ -92,6 +93,9 @@ class Handler(BaseHTTPRequestHandler,
                                   'cwd': config.get_current_cwd(),
                                   'workspace': config.WORKSPACE_ROOT})
             return
+
+        if self.path.startswith('/music-file'):
+            return self.handle_music_file_get()
 
         # 静态文件（http://localhost:8765/ 可直接打开 HTML）
         return self.handle_static_file()
@@ -181,6 +185,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_skill_list(body)
             elif action == 'skill_read':
                 self.handle_skill_read(body)
+            elif action == 'music':
+                self.handle_music_action(body)
             else:
                 self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:

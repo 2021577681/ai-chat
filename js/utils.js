@@ -29,6 +29,7 @@ let _completionSoundAudioCtx = null;
 function ensureCompletionSoundReady() {
   try {
     if (!state.settings || !state.settings.completionSoundEnabled) return;
+    if (state.settings.musicPlayer && state.settings.musicPlayer.completionSoundMode === 'music') return;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
     if (!_completionSoundAudioCtx) _completionSoundAudioCtx = new AudioCtx();
@@ -42,6 +43,18 @@ function playCompletionSound(options = {}) {
   try {
     if (!state.settings || !state.settings.completionSoundEnabled) return;
     if (options && options.suppress) return;
+    if (state.settings.musicPlayer
+      && state.settings.musicPlayer.completionSoundMode === 'music'
+      && typeof playMusicCompletionSound === 'function'
+      && playMusicCompletionSound()) {
+      return;
+    }
+    playDefaultCompletionSound();
+  } catch (e) {}
+}
+
+function playDefaultCompletionSound() {
+  try {
     const rawVolume = parseInt(state.settings.completionSoundVolume);
     const volumePct = isNaN(rawVolume) ? 80 : Math.max(0, Math.min(100, rawVolume));
     if (volumePct <= 0) return;
