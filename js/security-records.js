@@ -125,7 +125,20 @@ function sanitizeSecurityRecordDetail(type, detail) {
     localRestoreEnabled: !!detail.localRestoreEnabled,
     localRestoreRetention: securityRecordsText(detail.localRestoreRetention || '', 40),
     restoreCount: Number(detail.restoreCount || 0),
-    warnings: securityRecordsArray(detail.warnings, 10)
+    warnings: securityRecordsArray(detail.warnings, 10),
+    responseGuard: sanitizeSecurityRecordResponseGuard(detail.responseGuard)
+  };
+}
+
+function sanitizeSecurityRecordResponseGuard(value) {
+  if (!value || typeof value !== 'object') return null;
+  const status = String(value.status || '').toLowerCase() === 'missing' ? 'missing' : 'ok';
+  return {
+    status,
+    marker: securityRecordsText(value.marker || '', 120),
+    action: securityRecordsText(value.action || '', 40),
+    source: securityRecordsText(value.source || '', 80),
+    trimmedTail: !!value.trimmedTail
   };
 }
 
@@ -134,13 +147,17 @@ function recordPrivacySecurityEvent(report, options = {}) {
   const total = securityRecordsCounterTotal(report.counters);
   const stripped = Number(report.strippedAttachments || 0);
   const warnings = Array.isArray(report.warnings) ? report.warnings.length : 0;
-  if (!total && !stripped && !warnings && !report.highRiskCount) return null;
+  const responseGuard = report.responseGuard && typeof report.responseGuard === 'object' ? report.responseGuard : null;
+  if (!total && !stripped && !warnings && !report.highRiskCount && !responseGuard) return null;
   const types = securityRecordsCounterSummary(report.counters);
+  const guardText = responseGuard
+    ? `responseGuard:${responseGuard.status === 'missing' ? 'missing' : 'ok'}${responseGuard.trimmedTail ? ':trimmed-tail' : ''}`
+    : '';
   return addSecurityRecord({
     type: 'privacy',
     ts: report.ts || Date.now(),
-    result: 'processed',
-    summary: `${total} 处文本脱敏 · ${stripped} 个附件剥离${types ? ' · ' + types : ''}`,
+    result: responseGuard?.status === 'missing' ? 'response_guard_missing' : 'processed',
+    summary: `${total} 处文本脱敏 · ${stripped} 个附件剥离${types ? ' · ' + types : ''}${guardText ? ' · ' + guardText : ''}`,
     detail: {
       source: options.source || '',
       counters: report.counters || {},
@@ -150,7 +167,8 @@ function recordPrivacySecurityEvent(report, options = {}) {
       localRestoreEnabled: !!report.localRestoreEnabled,
       localRestoreRetention: report.localRestoreRetention || '',
       restoreCount: report.restoreCount || 0,
-      warnings: report.warnings || []
+      warnings: report.warnings || [],
+      responseGuard
     }
   });
 }
@@ -325,9 +343,10 @@ function securityRecordResultLabel(record) {
     manual_reject: '用户拒绝',
     aborted: '已中断',
     local_block: '本地拦截',
-    error: '审核异常'
+    error: '审核异常',
+    response_guard_missing: '标记缺失'
   };
-  const danger = ['manual_reject', 'local_block', 'error'].includes(result);
+  const danger = ['manual_reject', 'local_block', 'error', 'response_guard_missing'].includes(result);
   const warn = ['manual_required', 'aborted'].includes(result);
   return `<span class="security-records-result ${danger ? 'danger' : (warn ? 'warn' : 'ok')}">${securityRecordsEscape(labels[result] || result || '-')}</span>`;
 }
@@ -380,6 +399,7 @@ function renderSecurityRecordDetail(record) {
     .map(([key, value]) => securityRecordDetailPill(`${key}:${value}`, 'neutral'))
     .join('') || securityRecordDetailPill('无文本命中', 'neutral');
   const restoreText = d.localRestoreEnabled ? `开启，仅记录 ${Number(d.restoreCount || 0)} 个映射数量` : '未开启';
+  const responseGuardBlock = renderPrivacyResponseGuardDetail(d.responseGuard);
   return `
     <details class="security-records-detail">
       <summary><span>详情</span><em>${Number(d.highRiskCount || 0)} 个高风险命中</em></summary>
@@ -396,8 +416,22 @@ function renderSecurityRecordDetail(record) {
             <div class="security-records-detail-label">警告</div>
             <ul>${warnings}</ul>
           </div>` : ''}
+        ${responseGuardBlock}
       </div>
     </details>
+  `;
+}
+
+function renderPrivacyResponseGuardDetail(responseGuard) {
+  if (!responseGuard) return '';
+  const statusText = responseGuard.status === 'missing' ? '未检测到结束标记' : '已检测到结束标记';
+  const tone = responseGuard.status === 'missing' ? 'danger' : (responseGuard.trimmedTail ? 'warn' : 'ok');
+  const tailText = responseGuard.trimmedTail ? '已切除标记后的尾部内容' : '未发现标记后尾部内容';
+  return `
+    <div class="security-records-detail-block ${tone === 'danger' ? 'danger' : (tone === 'warn' ? 'warn' : '')}">
+      <div class="security-records-detail-label">响应防尾注</div>
+      <p>${securityRecordsEscape(statusText)}；${securityRecordsEscape(tailText)}；动作：${securityRecordsEscape(responseGuard.action || '-')}；标记：${securityRecordsEscape(responseGuard.marker || '-')}</p>
+    </div>
   `;
 }
 

@@ -371,19 +371,25 @@ async function fetchAnthropicTokenCount(chat) {
   if (!s.apiKey) return null;
   
   try {
-    const messages = buildAnthropicMessages(chat.messages, { includeResponseGuard: false });
-    if (!messages.length) return null;
-    
-    const body = { model: s.currentModel, messages: messages };
-    let systemPrompt = typeof getEffectiveSystemPrompt === 'function'
-      ? getEffectiveSystemPrompt()
-      : (s.systemPrompt || '');
-    if (typeof privacyGuardSanitizeAuxiliarySystemText === 'function') {
-      systemPrompt = privacyGuardSanitizeAuxiliarySystemText(systemPrompt);
-    }
-    if (systemPrompt) body.system = systemPrompt;
-    const tools = buildToolsArray();
-    if (tools) body.tools = tools;
+    const buildCountTokensBody = () => {
+      const messages = buildAnthropicMessages(chat.messages, { includeResponseGuard: false });
+      if (!messages.length) return null;
+      const body = { model: s.currentModel, messages };
+      let systemPrompt = typeof getEffectiveSystemPrompt === 'function'
+        ? getEffectiveSystemPrompt()
+        : (s.systemPrompt || '');
+      if (typeof privacyGuardSanitizeAuxiliarySystemText === 'function') {
+        systemPrompt = privacyGuardSanitizeAuxiliarySystemText(systemPrompt);
+      }
+      if (systemPrompt) body.system = systemPrompt;
+      const tools = buildToolsArray();
+      if (tools) body.tools = tools;
+      return body;
+    };
+    const body = typeof withPrivacyGuardRequest === 'function'
+      ? withPrivacyGuardRequest(buildCountTokensBody, { source: 'count_tokens', silentReport: true })
+      : buildCountTokensBody();
+    if (!body || !Array.isArray(body.messages) || !body.messages.length) return null;
     
     const baseUrl = s.baseUrl.replace(/\/+$/, '');
     let path = s.apiPath;

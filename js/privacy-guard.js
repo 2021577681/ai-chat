@@ -645,15 +645,35 @@ function privacyGuardFinalizeAssistantMessage(msg, options = {}) {
   if (shouldCheckResponseGuard) {
     const marker = normalizePrivacyMarker(responseGuardMarker);
     if (marker) {
-      const idx = msg.content.indexOf(marker);
+      const idx = findPrivacyResponseGuardMarkerIndex(msg.content, marker);
       if (idx >= 0) {
+        const tail = msg.content.slice(idx + marker.length).trim();
         msg.content = msg.content.slice(0, idx).trimEnd();
         if (Array.isArray(msg._responsesOutput)) {
           syncPrivacyResponsesOutputText(msg._responsesOutput, msg.content);
         }
         msg._privacyGuardMarkerOk = true;
+        msg._privacyGuardMarkerTrimmedTail = !!tail;
+        recordPrivacyResponseGuardEvent({
+          status: 'ok',
+          marker,
+          action: responseGuardAction,
+          source: options.source || '',
+          trimmedTail: !!tail,
+          ctx,
+          cfg
+        });
       } else {
         msg._privacyGuardMarkerMissing = true;
+        recordPrivacyResponseGuardEvent({
+          status: 'missing',
+          marker,
+          action: responseGuardAction,
+          source: options.source || '',
+          trimmedTail: false,
+          ctx,
+          cfg
+        });
         if (responseGuardAction === 'warn') {
           msg.content = `${msg.content.trimEnd()}\n\n*[隐私防尾注提醒：未检测到结束标记，返回内容可能被中转站追加或模型未遵循标记要求。]*`;
         }
@@ -667,6 +687,47 @@ function privacyGuardFinalizeAssistantMessage(msg, options = {}) {
     }
   }
   return msg;
+}
+
+function findPrivacyResponseGuardMarkerIndex(content, marker) {
+  const text = String(content || '');
+  const safeMarker = String(marker || '');
+  if (!text || !safeMarker) return -1;
+  const escaped = escapePrivacyRegExp(safeMarker);
+  const re = new RegExp(`(^|\\r?\\n)[ \\t]*${escaped}[ \\t]*(?=\\r?\\n|$)`, 'g');
+  let match;
+  let idx = -1;
+  while ((match = re.exec(text)) !== null) {
+    const full = match[0] || '';
+    const prefix = match[1] || '';
+    const leading = (full.slice(prefix.length).match(/^[ \t]*/) || [''])[0].length;
+    idx = match.index + prefix.length + leading;
+    if (re.lastIndex === match.index) re.lastIndex += 1;
+  }
+  return idx;
+}
+
+function recordPrivacyResponseGuardEvent({ status, marker, action, source, trimmedTail, ctx, cfg } = {}) {
+  if (typeof recordPrivacySecurityEvent !== 'function') return;
+  const normalizedStatus = status === 'missing' ? 'missing' : 'ok';
+  recordPrivacySecurityEvent({
+    counters: {},
+    strippedAttachments: 0,
+    textAttachments: 0,
+    highRiskCount: 0,
+    restoreCount: 0,
+    localRestoreEnabled: !!(ctx?.localRestoreEnabled || cfg?.localRestoreEnabled),
+    localRestoreRetention: ctx?.localRestoreRetention || cfg?.localRestoreRetention || '',
+    warnings: normalizedStatus === 'missing' ? ['responseGuardMissing'] : [],
+    responseGuard: {
+      status: normalizedStatus,
+      marker: normalizePrivacyMarker(marker),
+      action: action || 'trim',
+      source: source || '',
+      trimmedTail: !!trimmedTail
+    },
+    ts: Date.now()
+  }, { source: source || '' });
 }
 
 function syncPrivacyResponsesOutputText(output, cleanText) {
@@ -1187,6 +1248,9 @@ function updatePrivacyInstructionPreview() {
 
 function resetPrivacyGuardDefaults() {
   state.settings.privacyGuard = clonePrivacyGuardDefaults();
+  if (typeof state !== 'undefined' && state.settings?.securityMode && typeof enforceSecurityModeProtections === 'function') {
+    enforceSecurityModeProtections();
+  }
   persistSettings();
   renderPrivacySettings();
   updatePrivacyGuardButton();
