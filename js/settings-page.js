@@ -268,10 +268,23 @@ function dockSettingsPanel(mask, modal, section, config) {
   if (closeBtn) closeBtn.setAttribute('onclick', 'closeSettingsPage()');
 
   content.innerHTML = '';
+  ensureSettingsFooterSpacer(modal);
   content.appendChild(modal);
   content.scrollTop = 0;
 
   if (config.focusId) focusSettingsTarget(config.focusId);
+}
+
+function ensureSettingsFooterSpacer(modal) {
+  if (!modal) return;
+  modal.querySelectorAll(':scope > .settings-footer-spacer').forEach(el => el.remove());
+  const footers = Array.from(modal.querySelectorAll(':scope > .modal-footer:not(.backup-export-actions)'));
+  const footer = footers[footers.length - 1];
+  if (!footer) return;
+  const spacer = document.createElement('div');
+  spacer.className = 'settings-footer-spacer';
+  spacer.setAttribute('aria-hidden', 'true');
+  modal.insertBefore(spacer, footer);
 }
 
 function beginSettingsDocking() {
@@ -318,6 +331,7 @@ function undockSettingsPanel() {
 
   state.dockedModal.classList.remove('settings-docked-panel');
   if (state.dockedSectionClass) state.dockedModal.classList.remove(state.dockedSectionClass);
+  state.dockedModal.querySelectorAll(':scope > .settings-footer-spacer').forEach(el => el.remove());
 
   if (state.originalNext && state.originalNext.parentNode === state.originalParent) {
     state.originalParent.insertBefore(state.dockedModal, state.originalNext);

@@ -1913,6 +1913,7 @@ input::placeholder{
 
 .settings-page-content{
   --settings-footer-bleed:36px;
+  --settings-footer-gap:28px;
   --settings-footer-button-bottom-gap:0px;
   --settings-panel-width:980px;
   flex:1;
@@ -1922,6 +1923,7 @@ input::placeholder{
   padding:24px 42px var(--settings-footer-bleed);
   scroll-behavior:smooth;
   scrollbar-gutter:stable;
+  scroll-padding-bottom:calc(var(--settings-footer-bleed) + var(--settings-footer-gap) + 56px);
 }
 
 .settings-page-content > .modal{
@@ -1948,12 +1950,17 @@ input::placeholder{
   display:none;
 }
 
+.settings-footer-spacer{
+  flex:0 0 var(--settings-footer-gap);
+  height:var(--settings-footer-gap);
+}
+
 .settings-page-content .modal-footer{
   position:sticky;
   bottom:calc(-1 * var(--settings-footer-bleed));
   z-index:2;
   width:auto;
-  margin:auto -42px calc(-1 * var(--settings-footer-bleed));
+  margin:auto -42px calc(-1 * var(--settings-footer-bleed))!important;
   padding:14px 42px calc(var(--settings-footer-bleed) + var(--settings-footer-button-bottom-gap));
   justify-content:flex-start;
   align-items:center;
