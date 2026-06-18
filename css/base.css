@@ -731,6 +731,111 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 .context-limit-table{min-width:760px}
 
+/* Token 使用统计 */
+#tokenUsageContent{display:flex;flex-direction:column;gap:14px}
+.token-usage-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:2px 0 0}
+.token-usage-card{
+  min-width:0;padding:12px 14px;border:1px solid var(--border);border-radius:10px;
+  background:var(--bg-input);display:flex;flex-direction:column;gap:6px
+}
+.token-usage-card-label{
+  color:var(--text-secondary);font-size:11.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.03em
+}
+.token-usage-card-value{
+  color:var(--text);font-size:18px;font-weight:800;
+  font-family:'SF Mono',Monaco,Consolas,monospace;line-height:1.2;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.token-usage-card-value-money{font-size:14px}
+.token-usage-section{margin-top:2px}
+.token-usage-section-title{
+  margin:0 0 10px;color:var(--text);font-size:13px;font-weight:700;
+  display:flex;align-items:center;justify-content:space-between;gap:8px
+}
+.token-usage-panel{
+  padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-input)
+}
+.token-usage-table-wrap{
+  max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:10px;
+  background:var(--bg)
+}
+.token-usage-table{width:100%;min-width:900px;border-collapse:collapse;font-size:12.5px}
+.token-usage-table th,
+.token-usage-table td{
+  padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle;
+  text-align:left;line-height:1.45
+}
+.token-usage-table thead th{
+  position:sticky;top:0;z-index:1;background:var(--bg-sidebar);color:var(--text-secondary);
+  font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em
+}
+.token-usage-table tbody tr{transition:background .15s}
+.token-usage-table tbody tr:hover{background:var(--bg-hover)}
+.token-usage-table tbody tr:last-child td{border-bottom:0}
+.token-usage-table th.num,
+.token-usage-table td.num{text-align:right;white-space:nowrap;font-family:'SF Mono',Monaco,Consolas,monospace}
+.token-usage-model-col{width:28%}
+.token-usage-model{min-width:220px;max-width:320px}
+.token-usage-model code,
+.token-usage-recent-model code{
+  display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;
+  white-space:nowrap;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;
+  padding:2px 6px;color:var(--text);font-family:'SF Mono',Monaco,Consolas,monospace;font-size:12px
+}
+.token-usage-time-range{
+  color:var(--text-secondary);font-size:11.5px;white-space:nowrap;
+  font-family:'SF Mono',Monaco,Consolas,monospace
+}
+.token-usage-chart-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px
+}
+.token-usage-chart-head h3{font-size:13px;margin:0;color:var(--text);font-weight:700}
+.token-usage-chart-subtitle{font-size:12px;color:var(--text-secondary);margin-top:4px}
+.token-usage-date-picker{
+  display:flex;align-items:center;gap:8px;margin:0;
+  font-size:12px;font-weight:600;color:var(--text-secondary);white-space:nowrap
+}
+.token-usage-date-picker input{
+  min-height:32px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;
+  background:var(--bg);color:var(--text);font-size:12px
+}
+.token-usage-date-picker input:focus{
+  outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(59,130,246,.14)
+}
+.token-usage-chart-wrap{width:100%;overflow-x:auto;color:var(--primary)}
+.token-usage-chart-wrap svg{width:100%;min-width:720px;display:block}
+.tus-grid{stroke:var(--border);stroke-width:1;opacity:.85}
+.tus-axis-line{stroke:var(--text-secondary);stroke-width:1;opacity:.6}
+.tus-axis{fill:var(--text-secondary);font-size:11px;font-family:'SF Mono',Monaco,Consolas,monospace}
+.tus-line{fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.tus-area{fill:url(#tusAreaGradient);color:var(--primary)}
+.tus-dot{fill:var(--bg-input);stroke:currentColor;stroke-width:2}
+.token-usage-recent-list{
+  max-height:245px;overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--bg)
+}
+.token-usage-recent-row{
+  display:grid;grid-template-columns:138px minmax(0,1fr) minmax(72px,auto);gap:10px;
+  align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);
+  font-size:12.5px;transition:background .15s
+}
+.token-usage-recent-row:hover{background:var(--bg-hover)}
+.token-usage-recent-row:last-child{border-bottom:0}
+.token-usage-recent-time,
+.token-usage-recent-total{
+  color:var(--text-secondary);font-family:'SF Mono',Monaco,Consolas,monospace;white-space:nowrap
+}
+.token-usage-recent-total{text-align:right;color:var(--text);font-weight:700}
+@media (max-width:900px){
+  .token-usage-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .token-usage-chart-head{align-items:flex-start;flex-direction:column}
+}
+@media (max-width:640px){
+  .token-usage-cards{grid-template-columns:1fr}
+  .token-usage-recent-row{grid-template-columns:1fr auto}
+  .token-usage-recent-time{grid-column:1 / -1}
+}
+
 /* —— 行内删除按钮（红色圆形） —— */
 .pricing-row-del{
   width:28px;height:28px;border-radius:50%;

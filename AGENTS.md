@@ -7,8 +7,8 @@
 ## 关键文件
 
 - `AI-Chat-大模型对话助手.html`：主页面结构、弹窗和脚本加载顺序。
-- `base.css`：基础界面样式。
-- `gemini-theme.css`：主题和统一设置页相关样式。
+- `css/base.css`：基础界面样式。
+- `css/gemini-theme.css`：主题和统一设置页相关样式。
 - `js/state.js`：全局状态、设置默认值、数据持久化。
 - `js/api-core.js`：请求体构造、主模型调用、辅助调用和 agent loop。
 - `js/api-adapters.js`：不同模型 API 的消息格式适配。

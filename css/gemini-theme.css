@@ -1266,6 +1266,9 @@ body{
 .json-history-item,
 .tool-item,
 .pricing-table-wrap,
+.token-usage-table-wrap,
+.token-usage-panel,
+.token-usage-recent-list,
 .git-left-col,
 .git-right-col,
 .git-detail-col,
@@ -1278,6 +1281,7 @@ body{
 
 .msg-content thead,
 .pricing-table thead tr,
+.token-usage-table thead th,
 .tool-item-header,
 .git-section-title,
 .lms-panel-tabs,
@@ -1288,6 +1292,8 @@ body{
 
 .msg-content tbody tr:hover,
 .pricing-table tbody tr:hover,
+.token-usage-table tbody tr:hover,
+.token-usage-recent-row:hover,
 .json-history-header:hover,
 .git-file-row:hover,
 .git-commit-row:hover{
@@ -1656,6 +1662,7 @@ input::placeholder{
 
 /* Unified settings page */
 .settings-page{
+  --settings-nav-width:280px;
   position:fixed;
   inset:0;
   height:100vh;
@@ -1664,7 +1671,7 @@ input::placeholder{
   max-height:100dvh;
   z-index:1400;
   display:none;
-  grid-template-columns:280px minmax(0,1fr);
+  grid-template-columns:var(--settings-nav-width) minmax(0,1fr);
   background:var(--bg-chat);
   color:var(--text);
   overflow:hidden;
@@ -1867,6 +1874,7 @@ input::placeholder{
 .settings-page-content{
   --settings-footer-bleed:36px;
   --settings-footer-button-bottom-gap:0px;
+  --settings-panel-width:980px;
   flex:1;
   min-height:0;
   overflow-x:hidden;
@@ -1877,7 +1885,8 @@ input::placeholder{
 }
 
 .settings-page-content > .modal{
-  width:min(980px,100%);
+  width:min(var(--settings-panel-width),100%);
+  min-height:100%;
   max-width:none;
   max-height:none;
   margin:0 auto;
@@ -1887,10 +1896,12 @@ input::placeholder{
   border-radius:0;
   box-shadow:none;
   background:transparent;
+  display:flex;
+  flex-direction:column;
 }
 
 .settings-page-content > .modal.wide{
-  width:min(1040px,100%);
+  width:min(var(--settings-panel-width),100%);
 }
 
 .settings-page-content > .modal > h2{
@@ -1901,14 +1912,27 @@ input::placeholder{
   position:sticky;
   bottom:calc(-1 * var(--settings-footer-bleed));
   z-index:2;
-  margin:22px -42px calc(-1 * var(--settings-footer-bleed));
+  width:auto;
+  margin:auto -42px calc(-1 * var(--settings-footer-bleed));
   padding:14px 42px calc(var(--settings-footer-bleed) + var(--settings-footer-button-bottom-gap));
   justify-content:flex-start;
   align-items:center;
   gap:8px!important;
   background:var(--bg-chat);
-  border-top:1px solid var(--border);
+  border-top:0;
   backdrop-filter:none;
+}
+
+.settings-page-content .modal-footer::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  right:auto;
+  top:0;
+  width:calc(100vw - var(--settings-nav-width));
+  border-top:1px solid var(--border);
+  transform:translateX(-50%);
+  pointer-events:none;
 }
 
 .settings-page-content .backup-export-actions{
@@ -1919,6 +1943,10 @@ input::placeholder{
   background:transparent;
   border-top:0;
   backdrop-filter:none;
+}
+
+.settings-page-content .backup-export-actions::before{
+  display:none;
 }
 
 .settings-page-loading,
@@ -1955,20 +1983,8 @@ body.settings-page-open .settings-docked-mask.show{
   max-height:none;
 }
 
-.settings-page-content .settings-section-git{
-  width:min(1160px,100%);
-}
-
 .settings-page-content .git-main-grid{
   height:calc(100vh - 230px);
-}
-
-.settings-page-content .settings-section-taskQueue{
-  width:min(1040px,100%);
-}
-
-.settings-page-content .settings-section-concurrentRequests{
-  width:min(1040px,100%);
 }
 
 .settings-page-content .task-queue-list{
@@ -1987,30 +2003,27 @@ body.settings-page-open .settings-docked-mask.show{
   max-height:calc(100vh - 330px)!important;
 }
 
+.settings-page-content .settings-docked-panel,
+.settings-page-content .privacy-settings-panel,
+.settings-page-content .git-modal-box{
+  width:min(var(--settings-panel-width),100%)!important;
+}
+
+.settings-page-content .settings-section-git,
+.settings-page-content .settings-section-taskQueue,
+.settings-page-content .settings-section-concurrentRequests,
 .settings-page-content .settings-section-pricing,
 .settings-page-content .settings-section-contextLimit,
-.settings-page-content .settings-section-tokenUsage{
-  width:min(980px,100%);
-}
-
-.settings-page-content .settings-section-jsonEditor{
-  width:min(1040px,100%);
-}
-
-.settings-page-content .settings-section-securityRecords{
-  width:min(1120px,100%);
-}
-
-.settings-page-content .settings-section-privacy{
-  width:min(980px,100%);
-}
-
+.settings-page-content .settings-section-tokenUsage,
+.settings-page-content .settings-section-jsonEditor,
+.settings-page-content .settings-section-securityRecords,
+.settings-page-content .settings-section-privacy,
 .settings-page-content .settings-section-mcpSkill,
 .settings-page-content .settings-section-music,
 .settings-page-content .settings-section-projectInstructions,
 .settings-page-content .settings-section-projectMemory,
 .settings-page-content .settings-section-backup{
-  width:min(1000px,100%);
+  width:min(var(--settings-panel-width),100%)!important;
 }
 
 .settings-page-content .json-editor{
@@ -2039,7 +2052,10 @@ body.settings-page-open .settings-docked-mask.show{
 
 [data-theme="dark"] .settings-page-content .modal-footer{
   background:#131314;
-  border-top-color:rgba(232,234,237,.12);
+}
+
+[data-theme="dark"] .settings-page-content .modal-footer::before{
+  border-top-color:var(--border);
 }
 
 [data-theme="dark"] .settings-page-loading,
@@ -2514,6 +2530,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .api-profile-trigger,
 [data-theme="dark"] .pricing-table .pricing-input,
 [data-theme="dark"] .pricing-currency-segment,
+[data-theme="dark"] .token-usage-date-picker input,
 [data-theme="dark"] .outline-inject-input,
 [data-theme="dark"] .task-queue-item textarea,
 [data-theme="dark"] .task-queue-order input,
@@ -2535,6 +2552,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .api-profile-trigger.open,
 [data-theme="dark"] .pricing-table .pricing-input:focus,
 [data-theme="dark"] .pricing-currency-segment:focus-within,
+[data-theme="dark"] .token-usage-date-picker input:focus,
 [data-theme="dark"] .outline-inject-input:focus,
 [data-theme="dark"] .git-form-row input:focus,
 [data-theme="dark"] .git-commit-box textarea:focus,
@@ -2555,6 +2573,8 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .backup-lede,
 [data-theme="dark"] .pricing-config-box,
 [data-theme="dark"] .context-limit-status,
+[data-theme="dark"] .token-usage-card,
+[data-theme="dark"] .token-usage-panel,
 [data-theme="dark"] .api-profile-box,
 [data-theme="dark"] .json-help,
 [data-theme="dark"] .suggestion,

@@ -181,8 +181,8 @@ function _renderRequestCurve(events, dateStr) {
   return `
     <div class="token-usage-chart-head">
       <div>
-        <h3 style="font-size:15px;margin:0;">请求数随时间变化曲线</h3>
-        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">范围：${escapeHtml(dateStr)} 00:00 → ${isToday ? '当前时间' : '24:00'}，合计 ${totalReq} 次请求</div>
+        <h3>请求数随时间变化曲线</h3>
+        <div class="token-usage-chart-subtitle">范围：${escapeHtml(dateStr)} 00:00 → ${isToday ? '当前时间' : '24:00'}，合计 ${totalReq} 次请求</div>
       </div>
       <label class="token-usage-date-picker">
         <span>选择日期</span>
@@ -276,80 +276,56 @@ function renderTokenUsageStats() {
   const legacyCount = events.filter(e => e._legacy).length;
 
   el.innerHTML = `
-    <style>
-      .token-usage-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0;}
-      .token-usage-card{background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px;}
-      .token-usage-card .label{font-size:12px;color:var(--text-secondary);margin-bottom:6px;}
-      .token-usage-card .value{font-size:18px;font-weight:700;font-family:monospace;}
-      .token-usage-table{width:100%;border-collapse:collapse;font-size:12px;}
-      .token-usage-table th,.token-usage-table td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle;}
-      .token-usage-table th{text-align:left;color:var(--text-secondary);font-weight:600;background:var(--bg-input);}
-      .token-usage-table td.num{text-align:right;font-family:monospace;white-space:nowrap;}
-      .token-usage-section{margin-top:16px;}
-      .token-usage-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
-      .token-usage-date-picker{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);}
-      .token-usage-date-picker input{background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;}
-      .token-usage-chart-wrap{width:100%;overflow-x:auto;color:var(--accent);}
-      .token-usage-chart-wrap svg{width:100%;min-width:720px;display:block;}
-      .tus-grid{stroke:var(--border);stroke-width:1;opacity:.8;}
-      .tus-axis-line{stroke:var(--text-secondary);stroke-width:1;opacity:.6;}
-      .tus-axis{fill:var(--text-secondary);font-size:11px;font-family:monospace;}
-      .tus-line{fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;}
-      .tus-area{fill:url(#tusAreaGradient);color:var(--accent);}
-      .tus-dot{fill:var(--bg);stroke:currentColor;stroke-width:2;}
-      @media(max-width:900px){.token-usage-cards{grid-template-columns:repeat(2,minmax(0,1fr));}.token-usage-chart-head{align-items:flex-start;flex-direction:column;}}
-    </style>
-
     <div class="json-help">
       数据来源：所有对话的 <code>tokenStats</code>，由 <code>recordUsageFromResponse()</code> 从 API 返回的 <code>usage</code> 字段累计，和对话中的 Token 统计来源一致。费用使用「定价管理」里的价格表估算。
       ${legacyCount ? `<br>⚠️ 有 ${legacyCount} 条旧版累计记录没有逐次模型信息，已归入「历史累计（未记录模型）」。` : ''}
     </div>
 
     <div class="token-usage-cards">
-      <div class="token-usage-card"><div class="label">总请求数</div><div class="value">${formatNumber(total.requests)}</div></div>
-      <div class="token-usage-card"><div class="label">输入 token</div><div class="value">${formatNumber(total.inputTokens)}</div></div>
-      <div class="token-usage-card"><div class="label">输出 token</div><div class="value">${formatNumber(total.outputTokens)}</div></div>
-      <div class="token-usage-card"><div class="label">估算费用</div><div class="value" style="font-size:15px;">${_fmtTokenUsageMoney(total.usd)}</div></div>
+      <div class="token-usage-card"><div class="token-usage-card-label">总请求数</div><div class="token-usage-card-value">${formatNumber(total.requests)}</div></div>
+      <div class="token-usage-card"><div class="token-usage-card-label">输入 token</div><div class="token-usage-card-value">${formatNumber(total.inputTokens)}</div></div>
+      <div class="token-usage-card"><div class="token-usage-card-label">输出 token</div><div class="token-usage-card-value">${formatNumber(total.outputTokens)}</div></div>
+      <div class="token-usage-card"><div class="token-usage-card-label">估算费用</div><div class="token-usage-card-value token-usage-card-value-money">${_fmtTokenUsageMoney(total.usd)}</div></div>
     </div>
 
     <div class="token-usage-section">
-      <h3 style="font-size:15px;margin:0 0 10px;">按模型汇总</h3>
-      <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:10px;">
+      <h3 class="token-usage-section-title">按模型汇总</h3>
+      <div class="token-usage-table-wrap">
         <table class="token-usage-table">
           <thead>
             <tr>
-              <th>模型</th><th class="num">请求</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存读</th><th class="num">思考</th><th class="num">费用</th><th>时间范围</th>
+              <th class="token-usage-model-col">模型</th><th class="num">请求</th><th class="num">输入</th><th class="num">输出</th><th class="num">缓存读</th><th class="num">思考</th><th class="num">费用</th><th>时间范围</th>
             </tr>
           </thead>
           <tbody>
             ${modelRows.map(r => `
               <tr>
-                <td><code>${escapeHtml(r.model)}</code></td>
+                <td class="token-usage-model"><code>${escapeHtml(r.model)}</code></td>
                 <td class="num">${formatNumber(r.requests)}</td>
                 <td class="num">${formatNumber(r.inputTokens)}</td>
                 <td class="num">${formatNumber(r.outputTokens)}</td>
                 <td class="num">${formatNumber(r.cacheReadTokens)}</td>
                 <td class="num">${formatNumber(r.thinkingTokens)}</td>
                 <td class="num">${_fmtTokenUsageMoney(r.usd)}</td>
-                <td style="font-size:11px;color:var(--text-secondary);white-space:nowrap;">${_fmtTokenUsageDate(r.firstTs)} → ${_fmtTokenUsageDate(r.lastTs)}</td>
+                <td class="token-usage-time-range">${_fmtTokenUsageDate(r.firstTs)} → ${_fmtTokenUsageDate(r.lastTs)}</td>
               </tr>`).join('')}
           </tbody>
         </table>
       </div>
     </div>
 
-    <div class="token-usage-section" style="background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px;">
+    <div class="token-usage-section token-usage-panel">
       ${_renderRequestCurve(events, selectedDate)}
     </div>
 
-    <div class="token-usage-section" style="background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:12px;">
-      <h3 style="font-size:15px;margin:0 0 10px;">最近请求</h3>
-        <div style="max-height:245px;overflow:auto;">
+    <div class="token-usage-section token-usage-panel">
+      <h3 class="token-usage-section-title">最近请求</h3>
+        <div class="token-usage-recent-list">
           ${latestEvents.map(ev => `
-            <div style="display:grid;grid-template-columns:118px 1fr auto;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;align-items:center;">
-              <span style="color:var(--text-secondary);font-family:monospace;">${_fmtTokenUsageTime(ev.ts)}</span>
-              <span><code>${escapeHtml(ev.model)}</code></span>
-              <span style="font-family:monospace;">${formatNumber(ev.inputTokens + ev.outputTokens)}</span>
+            <div class="token-usage-recent-row">
+              <span class="token-usage-recent-time">${_fmtTokenUsageTime(ev.ts)}</span>
+              <span class="token-usage-recent-model"><code>${escapeHtml(ev.model)}</code></span>
+              <span class="token-usage-recent-total">${formatNumber(ev.inputTokens + ev.outputTokens)}</span>
             </div>`).join('')}
         </div>
     </div>

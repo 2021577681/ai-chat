@@ -389,10 +389,11 @@ http://127.0.0.1:9000
 ```text
 .
 ├── AI-Chat-大模型对话助手.html   # 主入口，可直接打开
-├── base.css                      # 通用样式
-├── gemini-theme.css              # Gemini 风格主题
-├── git-panel.css                 # Git 面板样式
-├── lms.css                       # LMS 面板样式
+├── css/                          # 样式文件
+│   ├── base.css                  # 通用样式
+│   ├── gemini-theme.css          # Gemini 风格主题
+│   ├── git-panel.css             # Git 面板样式
+│   └── lms.css                   # LMS 面板样式
 ├── local_terminal_server.py      # 本地后端入口
 ├── requirements.txt              # Python 依赖
 ├── start_agent.bat               # Windows 启动器
