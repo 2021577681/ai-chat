@@ -16,8 +16,12 @@ MUSIC_EXTS = {
 }
 
 
+def _agent_root():
+    return os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir))
+
+
 def _music_root():
-    return os.path.join(config.WORKSPACE_ROOT, 'music')
+    return os.path.join(_agent_root(), 'music')
 
 
 def _music_rel(path):

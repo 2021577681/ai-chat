@@ -60,6 +60,112 @@ const TERMINAL_CONFIG = {
   autoAnalyzeAfterAttach: true
 };
 
+const AGENT_BACKEND_DEFAULT_TIMEOUT_MS = 75 * 1000;
+const AGENT_BACKEND_TOKEN_TIMEOUT_MS = 15 * 1000;
+const AGENT_BACKEND_EXECUTE_GRACE_MS = 15 * 1000;
+
+function agentBackendRequestTimeoutMs(action, params) {
+  const explicit = params && Number(params.requestTimeoutMs || params._requestTimeoutMs);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return Math.max(1000, explicit);
+  }
+  if (action === 'execute') {
+    const commandTimeoutSec = Math.max(1, parseInt(params && params.timeout, 10) || 60);
+    return Math.min(315 * 1000, (commandTimeoutSec * 1000) + AGENT_BACKEND_EXECUTE_GRACE_MS);
+  }
+  if (action === 'web_search' || action === 'fetch_url') return 120 * 1000;
+  if (action === 'read_file_binary' || action === 'screenshot' || action === 'list_windows') return 90 * 1000;
+  return AGENT_BACKEND_DEFAULT_TIMEOUT_MS;
+}
+
+function makeAgentAbortError(message) {
+  let err;
+  try {
+    err = new DOMException(message || 'aborted', 'AbortError');
+  } catch (e) {
+    err = new Error(message || 'aborted');
+    err.name = 'AbortError';
+  }
+  return err;
+}
+
+function makeAgentBackendTimeoutError(timeoutMs) {
+  const err = new Error(`工具请求超时（${Math.round(timeoutMs / 1000)}秒无响应）。本次工具调用已停止等待，请改用更小的命令、new_window，或标记为阻塞。`);
+  err.name = 'AgentBackendTimeoutError';
+  err.timeoutMs = timeoutMs;
+  return err;
+}
+
+async function fetchAgentBackendWithTimeout(url, init, externalSignal, timeoutMs) {
+  const finalTimeoutMs = Math.max(1000, parseInt(timeoutMs, 10) || AGENT_BACKEND_DEFAULT_TIMEOUT_MS);
+  const ctrl = new AbortController();
+  let timedOut = false;
+  let settled = false;
+  let externalAbortHandler = null;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { ctrl.abort(); } catch (e) {}
+  }, finalTimeoutMs);
+
+  const cleanup = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (externalSignal && externalAbortHandler) {
+      try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
+    }
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      cleanup();
+      throw makeAgentAbortError('aborted');
+    }
+    externalAbortHandler = () => {
+      try { ctrl.abort(); } catch (e) {}
+    };
+    externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+  }
+
+  try {
+    return await fetch(url, { ...(init || {}), signal: ctrl.signal });
+  } catch (e) {
+    if (e && e.name === 'AbortError' && timedOut && !(externalSignal && externalSignal.aborted)) {
+      throw makeAgentBackendTimeoutError(finalTimeoutMs);
+    }
+    throw e;
+  } finally {
+    cleanup();
+  }
+}
+
+async function readAgentBackendJsonWithTimeout(resp, externalSignal, timeoutMs) {
+  const finalTimeoutMs = Math.max(1000, parseInt(timeoutMs, 10) || 15000);
+  let timer = null;
+  let externalAbortHandler = null;
+  try {
+    return await Promise.race([
+      resp.json(),
+      new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(makeAgentBackendTimeoutError(finalTimeoutMs)), finalTimeoutMs);
+        if (externalSignal) {
+          if (externalSignal.aborted) {
+            reject(makeAgentAbortError('aborted'));
+            return;
+          }
+          externalAbortHandler = () => reject(makeAgentAbortError('aborted'));
+          externalSignal.addEventListener('abort', externalAbortHandler, { once: true });
+        }
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (externalSignal && externalAbortHandler) {
+      try { externalSignal.removeEventListener('abort', externalAbortHandler); } catch (e) {}
+    }
+  }
+}
+
 // ⭐ 永久权限的增删
 function setPermanentPermission(category, allow) {
   if (!PERMISSION_CATEGORIES[category]) return;
@@ -191,7 +297,12 @@ async function fetchTerminalToken(silent = false) {
     if (!silent && typeof toast === 'function') {
       toast('🔑 正在请求 Token 授权，请到 Python 终端窗口按 y 确认…', 6000);
     }
-    const resp = await fetch(TERMINAL_CONFIG.serverUrl + '/token', { method: 'GET' });
+    const resp = await fetchAgentBackendWithTimeout(
+      TERMINAL_CONFIG.serverUrl + '/token',
+      { method: 'GET' },
+      null,
+      AGENT_BACKEND_TOKEN_TIMEOUT_MS
+    );
     if (!resp.ok) {
       const txt = await resp.text();
       throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
@@ -578,13 +689,16 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   }
   
   // ⭐ 实际请求，封装为函数以便 403 后自动重试一次
+  const requestTimeoutMs = agentBackendRequestTimeoutMs(action, requestParams);
   const doFetch = async () => {
-    return await fetch(TERMINAL_CONFIG.serverUrl, {
+    const backendParams = { ...requestParams };
+    delete backendParams.requestTimeoutMs;
+    delete backendParams._requestTimeoutMs;
+    return await fetchAgentBackendWithTimeout(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
-      body: JSON.stringify({ action, ...requestParams, session_id: getAgentSessionId({ chatId }) }),
-      signal: context && context.signal ? context.signal : undefined
-    });
+      body: JSON.stringify({ action, ...backendParams, session_id: getAgentSessionId({ chatId }) })
+    }, context && context.signal ? context.signal : undefined, requestTimeoutMs);
   };
   
   try {
@@ -604,7 +718,11 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       resp = await doFetch();
     }
     
-    const r = await resp.json();
+    const r = await readAgentBackendJsonWithTimeout(
+      resp,
+      context && context.signal ? context.signal : undefined,
+      Math.max(15000, Math.min(requestTimeoutMs, 60000))
+    );
     bindCheckpointToToolContext(r, context);
     if (typeof rememberConcurrentCheckpoints === 'function') {
       rememberConcurrentCheckpoints(r, context);
@@ -634,6 +752,14 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     }
     if (e && e.name === 'AbortError') {
       return { ok: false, error: '⏸️ 工具请求已被中断，准备按新的引导继续。' };
+    }
+    if (e && e.name === 'AgentBackendTimeoutError') {
+      return {
+        ok: false,
+        error: `⏱️ ${e.message}`,
+        _toolTimeout: true,
+        timeoutMs: e.timeoutMs || requestTimeoutMs
+      };
     }
     return { ok: false, error: `无法连接后端服务：${e.message}` };
   }

@@ -756,11 +756,11 @@ function _ctxToolFn(name, context) {
 async function executeTool(name, args, context = {}) {
   const tool = state.tools.find(t => t.name === name);
   if (!tool) return { ok: false, value: `未找到工具：${name}` };
+  const toolContext = {
+    ...(context && typeof context === 'object' ? context : {}),
+    chatId: _toolContextChatId(context)
+  };
   try {
-    const toolContext = {
-      ...(context && typeof context === 'object' ? context : {}),
-      chatId: _toolContextChatId(context)
-    };
     if (typeof window !== 'undefined') window.__currentToolContext = toolContext;
     const scopedNames = [
       'callAgentBackend',
@@ -776,7 +776,7 @@ async function executeTool(name, args, context = {}) {
     if (typeof window !== 'undefined' && window.__currentToolContext === toolContext) delete window.__currentToolContext;
     return { ok: true, value };
   } catch (e) {
-    if (typeof window !== 'undefined') delete window.__currentToolContext;
+    if (typeof window !== 'undefined' && window.__currentToolContext === toolContext) delete window.__currentToolContext;
     return { ok: false, value: `工具出错：${e.message}` };
   }
 }

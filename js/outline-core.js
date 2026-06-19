@@ -7,6 +7,106 @@
 // ⭐ 单轮 fetch 硬超时（毫秒）。即使外部 abort 信号失灵，到点也会强行抛错
 // 5 分钟够长（推理模型也能跑完），但能兜住"网络层死锁"导致的永久挂起
 const OUTLINE_FETCH_TIMEOUT_MS = 5 * 60 * 1000;
+const OUTLINE_TOOL_TIMEOUT_MS = 90 * 1000;
+
+function outlineToolTimeoutMs(name, args) {
+  if (name === 'execute_action') {
+    const commandTimeoutSec = Math.max(1, parseInt(args && args.timeout, 10) || 60);
+    return Math.min(315 * 1000, (commandTimeoutSec * 1000) + 30 * 1000);
+  }
+  if (name === 'web_search' || name === 'fetch_url') return 150 * 1000;
+  if (name === 'attach_file' || name === 'ai_screenshot') return 120 * 1000;
+  return OUTLINE_TOOL_TIMEOUT_MS;
+}
+
+function outlineAbortError() {
+  let err;
+  try {
+    err = new DOMException('用户中断', 'AbortError');
+  } catch (e) {
+    err = new Error('用户中断');
+    err.name = 'AbortError';
+  }
+  return err;
+}
+
+function outlineToolTimeoutResult(name, timeoutMs) {
+  const seconds = Math.round(timeoutMs / 1000);
+  return {
+    ok: false,
+    value: {
+      ok: false,
+      error: `⏱️ 工具 ${name || 'unknown'} 超过 ${seconds} 秒没有返回，前端已停止等待。本次工具调用按失败处理，请换用更小的命令、new_window，或用 update_outline 记录阻塞原因。`,
+      _toolTimeout: true,
+      timeoutMs
+    }
+  };
+}
+
+async function executeOutlineToolWithTimeout(name, args, context, timeoutMs) {
+  const parentSignal = context && context.signal;
+  if (parentSignal && parentSignal.aborted) throw outlineAbortError();
+
+  const ctrl = new AbortController();
+  let timedOut = false;
+  let timer = null;
+  let parentAbortHandler = null;
+
+  const clear = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (parentSignal && parentAbortHandler) {
+      try { parentSignal.removeEventListener('abort', parentAbortHandler); } catch (e) {}
+    }
+    parentAbortHandler = null;
+  };
+
+  const runContext = {
+    ...(context && typeof context === 'object' ? context : {}),
+    signal: ctrl.signal
+  };
+
+  try {
+    let abortPromise = null;
+    if (parentSignal) {
+      abortPromise = new Promise((resolve, reject) => {
+        parentAbortHandler = () => {
+          try { ctrl.abort(); } catch (e) {}
+          reject(outlineAbortError());
+        };
+        parentSignal.addEventListener('abort', parentAbortHandler, { once: true });
+      });
+    }
+
+    const timeoutPromise = new Promise(resolve => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        try { ctrl.abort(); } catch (e) {}
+        resolve(outlineToolTimeoutResult(name, timeoutMs));
+      }, timeoutMs);
+    });
+
+    const toolPromise = Promise.resolve()
+      .then(() => executeTool(name, args, runContext))
+      .catch(e => {
+        if (timedOut) return outlineToolTimeoutResult(name, timeoutMs);
+        if (e && e.name === 'AbortError') throw e;
+        return { ok: false, value: `工具出错：${e.message || e}` };
+      });
+
+    return await Promise.race([
+      toolPromise,
+      timeoutPromise,
+      ...(abortPromise ? [abortPromise] : [])
+    ]);
+  } catch (e) {
+    if (timedOut) return outlineToolTimeoutResult(name, timeoutMs);
+    if (e && e.name === 'AbortError') throw e;
+    return { ok: false, value: `工具出错：${e.message || e}` };
+  } finally {
+    clear();
+  }
+}
 
 function outlineExtractTaskText(history) {
   return (history || [])
@@ -1092,8 +1192,25 @@ async function callAPIWithOutline(options = {}) {
           }
           onUpdate();
           
-          result = await executeTool(fname, args, { chatId: taskChatId, chat: c, outline: aiMsg.outline });
           anyExternalToolCalled = true;
+          try {
+            const toolTimeoutMs = outlineToolTimeoutMs(fname, args);
+            result = await executeOutlineToolWithTimeout(fname, args, {
+              chatId: taskChatId,
+              chat: c,
+              outline: aiMsg.outline,
+              signal: abortSignal,
+              isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+            }, toolTimeoutMs);
+          } catch (e) {
+            liveEntry._running = false;
+            liveEntry.ok = false;
+            liveEntry.result = e && e.name === 'AbortError'
+              ? '⏸️ 工具请求已被用户中断。'
+              : `工具出错：${e.message || e}`;
+            onUpdate();
+            throw e;
+          }
           
           const rawContent = outlineToolResultText(result);
           const preparedToolResult = typeof prepareToolResultForContext === 'function'
