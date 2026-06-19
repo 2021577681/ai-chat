@@ -274,23 +274,116 @@ function outlineRecordAssistantSpeech(outlineObj, assistantMsg, round, hasToolCa
 }
 
 function outlineIsCodeMutationCall(tc) {
-    if (!tc || !tc.name) return false;
-    if (['apply_patch', 'save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
-      if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) return false;
-      return true;
+  if (!tc || !tc.name) return false;
+  if (['apply_patch', 'save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
+    if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) return false;
+    return true;
+  }
+  if (tc.name !== 'execute_action') return false;
+  const cmd = String((tc.args && tc.args.command) || '');
+  return /\b(npm|pnpm|yarn|pip)\b.*\b(add|install|remove|uninstall)\b/i.test(cmd)
+    || /\b(eslint|ruff)\b.*\b--fix\b/i.test(cmd)
+    || /\b(prettier)\b.*\b--write\b/i.test(cmd)
+    || /\b(gofmt|rustfmt)\b.*\b-w\b/i.test(cmd)
+    || /\b(npm|pnpm|yarn)\b.*\b(format|fix)\b/i.test(cmd)
+    || /\b(sed|perl|powershell|python)\b.*\b(-i|set-content|out-file|writealltext|replace)\b/i.test(cmd);
+}
+
+function outlineMutationActionKind(action) {
+  const a = String(action || '').toLowerCase();
+  if (/delete|deleted|删除|移除/.test(a)) return 'deleted';
+  if (/create|created|创建|新增/.test(a)) return 'created';
+  return 'modified';
+}
+
+function outlineMutationFilesForEntry(tc) {
+  if (!tc || tc.ok === false || tc._running || !outlineIsCodeMutationCall(tc)) return [];
+  if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) return [];
+
+  const files = (tc.rawResult && Array.isArray(tc.rawResult.files)) ? tc.rawResult.files : [];
+  if (files.length) {
+    return files.map(f => {
+      const path = outlineNormalizePatchPath(f && f.path);
+      if (!path) return null;
+      return {
+        path,
+        added: Math.max(0, parseInt(f && f.added) || 0),
+        removed: Math.max(0, parseInt(f && f.removed) || 0),
+        source: tc.name,
+        action: f && f.action ? String(f.action) : 'modified',
+        kind: outlineMutationActionKind(f && f.action)
+      };
+    }).filter(Boolean);
+  }
+
+  if (['save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
+    const path = outlineNormalizePatchPath(tc.args && tc.args.path);
+    if (!path) return [];
+    const isDelete = tc.name === 'delete_note';
+    return [{
+      path,
+      added: 0,
+      removed: 0,
+      source: tc.name,
+      action: isDelete ? 'deleted' : 'modified',
+      kind: isDelete ? 'deleted' : 'modified'
+    }];
+  }
+
+  return [];
+}
+
+function outlineMutationTimeline(outlineObj) {
+  return outlineToolCallEntries(outlineObj)
+    .map((tc, idx) => ({ tc, idx, ts: Number(tc && tc._ts) || idx }))
+    .filter(x => outlineMutationFilesForEntry(x.tc).length > 0);
+}
+
+function outlineNetMutationState(outlineObj) {
+  const fileMap = new Map();
+  for (const entry of outlineMutationTimeline(outlineObj)) {
+    for (const f of outlineMutationFilesForEntry(entry.tc)) {
+      const cur = fileMap.get(f.path) || {
+        path: f.path,
+        added: 0,
+        removed: 0,
+        sources: new Set(),
+        actions: [],
+        firstKind: '',
+        lastKind: '',
+        lastEntry: null
+      };
+      cur.added += f.added;
+      cur.removed += f.removed;
+      if (f.source) cur.sources.add(f.source);
+      if (f.action) cur.actions.push(f.action);
+      if (!cur.firstKind) cur.firstKind = f.kind;
+      cur.lastKind = f.kind;
+      cur.lastEntry = entry;
+      fileMap.set(f.path, cur);
     }
-    if (tc.name !== 'execute_action') return false;
-    const cmd = String((tc.args && tc.args.command) || '');
-    return /\b(npm|pnpm|yarn|pip)\b.*\b(add|install|remove|uninstall)\b/i.test(cmd)
-      || /\b(eslint|ruff)\b.*\b--fix\b/i.test(cmd)
-      || /\b(prettier)\b.*\b--write\b/i.test(cmd)
-      || /\b(gofmt|rustfmt)\b.*\b-w\b/i.test(cmd)
-      || /\b(npm|pnpm|yarn)\b.*\b(format|fix)\b/i.test(cmd)
-      || /\b(sed|perl|powershell|python)\b.*\b(-i|set-content|out-file|writealltext|replace)\b/i.test(cmd);
+  }
+
+  const files = Array.from(fileMap.values()).filter(f => {
+    const createdThenDeleted = f.firstKind === 'created' && f.lastKind === 'deleted';
+    if (createdThenDeleted) return false;
+    return true;
+  });
+  const mutationEntries = files
+    .map(f => f.lastEntry)
+    .filter(Boolean)
+    .sort((a, b) => (a.ts - b.ts) || (a.idx - b.idx));
+
+  return {
+    files,
+    mutationEntries,
+    hasMutation: mutationEntries.length > 0,
+    lastMutation: mutationEntries.length ? mutationEntries[mutationEntries.length - 1] : null
+  };
 }
 
 function outlineHasCodeMutation(outlineObj) {
-  return outlineToolCallEntries(outlineObj).some(outlineIsCodeMutationCall);
+  return outlineNetMutationState(outlineObj).hasMutation;
 }
 
 function outlineCommandSegments(command) {
@@ -364,8 +457,9 @@ function outlineLooksLikePassedVerificationOutput(tc) {
 function outlineVerificationState(outlineObj) {
   const entries = outlineToolCallEntries(outlineObj)
     .map((tc, idx) => ({ tc, idx, ts: Number(tc && tc._ts) || idx }));
-  const mutationEntries = entries.filter(x => outlineIsCodeMutationCall(x.tc));
-  const lastMutation = mutationEntries.length ? mutationEntries[mutationEntries.length - 1] : null;
+  const mutationState = outlineNetMutationState(outlineObj);
+  const mutationEntries = mutationState.mutationEntries;
+  const lastMutation = mutationState.lastMutation;
   const executeEntries = entries.filter(x => x.tc && x.tc.name === 'execute_action');
   const verificationEntries = executeEntries.filter(x =>
     outlineIsVerifyIntentToolCall(x.tc)
@@ -384,8 +478,9 @@ function outlineVerificationState(outlineObj) {
   const lastVerification = verificationEntries.length ? verificationEntries[verificationEntries.length - 1].tc : null;
   const lastAfterMutation = afterMutation.length ? afterMutation[afterMutation.length - 1].tc : null;
   return {
-    hasMutation: !!lastMutation,
+    hasMutation: mutationState.hasMutation,
     lastMutation: lastMutation ? lastMutation.tc : null,
+    mutationFiles: mutationState.files,
     hasExecute: executeEntries.length > 0,
     hasVerification: verificationEntries.length > 0,
     hasVerificationAfterMutation: afterMutation.length > 0,
@@ -440,43 +535,14 @@ function outlineNormalizePatchPath(path) {
 }
 
 function outlineBuildDiffSummary(outlineObj) {
-  const map = new Map();
-  const addFile = (path, added, removed, source, action) => {
-    if (!path) return;
-    const key = outlineNormalizePatchPath(path);
-    const cur = map.get(key) || { path: key, added: 0, removed: 0, sources: new Set(), actions: [] };
-    cur.added += Math.max(0, parseInt(added) || 0);
-    cur.removed += Math.max(0, parseInt(removed) || 0);
-    if (source) cur.sources.add(source);
-    if (action) cur.actions.push(String(action));
-    map.set(key, cur);
-  };
-
-  for (const tc of outlineToolCallEntries(outlineObj)) {
-    if (!tc || tc.ok === false || tc._running) continue;
-    if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) continue;
-    const files = (tc.rawResult && Array.isArray(tc.rawResult.files)) ? tc.rawResult.files : [];
-    if (files.length) {
-      for (const f of files) addFile(f.path, f.added, f.removed, tc.name, f.action);
-    } else if (['save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
-      const path = (tc.args && tc.args.path) || '';
-      addFile(path, 0, 0, tc.name, tc.name === 'delete_note' ? 'deleted' : 'modified');
-    }
-  }
-
-  const files = Array.from(map.values()).map(x => ({
+  const files = outlineNetMutationState(outlineObj).files.map(x => ({
     path: x.path,
     added: x.added,
     removed: x.removed,
     net: x.added - x.removed,
     sources: Array.from(x.sources),
     actions: x.actions
-  })).filter(f => {
-    const hasCreate = f.actions.some(a => /create|创建/i.test(a));
-    const hasDelete = f.actions.some(a => /delete|deleted|删除/i.test(a));
-    if (hasCreate && hasDelete) return false;
-    return true;
-  }).sort((a, b) => a.path.localeCompare(b.path));
+  })).sort((a, b) => a.path.localeCompare(b.path));
   if (!files.length) return null;
   return {
     files,
