@@ -302,7 +302,7 @@
     <!-- 🗂️ API 配置档案 -->
     <div class="form-group api-profile-box">
       <label style="display:flex;align-items:center;gap:6px;">
-        🗂️ 配置档案
+        配置档案
         <span class="form-hint" style="font-weight:normal;margin:0;">保存多套 API 配置，一键切换</span>
       </label>
       <div style="display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;">
@@ -328,7 +328,7 @@
         <button class="btn api-profile-op-btn" type="button" onclick="onDeleteActiveProfile()" title="删除此档案" disabled style="color:#d9534f;">🗑</button>
       </div>
       <div class="form-hint" style="margin-top:6px;">
-        💡 切换档案会自动应用 baseUrl / API Key / 模型 / 系统提示等配置。修改后点「保存」会自动同步到当前激活的档案。
+        切换档案会自动应用 baseUrl / API Key / 模型 / 系统提示等配置。修改后点「保存」会自动同步到当前激活的档案。
       </div>
     </div>
     
@@ -369,7 +369,7 @@
     </div>
     
     <div class="form-group">
-      <label>🔗 最终请求 URL</label>
+      <label>最终请求 URL</label>
       <div class="url-final-preview"><span class="label">POST</span><span id="finalUrlPreview">-</span></div>
     </div>
     
@@ -387,7 +387,7 @@
         <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" onclick="onFetchModels()">📡 拉取模型</button>
       </label>
       <input type="text" id="modelName">
-      <div class="form-hint">多个用逗号分隔。点【📡 拉取模型】可从服务商自动获取可用列表</div>
+      <div class="form-hint">多个用逗号分隔。点【拉取模型】可从服务商自动获取可用列表</div>
     </div>
     
     <div class="form-group">
@@ -409,7 +409,7 @@
     </div>
     
     <div class="form-group">
-      <label>🛠️ 工具调用最大轮数</label>
+      <label>工具调用最大轮数</label>
       <div class="slider-row">
         <input type="range" id="maxToolRounds" min="1" max="100" step="1" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRoundsInput').value=this.value">
         <span class="slider-val" id="maxToolRoundsVal">15</span>
@@ -442,7 +442,7 @@
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div>
-        <label style="margin:0;">🛡️ 通过本地服务代理（绕过 CORS）</label>
+        <label style="margin:0;">通过本地服务代理（绕过 CORS）</label>
         <div class="form-hint" style="margin-top:2px;">
           浏览器报 <code>Failed to fetch</code> / CORS 错误时开启。需先启动 <code>python local_terminal_server.py</code> 并拉取 Token。
         </div>
@@ -451,7 +451,7 @@
     </div>
     
     <div class="form-group">
-      <label>🔁 失败自动重试次数</label>
+      <label>失败自动重试次数</label>
       <div class="slider-row">
         <input type="range" id="retryMaxAttempts" min="0" max="9" step="1" oninput="setRetryMaxAttemptsLabel(this.value)">
         <span class="slider-val" id="retryMaxAttemptsVal">∞</span>
@@ -461,7 +461,7 @@
     
     <!-- 上下文压缩设置 -->
     <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
-    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🗜️ 上下文压缩</h3>
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">上下文压缩</h3>
 
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div>
@@ -490,12 +490,12 @@
     
     <!-- 🧪 自动信标（上下文体检） -->
     <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
-    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🧪 上下文体检（自动信标）</h3>
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">上下文体检（自动信标）</h3>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div>
         <label style="margin:0;">启用自动信标</label>
-        <div class="form-hint" style="margin-top:2px;">每隔 N 条用户消息悄悄塞入一条"记代号"消息（不在聊天界面显示），用于检测 AI 是否还记得上下文。点击顶栏 🧪 按钮一键体检。</div>
+        <div class="form-hint" style="margin-top:2px;">每隔 N 条用户消息悄悄塞入一条"记代号"消息（不在聊天界面显示），用于检测 AI 是否还记得上下文。点击顶栏按钮一键体检。</div>
       </div>
       <label class="switch"><input type="checkbox" id="beaconEnabled"><span class="switch-slider"></span></label>
     </div>
@@ -511,7 +511,7 @@
     
     <!-- 本地终端 Token 设置 -->
     <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
-    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">🔑 本地终端授权</h3>
+    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">本地终端授权</h3>
     
     <div class="form-group">
       <label>当前 Token</label>
@@ -1135,11 +1135,11 @@
     </h2>
     
     <div class="json-tabs">
-      <button class="json-tab active" data-jsontab="preview" onclick="switchJsonTab('preview', this)">🔍 实时预览</button>
-      <button class="json-tab" data-jsontab="response" onclick="switchJsonTab('response', this)">📥 AI 响应</button>
-      <button class="json-tab" data-jsontab="template" onclick="switchJsonTab('template', this)">📝 自定义模板</button>
-      <button class="json-tab" data-jsontab="headers" onclick="switchJsonTab('headers', this)">📋 自定义请求头</button>
-      <button class="json-tab" data-jsontab="history" onclick="switchJsonTab('history', this)">📜 请求历史</button>
+      <button class="json-tab active" data-jsontab="preview" onclick="switchJsonTab('preview', this)">实时预览</button>
+      <button class="json-tab" data-jsontab="response" onclick="switchJsonTab('response', this)">AI 响应</button>
+      <button class="json-tab" data-jsontab="template" onclick="switchJsonTab('template', this)">自定义模板</button>
+      <button class="json-tab" data-jsontab="headers" onclick="switchJsonTab('headers', this)">自定义请求头</button>
+      <button class="json-tab" data-jsontab="history" onclick="switchJsonTab('history', this)">请求历史</button>
     </div>
     
     <!-- Tab 1: 实时预览 -->
@@ -1151,10 +1151,10 @@
       <div class="json-stats" id="jsonStats" style="margin-bottom:8px;font-size:12px;color:var(--text-secondary);"></div>
       <textarea class="json-editor" id="jsonPreview" readonly style="min-height:380px;"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="refreshJsonPreview()">🔄 刷新</button>
-        <button class="btn" onclick="copyJsonPreview()">📋 复制完整内容</button>
-        <button class="btn" onclick="copyJsonBodyOnly()">📦 仅复制 body</button>
-        <button class="btn" onclick="copyAsCurl()">⚡ 复制为 cURL</button>
+        <button class="btn" onclick="refreshJsonPreview()">刷新</button>
+        <button class="btn" onclick="copyJsonPreview()">复制完整内容</button>
+        <button class="btn" onclick="copyJsonBodyOnly()">仅复制 body</button>
+        <button class="btn" onclick="copyAsCurl()">复制为 cURL</button>
       </div>
     </div>
     
@@ -1172,9 +1172,9 @@
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="refreshJsonResponse()">🔄 刷新</button>
-        <button class="btn" onclick="copyJsonResponse()">📋 复制内容</button>
-        <button class="btn btn-warning" onclick="clearJsonResponses()">🗑 清空</button>
+        <button class="btn" onclick="refreshJsonResponse()">刷新</button>
+        <button class="btn" onclick="copyJsonResponse()">复制内容</button>
+        <button class="btn btn-warning" onclick="clearJsonResponses()">清空</button>
       </div>
     </div>
     
@@ -1192,9 +1192,9 @@
       </div>
       <textarea class="json-editor" id="jsonTemplate" style="min-height:300px;"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="formatJsonTemplate()">✨ 格式化</button>
-        <button class="btn btn-warning" onclick="resetJsonTemplate()">🔄 恢复默认</button>
-        <button class="btn btn-primary" onclick="saveJsonTemplate()">💾 保存</button>
+        <button class="btn" onclick="formatJsonTemplate()">格式化</button>
+        <button class="btn btn-warning" onclick="resetJsonTemplate()">恢复默认</button>
+        <button class="btn btn-primary" onclick="saveJsonTemplate()">保存</button>
       </div>
     </div>
     
@@ -1206,8 +1206,8 @@
       </div>
       <textarea class="json-editor" id="jsonHeaders" style="min-height:200px;" placeholder='{"User-Agent": "codex-tui/0.118.0 (Mac OS 26.3.1; arm64)"}'></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="setCodexUserAgentHeader()">🧩 填入 Codex UA</button>
-        <button class="btn btn-primary" onclick="saveJsonTemplate()">💾 保存</button>
+        <button class="btn" onclick="setCodexUserAgentHeader()">填入 Codex UA</button>
+        <button class="btn btn-primary" onclick="saveJsonTemplate()">保存</button>
       </div>
     </div>
     
@@ -1217,8 +1217,8 @@
         💡 最近 20 次 API 请求记录。可查看请求体、响应、错误，方便调试。
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <button class="btn" onclick="refreshJsonHistory()">🔄 刷新</button>
-        <button class="btn btn-warning" onclick="clearJsonHistory()">🗑 清空历史</button>
+        <button class="btn" onclick="refreshJsonHistory()">刷新</button>
+        <button class="btn btn-warning" onclick="clearJsonHistory()">清空历史</button>
       </div>
       <div id="jsonHistory" style="max-height:480px;overflow-y:auto;"></div>
     </div>
