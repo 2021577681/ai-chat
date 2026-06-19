@@ -481,9 +481,9 @@ function _refreshSettingsModalFromState() {
   const retryEl = document.getElementById('retryMaxAttempts');
   const retryValEl = document.getElementById('retryMaxAttemptsVal');
   if (retryEl) {
-    const v = (s.retryMaxAttempts === undefined || s.retryMaxAttempts === null) ? 3 : s.retryMaxAttempts;
+    const v = retrySettingToSliderValue(s.retryMaxAttempts);
     retryEl.value = v;
-    if (retryValEl) retryValEl.textContent = v;
+    if (retryValEl) retryValEl.textContent = retrySliderDisplay(v);
   }
   const compEnabled = document.getElementById('compressAutoEnabled');
   const compThreshold = document.getElementById('compressAutoThreshold');

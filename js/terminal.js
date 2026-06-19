@@ -234,12 +234,63 @@ let _autoResendInProgressByChat = {};
 // 防止"暂停后下一次正常对话结束才冒出幽灵等待"。
 let _autoResendCancelSeq = 0;
 let _autoResendCancelSeqByChat = {};
+const OUTLINE_PERMISSION_AUTO_ALLOW_MS = 3 * 60 * 1000;
+let _termConfirmAutoAllowTimer = null;
+let _termConfirmAutoAllowTick = null;
+
+function isOutlinePermissionAutoAllowContext(context) {
+  if (typeof state === 'undefined' || !state.settings || !state.settings.outlinePermissionAutoAllow) return false;
+  const chatId = resolveToolChatId(context);
+  const hasOutlineContext = !!(context && typeof context === 'object' && context.outline);
+  const isOutlineTask = !!(chatId && typeof isChatTaskMode === 'function' && isChatTaskMode(chatId, 'outline'));
+  return hasOutlineContext || isOutlineTask;
+}
+
+function formatAutoAllowRemaining(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
+  return `${min}:${String(sec).padStart(2, '0')}`;
+}
+
+function cleanupTermConfirmAutoAllowTimer() {
+  if (_termConfirmAutoAllowTimer) clearTimeout(_termConfirmAutoAllowTimer);
+  if (_termConfirmAutoAllowTick) clearInterval(_termConfirmAutoAllowTick);
+  _termConfirmAutoAllowTimer = null;
+  _termConfirmAutoAllowTick = null;
+  const hint = document.getElementById('termConfirmAutoAllowHint');
+  if (hint) {
+    hint.style.display = 'none';
+    hint.textContent = '';
+  }
+}
+
+function startTermConfirmAutoAllowTimer(context) {
+  cleanupTermConfirmAutoAllowTimer();
+  if (!isOutlinePermissionAutoAllowContext(context)) return;
+  const hint = document.getElementById('termConfirmAutoAllowHint');
+  const deadline = Date.now() + OUTLINE_PERMISSION_AUTO_ALLOW_MS;
+  const updateHint = () => {
+    if (!hint) return;
+    hint.style.display = 'block';
+    hint.textContent = `大纲模式：${formatAutoAllowRemaining(deadline - Date.now())} 内未选择允许或阻止，将默认允许本次调用。`;
+  };
+  updateHint();
+  _termConfirmAutoAllowTick = setInterval(updateHint, 1000);
+  _termConfirmAutoAllowTimer = setTimeout(() => {
+    _termConfirmAutoAllowTimer = null;
+    if (!_termConfirmResolve) return;
+    if (typeof toast === 'function') toast('大纲模式权限等待超时，已自动允许本次调用', 3500);
+    termConfirmAccept({ autoAllowed: true });
+  }, OUTLINE_PERMISSION_AUTO_ALLOW_MS);
+}
 
 function termAskConfirm(title, detail, command, category, context) {
   return new Promise(resolve => {
     if (_termConfirmAbortSignal && _termConfirmAbortHandler) {
       try { _termConfirmAbortSignal.removeEventListener('abort', _termConfirmAbortHandler); } catch (_) {}
     }
+    cleanupTermConfirmAutoAllowTimer();
     _termConfirmAbortSignal = null;
     _termConfirmAbortHandler = null;
     _termConfirmResolve = resolve;
@@ -271,6 +322,7 @@ function termAskConfirm(title, detail, command, category, context) {
     }
 
     document.getElementById('termConfirmMask').classList.add('show');
+    startTermConfirmAutoAllowTimer(context);
 
     let secs = 3;
     const countEl = document.getElementById('termCountdown');
@@ -293,6 +345,7 @@ function termAskConfirm(title, detail, command, category, context) {
       const abortConfirm = () => {
         document.getElementById('termConfirmMask').classList.remove('show');
         if (btn._timer) clearInterval(btn._timer);
+        cleanupTermConfirmAutoAllowTimer();
         if (_termConfirmResolve) {
           _termConfirmResolve({ allowed: false, rejectAll: false, aborted: true });
           _termConfirmResolve = null;
@@ -317,20 +370,22 @@ function cleanupTermConfirmAbortListener() {
   _termConfirmAbortHandler = null;
 }
 
-function termConfirmAccept() {
+function termConfirmAccept(options = {}) {
   document.getElementById('termConfirmMask').classList.remove('show');
   // ⭐ "永久允许此类"复选框
   const cat = _currentConfirmCategory;
-  if (document.getElementById('termAllowSession').checked && cat) {
+  const autoAllowed = !!(options && options.autoAllowed);
+  if (!autoAllowed && document.getElementById('termAllowSession').checked && cat) {
     setPermanentPermission(cat, true);
     const info = PERMISSION_CATEGORIES[cat];
     toast(`✓ 已永久允许「${info ? info.label : cat}」（可在 ⋯ 更多 → 权限管理 撤销）`, 3500);
   }
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAutoAllowTimer();
   cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
-    _termConfirmResolve({ allowed: true, rejectAll: false });
+    _termConfirmResolve({ allowed: true, rejectAll: false, autoAllowed });
     _termConfirmResolve = null;
   }
   _currentConfirmChatId = '';
@@ -347,6 +402,7 @@ function termConfirmAcceptAll() {
   }
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAutoAllowTimer();
   cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: true, rejectAll: false });
@@ -359,6 +415,7 @@ function termConfirmReject() {
   document.getElementById('termConfirmMask').classList.remove('show');
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAutoAllowTimer();
   cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: false, rejectAll: false });
@@ -371,6 +428,7 @@ function termConfirmRejectAll() {
   document.getElementById('termConfirmMask').classList.remove('show');
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
+  cleanupTermConfirmAutoAllowTimer();
   cleanupTermConfirmAbortListener();
   if (_termConfirmResolve) {
     _termConfirmResolve({ allowed: false, rejectAll: true });

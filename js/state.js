@@ -52,6 +52,7 @@ let state = {
     outlineMaxRounds: 30,
     outlineModel: '',
     outlineSystemPrompt: '',  // 留空则使用 outline.js 中的 DEFAULT_OUTLINE_SYSTEM_PROMPT
+    outlinePermissionAutoAllow: false, // 大纲模式权限弹窗 3 分钟无人响应时默认允许本次调用
     contextLimitMode: 'auto',
     contextLimitOverride: 0,
     compressAutoEnabled: false,
@@ -69,8 +70,9 @@ let state = {
     // 默认开启 —— 大部分用户用本地项目时都会遇到 CORS 问题
     useLocalProxy: true,
     // ⭐ 自动重试：网络抖动 / HTTP 5xx / 429 / 流中途断开时自动重发
-    retryMaxAttempts: 3,        // 最多重试次数（首次失败后再试 N 次，总共 N+1 次尝试）
-    retryBaseDelayMs: 1000,     // 退避基数（毫秒），实际等待 = base * 2^(n-1) + 抖动
+    retryMaxAttempts: -1,       // 最多重试次数；-1 表示无限重试
+    retryPolicyVersion: 2,      // v2 默认使用无限重试 + 5 次后固定 2s
+    retryBaseDelayMs: 1000,     // 前 5 次退避基数（毫秒），之后固定 2s
     // 🧪 自动信标系统：每隔 N 条用户消息塞入一条隐藏的"记代号"消息，
     //    供"体检"功能测试 AI 是否还记得上下文（中段消息最易丢）
     beaconEnabled: false,       // 默认关闭，避免增加不必要 token
@@ -186,9 +188,61 @@ let state = {
 
 let pendingImportData = null;
 
+// ============ 自动重试设置工具 ============
+const RETRY_UNLIMITED = -1;
+const RETRY_POLICY_VERSION = 2;
+const RETRY_UI_INFINITY_VALUE = 9;
+const RETRY_FIXED_DELAY_AFTER_FAILURES = 5;
+const RETRY_FIXED_DELAY_MS = 2000;
+
+function normalizeRetryMaxAttempts(value, fallback = RETRY_UNLIMITED) {
+  const n = parseInt(value, 10);
+  if (n === RETRY_UNLIMITED) return RETRY_UNLIMITED;
+  if (isNaN(n)) return fallback;
+  return Math.max(0, n);
+}
+
+function retryMaxAttemptsToTotalAttempts(value) {
+  const maxRetries = normalizeRetryMaxAttempts(value);
+  return maxRetries === RETRY_UNLIMITED ? Infinity : Math.max(1, maxRetries + 1);
+}
+
+function retryTotalAttemptsLabel(totalAttempts) {
+  return Number.isFinite(totalAttempts) ? String(totalAttempts) : '∞';
+}
+
+function retrySettingToSliderValue(value) {
+  const maxRetries = normalizeRetryMaxAttempts(value);
+  if (maxRetries === RETRY_UNLIMITED || maxRetries >= RETRY_UI_INFINITY_VALUE) return RETRY_UI_INFINITY_VALUE;
+  return Math.max(0, maxRetries);
+}
+
+function retrySliderValueToSetting(value) {
+  const n = parseInt(value, 10);
+  if (isNaN(n)) return RETRY_UNLIMITED;
+  return n >= RETRY_UI_INFINITY_VALUE ? RETRY_UNLIMITED : Math.max(0, n);
+}
+
+function retrySliderDisplay(value) {
+  const n = parseInt(value, 10);
+  return !isNaN(n) && n >= RETRY_UI_INFINITY_VALUE ? '∞' : String(Math.max(0, isNaN(n) ? 0 : n));
+}
+
+function setRetryMaxAttemptsLabel(value) {
+  const el = document.getElementById('retryMaxAttemptsVal');
+  if (el) el.textContent = retrySliderDisplay(value);
+}
+
+function migrateRetrySettings() {
+  if (!state.settings || state.settings.retryPolicyVersion === RETRY_POLICY_VERSION) return;
+  state.settings.retryMaxAttempts = RETRY_UNLIMITED;
+  state.settings.retryPolicyVersion = RETRY_POLICY_VERSION;
+}
+
 function loadData() {
   try { const d = storage.get(STORE_KEY); if (d) { const p = JSON.parse(d); state.chats = p.chats || []; state.currentId = p.currentId; state._lastSavedAt = p.savedAt || null; } } catch (e) {}
   try { const s = storage.get(SETTINGS_KEY); if (s) state.settings = { ...state.settings, ...JSON.parse(s) }; } catch (e) {}
+  migrateRetrySettings();
   try { const t = storage.get(TOOLS_KEY); if (t) state.tools = JSON.parse(t); } catch (e) {}
   injectBuiltinTools();
 }

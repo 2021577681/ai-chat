@@ -452,7 +452,7 @@ function importApiProfilesFromBackup(payload) {
 }
 
 function buildExportData() {
-  const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt'];
+  const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow'];
   const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
   const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
 
@@ -608,7 +608,7 @@ function applyImport() {
   if (text && !pendingImportData) parseAndPreviewImport();
   if (!pendingImportData) { alert('请先选择文件或粘贴 JSON'); return; }
   
-  const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt'];
+  const OUTLINE_KEYS = ['useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow'];
   const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
   const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
 

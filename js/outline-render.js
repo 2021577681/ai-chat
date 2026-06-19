@@ -390,6 +390,7 @@ function openOutlineSettings() {
   if (e('outline_maxRounds')) {
     e('outline_maxRounds').value = Math.max(1, parseInt(s.outlineMaxRounds) || 30);
   }
+  if (e('outline_permissionAutoAllow')) e('outline_permissionAutoAllow').checked = !!s.outlinePermissionAutoAllow;
   if (e('outline_model')) e('outline_model').value = s.outlineModel || '';
   if (e('outline_systemPrompt')) e('outline_systemPrompt').value = s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
 }
@@ -407,6 +408,7 @@ function saveOutlineSettings() {
     const rounds = parseInt(e('outline_maxRounds').value);
     s.outlineMaxRounds = (isNaN(rounds) || rounds < 1) ? 30 : rounds;
   }
+  if (e('outline_permissionAutoAllow')) s.outlinePermissionAutoAllow = e('outline_permissionAutoAllow').checked;
   if (e('outline_model')) s.outlineModel = e('outline_model').value.trim();
   if (e('outline_systemPrompt')) s.outlineSystemPrompt = e('outline_systemPrompt').value;
   

@@ -270,8 +270,11 @@ function _isRetryableError(e, httpStatus, signal) {
   return false;
 }
 
-// 退避等待，支持 Retry-After 头（秒数或 HTTP-date）
+// 退避等待：前 5 次支持 Retry-After，之后固定 2s
 function _retryDelay(attempt, retryAfter, baseMs) {
+  if (attempt > RETRY_FIXED_DELAY_AFTER_FAILURES) {
+    return RETRY_FIXED_DELAY_MS;
+  }
   if (retryAfter) {
     const n = parseInt(retryAfter);
     if (!isNaN(n) && n > 0 && n < 120) return n * 1000; // 1~120s 之间才信
@@ -541,7 +544,8 @@ async function callAPI(roundLimit, options = {}) {
   const requestHeaders = buildHeaders();
   
   // ⭐ 自动重试：把"发请求 + 读响应"包成可重试单元
-  const maxAttempts = Math.max(1, (parseInt(s.retryMaxAttempts) || 3) + 1);  // 总尝试次数 = 重试次数+1
+  const maxAttempts = retryMaxAttemptsToTotalAttempts(s.retryMaxAttempts);  // 总尝试次数 = 重试次数+1，∞ 表示无限
+  const maxAttemptsLabel = retryTotalAttemptsLabel(maxAttempts);
   const baseDelay = Math.max(100, parseInt(s.retryBaseDelayMs) || 1000);
   let lastError = null;
   let succeeded = false;
@@ -618,7 +622,7 @@ async function callAPI(roundLimit, options = {}) {
           throw attemptErr;
         }
         const wait = _retryDelay(attempt, retryAfter || attemptErr.retryAfter, baseDelay);
-        console.warn(`[callAPI] 第 ${attempt}/${maxAttempts} 次尝试失败：${attemptErr.message}\n  → ${wait}ms 后重试`);
+        console.warn(`[callAPI] 第 ${attempt}/${maxAttemptsLabel} 次尝试失败：${attemptErr.message}\n  → ${wait}ms 后重试`);
         // 把"正在重试"信息显示给用户看
         const m = c.messages[lastIdx];
         if (m) {
@@ -1221,7 +1225,8 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
   // ⭐ 自动重试：把"发请求 + 读响应 + 解析"整体包成可重试单元
   // 复用主对话的 _isRetryableError / _retryDelay / _sleepAbortable
   // 配置项也用同一套 retryMaxAttempts / retryBaseDelayMs
-  const maxAttempts = Math.max(1, (parseInt(s.retryMaxAttempts) || 3) + 1);
+  const maxAttempts = retryMaxAttemptsToTotalAttempts(s.retryMaxAttempts);
+  const maxAttemptsLabel = retryTotalAttemptsLabel(maxAttempts);
   const baseDelay = Math.max(100, parseInt(s.retryBaseDelayMs) || 1000);
   const url = buildFullUrl(s.baseUrl, s.apiPath);
   const reqHeaders = buildHeaders();
@@ -1321,7 +1326,7 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
         const wait = (typeof _retryDelay === 'function')
           ? _retryDelay(attempt, retryAfter || attemptErr.retryAfter, baseDelay)
           : (baseDelay * Math.pow(2, attempt - 1));
-        console.warn(`[callOnceWithRole] 第 ${attempt}/${maxAttempts} 次尝试失败：${attemptErr.message}\n  → ${wait}ms 后重试`);
+        console.warn(`[callOnceWithRole] 第 ${attempt}/${maxAttemptsLabel} 次尝试失败：${attemptErr.message}\n  → ${wait}ms 后重试`);
         
         try {
           if (typeof _sleepAbortable === 'function') {

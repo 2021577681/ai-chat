@@ -33,9 +33,9 @@ function openSettings() {
   const retryEl = document.getElementById('retryMaxAttempts');
   const retryValEl = document.getElementById('retryMaxAttemptsVal');
   if (retryEl) {
-    const v = (s.retryMaxAttempts === undefined || s.retryMaxAttempts === null) ? 3 : s.retryMaxAttempts;
+    const v = retrySettingToSliderValue(s.retryMaxAttempts);
     retryEl.value = v;
-    if (retryValEl) retryValEl.textContent = v;
+    if (retryValEl) retryValEl.textContent = retrySliderDisplay(v);
   }
   
   // 工具调用轮数
@@ -340,8 +340,7 @@ function saveAndClose() {
   // ⭐ 自动重试次数
   const retryEl = document.getElementById('retryMaxAttempts');
   if (retryEl) {
-    const v = parseInt(retryEl.value);
-    s.retryMaxAttempts = (isNaN(v) || v < 0) ? 3 : v;
+    s.retryMaxAttempts = retrySliderValueToSetting(retryEl.value);
   }
   
   // 工具调用轮数

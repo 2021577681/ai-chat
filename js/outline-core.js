@@ -437,7 +437,8 @@ function _outlineFetchWithTimeout(url, init, externalSignal, timeoutMs) {
 // 失败时把"正在重试"信息通过 onProgress 回写给 UI
 async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
   const s = state.settings;
-  const maxAttempts = Math.max(1, (parseInt(s.retryMaxAttempts) || 3) + 1);
+  const maxAttempts = retryMaxAttemptsToTotalAttempts(s.retryMaxAttempts);
+  const maxAttemptsLabel = retryTotalAttemptsLabel(maxAttempts);
   const baseDelay = Math.max(100, parseInt(s.retryBaseDelayMs) || 1000);
   let lastErr = null;
   
@@ -473,7 +474,7 @@ async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
       const wait = (typeof _retryDelay === 'function')
         ? _retryDelay(attempt, retryAfter || e.retryAfter, baseDelay)
         : (baseDelay * Math.pow(2, attempt - 1));
-      console.warn(`[outline] 第 ${attempt}/${maxAttempts} 次失败：${e.message}\n  → ${wait}ms 后重试`);
+      console.warn(`[outline] 第 ${attempt}/${maxAttemptsLabel} 次失败：${e.message}\n  → ${wait}ms 后重试`);
       if (typeof onProgress === 'function') {
         onProgress(`🔁 第 ${attempt} 次失败，${Math.round(wait / 1000) || 1}s 后重试…（${e.message.split('\n')[0].slice(0, 80)}）`);
       }
