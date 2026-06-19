@@ -661,6 +661,13 @@ function checkpointMetaFromResponse(r) {
   };
 }
 
+function countTextLinesForDiff(text) {
+  const value = String(text || '');
+  if (!value) return 0;
+  const lines = value.split(/\r\n|\r|\n/).length;
+  return value.endsWith('\n') || value.endsWith('\r') ? Math.max(0, lines - 1) : lines;
+}
+
 function bindCheckpointToToolContext(response, context) {
   const checkpointId = response && (response.checkpoint_id || (response.checkpoint && response.checkpoint.id));
   if (!checkpointId) return;
@@ -825,7 +832,17 @@ async function writeFile(path, content, context) {
     'AI 想保存文档', `[写入文档] ${path}\n\n内容预览（${content.length} 字符）:\n${content.slice(0, 300)}${content.length > 300 ? '\n...(已截断)' : ''}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
-  return `✅ ${r.action}文档：${r.path}（写入 ${r.bytes_written} 字节）`;
+  return {
+    ok: true,
+    files: [{
+      path: r.path || path,
+      added: countTextLinesForDiff(content),
+      removed: parseInt(r.old_lines) || 0,
+      action: r.action === '创建' ? 'created' : 'modified'
+    }],
+    ...checkpointMetaFromResponse(r),
+    text: `✅ ${r.action}文档：${r.path}（写入 ${r.bytes_written} 字节）`
+  };
 }
 
 async function appendFile(path, content, context) {
@@ -833,7 +850,17 @@ async function appendFile(path, content, context) {
     'AI 想追加内容到文档', `[追加到] ${path}\n\n追加内容（${content.length} 字符）:\n${content.slice(0, 300)}${content.length > 300 ? '\n...' : ''}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
-  return `✅ 已追加 ${r.bytes_appended} 字节到 ${r.path}`;
+  return {
+    ok: true,
+    files: [{
+      path: r.path || path,
+      added: countTextLinesForDiff(content),
+      removed: 0,
+      action: 'modified'
+    }],
+    ...checkpointMetaFromResponse(r),
+    text: `✅ 已追加 ${r.bytes_appended} 字节到 ${r.path}`
+  };
 }
 
 async function editFile(path, oldText, newText, context) {
@@ -841,7 +868,17 @@ async function editFile(path, oldText, newText, context) {
     'AI 想更新文档', `[更新文档] ${path}\n\n[替换前]\n${oldText.slice(0, 200)}\n\n[替换后]\n${newText.slice(0, 200)}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
-  return `✅ 已更新文档：${r.path}`;
+  return {
+    ok: true,
+    files: [{
+      path: r.path || path,
+      added: countTextLinesForDiff(newText),
+      removed: countTextLinesForDiff(oldText),
+      action: 'modified'
+    }],
+    ...checkpointMetaFromResponse(r),
+    text: `✅ 已更新文档：${r.path}`
+  };
 }
 
 async function applyPatch(patch, dryRun, context) {
@@ -869,7 +906,17 @@ async function deleteFile(path, context) {
     'AI 想移除文档', `[移除] ${path}`, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ ${r.error}`;
-  return `✅ 已移除${r.type === 'dir' ? '目录' : '文档'}：${r.path}`;
+  return {
+    ok: true,
+    files: [{
+      path: r.path || path,
+      added: 0,
+      removed: parseInt(r.removed_lines) || 0,
+      action: r.type === 'dir' ? 'deleted_dir' : 'deleted'
+    }],
+    ...checkpointMetaFromResponse(r),
+    text: `✅ 已移除${r.type === 'dir' ? '目录' : '文档'}：${r.path}`
+  };
 }
 
 async function listCheckpoints(limit, context) {

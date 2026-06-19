@@ -247,13 +247,17 @@ function renderOutlineDiffSummary(m, idx) {
   const rows = visible.map(f => {
     const added = parseInt(f.added) || 0;
     const removed = parseInt(f.removed) || 0;
+    const actionLabel = (f.actions || []).some(a => /create|创建/i.test(a))
+      ? '新增'
+      : ((f.actions || []).some(a => /delete|deleted|删除/i.test(a)) ? '删除' : '修改');
     return `
       <div class="outline-diff-row">
         <span class="outline-diff-path" title="${escapeHtml(f.path || '')}">${escapeHtml(f.path || '(unknown)')}</span>
         <span class="outline-diff-stat">
-          ${added ? `<span class="outline-diff-add">+${added}</span>` : ''}
-          ${removed ? `<span class="outline-diff-del">-${removed}</span>` : ''}
-          ${(!added && !removed) ? '<span class="outline-diff-unknown">已修改</span>' : ''}
+          <span class="outline-diff-action">${actionLabel}</span>
+          ${added ? `<span class="outline-diff-pill outline-diff-add">+${added}</span>` : ''}
+          ${removed ? `<span class="outline-diff-pill outline-diff-del">-${removed}</span>` : ''}
+          ${(!added && !removed) ? '<span class="outline-diff-pill outline-diff-unknown">+0/-0</span>' : ''}
         </span>
       </div>`;
   }).join('');
@@ -270,7 +274,7 @@ function renderOutlineDiffSummary(m, idx) {
   return `
     <div class="outline-diff-card">
       <div class="outline-diff-head">
-        <span class="outline-diff-icon">⊞</span>
+        <img class="outline-diff-icon" src="icon/排序3_sort-three.png" alt="">
         <div class="outline-diff-title">
           <div>已编辑 ${(summary && summary.totalFiles) || files.length} 个文件</div>
           <div class="outline-diff-total">
@@ -282,7 +286,7 @@ function renderOutlineDiffSummary(m, idx) {
       ${verifyHtml}
       ${checkpointHtml}
       ${rows ? `<div class="outline-diff-list">${rows}</div>` : ''}
-      ${hiddenCount ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">再显示 ${hiddenCount} 个文件⌄</button>` : (files.length > 3 ? `<button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">收起⌃</button>` : '')}
+      ${hiddenCount ? `<div class="outline-diff-more-wrap"><button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">显示其余 ${hiddenCount} 个文件</button></div>` : (files.length > 3 ? `<div class="outline-diff-more-wrap"><button class="outline-diff-more" onclick="toggleOutlineDiffSummary(${idx})">收起</button></div>` : '')}
     </div>`;
 }
 
@@ -380,6 +384,46 @@ function updateOutlinePanel(msgIdx, targetChat) {
 
 // ============ 设置面板 ============
 
+const OUTLINE_PROMPT_FIELDS = [
+  ['outline_systemPrompt', 'outlineSystemPrompt', DEFAULT_OUTLINE_SYSTEM_PROMPT],
+  ['outline_codeTaskPrompt', 'outlineCodeTaskPrompt', CODE_TASK_OUTLINE_PROFILE_PROMPT],
+  ['outline_classifierPrompt', 'outlineClassifierPrompt', DEFAULT_OUTLINE_CLASSIFIER_PROMPT],
+  ['outline_budgetHalfPrompt', 'outlineBudgetHalfPrompt', DEFAULT_OUTLINE_BUDGET_HALF_PROMPT],
+  ['outline_budgetLowPrompt', 'outlineBudgetLowPrompt', DEFAULT_OUTLINE_BUDGET_LOW_PROMPT],
+  ['outline_budgetCriticalPrompt', 'outlineBudgetCriticalPrompt', DEFAULT_OUTLINE_BUDGET_CRITICAL_PROMPT],
+  ['outline_gateNoVerifyPrompt', 'outlineGateNoVerifyPrompt', DEFAULT_OUTLINE_GATE_NO_VERIFY_PROMPT],
+  ['outline_gateStaleVerifyPrompt', 'outlineGateStaleVerifyPrompt', DEFAULT_OUTLINE_GATE_STALE_VERIFY_PROMPT],
+  ['outline_gateFailedVerifyPrompt', 'outlineGateFailedVerifyPrompt', DEFAULT_OUTLINE_GATE_FAILED_VERIFY_PROMPT],
+  ['outline_forceFinalSystemPrompt', 'outlineForceFinalSystemPrompt', DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT],
+  ['outline_forceFinalUserPrompt', 'outlineForceFinalUserPrompt', DEFAULT_OUTLINE_FORCE_FINAL_USER_PROMPT],
+  ['outline_userInjectionPrompt', 'outlineUserInjectionPrompt', DEFAULT_OUTLINE_USER_INJECTION_PROMPT],
+  ['outline_toolRejectStopPrompt', 'outlineToolRejectStopPrompt', DEFAULT_OUTLINE_TOOL_REJECT_STOP_PROMPT],
+  ['outline_toolRejectOncePrompt', 'outlineToolRejectOncePrompt', DEFAULT_OUTLINE_TOOL_REJECT_ONCE_PROMPT],
+  ['outline_stalledPrompt', 'outlineStalledPrompt', DEFAULT_OUTLINE_STALLED_PROMPT]
+];
+
+function fillOutlinePromptFields() {
+  const s = state.settings;
+  for (const [id, key, fallback] of OUTLINE_PROMPT_FIELDS) {
+    const el = document.getElementById(id);
+    if (el) el.value = s[key] || fallback;
+  }
+}
+
+function saveOutlinePromptFields() {
+  const s = state.settings;
+  for (const [id, key] of OUTLINE_PROMPT_FIELDS) {
+    const el = document.getElementById(id);
+    if (el) s[key] = el.value;
+  }
+}
+
+function resetOutlinePromptField(id) {
+  const field = OUTLINE_PROMPT_FIELDS.find(x => x[0] === id);
+  const el = field && document.getElementById(id);
+  if (el) el.value = field[2];
+}
+
 function openOutlineSettings() {
   const modal = document.getElementById('outlineModal');
   if (!modal) return;
@@ -392,7 +436,7 @@ function openOutlineSettings() {
   }
   if (e('outline_permissionAutoAllow')) e('outline_permissionAutoAllow').checked = !!s.outlinePermissionAutoAllow;
   if (e('outline_model')) e('outline_model').value = s.outlineModel || '';
-  if (e('outline_systemPrompt')) e('outline_systemPrompt').value = s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
+  fillOutlinePromptFields();
 }
 
 function closeOutlineSettings() {
@@ -410,7 +454,7 @@ function saveOutlineSettings() {
   }
   if (e('outline_permissionAutoAllow')) s.outlinePermissionAutoAllow = e('outline_permissionAutoAllow').checked;
   if (e('outline_model')) s.outlineModel = e('outline_model').value.trim();
-  if (e('outline_systemPrompt')) s.outlineSystemPrompt = e('outline_systemPrompt').value;
+  saveOutlinePromptFields();
   
   // 互斥：开启大纲模式时关闭 plan / reflection
   if (s.useOutline) {
@@ -436,11 +480,13 @@ function saveOutlineSettings() {
 }
 
 function resetOutlinePrompt() {
-  const el = document.getElementById('outline_systemPrompt');
-  if (el) {
-    el.value = DEFAULT_OUTLINE_SYSTEM_PROMPT;
-    if (typeof toast === 'function') toast('✓ 已恢复默认提示词');
-  }
+  resetOutlinePromptField('outline_systemPrompt');
+  if (typeof toast === 'function') toast('✓ 已恢复默认提示词');
+}
+
+function resetAllOutlinePrompts() {
+  for (const [id] of OUTLINE_PROMPT_FIELDS) resetOutlinePromptField(id);
+  if (typeof toast === 'function') toast('✓ 已恢复全部大纲提示词默认值');
 }
 
 // ============ 用户介入操作 ============

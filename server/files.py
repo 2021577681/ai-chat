@@ -652,6 +652,15 @@ class FilesMixin:
             if parent:
                 os.makedirs(parent, exist_ok=True)
             existed = os.path.exists(path)
+            old_lines = 0
+            if existed and os.path.isfile(path):
+                try:
+                    with open(path, 'r', encoding='utf-8', errors='ignore') as old_f:
+                        old_text = old_f.read()
+                    if old_text:
+                        old_lines = len(old_text.splitlines())
+                except Exception:
+                    old_lines = 0
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f'   ✅ 成功！')
@@ -659,6 +668,7 @@ class FilesMixin:
                 'ok': True, 'path': path,
                 'action': '覆盖' if existed else '创建',
                 'bytes_written': len(content.encode('utf-8')),
+                'old_lines': old_lines,
                 'checkpoint_id': checkpoint['id'] if checkpoint else None,
                 'checkpoint': checkpoint
             })
@@ -821,11 +831,20 @@ class FilesMixin:
         try:
             checkpoint = self._checkpoint_before_mutation([path], body, 'delete_file')
             if os.path.isfile(path):
+                removed_lines = 0
+                try:
+                    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                        text = f.read()
+                    if text:
+                        removed_lines = len(text.splitlines())
+                except Exception:
+                    removed_lines = 0
                 os.remove(path)
                 self._send_json(200, {
                     'ok': True,
                     'path': path,
                     'type': 'file',
+                    'removed_lines': removed_lines,
                     'checkpoint_id': checkpoint['id'] if checkpoint else None,
                     'checkpoint': checkpoint
                 })

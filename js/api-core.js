@@ -699,6 +699,9 @@ async function callAPI(roundLimit, options = {}) {
           } else if (result.value._userRejected) {
             contentText = result.value.error || '用户拒绝此操作';
             isError = true;
+          } else if (typeof result.value.text === 'string') {
+            contentText = result.value.text;
+            isError = !result.ok;
           } else if (result.value.ok === false) {
             contentText = result.value.error || JSON.stringify(result.value);
             isError = true;
@@ -1795,6 +1798,9 @@ async function runAgentLoop({
         } else if (result.value._stopAll || result.value._userRejected) {
           contentText = result.value.error || '用户中断';
           isError = true;
+        } else if (typeof result.value.text === 'string') {
+          contentText = result.value.text;
+          isError = !result.ok;
         } else if (result.value.ok === false) {
           contentText = result.value.error || JSON.stringify(result.value);
           isError = true;

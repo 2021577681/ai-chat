@@ -98,26 +98,7 @@ function parseOutlineTaskProfileJson(raw, history) {
 
 async function classifyOutlineTaskProfile(history, model, options = {}) {
   const taskText = outlineExtractTaskText(history);
-  const prompt = `你是任务分流器。请判断用户任务是否需要代码修改和验证。严格只输出 JSON，不要代码块或解释。
-
-字段：
-{
-  "domain": "coding|research|writing|file_ops|general",
-  "intent": "read_only|code_change|debug|test_only|explain|other",
-  "requiresCodeChange": true/false,
-  "requiresVerification": true/false,
-  "verificationPolicy": "none|if_code_changed|after_each_code_change",
-  "suggestedCommands": ["可选验证命令"],
-  "confidence": 0到1,
-  "reason": "一句话理由"
-}
-
-判断规则：
-- 解释概念、写作、总结、资料查询通常不需要代码验证。
-- 只读代码/解释项目可以 domain=coding，但 requiresCodeChange=false，requiresVerification=false。
-- 修 bug、实现功能、改代码、调测试、改配置、改依赖时 requiresCodeChange=true，requiresVerification=true。
-- 如果不确定是否会改代码，但任务目标明显是修复/实现/调试，requiresVerification=true；运行时只有实际改代码后才会强制验证。
-- suggestedCommands 只给明显可能相关的命令，不要编造太具体的脚本名。`;
+  const prompt = outlinePromptSetting('outlineClassifierPrompt', DEFAULT_OUTLINE_CLASSIFIER_PROMPT);
   try {
     const raw = await callOnceWithRole(
       [{ role: 'user', content: `【用户任务】\n${taskText || '(空)'}` }],
@@ -146,7 +127,7 @@ function outlineShouldUseCodeProfile(taskProfile, history) {
 function buildOutlineSystemPromptForProfile(basePrompt, history, taskProfile) {
   const prompt = basePrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
   if (!outlineShouldUseCodeProfile(taskProfile, history)) return prompt;
-  let extra = typeof CODE_TASK_OUTLINE_PROFILE_PROMPT === 'string' ? CODE_TASK_OUTLINE_PROFILE_PROMPT : '';
+  let extra = outlinePromptSetting('outlineCodeTaskPrompt', CODE_TASK_OUTLINE_PROFILE_PROMPT);
   if (taskProfile && taskProfile.suggestedCommands && taskProfile.suggestedCommands.length) {
     extra += `\n\n【建议验证命令】\n${taskProfile.suggestedCommands.map(x => `- ${x}`).join('\n')}`;
   }
@@ -189,10 +170,46 @@ function outlineHasCodeMutation(outlineObj) {
   return outlineToolCallEntries(outlineObj).some(outlineIsCodeMutationCall);
 }
 
+function outlineCommandSegments(command) {
+  return String(command || '')
+    .toLowerCase()
+    .replace(/\s+\d?>&\d+\b/g, '')
+    .replace(/\s+\d?>\s*(?:"[^"]*"|'[^']*'|\S+)/g, '')
+    .replace(/\s+/g, ' ')
+    .split(/\s*(?:&&|\|\||;|\r?\n)\s*/)
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+
+function outlineIsWeakVerificationProbeSegment(cmd) {
+  if (!cmd) return true;
+  if (/^(?:where|which|command\s+-v|get-command)\b/i.test(cmd)) return true;
+  if (/\b(?:--help|-h|help|--print-config|--show-config|--showconfig|--init|--env-info|--collect-only|doctor)\b/i.test(cmd)) return true;
+  if (/\b(?:--version|version)\b/i.test(cmd)) return true;
+  if (/^\s*(?:npm|pnpm|yarn|node|python|python3|go|cargo|mvn|gradle|eslint|tsc|vue-tsc)\s+-v\b/i.test(cmd)) return true;
+  if (/^\s*(?:npm|pnpm|yarn)\s+(?:info|view|config|list|why|outdated)\b/i.test(cmd)) return true;
+  return false;
+}
+
+function outlineLooksLikeVerificationSegment(cmd) {
+  if (outlineIsWeakVerificationProbeSegment(cmd)) return false;
+  if (/\b(?:npm|pnpm|yarn)\s+(?:test|build|lint|check|typecheck|compile)\b/i.test(cmd)) return true;
+  if (/\b(?:npm|pnpm|yarn)\s+run\s+[-\w:]*?(?:test|build|lint|check|typecheck|compile)[-\w:]*\b/i.test(cmd)) return true;
+  if (/\b(?:pytest|unittest|jest|vitest|mocha|ava|phpunit|rspec)\b/i.test(cmd)) return true;
+  if (/\bpython(?:3)?\s+-m\s+(?:pytest|unittest|mypy|ruff|flake8|py_compile|compileall)\b/i.test(cmd)) return true;
+  if (/\bnode\s+--check\b/i.test(cmd)) return true;
+  if (/\bgo\s+test\b/i.test(cmd)) return true;
+  if (/\bcargo\s+(?:test|check|build|clippy)\b/i.test(cmd)) return true;
+  if (/\b(?:mvn|gradle)\b.*\b(?:test|check|build|compile)\b/i.test(cmd)) return true;
+  if (/\b(?:tsc|vue-tsc)\b/i.test(cmd)) return true;
+  if (/\b(?:eslint|ruff|flake8|mypy|pyright|biome|stylelint)\b/i.test(cmd)) return true;
+  if (/\b(?:make|cmake)\b.*\b(?:test|check|build|compile)\b/i.test(cmd)) return true;
+  return /\b(?:test|build|lint|typecheck|check|compile)\b/i.test(cmd)
+    && /\b(?:npm|pnpm|yarn|python|python3|node|go|cargo|mvn|gradle|make|cmake|pytest|jest|vitest|tsc|eslint|ruff|flake8|mypy|pyright|biome)\b/i.test(cmd);
+}
+
 function outlineLooksLikeVerificationCommand(command) {
-  const cmd = String(command || '').toLowerCase();
-  return /\b(test|pytest|unittest|jest|vitest|mocha|ava|npm\s+test|pnpm\s+test|yarn\s+test|mvn\s+test|gradle\s+test|cargo\s+test|go\s+test|build|lint|typecheck|check|compile|tsc|eslint|ruff|flake8|mypy|pytest|phpunit|rspec)\b/.test(cmd)
-    || /\b(python|node|go|cargo|mvn|gradle|npm|pnpm|yarn)\b.*\b(test|build|lint|check|compile|typecheck)\b/.test(cmd);
+  return outlineCommandSegments(command).some(outlineLooksLikeVerificationSegment);
 }
 
 function outlineVerificationState(outlineObj) {
@@ -246,12 +263,14 @@ function outlineCodeGateMessage(outlineObj) {
   const st = outlineVerificationState(outlineObj);
   if (!st.hasMutation) return '';
   if (!st.hasVerification) {
-    return '【系统门禁】这是代码任务，且你已经修改过代码，但还没有运行任何明显的测试、构建、lint、typecheck、启动检查或最小复现命令。不要最终总结。请继续调用 execute_action 运行最相关的验证命令；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+    return outlinePromptText('outlineGateNoVerifyPrompt', DEFAULT_OUTLINE_GATE_NO_VERIFY_PROMPT);
   }
   if (!st.hasVerificationAfterMutation) {
-    return '【系统门禁】你在上一次验证之后又修改了代码，但还没有重新验证。不要最终总结。请继续调用 execute_action 运行与最新改动相关的测试、构建或最小检查；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+    return outlinePromptText('outlineGateStaleVerifyPrompt', DEFAULT_OUTLINE_GATE_STALE_VERIFY_PROMPT);
   }
-  return `【系统门禁】最新代码修改后的验证命令没有通过（退出码 ${st.lastVerificationReturncode ?? '?'}）。不要最终总结。请读取 stdout/stderr，继续修复后再次运行验证命令；如果失败是环境/依赖/权限阻塞，必须调用 update_outline 明确记录阻塞原因。`;
+  return outlinePromptText('outlineGateFailedVerifyPrompt', DEFAULT_OUTLINE_GATE_FAILED_VERIFY_PROMPT, {
+    returncode: st.lastVerificationReturncode ?? '?'
+  });
 }
 
 function outlineNormalizePatchPath(path) {
@@ -271,24 +290,26 @@ function outlineNormalizePatchPath(path) {
 
 function outlineBuildDiffSummary(outlineObj) {
   const map = new Map();
-  const addFile = (path, added, removed, source) => {
+  const addFile = (path, added, removed, source, action) => {
     if (!path) return;
     const key = outlineNormalizePatchPath(path);
-    const cur = map.get(key) || { path: key, added: 0, removed: 0, sources: new Set() };
+    const cur = map.get(key) || { path: key, added: 0, removed: 0, sources: new Set(), actions: [] };
     cur.added += Math.max(0, parseInt(added) || 0);
     cur.removed += Math.max(0, parseInt(removed) || 0);
     if (source) cur.sources.add(source);
+    if (action) cur.actions.push(String(action));
     map.set(key, cur);
   };
 
   for (const tc of outlineToolCallEntries(outlineObj)) {
     if (!tc || tc.ok === false || tc._running) continue;
-    if (tc.name === 'apply_patch' && !(tc.args && tc.args.dry_run === true)) {
-      const files = (tc.rawResult && Array.isArray(tc.rawResult.files)) ? tc.rawResult.files : [];
-      for (const f of files) addFile(f.path, f.added, f.removed, 'apply_patch');
+    if (tc.name === 'apply_patch' && tc.args && tc.args.dry_run === true) continue;
+    const files = (tc.rawResult && Array.isArray(tc.rawResult.files)) ? tc.rawResult.files : [];
+    if (files.length) {
+      for (const f of files) addFile(f.path, f.added, f.removed, tc.name, f.action);
     } else if (['save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
       const path = (tc.args && tc.args.path) || '';
-      addFile(path, 0, 0, tc.name);
+      addFile(path, 0, 0, tc.name, tc.name === 'delete_note' ? 'deleted' : 'modified');
     }
   }
 
@@ -296,8 +317,15 @@ function outlineBuildDiffSummary(outlineObj) {
     path: x.path,
     added: x.added,
     removed: x.removed,
-    sources: Array.from(x.sources)
-  })).sort((a, b) => a.path.localeCompare(b.path));
+    net: x.added - x.removed,
+    sources: Array.from(x.sources),
+    actions: x.actions
+  })).filter(f => {
+    const hasCreate = f.actions.some(a => /create|创建/i.test(a));
+    const hasDelete = f.actions.some(a => /delete|deleted|删除/i.test(a));
+    if (hasCreate && hasDelete) return false;
+    return true;
+  }).sort((a, b) => a.path.localeCompare(b.path));
   if (!files.length) return null;
   return {
     files,
@@ -543,7 +571,7 @@ async function callAPIWithOutline(options = {}) {
       taskProfile
     };
   };
-  
+
   if (options.resumeFromMsgIdx !== undefined) {
     // ===== 恢复模式 =====
     msgIdx = options.resumeFromMsgIdx;
@@ -574,7 +602,9 @@ async function callAPIWithOutline(options = {}) {
     
     // 注入用户留言
     if (options.userInjection && options.userInjection.trim()) {
-      const injectMsg = `【用户中途留言】${options.userInjection.trim()}\n\n请根据这条留言调整后续工作。`;
+      const injectMsg = outlinePromptText('outlineUserInjectionPrompt', DEFAULT_OUTLINE_USER_INJECTION_PROMPT, {
+        message: options.userInjection.trim()
+      });
       conversationMessages.push({ role: 'user', content: injectMsg });
       if (!Array.isArray(aiMsg.outline.injections)) aiMsg.outline.injections = [];
       aiMsg.outline.injections.push({
@@ -717,11 +747,11 @@ async function callAPIWithOutline(options = {}) {
       if (warnLevel > 0 && warnLevel !== aiMsg.outline._lastBudgetWarn) {
         let warnMsg = '';
         if (warnLevel === 1) {
-          warnMsg = `【系统提示】执行预算已过半，当前剩余 ${remaining} 轮。请合理规划，对仍 pending 的条目评估优先级。`;
+          warnMsg = outlinePromptText('outlineBudgetHalfPrompt', DEFAULT_OUTLINE_BUDGET_HALF_PROMPT, { remaining, maxRounds, round: loop + 1 });
         } else if (warnLevel === 2) {
-          warnMsg = `⚠️【系统警告】仅剩 ${remaining} 轮执行预算！请加快进度，对非关键的 pending 条目用 update_outline 标记为 skipped，集中完成核心内容。`;
+          warnMsg = outlinePromptText('outlineBudgetLowPrompt', DEFAULT_OUTLINE_BUDGET_LOW_PROMPT, { remaining, maxRounds, round: loop + 1 });
         } else if (warnLevel === 3) {
-          warnMsg = `🚨【系统紧急】只剩 ${remaining} 轮！请立即开始收尾：把所有未完成条目标记为 done 或 skipped，下一轮请不要再调用任何工具，直接给出完整的 Markdown 格式最终答案。`;
+          warnMsg = outlinePromptText('outlineBudgetCriticalPrompt', DEFAULT_OUTLINE_BUDGET_CRITICAL_PROMPT, { remaining, maxRounds, round: loop + 1 });
         }
         conversationMessages.push({ role: 'user', content: warnMsg });
         aiMsg.outline._lastBudgetWarn = warnLevel;
@@ -1072,8 +1102,8 @@ async function callAPIWithOutline(options = {}) {
           conversationMessages.push({
             role: 'user',
             content: outcome.stopAll
-              ? '【系统提示】用户拒绝了该工具操作，并要求停止所有后续工具调用。请不要再调用工具，基于已完成内容直接给出简短说明。'
-              : '【系统提示】用户拒绝了该工具操作。请不要重复同一操作；如任务还能继续，请改用无需该权限的路径，否则直接说明受限情况。'
+              ? outlinePromptText('outlineToolRejectStopPrompt', DEFAULT_OUTLINE_TOOL_REJECT_STOP_PROMPT)
+              : outlinePromptText('outlineToolRejectOncePrompt', DEFAULT_OUTLINE_TOOL_REJECT_ONCE_PROMPT)
           });
           break;
         }
@@ -1091,7 +1121,7 @@ async function callAPIWithOutline(options = {}) {
         if (aiMsg.outline.stalledRounds >= 3) {
           conversationMessages.push({
             role: 'user',
-            content: '【系统提示】你似乎在原地踏步，请重新评估当前进展。如果信息已足够，请直接给出最终答案并停止调用工具；如果仍需推进，请明确下一步行动。'
+            content: outlinePromptText('outlineStalledPrompt', DEFAULT_OUTLINE_STALLED_PROMPT)
           });
           aiMsg.outline.stalledRounds = 0;
         }
@@ -1262,9 +1292,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   const s = state.settings;
   
   const finalSystemPrompt = (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt) + 
-    '\n\n【最终阶段·强制收尾】你已达到执行轮数上限。请基于上面所有已收集的信息和工具结果，' +
-    '直接给出完整的 Markdown 格式最终答案。不要再调用任何工具。' +
-    '如有未完成的条目，可在答案末尾用"⚠️ 受限说明"小节简要说明。';
+    '\n\n' + outlinePromptText('outlineForceFinalSystemPrompt', DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT);
   
   // 给当前 outline 状态做个文字快照，便于模型理解进展
   let outlineSnapshot = '';
@@ -1275,7 +1303,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
     }).join('\n');
   }
   
-  const finalUserMsg = '请立即基于已有信息给出完整的最终回答（Markdown 格式）。不要再调用任何工具。' + outlineSnapshot;
+  const finalUserMsg = outlinePromptText('outlineForceFinalUserPrompt', DEFAULT_OUTLINE_FORCE_FINAL_USER_PROMPT) + outlineSnapshot;
   
   // ----- 构造请求（不带 tools 字段）-----
   let body;

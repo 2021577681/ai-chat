@@ -710,6 +710,69 @@
       <div class="form-hint">指导 AI 如何使用 save_outline / append_outline / update_outline 三个工具维护大纲。</div>
       <button class="btn" style="margin-top:6px;" onclick="resetOutlinePrompt()">🔄 恢复默认</button>
     </div>
+
+    <details class="form-group">
+      <summary style="cursor:pointer;font-weight:600;">高级提示词模板</summary>
+      <div class="form-hint" style="margin:6px 0 10px;">以下模板均会发给模型；留空时使用内置默认。可用变量：{{remaining}}、{{maxRounds}}、{{round}}、{{message}}、{{returncode}}。</div>
+
+      <div class="form-group">
+        <label>代码任务附加 Prompt</label>
+        <textarea id="outline_codeTaskPrompt" rows="9"></textarea>
+      </div>
+      <div class="form-group">
+        <label>任务分类 Prompt</label>
+        <textarea id="outline_classifierPrompt" rows="8"></textarea>
+      </div>
+      <div class="form-group">
+        <label>预算过半提示</label>
+        <textarea id="outline_budgetHalfPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>预算不足提示</label>
+        <textarea id="outline_budgetLowPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>预算紧急提示</label>
+        <textarea id="outline_budgetCriticalPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>验证门禁：未验证</label>
+        <textarea id="outline_gateNoVerifyPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>验证门禁：验证后又修改</label>
+        <textarea id="outline_gateStaleVerifyPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>验证门禁：验证失败</label>
+        <textarea id="outline_gateFailedVerifyPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>强制收尾 System Prompt</label>
+        <textarea id="outline_forceFinalSystemPrompt" rows="4"></textarea>
+      </div>
+      <div class="form-group">
+        <label>强制收尾 User Prompt</label>
+        <textarea id="outline_forceFinalUserPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>用户中途留言模板</label>
+        <textarea id="outline_userInjectionPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>工具拒绝并停止提示</label>
+        <textarea id="outline_toolRejectStopPrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>工具单次拒绝提示</label>
+        <textarea id="outline_toolRejectOncePrompt" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>原地踏步提醒</label>
+        <textarea id="outline_stalledPrompt" rows="3"></textarea>
+      </div>
+      <button class="btn" type="button" onclick="resetAllOutlinePrompts()">🔄 恢复全部大纲提示词默认值</button>
+    </details>
     
     <div class="modal-footer">
       <button class="btn" onclick="closeOutlineSettings()">取消</button>

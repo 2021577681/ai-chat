@@ -78,13 +78,72 @@ const DEFAULT_OUTLINE_SYSTEM_PROMPT = `你正在协助用户完成一项工作�
 
 const CODE_TASK_OUTLINE_PROFILE_PROMPT = `
 
-【代码任务工程闭环】
+【代码任务工程闭环（Codex 风格验证策略）】
 当任务涉及代码、测试、构建、运行、调试、报错、bug 修复、功能实现、重构、依赖、脚本或项目配置时，必须采用下面的工程闭环：
 
-1. 初始大纲必须覆盖这些阶段：探索项目结构和相关文件、定位实现/问题点、修改代码、运行测试/构建/复现命令、根据错误继续修复、最终验证和总结。
-2. 修改前必须先用 list_notes / find_in_notes / read_note 或必要的命令了解相关代码和项目约定，不要直接猜。
-3. 修改代码优先使用 apply_patch：先 dry_run=true 预检，预检通过后 dry_run=false 应用。仅在新建完整小文件或 patch 不适合时才用 save_note / edit_note。
-4. 代码修改后必须调用 execute_action 运行最相关的测试、构建、lint、typecheck、启动检查或最小复现命令。
-5. 如果验证命令失败，必须读取 stdout/stderr，继续修改代码，再次运行验证命令；不要在失败后直接总结为完成。
-6. 如果在验证之后又修改了代码，必须重新运行验证命令；只有最新代码修改后的验证命令通过，或因为缺依赖、缺配置、缺权限、环境限制等明确阻塞且已说明原因时，才允许最终总结。
-7. 最终回答必须包含：改了什么、运行了什么验证命令、验证结果、仍需注意的问题。`;
+1. 初始大纲必须覆盖这些阶段：明确完成标准、探索项目结构和相关文件、定位实现/问题点、修改代码、运行最小相关验证、根据错误继续修复、最终总结。
+2. 开始修改前，先用 list_notes / find_in_notes / read_note 或必要的只读命令了解相关代码、项目约定和可用验证命令，不要直接猜。
+3. 明确“Done when”：用一句话记录本任务的验收标准，例如 bug 不再复现、目标功能可用、指定测试通过、或用户要求的行为已满足。
+4. 修改代码优先使用 apply_patch：先 dry_run=true 预检，预检通过后 dry_run=false 应用。仅在新建完整小文件或 patch 不适合时才用 save_note / edit_note。
+5. 代码修改后必须调用 execute_action 运行**一个最相关、最小充分**的验证命令：优先选择用户指定命令、复现命令、受影响文件/模块的测试、或项目约定的最小 lint/typecheck/build 检查。--version、-v、--help、help、--print-config、环境探测或配置打印命令只能用于了解环境，不能算作代码验证通过。
+6. 不要为了“更保险”主动扩展到大量无关测试、全量测试矩阵、长时间构建或启动检查；只有用户明确要求、最小验证失败、改动影响面明显很大、或最小验证无法覆盖核心风险时，才追加第二个验证命令。
+7. 如果验证命令通过，且之后没有再修改代码，并且 Done when 已满足，应立即停止继续调用工具，直接给出最终回答；不要继续寻找更多测试命令。
+8. 如果验证命令失败，必须读取 stdout/stderr，继续修改代码，然后重新运行与最新改动最相关的最小验证命令；不要在失败后直接总结为完成。
+9. 如果在验证之后又修改了代码，必须重新运行最小相关验证；只有最新代码修改后的验证通过，或因为缺依赖、缺配置、缺权限、环境限制等明确阻塞且已说明原因时，才允许最终总结。
+10. 最终回答必须包含：Done when 是否满足、改了什么、运行了什么验证命令、验证结果、仍需注意的问题。`;
+
+const DEFAULT_OUTLINE_CLASSIFIER_PROMPT = `你是任务分流器。请判断用户任务是否需要代码修改和验证。严格只输出 JSON，不要代码块或解释。
+
+字段：
+{
+  "domain": "coding|research|writing|file_ops|general",
+  "intent": "read_only|code_change|debug|test_only|explain|other",
+  "requiresCodeChange": true/false,
+  "requiresVerification": true/false,
+  "verificationPolicy": "none|if_code_changed|after_each_code_change",
+  "suggestedCommands": ["可选验证命令"],
+  "confidence": 0到1,
+  "reason": "一句话理由"
+}
+
+判断规则：
+- 解释概念、写作、总结、资料查询通常不需要代码验证。
+- 只读代码/解释项目可以 domain=coding，但 requiresCodeChange=false，requiresVerification=false。
+- 修 bug、实现功能、改代码、调测试、改配置、改依赖时 requiresCodeChange=true，requiresVerification=true。
+- 如果不确定是否会改代码，但任务目标明显是修复/实现/调试，requiresVerification=true；运行时只有实际改代码后才会强制验证。
+- suggestedCommands 只给明显可能相关的命令，不要编造太具体的脚本名。`;
+
+const DEFAULT_OUTLINE_BUDGET_HALF_PROMPT = '【系统提示】执行预算已过半，当前剩余 {{remaining}} 轮。请合理规划，对仍 pending 的条目评估优先级。';
+const DEFAULT_OUTLINE_BUDGET_LOW_PROMPT = '⚠️【系统警告】仅剩 {{remaining}} 轮执行预算！请加快进度，对非关键的 pending 条目用 update_outline 标记为 skipped，集中完成核心内容。';
+const DEFAULT_OUTLINE_BUDGET_CRITICAL_PROMPT = '🚨【系统紧急】只剩 {{remaining}} 轮！请立即开始收尾：把所有未完成条目标记为 done 或 skipped，下一轮请不要再调用任何工具，直接给出完整的 Markdown 格式最终答案。';
+
+const DEFAULT_OUTLINE_GATE_NO_VERIFY_PROMPT = '【系统门禁】这是代码任务，且你已经修改过代码，但还没有运行任何明显的测试、构建、lint、typecheck、启动检查或最小复现命令。不要最终总结。请继续调用 execute_action 运行最相关的验证命令；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+const DEFAULT_OUTLINE_GATE_STALE_VERIFY_PROMPT = '【系统门禁】你在上一次验证之后又修改了代码，但还没有重新验证。不要最终总结。请继续调用 execute_action 运行与最新改动相关的测试、构建或最小检查；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+const DEFAULT_OUTLINE_GATE_FAILED_VERIFY_PROMPT = '【系统门禁】最新代码修改后的验证命令没有通过（退出码 {{returncode}}）。不要最终总结。请读取 stdout/stderr，继续修复后再次运行验证命令；如果失败是环境/依赖/权限阻塞，必须调用 update_outline 明确记录阻塞原因。';
+
+const DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT = `【最终阶段·强制收尾】你已达到执行轮数上限。请基于上面所有已收集的信息和工具结果，直接给出完整的 Markdown 格式最终答案。不要再调用任何工具。如有未完成的条目，可在答案末尾用"⚠️ 受限说明"小节简要说明。`;
+const DEFAULT_OUTLINE_FORCE_FINAL_USER_PROMPT = '请立即基于已有信息给出完整的最终回答（Markdown 格式）。不要再调用任何工具。';
+
+const DEFAULT_OUTLINE_USER_INJECTION_PROMPT = `【用户中途留言】{{message}}
+
+请根据这条留言调整后续工作。`;
+const DEFAULT_OUTLINE_TOOL_REJECT_STOP_PROMPT = '【系统提示】用户拒绝了该工具操作，并要求停止所有后续工具调用。请不要再调用工具，基于已完成内容直接给出简短说明。';
+const DEFAULT_OUTLINE_TOOL_REJECT_ONCE_PROMPT = '【系统提示】用户拒绝了该工具操作。请不要重复同一操作；如任务还能继续，请改用无需该权限的路径，否则直接说明受限情况。';
+const DEFAULT_OUTLINE_STALLED_PROMPT = '【系统提示】你似乎在原地踏步，请重新评估当前进展。如果信息已足够，请直接给出最终答案并停止调用工具；如果仍需推进，请明确下一步行动。';
+
+function outlineTemplate(template, vars = {}) {
+  return String(template == null ? '' : template).replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    const value = vars[key];
+    return value === undefined || value === null ? '' : String(value);
+  });
+}
+
+function outlinePromptSetting(key, fallback) {
+  if (typeof state === 'undefined' || !state.settings) return fallback;
+  const value = state.settings[key];
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+function outlinePromptText(key, fallback, vars = {}) {
+  return outlineTemplate(outlinePromptSetting(key, fallback), vars);
+}
