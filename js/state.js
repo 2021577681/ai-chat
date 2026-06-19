@@ -64,6 +64,8 @@ let state = {
     outlineForceFinalSystemPrompt: '',
     outlineForceFinalUserPrompt: '',
     outlineUserInjectionPrompt: '',
+    outlineFreshTaskPrompt: '',
+    outlineRequireStartPrompt: '',
     outlineToolRejectStopPrompt: '',
     outlineToolRejectOncePrompt: '',
     outlineStalledPrompt: '',

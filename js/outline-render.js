@@ -457,6 +457,8 @@ const OUTLINE_PROMPT_FIELDS = [
   ['outline_forceFinalSystemPrompt', 'outlineForceFinalSystemPrompt', DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT],
   ['outline_forceFinalUserPrompt', 'outlineForceFinalUserPrompt', DEFAULT_OUTLINE_FORCE_FINAL_USER_PROMPT],
   ['outline_userInjectionPrompt', 'outlineUserInjectionPrompt', DEFAULT_OUTLINE_USER_INJECTION_PROMPT],
+  ['outline_freshTaskPrompt', 'outlineFreshTaskPrompt', DEFAULT_OUTLINE_FRESH_TASK_PROMPT],
+  ['outline_requireStartPrompt', 'outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT],
   ['outline_toolRejectStopPrompt', 'outlineToolRejectStopPrompt', DEFAULT_OUTLINE_TOOL_REJECT_STOP_PROMPT],
   ['outline_toolRejectOncePrompt', 'outlineToolRejectOncePrompt', DEFAULT_OUTLINE_TOOL_REJECT_ONCE_PROMPT],
   ['outline_stalledPrompt', 'outlineStalledPrompt', DEFAULT_OUTLINE_STALLED_PROMPT]

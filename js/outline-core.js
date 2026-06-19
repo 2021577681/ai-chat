@@ -877,6 +877,12 @@ async function callAPIWithOutline(options = {}) {
     model = (s.outlineModel || '').trim() || s.currentModel;
     maxRounds = aiMsg.outline.maxRounds;
     conversationMessages = [];
+    conversationMessages.push({
+      role: 'user',
+      content: outlinePromptText('outlineFreshTaskPrompt', DEFAULT_OUTLINE_FRESH_TASK_PROMPT, {
+        question: aiMsg.outline._userQuestion || extractUserQuestion(history)
+      })
+    });
     finalAnswer = '';
     completedNaturally = false;
     startLoop = 0;
@@ -1198,6 +1204,19 @@ async function callAPIWithOutline(options = {}) {
       
       // ----- 没工具调用：完成 -----
       if (!toolCalls || !toolCalls.length) {
+        if (loop === 0 && !(aiMsg.outline.items && aiMsg.outline.items.length)) {
+          conversationMessages.push({
+            role: 'user',
+            content: outlinePromptText('outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT)
+          });
+          finalAnswer = '';
+          aiMsg.outline.status = 'running';
+          aiMsg.outline.progressText = '📑 正在重新要求创建本次任务大纲...';
+          onUpdate();
+          saveSnap(loop + 1);
+          saveData();
+          continue;
+        }
         if (outlineCodeGateNeedsVerification(aiMsg.outline, taskProfile)) {
           conversationMessages.push({
             role: 'user',
@@ -1370,6 +1389,20 @@ async function callAPIWithOutline(options = {}) {
       // 把它们转成 user 消息注入到 conversationMessages，下一轮 LLM 就能直接"看到"
       // 否则 terminal.js 的 autoResend 会在大纲结束后另起一段新 AI 回复
       consumePendingAttachments(conversationMessages, aiMsg.outline, taskChatId);
+
+      if (loop === 0 && !(aiMsg.outline.items && aiMsg.outline.items.length)) {
+        conversationMessages.push({
+          role: 'user',
+          content: outlinePromptText('outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT)
+        });
+        finalAnswer = '';
+        aiMsg.outline.status = 'running';
+        aiMsg.outline.progressText = '📑 正在重新要求创建本次任务大纲...';
+        onUpdate();
+        saveSnap(loop + 1);
+        saveData();
+        continue;
+      }
       
       // 保存快照（方便暂停后恢复）
       saveSnap(loop + 1);
