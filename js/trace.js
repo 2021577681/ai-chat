@@ -477,18 +477,8 @@ function exportTraces() {
 function _updateTraceBadge() {
   const btn = document.getElementById('traceToggleBtn');
   if (!btn) return;
-  const running = state.traces.filter(t => t.status === 'running').length;
-  let badge = btn.querySelector('.tr-badge');
-  if (running > 0) {
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'tr-badge';
-      btn.appendChild(badge);
-    }
-    badge.textContent = running;
-  } else if (badge) {
-    badge.remove();
-  }
+  const badge = btn.querySelector('.tr-badge');
+  if (badge) badge.remove();
 }
 
 // 启动时加载

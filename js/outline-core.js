@@ -150,6 +150,29 @@ function outlineHasExecuteAction(outlineObj) {
   return outlineToolCallEntries(outlineObj).some(tc => tc.name === 'execute_action');
 }
 
+function outlineRecordAssistantSpeech(outlineObj, assistantMsg, round, hasToolCalls) {
+  if (!outlineObj || !assistantMsg) return;
+  const text = String(assistantMsg.content || '').trim();
+  if (!text) return;
+  const maxLen = 12000;
+  const entry = {
+    type: 'assistant_speech',
+    round,
+    text: text.length > maxLen ? text.slice(0, maxLen) + '\n\n...' : text,
+    hasToolCalls: !!hasToolCalls,
+    ts: Date.now()
+  };
+  const activeItem = ((outlineObj.items || [])).find(it => it && it.status === 'active');
+  if (!activeItem && !Array.isArray(outlineObj.globalToolCalls)) outlineObj.globalToolCalls = [];
+  const target = activeItem || { toolCalls: outlineObj.globalToolCalls };
+  if (!Array.isArray(target.toolCalls)) target.toolCalls = [];
+  target.toolCalls.push(entry);
+  if (target.toolCalls.length > 120) {
+    target.toolCalls = target.toolCalls.slice(-120);
+  }
+  if (!activeItem) outlineObj.globalToolCalls = target.toolCalls;
+}
+
 function outlineIsCodeMutationCall(tc) {
     if (!tc || !tc.name) return false;
     if (['apply_patch', 'save_note', 'edit_note', 'append_note', 'delete_note'].includes(tc.name)) {
@@ -196,10 +219,15 @@ function outlineLooksLikeVerificationSegment(cmd) {
   if (/\b(?:npm|pnpm|yarn)\s+(?:test|build|lint|check|typecheck|compile)\b/i.test(cmd)) return true;
   if (/\b(?:npm|pnpm|yarn)\s+run\s+[-\w:]*?(?:test|build|lint|check|typecheck|compile)[-\w:]*\b/i.test(cmd)) return true;
   if (/\b(?:pytest|unittest|jest|vitest|mocha|ava|phpunit|rspec)\b/i.test(cmd)) return true;
-  if (/\bpython(?:3)?\s+-m\s+(?:pytest|unittest|mypy|ruff|flake8|py_compile|compileall)\b/i.test(cmd)) return true;
+  if (/\b(?:python|python3|py)\s+-m\s+(?:pytest|unittest|doctest|mypy|ruff|flake8|py_compile|compileall)\b/i.test(cmd)) return true;
+  if (/\b(?:python|python3|py)\s+(?:-c\b|-\s*<<)\b/i.test(cmd)) return true;
+  if (/\b(?:python|python3|py)\s+(?!(?:-m|-c|-v|--version|--help)\b)(?:"[^"]+\.py"|'[^']+\.py'|[^\s;&|]+\.py)(?=$|\s|[;&|])/i.test(cmd)) return true;
   if (/\bnode\s+--check\b/i.test(cmd)) return true;
+  if (/\bnode\s+(?!(?:--check|-v|--version|--help)\b)(?:"[^"]+\.m?js"|'[^']+\.m?js'|[^\s;&|]+\.m?js)\b/i.test(cmd)) return true;
   if (/\bgo\s+test\b/i.test(cmd)) return true;
+  if (/\bgo\s+run\b/i.test(cmd)) return true;
   if (/\bcargo\s+(?:test|check|build|clippy)\b/i.test(cmd)) return true;
+  if (/\bcargo\s+run\b/i.test(cmd)) return true;
   if (/\b(?:mvn|gradle)\b.*\b(?:test|check|build|compile)\b/i.test(cmd)) return true;
   if (/\b(?:tsc|vue-tsc)\b/i.test(cmd)) return true;
   if (/\b(?:eslint|ruff|flake8|mypy|pyright|biome|stylelint)\b/i.test(cmd)) return true;
@@ -212,6 +240,27 @@ function outlineLooksLikeVerificationCommand(command) {
   return outlineCommandSegments(command).some(outlineLooksLikeVerificationSegment);
 }
 
+function outlineExecuteIntent(tc) {
+  return String((tc && tc.args && tc.args.intent) || '').trim().toLowerCase();
+}
+
+function outlineIsVerifyIntentToolCall(tc) {
+  if (!tc || tc.name !== 'execute_action') return false;
+  if (outlineExecuteIntent(tc) !== 'verify') return false;
+  if (outlineCommandSegments(tc.args && tc.args.command).some(outlineIsWeakVerificationProbeSegment)) return false;
+  const result = tc.rawResult;
+  return !!(result && Number(result.returncode) === 0);
+}
+
+function outlineLooksLikePassedVerificationOutput(tc) {
+  const result = tc && tc.rawResult;
+  if (!result || Number(result.returncode) !== 0) return false;
+  const text = String(result.stdout || result.stderr || result.value || result.text || '').toLowerCase();
+  if (!text) return false;
+  return /\b(pass|passed|success|successful|ok|all tests passed|tests? passed)\b/i.test(text)
+    || /(?:通过|成功|全部通过|测试通过|验证通过)/i.test(text);
+}
+
 function outlineVerificationState(outlineObj) {
   const entries = outlineToolCallEntries(outlineObj)
     .map((tc, idx) => ({ tc, idx, ts: Number(tc && tc._ts) || idx }));
@@ -219,7 +268,9 @@ function outlineVerificationState(outlineObj) {
   const lastMutation = mutationEntries.length ? mutationEntries[mutationEntries.length - 1] : null;
   const executeEntries = entries.filter(x => x.tc && x.tc.name === 'execute_action');
   const verificationEntries = executeEntries.filter(x =>
-    outlineLooksLikeVerificationCommand(x.tc.args && x.tc.args.command)
+    outlineIsVerifyIntentToolCall(x.tc)
+    || outlineLooksLikeVerificationCommand(x.tc.args && x.tc.args.command)
+    || outlineLooksLikePassedVerificationOutput(x.tc)
   );
   const afterMutation = lastMutation
     ? verificationEntries.filter(x => x.ts > lastMutation.ts || (x.ts === lastMutation.ts && x.idx > lastMutation.idx))
@@ -975,6 +1026,9 @@ async function callAPIWithOutline(options = {}) {
       }
       conversationMessages.push(assistantMsg);
       if (assistantMsg.content) finalAnswer = assistantMsg.content;
+      if (toolCalls && toolCalls.length) {
+        outlineRecordAssistantSpeech(aiMsg.outline, assistantMsg, loop + 1, true);
+      }
       
       // ----- 没工具调用：完成 -----
       if (!toolCalls || !toolCalls.length) {
@@ -1635,13 +1689,62 @@ function handleOutlineTool(name, args, outline) {
 
 // ============ 构建合并的 tools 数组（隐藏工具 + 用户工具）============
 
+function outlineCloneTool(tool) {
+  return JSON.parse(JSON.stringify(tool));
+}
+
+function outlineToolName(tool) {
+  return tool && (tool.name || (tool.function && tool.function.name) || '');
+}
+
+function outlineToolSchema(tool) {
+  if (!tool || typeof tool !== 'object') return null;
+  if (tool.input_schema) return tool.input_schema;
+  if (tool.parameters) return tool.parameters;
+  if (tool.function && tool.function.parameters) return tool.function.parameters;
+  return null;
+}
+
+function outlineSetToolDescription(tool, description) {
+  if (!tool || typeof tool !== 'object') return;
+  if (tool.function) tool.function.description = description;
+  else tool.description = description;
+}
+
+function outlineEnhanceExecuteActionToolForVerification(tool) {
+  const next = outlineCloneTool(tool);
+  if (outlineToolName(next) !== 'execute_action') return next;
+  const schema = outlineToolSchema(next);
+  if (!schema || !schema.properties) return next;
+  const props = schema.properties;
+  props.intent = {
+    type: 'string',
+    enum: ['inspect', 'verify', 'run', 'install', 'other'],
+    description: '大纲模式必填：声明本次命令意图。验证最后一次代码修改时必须填 verify；只读探测/查看填 inspect；运行普通程序填 run；安装依赖填 install；其他填 other。'
+  };
+  props.verifyTarget = {
+    type: 'string',
+    description: '当 intent=verify 时填写：本次验证覆盖的文件、模块、功能或 Done when。'
+  };
+  props.verifyReason = {
+    type: 'string',
+    description: '当 intent=verify 时填写：为什么这个命令是最小且相关的验证，以及通过后可停止继续验证的理由。'
+  };
+  const required = Array.isArray(schema.required) ? schema.required.slice() : [];
+  if (!required.includes('intent')) required.push('intent');
+  schema.required = required;
+  const desc = (next.function ? next.function.description : next.description) || '';
+  outlineSetToolDescription(next, desc + '\n\n【大纲模式额外要求】调用 execute_action 时必须声明 intent。只有用于验证最后一次代码修改的命令才设置 intent="verify"，并填写 verifyTarget 与 verifyReason。版本、帮助、配置打印、where/which/get-command 等环境探测命令必须使用 intent="inspect"，不能声明为 verify。');
+  return next;
+}
+
 function buildOutlineTools(options = {}) {
   const s = state.settings;
   const useUserTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   
   // 用户工具按本次任务配置合并；大纲内置工具始终存在。
   const userToolsFinal = (useUserTools && typeof buildToolsArray === 'function')
-    ? (buildToolsArray({ force: true }) || [])
+    ? (buildToolsArray({ force: true }) || []).map(outlineEnhanceExecuteActionToolForVerification)
     : [];
   
   // OUTLINE_TOOLS 转换为对应格式

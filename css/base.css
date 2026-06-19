@@ -1717,15 +1717,6 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 .trace-foot-hint::before{ content:'🔒 '; }
 
-/* 顶栏徽章（运行中数量） */
-.tr-badge{
-  display:inline-block; margin-left:4px;
-  background:var(--warning); color:#fff;
-  font-size:10px; padding:0 5px; border-radius:8px;
-  min-width:16px; text-align:center; line-height:14px;
-  font-weight:600;
-}
-
 /* 响应式 */
 @media (max-width:768px){
   .trace-panel{ width:100vw; }
@@ -1819,6 +1810,19 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .outline-tool-args{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .outline-tool-result{margin-top:5px;padding:5px 7px;background:var(--bg-input);border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;color:var(--text-secondary);line-height:1.45;max-height:100px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 .outline-tool-spin{display:inline-block;width:11px;height:11px;border:2px solid var(--border);border-top-color:#0ea5e9;border-radius:50%;animation:spin .8s linear infinite}
+.outline-ai-message{padding:7px 8px;border-radius:6px;background:var(--bg-chat);border:1px solid var(--border);font-size:12px}
+.outline-ai-head{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.outline-ai-icon{width:20px;height:18px;border-radius:5px;background:rgba(14,165,233,.10);color:#0ea5e9;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;line-height:1}
+.outline-ai-meta{font-size:11.5px;font-weight:600;color:var(--text-secondary)}
+.outline-ai-text{padding:5px 7px;background:var(--bg-input);border-radius:4px;color:var(--text);font-size:11px;line-height:1.45;max-height:180px;overflow:auto;word-break:break-word}
+.outline-ai-text p{margin:3px 0}
+.outline-ai-text ul,.outline-ai-text ol{margin:3px 0;padding-left:18px}
+.outline-ai-text li{margin:1px 0}
+.outline-ai-text h1,.outline-ai-text h2,.outline-ai-text h3,.outline-ai-text h4{margin:6px 0 3px;font-size:12px;line-height:1.35}
+.outline-ai-text .code-block{margin:5px 0}
+.outline-ai-text .code-header{padding:4px 8px;font-size:10px}
+.outline-ai-text pre{font-size:10.5px}
+.outline-ai-text :not(pre)>code{font-size:10.5px;padding:1px 4px}
 
 .outline-panel .outline-body > .ref-progress{margin-top:10px;background:rgba(14,165,233,.06)}
 .outline-panel .outline-body > .ref-progress .ref-spinner{border-top-color:#0ea5e9}
@@ -1867,6 +1871,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .outline-diff-verify.warn{background:rgba(245,158,11,.10);color:var(--warning)}
 .outline-diff-checkpoint{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 16px;border-bottom:1px solid var(--border);font-size:12.5px;background:var(--bg-chat)}
 .outline-diff-checkpoint-main{display:flex;align-items:center;gap:8px;min-width:0;color:var(--text-secondary)}
+.outline-diff-checkpoint-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;flex-wrap:wrap}
 .outline-diff-checkpoint code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;color:var(--text);background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
 .outline-diff-restore-btn{border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
 .outline-diff-restore-btn:hover{background:var(--hover)}

@@ -968,6 +968,7 @@ async function restoreCheckpoint(checkpointId, force, context) {
     `恢复文件：${restored.length}`,
     `删除新文件：${deleted.length}`,
     `跳过：${skipped.length}`,
+    skipped.length ? `跳过原因：${skipped.slice(0, 5).map(x => `${x.path || '?'}:${x.reason || '?'}`).join('；')}${skipped.length > 5 ? '；...' : ''}` : '',
     safetyId ? `恢复前安全 checkpoint：${safetyId}` : ''
   ].filter(Boolean).join('\n');
   return {

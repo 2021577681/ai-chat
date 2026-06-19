@@ -289,6 +289,64 @@ def _ensure_prewrite_checkpoint(paths, checkpoint_id='', session_id='', reason='
     }
 
 
+def _create_state_checkpoint(paths, session_id='', reason='state_checkpoint'):
+    unique_paths = []
+    seen = set()
+    for p in paths or []:
+        if not p or _is_inside_checkpoint_store(p):
+            continue
+        real = os.path.realpath(p)
+        key = real.lower() if os.name == 'nt' else real
+        if key not in seen:
+            seen.add(key)
+            unique_paths.append(real)
+    if not unique_paths:
+        return None
+
+    cid = _new_checkpoint_id()
+    checkpoint_dir = _checkpoint_dir_for(cid)
+    os.makedirs(os.path.join(checkpoint_dir, 'files'), exist_ok=True)
+    manifest = _load_checkpoint_manifest(checkpoint_dir, cid, session_id, reason)
+    added_entries = []
+
+    for abs_path in unique_paths:
+        rel_path = _workspace_rel_path(abs_path)
+        existed = os.path.exists(abs_path)
+        is_file = os.path.isfile(abs_path)
+        is_dir = os.path.isdir(abs_path)
+        snapshot_rel = None
+        sha_before = None
+        size_before = None
+        if is_file:
+            snapshot_rel = '/'.join(['files', rel_path])
+            snapshot_abs = os.path.join(checkpoint_dir, *snapshot_rel.split('/'))
+            os.makedirs(os.path.dirname(snapshot_abs), exist_ok=True)
+            shutil.copy2(abs_path, snapshot_abs)
+            sha_before = _sha256_file(abs_path)
+            size_before = os.path.getsize(abs_path)
+
+        entry = {
+            'path': rel_path,
+            'absPath': abs_path,
+            'existed': bool(existed),
+            'type': 'file' if is_file else ('directory' if is_dir else 'missing'),
+            'snapshotPath': snapshot_rel,
+            'sha256Before': sha_before,
+            'sizeBefore': size_before
+        }
+        manifest.setdefault('files', []).append(entry)
+        added_entries.append(entry)
+
+    _write_checkpoint_manifest(checkpoint_dir, manifest)
+    return {
+        'id': cid,
+        'dir': checkpoint_dir,
+        'manifestPath': _manifest_path(checkpoint_dir),
+        'files': added_entries,
+        'totalFiles': len(manifest.get('files', []))
+    }
+
+
 def _public_checkpoint_manifest(checkpoint_id, manifest, checkpoint_dir):
     files = manifest.get('files', []) if isinstance(manifest, dict) else []
     return {
@@ -421,7 +479,7 @@ def _restore_checkpoint(checkpoint_id, force=False, session_id=''):
             'safetyCheckpoint': None
         }
 
-    safety = _ensure_prewrite_checkpoint(
+    safety = _create_state_checkpoint(
         [target for _, target in targets],
         session_id=session_id,
         reason=f'before_restore_checkpoint:{cid}'

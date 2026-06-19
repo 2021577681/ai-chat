@@ -67,7 +67,7 @@ function renderOutlinePanel(m, idx) {
   if (o.globalToolCalls && o.globalToolCalls.length) {
     globalToolsHtml = `
       <div class="outline-section sub">
-        <div class="outline-section-header">🔧 其他工具调用</div>
+        <div class="outline-section-header">🔧 执行过程</div>
         <div class="outline-section-body">
           ${renderOutlineToolCalls(o.globalToolCalls)}
         </div>
@@ -91,7 +91,7 @@ function renderOutlinePanel(m, idx) {
         <span class="${p.requiresVerification ? 'verify' : ''}">${verify}</span>
       </div>`;
   }
-  
+
   const mainSection = `
     <div class="outline-section main">
       <div class="outline-section-header">📑 工作大纲 ${statusBadge}</div>
@@ -203,6 +203,7 @@ function renderOutlinePanel(m, idx) {
 
 function renderOutlineToolCalls(calls) {
   return `<div class="outline-tool-calls">${calls.map(tc => {
+    if (tc && tc.type === 'assistant_speech') return renderOutlineAIMessageCard(tc);
     const argsStr = JSON.stringify(tc.args || {});
     const argsShort = argsStr.length > 80 ? argsStr.slice(0, 80) + '…' : argsStr;
     let icon, cls;
@@ -219,6 +220,21 @@ function renderOutlineToolCalls(calls) {
         ${tc.result && !tc._running ? `<div class="outline-tool-result">${escapeHtml(tc.result.slice(0, 300))}${tc.result.length > 300 ? '…' : ''}</div>` : ''}
       </div>`;
   }).join('')}</div>`;
+}
+
+function renderOutlineAIMessageCard(msg) {
+  const text = String(msg && msg.text || '');
+  const shown = text.length > 1200 ? text.slice(0, 1200) + '…' : text;
+  const meta = `第 ${msg && msg.round || '?'} 轮`;
+  const html = (typeof renderMarkdown === 'function') ? renderMarkdown(shown) : escapeHtml(shown);
+  return `
+    <div class="outline-ai-message">
+      <div class="outline-ai-head">
+        <span class="outline-ai-icon">AI</span>
+        <span class="outline-ai-meta">${escapeHtml(meta)}</span>
+      </div>
+      <div class="outline-ai-text msg-content">${html}</div>
+    </div>`;
 }
 
 function renderOutlineDiffSummary(m, idx) {
@@ -263,13 +279,25 @@ function renderOutlineDiffSummary(m, idx) {
   }).join('');
   const checkpointId = outline && outline.checkpointId;
   const restoreState = outline && outline.restoreState;
+  const canRedo = restoreState && (
+    (restoreState.mode === 'restored' && restoreState.redoCheckpointId)
+    || (restoreState.restored && restoreState.safetyCheckpointId)
+  );
+  let checkpointActionHtml = '';
+  if (checkpointId) {
+    if (canRedo) {
+      checkpointActionHtml = `<button class="outline-diff-restore-btn" onclick="redoOutlineCheckpoint(${idx})">重做</button>`;
+    } else {
+      checkpointActionHtml = `<button class="outline-diff-restore-btn" onclick="restoreOutlineCheckpoint(${idx})">撤销</button>`;
+    }
+  }
   const checkpointHtml = checkpointId ? `
       <div class="outline-diff-checkpoint">
         <div class="outline-diff-checkpoint-main">
           <span>checkpoint</span>
           <code>${escapeHtml(checkpointId)}</code>
         </div>
-        ${restoreState && restoreState.restored ? `<div class="outline-diff-restore-ok">已恢复：${escapeHtml(restoreState.checkpointId || checkpointId)}（恢复 ${restoreState.restoredCount || 0}，删除 ${restoreState.deletedCount || 0}，跳过 ${restoreState.skippedCount || 0}）</div>` : `<button class="outline-diff-restore-btn" onclick="restoreOutlineCheckpoint(${idx})">回滚到修改前</button>`}
+        <div class="outline-diff-checkpoint-actions">${checkpointActionHtml}</div>
       </div>` : '';
   return `
     <div class="outline-diff-card">
@@ -304,24 +332,56 @@ async function restoreOutlineCheckpoint(idx) {
   const msg = c && c.messages[idx];
   const outline = msg && msg.outline;
   const checkpointId = outline && outline.checkpointId;
-  if (!checkpointId || typeof restoreCheckpoint !== 'function') return;
-  const result = await restoreCheckpoint(checkpointId, true, { chatId: c.id, chat: c, outline });
+  const restoreState = outline && outline.restoreState;
+  const undoCheckpointId = (restoreState && restoreState.undoCheckpointId) || checkpointId;
+  if (!undoCheckpointId || typeof restoreCheckpoint !== 'function') return;
+  const result = await restoreCheckpoint(undoCheckpointId, true, { chatId: c.id, chat: c, outline });
   if (typeof result === 'object' && result && result.ok) {
     outline.restoreState = {
-      restored: true,
-      restoredAt: new Date().toISOString(),
-      checkpointId,
-      restoredCount: Array.isArray(result.restored) ? result.restored.length : 0,
-      deletedCount: Array.isArray(result.deleted) ? result.deleted.length : 0,
-      skippedCount: Array.isArray(result.skipped) ? result.skipped.length : 0,
-      safetyCheckpointId: result.safetyCheckpoint && result.safetyCheckpoint.id
+      mode: 'restored',
+      updatedAt: new Date().toISOString(),
+      undoCheckpointId,
+      redoCheckpointId: result.safetyCheckpoint && result.safetyCheckpoint.id
     };
-    if (typeof toast === 'function') toast('已恢复到修改前 checkpoint');
+    if (typeof toast === 'function') toast('已撤销修改');
     if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
     else if (typeof renderMessages === 'function') renderMessages();
     saveData();
   } else if (typeof toast === 'function') {
     const text = typeof result === 'string' ? result : ((result && result.text) || '恢复 checkpoint 失败');
+    toast(text.slice(0, 180), 5000);
+  }
+}
+
+async function redoOutlineCheckpoint(idx) {
+  const c = currentChat();
+  const msg = c && c.messages[idx];
+  const outline = msg && msg.outline;
+  const restoreState = outline && outline.restoreState;
+  const redoCheckpointId = restoreState && (restoreState.redoCheckpointId || restoreState.safetyCheckpointId);
+  if (!redoCheckpointId || typeof restoreCheckpoint !== 'function') return;
+  const result = await restoreCheckpoint(redoCheckpointId, true, { chatId: c.id, chat: c, outline });
+  if (typeof result === 'object' && result && result.ok) {
+    const restoredCount = Array.isArray(result.restored) ? result.restored.length : 0;
+    const deletedCount = Array.isArray(result.deleted) ? result.deleted.length : 0;
+    const skippedCount = Array.isArray(result.skipped) ? result.skipped.length : 0;
+    if (!restoredCount && !deletedCount && skippedCount) {
+      const reason = result.skipped.slice(0, 3).map(x => `${x.path || '?'}: ${x.reason || '?'}`).join('；');
+      if (typeof toast === 'function') toast(`重做未恢复文件：${reason}`, 6000);
+      return;
+    }
+    outline.restoreState = {
+      mode: 'redone',
+      updatedAt: new Date().toISOString(),
+      undoCheckpointId: result.safetyCheckpoint && result.safetyCheckpoint.id,
+      redoCheckpointId,
+    };
+    if (typeof toast === 'function') toast('已重做修改');
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
+    else if (typeof renderMessages === 'function') renderMessages();
+    saveData();
+  } else if (typeof toast === 'function') {
+    const text = typeof result === 'string' ? result : ((result && result.text) || '重做 checkpoint 失败');
     toast(text.slice(0, 180), 5000);
   }
 }

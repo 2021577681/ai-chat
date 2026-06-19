@@ -85,9 +85,9 @@ const CODE_TASK_OUTLINE_PROFILE_PROMPT = `
 2. 开始修改前，先用 list_notes / find_in_notes / read_note 或必要的只读命令了解相关代码、项目约定和可用验证命令，不要直接猜。
 3. 明确“Done when”：用一句话记录本任务的验收标准，例如 bug 不再复现、目标功能可用、指定测试通过、或用户要求的行为已满足。
 4. 修改代码优先使用 apply_patch：先 dry_run=true 预检，预检通过后 dry_run=false 应用。仅在新建完整小文件或 patch 不适合时才用 save_note / edit_note。
-5. 代码修改后必须调用 execute_action 运行**一个最相关、最小充分**的验证命令：优先选择用户指定命令、复现命令、受影响文件/模块的测试、或项目约定的最小 lint/typecheck/build 检查。--version、-v、--help、help、--print-config、环境探测或配置打印命令只能用于了解环境，不能算作代码验证通过。
-6. 不要为了“更保险”主动扩展到大量无关测试、全量测试矩阵、长时间构建或启动检查；只有用户明确要求、最小验证失败、改动影响面明显很大、或最小验证无法覆盖核心风险时，才追加第二个验证命令。
-7. 如果验证命令通过，且之后没有再修改代码，并且 Done when 已满足，应立即停止继续调用工具，直接给出最终回答；不要继续寻找更多测试命令。
+5. 大纲模式下调用 execute_action 必须填写 intent：只读探测填 inspect，普通运行填 run，安装依赖填 install，验证最后一次代码修改才填 verify。代码修改后必须调用 execute_action 运行**一个最相关、最小充分**的验证命令，并设置 intent=verify、verifyTarget 和 verifyReason；优先选择用户指定命令、复现命令、受影响文件/模块的测试、直接运行目标脚本的自测、doctest/smoke test、或项目约定的最小 lint/typecheck/build 检查。--version、-v、--help、help、--print-config、环境探测或配置打印命令只能用于了解环境，必须用 intent=inspect，不能算作代码验证通过。
+6. 不要为了“更保险”主动扩展到大量无关测试、全量测试矩阵、长时间构建、启动检查、lint 或 typecheck；只有用户明确要求、最小验证失败、改动影响面明显很大、或最小验证无法覆盖核心风险时，才追加第二个验证命令。门禁只要求“最后一次代码修改后有一个相关验证通过”，不是要求升级到 lint/typecheck。
+7. 如果一个相关的 doctest、最小复现、直接运行目标脚本的自测、smoke test、目标模块测试或用户指定验证已经通过，且之后没有再修改代码，并且 Done when 已满足，应立即停止继续调用工具，直接给出最终回答；不要因为门禁、谨慎或不确定而重复验证或寻找更多测试命令。
 8. 如果验证命令失败，必须读取 stdout/stderr，继续修改代码，然后重新运行与最新改动最相关的最小验证命令；不要在失败后直接总结为完成。
 9. 如果在验证之后又修改了代码，必须重新运行最小相关验证；只有最新代码修改后的验证通过，或因为缺依赖、缺配置、缺权限、环境限制等明确阻塞且已说明原因时，才允许最终总结。
 10. 最终回答必须包含：Done when 是否满足、改了什么、运行了什么验证命令、验证结果、仍需注意的问题。`;
@@ -117,9 +117,9 @@ const DEFAULT_OUTLINE_BUDGET_HALF_PROMPT = '【系统提示】执行预算已过
 const DEFAULT_OUTLINE_BUDGET_LOW_PROMPT = '⚠️【系统警告】仅剩 {{remaining}} 轮执行预算！请加快进度，对非关键的 pending 条目用 update_outline 标记为 skipped，集中完成核心内容。';
 const DEFAULT_OUTLINE_BUDGET_CRITICAL_PROMPT = '🚨【系统紧急】只剩 {{remaining}} 轮！请立即开始收尾：把所有未完成条目标记为 done 或 skipped，下一轮请不要再调用任何工具，直接给出完整的 Markdown 格式最终答案。';
 
-const DEFAULT_OUTLINE_GATE_NO_VERIFY_PROMPT = '【系统门禁】这是代码任务，且你已经修改过代码，但还没有运行任何明显的测试、构建、lint、typecheck、启动检查或最小复现命令。不要最终总结。请继续调用 execute_action 运行最相关的验证命令；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
-const DEFAULT_OUTLINE_GATE_STALE_VERIFY_PROMPT = '【系统门禁】你在上一次验证之后又修改了代码，但还没有重新验证。不要最终总结。请继续调用 execute_action 运行与最新改动相关的测试、构建或最小检查；如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
-const DEFAULT_OUTLINE_GATE_FAILED_VERIFY_PROMPT = '【系统门禁】最新代码修改后的验证命令没有通过（退出码 {{returncode}}）。不要最终总结。请读取 stdout/stderr，继续修复后再次运行验证命令；如果失败是环境/依赖/权限阻塞，必须调用 update_outline 明确记录阻塞原因。';
+const DEFAULT_OUTLINE_GATE_NO_VERIFY_PROMPT = '【系统门禁】这是代码任务，且你已经修改过代码，但还没有在最后一次修改后运行任何相关验证。不要最终总结。请调用 execute_action 运行一个最小相关验证命令，并设置 intent=verify、verifyTarget 和 verifyReason。例如用户指定验证、最小复现、直接运行目标脚本的自测、doctest、smoke test、目标模块测试、lint/typecheck/build 中最相关的一种；不要因为门禁而升级到无关的 lint/typecheck 或重复多次验证。如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+const DEFAULT_OUTLINE_GATE_STALE_VERIFY_PROMPT = '【系统门禁】你在上一次验证之后又修改了代码，但还没有重新验证。不要最终总结。请调用 execute_action 运行一个与最新改动相关的最小验证，并设置 intent=verify、verifyTarget 和 verifyReason；如果相关 doctest、最小复现、直接运行目标脚本的自测、smoke test 或目标模块测试通过，就停止继续验证并总结，不要额外升级到 lint/typecheck。如果确实无法运行，必须调用 update_outline 记录阻塞原因。';
+const DEFAULT_OUTLINE_GATE_FAILED_VERIFY_PROMPT = '【系统门禁】最新代码修改后的验证命令没有通过（退出码 {{returncode}}）。不要最终总结。请读取 stdout/stderr，继续修复后再次运行一个最小相关验证命令，并设置 intent=verify、verifyTarget 和 verifyReason；如果失败是环境/依赖/权限阻塞，必须调用 update_outline 明确记录阻塞原因。';
 
 const DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT = `【最终阶段·强制收尾】你已达到执行轮数上限。请基于上面所有已收集的信息和工具结果，直接给出完整的 Markdown 格式最终答案。不要再调用任何工具。如有未完成的条目，可在答案末尾用"⚠️ 受限说明"小节简要说明。`;
 const DEFAULT_OUTLINE_FORCE_FINAL_USER_PROMPT = '请立即基于已有信息给出完整的最终回答（Markdown 格式）。不要再调用任何工具。';
