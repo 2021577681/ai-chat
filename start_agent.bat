@@ -12,6 +12,8 @@ REM ============================================================
 REM Switch console to UTF-8 so Python emoji output renders correctly
 chcp 65001 >nul 2>&1
 
+set "AGENT_HOME=C:\Users\philips\Desktop\agent"
+
 REM Agent code home. Defaults to this script's folder.
 if not defined AGENT_HOME set "AGENT_HOME=%~dp0"
 if "%AGENT_HOME:~-1%"=="\" set "AGENT_HOME=%AGENT_HOME:~0,-1%"
