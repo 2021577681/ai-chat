@@ -138,6 +138,12 @@ function updateSendBtn() {
   const c = (typeof currentChat === 'function') ? currentChat() : null;
   const debateWaitingManual = !!(c && c.debate && c.debate.type === 'debate_mode'
     && typeof isDebateWaitingManualTimed === 'function' && isDebateWaitingManualTimed(c.id));
+  if (typeof _editResendState !== 'undefined' && _editResendState && c && _editResendState.chatId === c.id) {
+    btn.textContent = '↑';
+    btn.classList.remove('stop');
+    document.getElementById('inputInfo').textContent = '编辑重发：发送后会截断后续消息并重新回答' + privacySuffix;
+    return;
+  }
   const currentGenerating = (typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : !!state.isGenerating;
   if (currentGenerating) {
     const input = document.getElementById('input');

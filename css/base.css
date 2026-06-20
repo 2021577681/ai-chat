@@ -315,6 +315,29 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .message:hover .msg-actions{opacity:1}
 .msg-action{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:12px;padding:2px 6px;border-radius:4px}
 .msg-action:hover{background:var(--bg-hover);color:var(--text)}
+.user-msg-actions{justify-content:flex-end;align-items:center;gap:4px;opacity:1}
+.user-msg-action{
+  width:24px;
+  height:24px;
+  padding:3px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:transparent!important;
+  border:0!important;
+  color:var(--text-secondary);
+  line-height:1;
+}
+.user-msg-action svg{
+  width:15px;
+  height:15px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.user-msg-action:hover{background:transparent!important;color:var(--text)}
 
 .cursor{display:inline-block;width:7px;height:14px;background:var(--primary);vertical-align:middle;animation:blink 1s infinite;margin-left:2px}
 @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}

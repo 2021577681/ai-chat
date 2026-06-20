@@ -139,6 +139,188 @@ function queueMidrunGuidance(chat, input, text) {
   return true;
 }
 
+let _editResendState = null;
+
+function _messageTextForEdit(m) {
+  if (!m) return '';
+  if (typeof m.content === 'string') return m.content;
+  if (Array.isArray(m.content)) {
+    return m.content
+      .filter(p => p && (p.type === 'text' || p.type === 'input_text'))
+      .map(p => p.text || '')
+      .filter(Boolean)
+      .join('\n');
+  }
+  return String(m.content || '');
+}
+
+function _cloneMessageAttachmentsForEdit(m) {
+  const atts = Array.isArray(m && m.attachments) ? m.attachments : [];
+  return atts
+    .filter(a => a && !a._stripped)
+    .map(a => ({ ...a, id: a.id || ('att_' + Date.now() + '_' + Math.random().toString(36).slice(2)) }));
+}
+
+function _inferReplyModeAfterUser(chat, idx) {
+  if (!chat || !Array.isArray(chat.messages)) return 'normal';
+  for (let i = idx + 1; i < chat.messages.length; i++) {
+    const m = chat.messages[i];
+    if (!m || m._hiddenFromUI) continue;
+    if (m.role === 'user') break;
+    if (m.outline) return 'outline';
+    if (m.plan) return 'plan';
+    if (m.reflection) return 'reflection';
+    if (m.role === 'assistant') return 'normal';
+  }
+  return 'normal';
+}
+
+function _consumeOneShotModeWithFallback(fallbackMode) {
+  const s = state.settings || {};
+  if (s.useOutline || s.usePlan || s.useReflection) {
+    return (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
+  }
+  return fallbackMode || 'normal';
+}
+
+function _setComposerDraft(input, text) {
+  if (!input) return;
+  input.value = text || '';
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
+  if (typeof input.setSelectionRange === 'function') {
+    const pos = input.value.length;
+    input.setSelectionRange(pos, pos);
+  }
+}
+
+function renderUserMsgActions(idx) {
+  return `
+    <div class="msg-actions user-msg-actions">
+      <button class="msg-action user-msg-action" type="button" onclick="copyMsg(${idx})" title="复制" aria-label="复制">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M5 15V7a2 2 0 0 1 2-2h8"></path></svg>
+      </button>
+      <button class="msg-action user-msg-action" type="button" onclick="editResendUserMsg(${idx})" title="编辑重发" aria-label="编辑重发">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg>
+      </button>
+    </div>`;
+}
+
+function editResendUserMsg(idx) {
+  const c = currentChat();
+  if (!c || !c.messages[idx] || c.messages[idx].role !== 'user') return;
+  const input = document.getElementById('input');
+  const msg = c.messages[idx];
+  _editResendState = {
+    chatId: c.id,
+    msgIdx: idx,
+    mode: _inferReplyModeAfterUser(c, idx)
+  };
+  state.pendingAttachments = _cloneMessageAttachmentsForEdit(msg);
+  if (typeof renderPendingAtts === 'function') renderPendingAtts();
+  _setComposerDraft(input, _messageTextForEdit(msg));
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof toast === 'function') toast('已进入编辑重发，发送后会重新回答', 1800);
+}
+
+async function _abortChatForRewrite(chatId) {
+  const sameChatGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(chatId) : !!state.isGenerating;
+  if (sameChatGenerating || (typeof chatTaskById === 'function' && chatTaskById(chatId)?.abortCtrl)) {
+    if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny(chatId);
+    else if (state.abortCtrl) { try { state.abortCtrl.abort(); } catch (_) {} }
+    await new Promise(r => setTimeout(r, 200));
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+    }
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+  }
+}
+
+async function submitEditResend(input) {
+  const edit = _editResendState;
+  const c = currentChat();
+  if (!edit || !c || edit.chatId !== c.id) {
+    _editResendState = null;
+    return false;
+  }
+  const text = input ? input.value.trim() : '';
+  if (!text && !state.pendingAttachments.length) return true;
+  if (!state.settings.apiKey) {
+    alert('请先在「设置」中填写 API Key');
+    openSettings();
+    return true;
+  }
+  if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
+
+  await _abortChatForRewrite(c.id);
+  if (!c.messages[edit.msgIdx] || c.messages[edit.msgIdx].role !== 'user') {
+    _editResendState = null;
+    if (typeof toast === 'function') toast('原消息已变化，无法编辑重发', 2600);
+    return true;
+  }
+
+  const userMsg = _buildUserMessageFromInput(c, text);
+  c.messages = c.messages.slice(0, edit.msgIdx);
+  c.messages.push(userMsg);
+  if (c.messages.length === 1) c.title = (text || '附件对话').slice(0, 30);
+  if (typeof traceUserMessage === 'function') traceUserMessage(text);
+  if (typeof maybeInsertBeacon === 'function') {
+    try { maybeInsertBeacon(c); } catch (e) { console.warn('[beacon] 插入失败:', e); }
+  }
+
+  const fallbackMode = edit.mode || 'normal';
+  _editResendState = null;
+  _clearComposerAfterSend(input);
+  if (typeof resetTaskPermission === 'function') resetTaskPermission();
+  if (typeof refreshLegacyModeFlags === 'function') {
+    refreshLegacyModeFlags();
+  } else {
+    state._planExecuting = false;
+    state._outlineExecuting = false;
+    state._outlineForceFinish = false;
+  }
+  renderChatList();
+  renderMessages();
+  saveData();
+  if (typeof scrollBottom === 'function') requestAnimationFrame(() => scrollBottom());
+
+  if (typeof autoCompressCheck === 'function') {
+    const compressResult = await autoCompressCheck(c, { touchGlobalGenerating: true });
+    if (compressResult === 'failed') {
+      _editResendState = { ...edit };
+      state.pendingAttachments = userMsg.attachments ? userMsg.attachments.map(a => ({ ...a })) : [];
+      if (typeof renderPendingAtts === 'function') renderPendingAtts();
+      _setComposerDraft(input, text);
+      toast('自动压缩失败，本轮请求已取消，避免发送超长上下文', 4000);
+      return true;
+    }
+  }
+
+  try {
+    state.stopRequested = false;
+    const mode = _consumeOneShotModeWithFallback(fallbackMode);
+    if (mode === 'outline') await callAPIWithOutline();
+    else if (mode === 'plan') await callAPIWithPlan();
+    else if (mode === 'reflection') await callAPIWithReflection();
+    else await callAPI(undefined, { contextChecked: true });
+  } catch (e) {
+    console.error('[submitEditResend] 错误:', e);
+    toast('❌ 编辑重发失败：' + e.message, 3000);
+  } finally {
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+    else {
+      state.isGenerating = false;
+      state.abortCtrl = null;
+    }
+    if (typeof updateSendBtn === 'function') updateSendBtn();
+  }
+  return true;
+}
+
 function newChat() {
   const id = 'c_' + Date.now();
   state.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
@@ -961,11 +1143,13 @@ function renderMsg(m, idx) {
         ${m.outline ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${outlineDiffHtml}
         ${m.reflection ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
+        ${!isUser ? `
         <div class="msg-actions">
           <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
-          ${!isUser && m.role !== 'tool' ? `<button class="msg-action" onclick="regenerate(${idx})">🔄 重新生成</button>` : ''}
-        </div>
+          ${m.role !== 'tool' ? `<button class="msg-action" onclick="regenerate(${idx})">🔄 重新生成</button>` : ''}
+        </div>` : ''}
       </div>
+      ${isUser ? renderUserMsgActions(idx) : ''}
     </div>`;
 }
 
@@ -1187,6 +1371,11 @@ async function onSend() {
   const currentGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(currentId) : !!state.isGenerating;
   const input = document.getElementById('input');
   const text = input.value.trim();
+  if (_editResendState && _editResendState.chatId === currentId) {
+    if (await submitEditResend(input)) return;
+  } else if (_editResendState) {
+    _editResendState = null;
+  }
   if (currentGenerating) {
     const c = currentChat();
     if (c && (text || state.pendingAttachments.length)) {
@@ -1332,7 +1521,8 @@ async function onSend() {
 
 function copyMsg(idx) {
   const c = currentChat();
-  navigator.clipboard.writeText(c.messages[idx].content || '').then(() => toast('✓ 已复制'));
+  if (!c || !c.messages[idx]) return;
+  navigator.clipboard.writeText(_messageTextForEdit(c.messages[idx])).then(() => toast('✓ 已复制'));
 }
 
 async function regenerate(idx) {
