@@ -586,38 +586,40 @@ function showTokenDetails() {
   const exchangeRate = (typeof getExchangeRate === 'function') ? getExchangeRate() : 7.2;
   const showCny = (typeof shouldShowCny === 'function') ? shouldShowCny() : true;
   
-  let html = `<div style="font-size:13px;line-height:1.8;">`;
-  html += `<h3 style="margin:0 0 12px;font-size:15px;">📊 Token 详细统计</h3>`;
-  html += `<div style="background:var(--bg-input);padding:12px;border-radius:8px;margin-bottom:12px;">`;
-  html += `<div><strong>模型：</strong>${escapeHtml(model)}</div>`;
+  let html = `<div class="token-detail">`;
+  html += `<div class="token-detail-titlebar">`;
+  html += `<div><h3>Token 详细统计</h3><p>当前对话的 token 用量、上下文上限和费用估算</p></div>`;
+  html += `</div>`;
+  html += `<div class="token-detail-card token-detail-overview">`;
+  html += `<div class="token-detail-info-row"><span>模型</span><strong class="token-detail-model">${escapeHtml(model)}</strong></div>`;
   const limitModeText = limitInfo.mode === 'matched'
     ? `匹配关键词 ${limitInfo.matchedKey}，内置识别值 ${formatNumber(limitInfo.autoLimit)}`
     : '自动识别';
-  html += `<div><strong>上下文限制：</strong>${formatNumber(limit)} tokens <span style="color:var(--text-secondary);">(${limitModeText})</span> <a href="javascript:void(0)" onclick="document.getElementById('tokenDetailModal') && document.getElementById('tokenDetailModal').classList.remove('show'); if (typeof openContextLimitSettings === 'function') openContextLimitSettings();" style="margin-left:6px;">设置</a></div>`;
-  html += `<div><strong>消息数：</strong>${c.messages.length}</div>`;
+  html += `<div class="token-detail-info-row"><span>上下文限制</span><strong>${formatNumber(limit)} tokens</strong></div>`;
+  html += `<div class="token-detail-meta">${limitModeText}<a class="token-detail-link" href="javascript:void(0)" onclick="document.getElementById('tokenDetailModal') && document.getElementById('tokenDetailModal').classList.remove('show'); if (typeof openContextLimitSettings === 'function') openContextLimitSettings();">设置</a></div>`;
+  html += `<div class="token-detail-info-row"><span>消息数</span><strong>${c.messages.length}</strong></div>`;
   html += `</div>`;
   
   if (stats && stats.totalRequests > 0) {
-    html += `<h4 style="margin:12px 0 8px;font-size:14px;">📈 本对话累计</h4>`;
-    html += `<div style="background:var(--bg-input);padding:12px;border-radius:8px;">`;
-    html += `<table style="width:100%;font-size:13px;">`;
-    html += `<tr><td>📊 总请求次数</td><td style="text-align:right;font-family:monospace;">${stats.totalRequests}</td></tr>`;
-    html += `<tr><td>📥 累计输入 token</td><td style="text-align:right;font-family:monospace;">${formatNumber(stats.inputTokens)}</td></tr>`;
-    html += `<tr><td>📤 累计输出 token</td><td style="text-align:right;font-family:monospace;">${formatNumber(stats.outputTokens)}</td></tr>`;
+    html += `<div class="token-detail-section-title"><h4>本对话累计</h4></div>`;
+    html += `<div class="token-detail-card token-detail-table">`;
+    html += `<div class="token-detail-row"><span>总请求次数</span><strong>${stats.totalRequests}</strong></div>`;
+    html += `<div class="token-detail-row"><span>累计输入 token</span><strong>${formatNumber(stats.inputTokens)}</strong></div>`;
+    html += `<div class="token-detail-row"><span>累计输出 token</span><strong>${formatNumber(stats.outputTokens)}</strong></div>`;
     if (stats.cacheReadTokens > 0) {
-      html += `<tr><td>💾 缓存命中（节省）</td><td style="text-align:right;font-family:monospace;color:var(--success);">${formatNumber(stats.cacheReadTokens)}</td></tr>`;
+      html += `<div class="token-detail-row"><span>缓存命中（节省）</span><strong class="token-detail-success">${formatNumber(stats.cacheReadTokens)}</strong></div>`;
     }
     if (stats.cacheCreateTokens > 0) {
-      html += `<tr><td>💾 缓存创建</td><td style="text-align:right;font-family:monospace;">${formatNumber(stats.cacheCreateTokens)}</td></tr>`;
+      html += `<div class="token-detail-row"><span>缓存创建</span><strong>${formatNumber(stats.cacheCreateTokens)}</strong></div>`;
     }
     if (stats.thinkingTokens > 0) {
-      html += `<tr><td>💭 思考 token</td><td style="text-align:right;font-family:monospace;">${formatNumber(stats.thinkingTokens)}</td></tr>`;
+      html += `<div class="token-detail-row"><span>思考 token</span><strong>${formatNumber(stats.thinkingTokens)}</strong></div>`;
     }
-    html += `<tr style="border-top:1px solid var(--border);"><td><strong>总计</strong></td><td style="text-align:right;font-family:monospace;"><strong>${formatNumber(stats.inputTokens + stats.outputTokens)}</strong></td></tr>`;
-    html += `</table></div>`;
+    html += `<div class="token-detail-row token-detail-total"><span>总计</span><strong>${formatNumber(stats.inputTokens + stats.outputTokens)}</strong></div>`;
+    html += `</div>`;
     
-    html += `<h4 style="margin:12px 0 8px;font-size:14px;display:flex;align-items:center;gap:8px;">💰 估算费用（参考） <span style="font-size:11px;font-weight:normal;color:var(--text-secondary);">${pricing.matched ? '匹配关键词：<code>' + escapeHtml(pricing.matched) + '</code>' : '⚠️ 未匹配，使用默认价'}<a href="javascript:void(0)" onclick="document.getElementById('tokenDetailModal') && document.getElementById('tokenDetailModal').classList.remove('show'); openPricingManager && openPricingManager();" style="margin-left:6px;">编辑</a></span></h4>`;
-    html += `<div style="background:var(--bg-input);padding:12px;border-radius:8px;font-size:12px;">`;
+    html += `<div class="token-detail-section-title"><h4>估算费用（参考）</h4><span class="token-detail-section-meta">${pricing.matched ? '匹配关键词：<code>' + escapeHtml(pricing.matched) + '</code>' : '未匹配，使用默认价'}<a class="token-detail-link" href="javascript:void(0)" onclick="document.getElementById('tokenDetailModal') && document.getElementById('tokenDetailModal').classList.remove('show'); openPricingManager && openPricingManager();">编辑</a></span></div>`;
+    html += `<div class="token-detail-card token-detail-cost">`;
     
     const costInput = (stats.inputTokens - stats.cacheReadTokens) * pricing.input / 1000000;
     const costOutput = stats.outputTokens * pricing.output / 1000000;
@@ -628,32 +630,30 @@ function showTokenDetails() {
     const inputPriceLabel = pricing.inputLabel || `$${pricing.input}`;
     const outputPriceLabel = pricing.outputLabel || `$${pricing.output}`;
     const cachePriceLabel = pricing.cacheReadLabel || `$${pricing.cacheRead}`;
-    html += `<div>输入费用：$${costInput.toFixed(6)} (${formatNumber(stats.inputTokens - stats.cacheReadTokens)} × ${inputPriceLabel}/M)</div>`;
+    html += `<div class="token-detail-cost-line"><span>输入费用</span><strong>$${costInput.toFixed(6)}</strong><em>(${formatNumber(stats.inputTokens - stats.cacheReadTokens)} × ${inputPriceLabel}/M)</em></div>`;
     if (costCache > 0) {
-      html += `<div>缓存费用：$${costCache.toFixed(6)} (${formatNumber(stats.cacheReadTokens)} × ${cachePriceLabel}/M)</div>`;
+      html += `<div class="token-detail-cost-line"><span>缓存费用</span><strong>$${costCache.toFixed(6)}</strong><em>(${formatNumber(stats.cacheReadTokens)} × ${cachePriceLabel}/M)</em></div>`;
     }
-    html += `<div>输出费用：$${costOutput.toFixed(6)} (${formatNumber(stats.outputTokens)} × ${outputPriceLabel}/M)</div>`;
-    html += `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;"><strong>总计：$${total.toFixed(6)}</strong>${showCny ? ` ≈ ¥${(total * exchangeRate).toFixed(4)}` : ''}</div>`;
+    html += `<div class="token-detail-cost-line"><span>输出费用</span><strong>$${costOutput.toFixed(6)}</strong><em>(${formatNumber(stats.outputTokens)} × ${outputPriceLabel}/M)</em></div>`;
+    html += `<div class="token-detail-cost-line token-detail-total"><span>总计</span><strong>$${total.toFixed(6)}${showCny ? `<small>≈ ¥${(total * exchangeRate).toFixed(4)}</small>` : ''}</strong></div>`;
     if (saved > 0) {
-      html += `<div style="color:var(--success);margin-top:4px;">💚 缓存节省：$${saved.toFixed(6)}</div>`;
+      html += `<div class="token-detail-note token-detail-success">缓存节省：$${saved.toFixed(6)}</div>`;
     }
-    html += `<div style="margin-top:6px;font-size:11px;color:var(--text-secondary);">⚠️ 价格仅供参考，以服务商实际计费为准</div>`;
+    html += `<div class="token-detail-note">价格仅供参考，以服务商实际计费为准</div>`;
     html += `</div>`;
     
     if (stats.lastInputTokens > 0) {
-      html += `<h4 style="margin:12px 0 8px;font-size:14px;">⏱ 最近一次请求</h4>`;
-      html += `<div style="background:var(--bg-input);padding:12px;border-radius:8px;">`;
-      html += `<div>📥 输入：${formatNumber(stats.lastInputTokens)} tokens</div>`;
-      html += `<div>📤 输出：${formatNumber(stats.lastOutputTokens)} tokens</div>`;
+      html += `<div class="token-detail-section-title"><h4>最近一次请求</h4></div>`;
+      html += `<div class="token-detail-card token-detail-table">`;
+      html += `<div class="token-detail-row"><span>输入</span><strong>${formatNumber(stats.lastInputTokens)} tokens</strong></div>`;
+      html += `<div class="token-detail-row"><span>输出</span><strong>${formatNumber(stats.lastOutputTokens)} tokens</strong></div>`;
       html += `</div>`;
     }
   } else {
-    html += `<div style="padding:20px;text-align:center;color:var(--text-secondary);">还没有发送过请求</div>`;
+    html += `<div class="token-detail-empty">还没有发送过请求</div>`;
   }
   
-  html += `<div style="margin-top:16px;font-size:12px;color:var(--text-secondary);">`;
-  html += `💡 提示：缓存命中能大幅降低成本（Anthropic 缓存读取约为正常输入价的 1/10）`;
-  html += `</div></div>`;
+  html += `<div class="token-detail-hint">提示：缓存命中能大幅降低成本（Anthropic 缓存读取约为正常输入价的 1/10）</div></div>`;
   
   // 显示在一个简单的模态框里
   showTokenModal(html);
@@ -664,17 +664,25 @@ function showTokenModal(html) {
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'tokenDetailModal';
-    modal.className = 'modal-mask';
+    modal.className = 'modal-mask token-detail-modal';
     modal.innerHTML = `
-      <div class="modal" style="width:480px;">
+      <div class="modal token-detail-dialog">
         <div id="tokenDetailContent"></div>
         <div class="modal-footer">
           <button class="btn" onclick="document.getElementById('tokenDetailModal').classList.remove('show')">关闭</button>
-          <button class="btn" onclick="resetTokenStats()">🔄 重置统计</button>
+          <button class="btn" onclick="resetTokenStats()">重置</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
   }
+  modal.className = 'modal-mask token-detail-modal';
+  const dialog = modal.querySelector('.modal');
+  if (dialog) {
+    dialog.classList.add('token-detail-dialog');
+    dialog.style.width = '';
+  }
+  const footerButtons = modal.querySelectorAll('.modal-footer .btn');
+  if (footerButtons[1]) footerButtons[1].textContent = '重置';
   document.getElementById('tokenDetailContent').innerHTML = html;
   modal.classList.add('show');
 }
@@ -688,7 +696,7 @@ function resetTokenStats() {
   }
   updateTokenDisplay();
   document.getElementById('tokenDetailModal').classList.remove('show');
-  toast('✓ 已重置');
+  toast('已重置');
 }
 
 // ============ 压缩对话 ============
