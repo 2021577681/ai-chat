@@ -322,6 +322,7 @@ async function submitEditResend(input) {
 }
 
 function newChat() {
+  if (typeof discardTemporaryChat === 'function') discardTemporaryChat({ nextCurrentId: null });
   const id = 'c_' + Date.now();
   state.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
   state.currentId = id;
@@ -334,6 +335,7 @@ function newChat() {
 }
 
 function switchChat(id) {
+  if (typeof discardTemporaryChat === 'function') discardTemporaryChat({ nextCurrentId: id });
   state.currentId = id;
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
   saveData();
@@ -341,6 +343,31 @@ function switchChat(id) {
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+}
+
+function updateTemporaryChatButton() {
+  const btn = document.getElementById('temporaryChatBtn');
+  if (!btn) return;
+  const active = typeof isTemporaryChat === 'function' && isTemporaryChat(state.currentId);
+  btn.classList.toggle('temporary-active', !!active);
+}
+
+function startTemporaryChat() {
+  if (typeof isTemporaryChat === 'function' && isTemporaryChat(state.currentId)) {
+    updateTemporaryChatButton();
+    return;
+  }
+  state.temporaryChat = typeof createTemporaryChat === 'function'
+    ? createTemporaryChat()
+    : { id: 'tmp_' + Date.now(), title: '临时会话', messages: [], createdAt: Date.now(), temporary: true };
+  state.currentId = state.temporaryChat.id;
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  saveData();
+  renderChatList();
+  renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  updateTemporaryChatButton();
 }
 
 function isTaskQueueSidebarGroupedChat(chat) {
@@ -682,6 +709,7 @@ function renderChatList() {
   list.onmouseout = handleChatListPointerOut;
   list.onfocusin = handleChatListFocusIn;
   list.onfocusout = handleChatListFocusOut;
+  updateTemporaryChatButton();
 }
 
 function renderSidebarChatEntry(entry) {

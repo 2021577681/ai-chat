@@ -84,6 +84,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .topbar-btn.reflect-active{background:linear-gradient(135deg,var(--student),var(--teacher));color:#fff;border-color:transparent}
 .topbar-btn.plan-active{background:linear-gradient(135deg,var(--primary),var(--success));color:#fff;border-color:transparent}
 .topbar-btn.privacy-active{background:var(--warning);color:#fff;border-color:var(--warning)}
+.topbar-btn.temporary-active{background:var(--bg-hover);color:var(--primary);border-color:rgba(79,70,229,.35)}
 
 /* 沙箱信息栏（替代原 URL 预览栏） */
 .workspace-bar{padding:8px 20px;background:var(--bg-input);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary)}

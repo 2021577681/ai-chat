@@ -1,6 +1,7 @@
 // ============ 全局状态 ============
 let state = {
   chats: [],
+  temporaryChat: null,
   currentId: null,
   tools: [],
   settings: {
@@ -256,7 +257,22 @@ function migrateRetrySettings() {
 }
 
 function loadData() {
-  try { const d = storage.get(STORE_KEY); if (d) { const p = JSON.parse(d); state.chats = p.chats || []; state.currentId = p.currentId; state._lastSavedAt = p.savedAt || null; } } catch (e) {}
+  try {
+    const d = storage.get(STORE_KEY);
+    if (d) {
+      const p = JSON.parse(d);
+      state.chats = p.chats || [];
+      state.temporaryChat = normalizeTemporaryChat(p.temporaryChat || null);
+      state.currentId = p.currentId;
+      if (state.temporaryChat && state.currentId !== state.temporaryChat.id) {
+        state.temporaryChat = null;
+      }
+      if (isTemporaryChatId(state.currentId) && (!state.temporaryChat || state.temporaryChat.id !== state.currentId)) {
+        state.currentId = null;
+      }
+      state._lastSavedAt = p.savedAt || null;
+    }
+  } catch (e) {}
   try { const s = storage.get(SETTINGS_KEY); if (s) state.settings = { ...state.settings, ...JSON.parse(s) }; } catch (e) {}
   migrateRetrySettings();
   try { const t = storage.get(TOOLS_KEY); if (t) state.tools = JSON.parse(t); } catch (e) {}
@@ -361,7 +377,7 @@ function _cleanupRecoveredMessageProgress(msg) {
 function recoverInterruptedMsgTimers() {
   const now = Date.now();
   let changed = false;
-  for (const chat of state.chats || []) {
+  for (const chat of [...(state.chats || []), state.temporaryChat].filter(Boolean)) {
     for (const msg of chat.messages || []) {
       if (!msg || msg.role !== 'assistant') continue;
       if (msg._startTime && !msg._endTime) {
@@ -377,7 +393,7 @@ function recoverInterruptedMsgTimers() {
 
 function sealOpenMsgTimersForPageExit() {
   let changed = false;
-  for (const chat of state.chats || []) {
+  for (const chat of [...(state.chats || []), state.temporaryChat].filter(Boolean)) {
     for (const msg of chat.messages || []) {
       if (pauseMsgTimer(msg, Date.now())) changed = true;
       if (_cleanupRecoveredMessageProgress(msg)) changed = true;
@@ -502,18 +518,28 @@ function sanitizeConcurrentForSave(concurrent) {
 // 当场抛出。所以我们在 idb-store.js 注册了 onQuotaError 回调，由它在异步落盘失败
 // 时反向触发 handleStorageQuotaExceeded()。这样旧逻辑（清请求历史 → 删旧对话
 // → 剥附件 → 放弃保存）保持有效。
+function sanitizeChatForSave(chat) {
+  if (!chat || typeof chat !== 'object') return chat;
+  return {
+    ...chat,
+    messages: sanitizeMessagesForSave(chat.messages),
+    concurrent: sanitizeConcurrentForSave(chat.concurrent)
+  };
+}
+
+function activeTemporaryChatForSave() {
+  return state.temporaryChat && state.currentId === state.temporaryChat.id ? state.temporaryChat : null;
+}
+
 function saveData() {
   try {
     // 深拷贝并剥离大附件的 data 字段
-    const chatsForSave = state.chats.map(chat => ({
-      ...chat,
-      messages: sanitizeMessagesForSave(chat.messages),
-      concurrent: sanitizeConcurrentForSave(chat.concurrent)
-    }));
+    const chatsForSave = state.chats.map(chat => sanitizeChatForSave(chat));
+    const temporaryChatForSave = activeTemporaryChatForSave() ? sanitizeChatForSave(state.temporaryChat) : null;
     
     const savedAt = Date.now();
     state._lastSavedAt = savedAt;
-    const payload = JSON.stringify({ chats: chatsForSave, currentId: state.currentId, savedAt });
+    const payload = JSON.stringify({ chats: chatsForSave, temporaryChat: temporaryChatForSave, currentId: state.currentId, savedAt });
     
     try {
       storage.set(STORE_KEY, payload);
@@ -587,7 +613,7 @@ function handleStorageQuotaExceeded() {
       _strippedReason: '存储空间不足，附件已被自动清理'
     }));
   };
-  for (const chat of state.chats) {
+  for (const chat of [...state.chats, state.temporaryChat].filter(Boolean)) {
     for (const msg of chat.messages) {
       stripAttachmentMeta(msg);
     }
@@ -600,7 +626,11 @@ function handleStorageQuotaExceeded() {
   }
   
   try {
-    const payload = JSON.stringify({ chats: state.chats, currentId: state.currentId });
+    const payload = JSON.stringify({
+      chats: state.chats.map(chat => sanitizeChatForSave(chat)),
+      temporaryChat: activeTemporaryChatForSave() ? sanitizeChatForSave(state.temporaryChat) : null,
+      currentId: state.currentId
+    });
     storage.set(STORE_KEY, payload);
     if (typeof toast === 'function') {
       toast('⚠️ 存储空间不足，已清理所有附件', 5000);
@@ -616,12 +646,9 @@ function handleStorageQuotaExceeded() {
 
 // 辅助：序列化对话（带附件剥离）
 function serializeChatsWithStrippedAttachments() {
-  const chatsForSave = state.chats.map(chat => ({
-    ...chat,
-    messages: sanitizeMessagesForSave(chat.messages),
-    concurrent: sanitizeConcurrentForSave(chat.concurrent)
-  }));
-  return JSON.stringify({ chats: chatsForSave, currentId: state.currentId });
+  const chatsForSave = state.chats.map(chat => sanitizeChatForSave(chat));
+  const temporaryChatForSave = activeTemporaryChatForSave() ? sanitizeChatForSave(state.temporaryChat) : null;
+  return JSON.stringify({ chats: chatsForSave, temporaryChat: temporaryChatForSave, currentId: state.currentId });
 }
 
 function persistSettings() {
@@ -640,7 +667,68 @@ function persistTools() {
   }
 }
 
-function chatById(id) { return state.chats.find(c => c && c.id === id); }
+const TEMPORARY_CHAT_PREFIX = 'tmp_';
+
+function isTemporaryChatId(id) {
+  return typeof id === 'string' && id.startsWith(TEMPORARY_CHAT_PREFIX);
+}
+
+function normalizeTemporaryChat(chat) {
+  if (!chat || typeof chat !== 'object') return null;
+  const id = chat.id && isTemporaryChatId(chat.id) ? chat.id : TEMPORARY_CHAT_PREFIX + Date.now();
+  return {
+    ...chat,
+    id,
+    title: chat.title || '临时会话',
+    messages: Array.isArray(chat.messages) ? chat.messages : [],
+    createdAt: chat.createdAt || Date.now(),
+    temporary: true
+  };
+}
+
+function createTemporaryChat() {
+  return normalizeTemporaryChat({
+    id: TEMPORARY_CHAT_PREFIX + Date.now(),
+    title: '临时会话',
+    messages: [],
+    createdAt: Date.now(),
+    temporary: true
+  });
+}
+
+function isTemporaryChat(chatOrId) {
+  const id = typeof chatOrId === 'string' ? chatOrId : (chatOrId && chatOrId.id);
+  return !!(id && state.temporaryChat && state.temporaryChat.id === id);
+}
+
+function discardTemporaryChat(options = {}) {
+  const temp = state.temporaryChat;
+  if (!temp) return false;
+  const tempId = temp.id;
+  const wasCurrent = state.currentId === tempId;
+  if (options.abort !== false) {
+    try {
+      if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny(tempId);
+      else if (typeof requestStopChatTask === 'function') requestStopChatTask(tempId);
+    } catch (e) {}
+  }
+  if (typeof clearChatTask === 'function') {
+    try { clearChatTask(tempId); } catch (e) {}
+  }
+  if (state.pendingAIAttachmentsByChat && state.pendingAIAttachmentsByChat[tempId]) {
+    delete state.pendingAIAttachmentsByChat[tempId];
+  }
+  if (wasCurrent) state.currentId = options.nextCurrentId || null;
+  state.temporaryChat = null;
+  if (typeof updateTemporaryChatButton === 'function') updateTemporaryChatButton();
+  return true;
+}
+
+function chatById(id) {
+  if (!id) return null;
+  if (state.temporaryChat && state.temporaryChat.id === id) return state.temporaryChat;
+  return state.chats.find(c => c && c.id === id);
+}
 
 function currentChat() { return chatById(state.currentId); }
 
@@ -841,7 +929,7 @@ function cleanupStorage() {
   
   let cleared = 0;
   let savedMB = 0;
-  for (const chat of state.chats) {
+  for (const chat of [...state.chats, state.temporaryChat].filter(Boolean)) {
     for (const msg of chat.messages) {
       if (msg.attachments) {
         msg.attachments.forEach(att => {
