@@ -235,12 +235,14 @@ function _taskQueueEnsureModal() {
       </div>
       <div class="task-queue-toolbar">
         <div class="task-queue-stats" id="taskQueueStats">暂无任务</div>
-        <button class="btn btn-primary" id="taskQueueStartBtn" onclick="startTaskQueue()">按顺序开始执行</button>
-        <button class="btn" id="taskQueuePauseAllBtn" onclick="taskQueueTogglePauseAll()">暂停所有任务</button>
-        <button class="btn btn-warning" id="taskQueueStopAllBtn" onclick="taskQueueStopAll()">停止所有任务</button>
-        <button class="btn" onclick="openTaskQueueTree()">生成树形图</button>
-        <button class="btn" onclick="taskQueueClearSettled()">清除已结束</button>
-        <button class="btn" onclick="taskQueueClearAll()">清空队列</button>
+        <div class="task-queue-toolbar-actions">
+          <button class="btn btn-primary" id="taskQueueStartBtn" onclick="startTaskQueue()">按顺序开始执行</button>
+          <button class="btn" id="taskQueuePauseAllBtn" onclick="taskQueueTogglePauseAll()">暂停所有任务</button>
+          <button class="btn btn-warning" id="taskQueueStopAllBtn" onclick="taskQueueStopAll()">停止所有任务</button>
+          <button class="btn" onclick="openTaskQueueTree()">生成树形图</button>
+          <button class="btn" onclick="taskQueueClearSettled()">清除已结束</button>
+          <button class="btn" onclick="taskQueueClearAll()">清空队列</button>
+        </div>
       </div>
       <div class="task-queue-list" id="taskQueueList"></div>
       <div class="form-hint" style="margin-top:12px;">
