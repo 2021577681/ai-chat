@@ -420,7 +420,7 @@ function termAskConfirm(title, detail, command, category, context) {
     const catLabelEl = document.getElementById('termConfirmCategoryLabel');
     if (catLabelEl) catLabelEl.textContent = catLabel;
     const taskBtnEl = document.getElementById('termAllowTaskBtn');
-    if (taskBtnEl) taskBtnEl.textContent = `⚡ 本任务后续允许「${catInfo ? catInfo.label : '此类'}」`;
+    if (taskBtnEl) taskBtnEl.textContent = `本任务后续允许「${catInfo ? catInfo.label : '此类'}」`;
 
     const danger = /\b(rm|del|format|shutdown|reboot|sudo|chmod\s+777|curl.*\|.*sh|delete)\b/i;
     const warnEl = document.getElementById('termConfirmWarn');

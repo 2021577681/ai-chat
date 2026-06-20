@@ -107,11 +107,11 @@ function updateLmsToggleBtn() {
   const total = lmsToolCount();
   if (enabled) {
     const cur = state.tools.filter(t => isLmsTool(t.name)).length;
-    btn.textContent = `🔕 禁用 LMS 工具 (${cur})`;
+    btn.textContent = `禁用 LMS 工具 (${cur})`;
     btn.classList.remove('btn-primary');
     btn.title = '当前 LMS 工具已启用，点击全部移除';
   } else {
-    btn.textContent = `🎓 启用 LMS 工具 (${total})`;
+    btn.textContent = `启用 LMS 工具 (${total})`;
     btn.classList.add('btn-primary');
     btn.title = '当前未启用，点击一键加入全部 LMS 工具';
   }
@@ -170,11 +170,11 @@ function updateGitToggleBtn() {
   const total = gitToolCount();
   if (enabled) {
     const cur = state.tools.filter(t => isGitTool(t.name)).length;
-    btn.textContent = `🔕 禁用快照工具 (${cur})`;
+    btn.textContent = `禁用快照工具 (${cur})`;
     btn.classList.remove('btn-primary');
     btn.title = '当前版本快照工具已启用，点击全部移除';
   } else {
-    btn.textContent = `💾 启用快照工具 (${total})`;
+    btn.textContent = `启用快照工具 (${total})`;
     btn.classList.add('btn-primary');
     btn.title = '当前未启用，点击一键加入全部版本快照工具';
   }
@@ -240,16 +240,16 @@ function updatePaperToggleBtn() {
   if (enabled) {
     const cur = state.tools.filter(t => isPaperTool(t.name)).length;
     if (cur < total) {
-      btn.textContent = `📚 补全论文工具 (${cur}/${total})`;
+      btn.textContent = `补全论文工具 (${cur}/${total})`;
       btn.classList.add('btn-primary');
       btn.title = '当前只启用了部分论文工具，点击补全 DBLP / OpenAlex / Crossref 等检索源';
     } else {
-      btn.textContent = `🔕 禁用论文工具 (${cur})`;
+      btn.textContent = `禁用论文工具 (${cur})`;
       btn.classList.remove('btn-primary');
       btn.title = '当前论文工具已启用，点击全部移除';
     }
   } else {
-    btn.textContent = `📚 启用论文工具 (${total})`;
+    btn.textContent = `启用论文工具 (${total})`;
     btn.classList.add('btn-primary');
     btn.title = '当前未启用，点击一键加入 arXiv + Semantic Scholar + DBLP + OpenAlex + Crossref + PDF 全文工具';
   }

@@ -270,7 +270,7 @@
   <div class="trace-header">
     <div class="trace-title">
       <span class="trace-title-icon">📜</span>
-      <span>Trace</span>
+      <span>日志</span>
       <span class="trace-header-stats" id="traceHeaderStats"></span>
     </div>
     <button class="trace-close" onclick="closeTracePanel()" title="关闭">×</button>
@@ -321,11 +321,11 @@
           </button>
           <div class="api-profile-menu" id="apiProfileMenu" hidden></div>
         </div>
-        <button class="btn" type="button" onclick="onSaveAsNewProfile()" title="把当前所有 API 设置保存为一个新的配置档案">💾 另存为</button>
-        <button class="btn api-profile-op-btn" type="button" onclick="onOverwriteActiveProfile()" title="用当前设置覆盖此档案" disabled>⤴ 更新</button>
-        <button class="btn api-profile-op-btn" type="button" onclick="onRenameActiveProfile()" title="重命名" disabled>✏️</button>
-        <button class="btn api-profile-op-btn" type="button" onclick="onDuplicateActiveProfile()" title="复制一份" disabled>📋</button>
-        <button class="btn api-profile-op-btn" type="button" onclick="onDeleteActiveProfile()" title="删除此档案" disabled style="color:#d9534f;">🗑</button>
+        <button class="btn api-profile-action-btn" type="button" onclick="onSaveAsNewProfile()" title="把当前所有 API 设置保存为一个新的配置档案">另存</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" onclick="onOverwriteActiveProfile()" title="用当前设置覆盖此档案" disabled>更新</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" onclick="onRenameActiveProfile()" title="重命名" disabled>改名</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" onclick="onDuplicateActiveProfile()" title="复制一份" disabled>复制</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn api-profile-danger-btn" type="button" onclick="onDeleteActiveProfile()" title="删除此档案" disabled>删除</button>
       </div>
       <div class="form-hint" style="margin-top:6px;">
         切换档案会自动应用 baseUrl / API Key / 模型 / 系统提示等配置。修改后点「保存」会自动同步到当前激活的档案。
@@ -523,8 +523,8 @@
     </div>
     
     <div class="form-group" style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn" type="button" onclick="onFetchTerminalToken()">🔄 重新获取 Token</button>
-      <button class="btn" type="button" onclick="onClearTerminalToken()">🗑️ 使 Token 失效</button>
+      <button class="btn" type="button" onclick="onFetchTerminalToken()">重新获取 Token</button>
+      <button class="btn" type="button" onclick="onClearTerminalToken()">使 Token 失效</button>
     </div>
     <div class="form-hint">
       Token 用于授权浏览器调用本机 <code>local_terminal_server.py</code>。<br>
@@ -536,7 +536,7 @@
     
     <div class="modal-footer">
       <button class="btn" onclick="closeSettings()">取消</button>
-      <button class="btn" onclick="testConnection()">🔌 测试连接</button>
+      <button class="btn" onclick="testConnection()">测试连接</button>
       <button class="btn btn-primary" onclick="saveAndClose()">保存</button>
     </div>
   </div>
@@ -708,7 +708,7 @@
       <label>系统提示词</label>
       <textarea id="outline_systemPrompt" rows="10" placeholder="留空则使用默认提示词"></textarea>
       <div class="form-hint">指导 AI 如何使用 save_outline / append_outline / update_outline 三个工具维护大纲。</div>
-      <button class="btn" style="margin-top:6px;" onclick="resetOutlinePrompt()">🔄 恢复默认</button>
+      <button class="btn" style="margin-top:6px;" onclick="resetOutlinePrompt()">恢复默认</button>
     </div>
 
     <details class="form-group">
@@ -779,7 +779,7 @@
         <label>原地踏步提醒</label>
         <textarea id="outline_stalledPrompt" rows="3"></textarea>
       </div>
-      <button class="btn" type="button" onclick="resetAllOutlinePrompts()">🔄 恢复全部大纲提示词默认值</button>
+      <button class="btn" type="button" onclick="resetAllOutlinePrompts()">全部提示词恢复默认值</button>
     </details>
     
     <div class="modal-footer">
@@ -831,7 +831,7 @@
     
     <!-- 🔧 工具调用设置 -->
     <div class="form-group" style="border-top:1px dashed var(--border);padding-top:12px;margin-top:12px;">
-      <label style="display:block;margin-bottom:8px;font-weight:600;">🔧 工具调用</label>
+      <label style="display:block;margin-bottom:8px;font-weight:600;">工具调用</label>
       <div class="json-help" style="margin-bottom:10px;">
         允许学生 / 老师在回答前调用工具完成任务或验证结果。需先在"工具管理"里启用工具并定义至少一个工具。
       </div>
@@ -892,8 +892,8 @@
     </div>
     
     <div class="json-tabs">
-      <button class="json-tab mcp-skill-tab active" data-tab="mcp" onclick="switchMcpSkillTab('mcp')">🔌 MCP 服务器</button>
-      <button class="json-tab mcp-skill-tab" data-tab="skills" onclick="switchMcpSkillTab('skills')">📚 Skill</button>
+      <button class="json-tab mcp-skill-tab active" data-tab="mcp" onclick="switchMcpSkillTab('mcp')">MCP 服务器</button>
+      <button class="json-tab mcp-skill-tab" data-tab="skills" onclick="switchMcpSkillTab('skills')">Skill</button>
     </div>
     
     <div class="mcp-skill-pane" data-pane="mcp">
@@ -902,7 +902,7 @@
           <h3 style="font-size:14px;margin:0 0 10px;">已配置服务器</h3>
           <div id="mcpServerList"></div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="syncMcpTools()">🔄 同步 MCP 工具到工具列表</button>
+            <button class="btn btn-primary" onclick="syncMcpTools()">同步 MCP 工具到工具列表</button>
             <button class="btn" onclick="openTools()">查看工具管理</button>
           </div>
           <pre id="mcpSyncResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:52px;max-height:180px;overflow:auto;font-size:12px;margin-top:10px;color:var(--text-secondary);"></pre>
@@ -1107,11 +1107,11 @@
     <button class="tool-add-btn" onclick="addCustomTool()">+ 添加自定义工具</button>
     
     <div class="modal-footer">
-      <button class="btn" id="lmsToggleBtn" onclick="toggleLmsTools()">🎓 启用 LMS 工具</button>
-      <button class="btn" id="gitToggleBtn" onclick="toggleGitTools()">💾 启用快照工具</button>
-      <button class="btn" id="paperToggleBtn" onclick="togglePaperTools()">📚 启用论文工具</button>
-      <button class="btn" onclick="resetBuiltinTools()">🔄 恢复内置工具</button>
-      <button class="btn btn-warning" onclick="clearAllTools()">🗑 清空全部</button>
+      <button class="btn" id="lmsToggleBtn" onclick="toggleLmsTools()">启用 LMS 工具</button>
+      <button class="btn" id="gitToggleBtn" onclick="toggleGitTools()">启用快照工具</button>
+      <button class="btn" id="paperToggleBtn" onclick="togglePaperTools()">启用论文工具</button>
+      <button class="btn" onclick="resetBuiltinTools()">恢复内置工具</button>
+      <button class="btn btn-warning" onclick="clearAllTools()">清空全部</button>
       <button class="btn btn-primary" onclick="closeTools()">完成</button>
     </div>
   </div>
@@ -1275,8 +1275,8 @@
       </div>
     </div>
     <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
-      <button class="btn btn-primary" onclick="exportConfig()">📥 下载</button>
-      <button class="btn" onclick="copyConfigToClipboard()">📋 复制</button>
+      <button class="btn btn-primary" onclick="exportConfig()">下载</button>
+      <button class="btn" onclick="copyConfigToClipboard()">复制</button>
     </div>
 
     <div class="backup-txt-export">
@@ -1287,8 +1287,8 @@
         <div class="form-hint">导出为纯文本，按聊天界面可见顺序包含普通消息、工具调用过程和卡片内容。</div>
       </div>
       <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
-        <button class="btn btn-primary" onclick="exportSelectedChatTxt()">📝 导出 TXT</button>
-        <button class="btn" onclick="exportSelectedChatDoc()">📄 导出 DOC</button>
+        <button class="btn btn-primary" onclick="exportSelectedChatTxt()">导出 TXT</button>
+        <button class="btn" onclick="exportSelectedChatDoc()">导出 DOC</button>
       </div>
     </div>
     
@@ -1327,9 +1327,9 @@
     </div>
     <div id="importPreview" class="test-result"></div>
     <div class="modal-footer">
-      <button class="btn btn-warning" onclick="resetAllData()">🗑 清空所有</button>
+      <button class="btn btn-warning" onclick="resetAllData()">清空所有</button>
       <button class="btn" onclick="closeBackup()">关闭</button>
-      <button class="btn btn-primary" onclick="applyImport()">✅ 应用导入</button>
+      <button class="btn btn-primary" onclick="applyImport()">应用导入</button>
     </div>
   </div>
 </div>
@@ -1349,7 +1349,7 @@
     
     <div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
-        <span>📋 本任务临时允许（任务结束自动清除）</span>
+        <span>本任务临时允许（任务结束自动清除）</span>
       </label>
       <div id="taskPermissionsList" class="perm-task-list" style="margin-top:8px;font-size:12px;color:var(--text-secondary);"></div>
     </div>
@@ -1367,8 +1367,8 @@
     </div>
 
     <div class="modal-footer">
-      <button class="btn" onclick="onClearAllPerms()">🗑️ 清空所有永久授权</button>
-      <button class="btn" style="color:var(--danger,#d9534f);border-color:var(--danger,#d9534f);" onclick="onClearAllSecrets()">🚨 清除所有凭证</button>
+      <button class="btn" onclick="onClearAllPerms()">清空所有永久授权</button>
+      <button class="btn" style="color:var(--danger,#d9534f);border-color:var(--danger,#d9534f);" onclick="onClearAllSecrets()">清除所有凭证</button>
       <button class="btn btn-primary" onclick="closePermissions()">完成</button>
     </div>
   </div>
@@ -1434,12 +1434,12 @@
       <div class="form-hint" id="termConfirmAutoAllowHint" style="display:none;margin-top:8px;"></div>
     </div>
     <div class="term-confirm-footer">
-      <button class="term-btn deny" onclick="termConfirmReject()">❌ 仅拒绝此次</button>
-      <button class="term-btn deny" onclick="termConfirmRejectAll()">🛑 拒绝并停止</button>
+      <button class="term-btn deny" onclick="termConfirmReject()">仅拒绝此次</button>
+      <button class="term-btn deny" onclick="termConfirmRejectAll()">拒绝并停止</button>
       <button class="term-btn allow" onclick="termConfirmAccept()" id="termAllowBtn">
-        ✅ 允许执行 <span class="term-countdown" id="termCountdown"></span>
+        允许执行 <span class="term-countdown" id="termCountdown"></span>
       </button>
-      <button class="term-btn allow-always" onclick="termConfirmAcceptAll()" id="termAllowTaskBtn">⚡ 本任务后续允许此类</button>
+      <button class="term-btn allow-always" onclick="termConfirmAcceptAll()" id="termAllowTaskBtn">本任务后续允许此类</button>
     </div>
   </div>
 </div>

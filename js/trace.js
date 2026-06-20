@@ -212,7 +212,7 @@ function installTraceHooks() {
       const id = traceStart({
         type: 'tool',
         role: 'tool',
-        title: `🛠 ${name}`,
+        title: name,
         input: args,
         meta: {
           toolName: name,
@@ -262,7 +262,7 @@ function traceUserMessage(text) {
   traceLog({
     type: 'user',
     role: 'user',
-    title: '💬 ' + (text.length > 60 ? text.slice(0, 60) + '…' : text),
+    title: text.length > 60 ? text.slice(0, 60) + '…' : text,
     input: text,
     output: null,
     status: 'ok'
@@ -319,6 +319,12 @@ function _typeIcon(t) {
     case 'system': return '⚙️';
     default: return '·';
   }
+}
+
+function _traceDisplayTitle(t) {
+  const title = String(t.title || '');
+  const icon = _typeIcon(t);
+  return icon && title.startsWith(icon + ' ') ? title.slice(icon.length + 1) : title;
 }
 
 function _statusBadge(t) {
@@ -390,7 +396,7 @@ function renderTracePanel() {
           <div class="tr-row1">
             <span class="tr-hash">${short}</span>
             <span class="tr-icon">${_typeIcon(t)}</span>
-            <span class="tr-title">${_escapeHtml(t.title || '')}</span>
+            <span class="tr-title">${_escapeHtml(_traceDisplayTitle(t))}</span>
             ${_statusBadge(t)}
           </div>
           <div class="tr-row2">

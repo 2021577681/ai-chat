@@ -27,7 +27,7 @@ function renderPermissionsList() {
         <input type="checkbox" ${granted ? 'checked' : ''} 
                onchange="onTogglePermission('${key}', this.checked)">
         <div class="perm-item-info">
-          <div class="perm-item-title">${info.icon} ${info.label}</div>
+          <div class="perm-item-title">${info.label}</div>
           <div class="perm-item-desc">${info.desc}</div>
         </div>
         <span class="perm-item-badge ${granted ? 'granted' : 'denied'}">
@@ -53,7 +53,7 @@ function renderTaskPermissionsList() {
   
   container.innerHTML = keys.map(k => {
     const info = PERMISSION_CATEGORIES[k];
-    return `<span class="perm-task-chip">${info ? info.icon + ' ' + info.label : k}</span>`;
+    return `<span class="perm-task-chip">${info ? info.label : k}</span>`;
   }).join('') + ' <button class="btn" style="padding:2px 10px;font-size:11px;margin-left:4px;" onclick="onClearTaskPerms()">清除</button>';
 }
 

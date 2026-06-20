@@ -569,8 +569,19 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   border-left:3px solid var(--primary, #3b82f6);
 }
 .api-profile-box .btn{padding:6px 10px;font-size:12.5px;white-space:nowrap}
+.api-profile-box .api-profile-action-btn{
+  width:44px;
+  min-width:44px;
+  padding:6px 0;
+  border-radius:15px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
 .api-profile-op-btn:disabled{opacity:0.45;cursor:not-allowed}
 .api-profile-op-btn:not(:disabled):hover{background:var(--bg-hover, rgba(0,0,0,0.05))}
+.api-profile-danger-btn{color:var(--danger, #d9534f)}
 
 /* —— 自定义两行下拉 —— */
 .api-profile-dropdown{position:relative}
@@ -989,6 +1000,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .term-confirm-mask{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:5000;animation:fadeIn .2s ease}
 .term-confirm-mask.show{display:flex}
 .term-confirm{background:var(--bg-sidebar);border-radius:14px;width:560px;max-width:92vw;max-height:80vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.3);border:2px solid var(--warning)}
+#termConfirmMask .term-confirm{width:640px;max-width:calc(100vw - 32px)}
 .term-confirm-header{padding:16px 20px;background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(239,68,68,.05));border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;color:var(--warning)}
 .term-confirm-header .icon{font-size:22px}
 .term-confirm-body{padding:18px 20px}
@@ -998,8 +1010,8 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .term-confirm-warn{background:rgba(239,68,68,.1);color:var(--danger);padding:10px 12px;border-radius:8px;font-size:12.5px;margin-bottom:12px;display:flex;align-items:flex-start;gap:6px}
 .term-confirm-options{display:flex;flex-direction:column;gap:6px;padding:10px 12px;background:var(--bg-input);border-radius:8px;margin-bottom:14px}
 .term-confirm-options label{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;color:var(--text)}
-.term-confirm-footer{padding:0 20px 20px;display:flex;gap:10px;justify-content:flex-end}
-.term-btn{padding:9px 18px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:13.5px;font-weight:500;transition:all .15s}
+.term-confirm-footer{padding:0 20px 20px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.term-btn{padding:9px 18px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:13.5px;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;transition:all .15s}
 .term-btn:hover{background:var(--bg-hover)}
 .term-btn.deny{color:var(--danger);border-color:var(--danger)}
 .term-btn.deny:hover{background:rgba(239,68,68,.1)}
