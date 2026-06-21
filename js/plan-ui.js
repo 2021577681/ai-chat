@@ -259,6 +259,48 @@ function togglePlanPanel(idx) {
   saveData();
 }
 
+function planIntegerOrFallback(value, min, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n >= min ? n : fallback;
+}
+
+function setPlanNumericControl(rangeId, inputId, valueId, value, min, max, fallback) {
+  const normalized = planIntegerOrFallback(value, min, fallback);
+  const clamped = Math.max(min, Math.min(max, normalized));
+  const range = document.getElementById(rangeId);
+  const input = document.getElementById(inputId);
+  const valueEl = document.getElementById(valueId);
+  if (range) range.value = clamped;
+  if (input) input.value = normalized;
+  if (valueEl) valueEl.textContent = normalized;
+}
+
+function syncPlanSettingRange(rangeId, inputId, valueId) {
+  const range = document.getElementById(rangeId);
+  const input = document.getElementById(inputId);
+  const valueEl = document.getElementById(valueId);
+  if (!range) return;
+  if (input) input.value = range.value;
+  if (valueEl) valueEl.textContent = range.value;
+}
+
+function syncPlanSettingInput(inputId, rangeId, valueId, min, max, fallback) {
+  const input = document.getElementById(inputId);
+  const range = document.getElementById(rangeId);
+  const valueEl = document.getElementById(valueId);
+  const raw = input ? input.value : '';
+  const normalized = planIntegerOrFallback(raw, min, fallback);
+  if (range) range.value = Math.max(min, Math.min(max, normalized));
+  if (valueEl) valueEl.textContent = raw === '' ? normalized : raw;
+}
+
+function readPlanNumericControl(inputId, rangeId, min, fallback) {
+  const input = document.getElementById(inputId);
+  const range = document.getElementById(rangeId);
+  const raw = input && input.value !== '' ? input.value : (range ? range.value : '');
+  return planIntegerOrFallback(raw, min, fallback);
+}
+
 function openPlanSettings() {
   document.getElementById('planModal').classList.add('show');
   const s = state.settings;
@@ -266,12 +308,9 @@ function openPlanSettings() {
   document.getElementById('plan_review').checked = s.planReview;
   document.getElementById('plan_synthesize').checked = s.planSynthesize;
   document.getElementById('plan_verify').checked = s.planVerify !== false;
-  document.getElementById('plan_maxSteps').value = s.planMaxSteps;
-  document.getElementById('planMaxStepsVal').textContent = s.planMaxSteps;
-  document.getElementById('plan_reviewRounds').value = s.planReviewRounds;
-  document.getElementById('planReviewRoundsVal').textContent = s.planReviewRounds;
-  document.getElementById('plan_verifyRounds').value = s.planVerifyRounds || 2;
-  document.getElementById('planVerifyRoundsVal').textContent = s.planVerifyRounds || 2;
+  setPlanNumericControl('plan_maxSteps', 'plan_maxStepsInput', 'planMaxStepsVal', s.planMaxSteps, 2, 10, 5);
+  setPlanNumericControl('plan_reviewRounds', 'plan_reviewRoundsInput', 'planReviewRoundsVal', s.planReviewRounds, 1, 10, 2);
+  setPlanNumericControl('plan_verifyRounds', 'plan_verifyRoundsInput', 'planVerifyRoundsVal', s.planVerifyRounds || 2, 1, 10, 2);
   document.getElementById('plan_plannerModel').value = s.planPlannerModel;
   document.getElementById('plan_executorModel').value = s.planExecutorModel;
   document.getElementById('plan_verifierModel').value = s.planVerifierModel || '';
@@ -291,15 +330,23 @@ function applyPlanPreset(key) {
   toast('✓ 已应用预设');
 }
 
+function resetPlanPrompts() {
+  const p = PLAN_PRESETS.general;
+  if (!p) return;
+  document.getElementById('plan_plannerPrompt').value = p.planner;
+  document.getElementById('plan_executorPrompt').value = p.executor;
+  if (typeof toast === 'function') toast('✓ 已恢复计划模式默认提示词');
+}
+
 function savePlanSettings() {
   const s = state.settings;
   s.usePlan = document.getElementById('plan_enabled').checked;
   s.planReview = document.getElementById('plan_review').checked;
   s.planSynthesize = document.getElementById('plan_synthesize').checked;
   s.planVerify = document.getElementById('plan_verify').checked;
-  s.planMaxSteps = parseInt(document.getElementById('plan_maxSteps').value);
-  s.planReviewRounds = parseInt(document.getElementById('plan_reviewRounds').value);
-  s.planVerifyRounds = parseInt(document.getElementById('plan_verifyRounds').value);
+  s.planMaxSteps = readPlanNumericControl('plan_maxStepsInput', 'plan_maxSteps', 2, 5);
+  s.planReviewRounds = readPlanNumericControl('plan_reviewRoundsInput', 'plan_reviewRounds', 1, 2);
+  s.planVerifyRounds = readPlanNumericControl('plan_verifyRoundsInput', 'plan_verifyRounds', 1, 2);
   s.planPlannerModel = document.getElementById('plan_plannerModel').value.trim();
   s.planExecutorModel = document.getElementById('plan_executorModel').value.trim();
   s.planVerifierModel = document.getElementById('plan_verifierModel').value.trim();
