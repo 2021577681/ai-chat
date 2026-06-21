@@ -300,6 +300,14 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .plan-step-error{margin-top:8px;padding:8px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:var(--danger);font-size:12px;white-space:pre-wrap}
 .plan-step-result{margin-top:8px;padding:8px 10px;background:var(--bg-chat);border:1px solid var(--border);border-radius:6px;font-size:12.5px;line-height:1.6}
 .plan-step-result-label{font-size:10px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:4px;letter-spacing:.5px}
+.plan-step-result ul{list-style:none;padding-left:0;margin:6px 0}
+.plan-step-result li{margin:2px 0}
+.plan-step-result .table-wrap{max-width:100%;margin:10px 0 2px;border-radius:12px;overflow-x:auto}
+.plan-step-result table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px}
+.plan-step-result thead{background:var(--bg-input)}
+.plan-step-result th,.plan-step-result td{padding:8px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--border);line-height:1.55;overflow-wrap:anywhere;word-break:break-word}
+.plan-step-result th{font-weight:600;color:var(--text)}
+.plan-step-result tr:last-child td{border-bottom:0}
 .plan-progress-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin:8px 0}
 .plan-progress-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--success));transition:width .4s ease}
 
@@ -1635,9 +1643,56 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 /* ============ 计划模式最终答案（位于 plan-panel 下方） ============ */
 .msg-content.plan-final-answer {
   margin-top: 12px;
-  padding-top: 12px;
+  padding: 12px 12px 0;
   border-top: 2px solid var(--border);
   position: relative;
+}
+.msg-content.plan-final-answer ul,
+.msg-content.plan-final-answer ol,
+.ref-final-answer ul,
+.ref-final-answer ol {
+  padding-left: 30px;
+  margin: 8px 0;
+}
+.msg-content.plan-final-answer li,
+.ref-final-answer li {
+  margin: 6px 0;
+  padding-left: 2px;
+}
+.msg-content.plan-final-answer .table-wrap,
+.ref-final-answer .table-wrap {
+  max-width: 100%;
+  margin: 12px 0;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+.msg-content.plan-final-answer table,
+.ref-final-answer table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.msg-content.plan-final-answer th,
+.msg-content.plan-final-answer td,
+.ref-final-answer th,
+.ref-final-answer td {
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.msg-content.plan-final-answer th,
+.ref-final-answer th {
+  font-weight: 600;
+  color: var(--text);
+}
+.msg-content.plan-final-answer tr:last-child td,
+.ref-final-answer tr:last-child td {
+  border-bottom: 0;
 }
 .msg-content.plan-final-answer:not(:empty)::before {
   content: '✨ 最终答案';

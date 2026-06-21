@@ -42,7 +42,7 @@ async function callAPIWithReflection(options = {}) {
     reflection: {
       turns: [],
       finalScore: null,
-      expanded: false,
+      expanded: true,
       inProgress: true,
       progressText: '🎭 准备...'
     }
@@ -211,7 +211,6 @@ async function callAPIWithReflection(options = {}) {
       }
     }
     aiMsg.reflection.inProgress = false;
-    aiMsg.reflection.expanded = false;
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.reflection.progressText;
     if (c) {
