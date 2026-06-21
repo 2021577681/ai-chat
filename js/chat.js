@@ -332,6 +332,7 @@ function newChat() {
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
 }
 
 function switchChat(id) {
@@ -343,6 +344,7 @@ function switchChat(id) {
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
 }
 
 function updateTemporaryChatButton() {
@@ -368,6 +370,7 @@ function startTemporaryChat() {
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   updateTemporaryChatButton();
+  if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
 }
 
 function isTaskQueueSidebarGroupedChat(chat) {
@@ -864,6 +867,7 @@ function renderMessages() {
   const c = currentChat();
   const hasVisibleMessages = !!(c && Array.isArray(c.messages) && c.messages.some(m => m && !m._hiddenFromUI));
   syncChatStartState(!hasVisibleMessages);
+  if (typeof updateDialogTimeline === 'function') requestAnimationFrame(updateDialogTimeline);
   if (!hasVisibleMessages) {
     inner.innerHTML = `
       <div class="welcome">
@@ -938,6 +942,7 @@ function refreshMsgNode(idx, targetChat) {
   postRender(newNode);
   if (typeof groupToolFlows === 'function') groupToolFlows();
   if (stickToBottom) scrollBottom();
+  if (typeof updateDialogTimeline === 'function') requestAnimationFrame(updateDialogTimeline);
   return true;
 }
 
@@ -974,6 +979,7 @@ function appendMsgNode(idx, targetChat) {
   if (typeof groupToolFlows === 'function') groupToolFlows();
   if (stickToBottom) scrollBottom();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (typeof updateDialogTimeline === 'function') requestAnimationFrame(updateDialogTimeline);
   return true;
 }
 

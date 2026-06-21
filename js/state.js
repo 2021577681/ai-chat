@@ -193,6 +193,11 @@ let state = {
       lastSource: '',
       lastPath: '',
       lastTime: 0
+    },
+    dialogManager: {
+      timelineEnabled: true,
+      folders: [],
+      prompts: []
     }
   },
   pendingAttachments: [],

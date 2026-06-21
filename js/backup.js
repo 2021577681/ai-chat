@@ -7,7 +7,6 @@ function openBackup() {
   document.getElementById('importPreview').className = 'test-result';
   document.getElementById('importPreview').textContent = '';
   pendingImportData = null;
-  renderExportTxtChatSelect();
 }
 
 function closeBackup() {

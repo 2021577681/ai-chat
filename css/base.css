@@ -57,7 +57,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 @media (max-width:768px){.more-menu-wrap.open .more-menu{opacity:1;visibility:visible;transform:translateY(0)}}
 
 /* 主区域 */
-.main{flex:1;display:flex;flex-direction:column;background:var(--bg-chat);min-width:0}
+.main{position:relative;flex:1;display:flex;flex-direction:column;background:var(--bg-chat);min-width:0}
 .topbar{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .menu-toggle{display:none;background:none;border:none;font-size:20px;cursor:pointer;color:var(--text)}
 .model-picker{position:relative;flex:0 1 180px;min-width:140px;max-width:220px}
@@ -666,6 +666,67 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .backup-check.compact{align-items:center;padding:7px 8px}
 .backup-check.compact span{display:block}
 @media (max-width:900px){.backup-options{grid-template-columns:1fr}.backup-lede{flex-direction:column}.backup-lede-note{white-space:normal}}
+
+/* 对话管理 */
+.dialog-manager-modal{width:min(1080px,95vw)}
+.dialog-manager-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.dialog-manager-section{min-width:0;border:1px solid var(--border);border-radius:10px;background:var(--bg-input);padding:12px;display:flex;flex-direction:column;gap:10px}
+.dialog-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.dialog-section-head h3{font-size:14px;margin:0 0 4px;color:var(--text)}
+.dialog-section-head p{font-size:12px;line-height:1.45;color:var(--text-secondary);margin:0}
+.dialog-section-actions{display:flex;gap:8px;justify-content:flex-start;flex-wrap:wrap}
+.dialog-switch{display:flex!important;align-items:center;gap:8px;font-size:12px;color:var(--text);font-weight:500!important;white-space:nowrap;margin:0!important;cursor:pointer}
+.dialog-switch input{width:15px!important;height:15px!important;accent-color:var(--primary)}
+.dialog-timeline-preview{min-height:88px;max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:8px}
+.dialog-timeline-row{position:relative;width:100%;border:0;background:transparent;color:var(--text);display:flex;gap:10px;text-align:left;padding:7px 8px 7px 4px;border-radius:8px;cursor:pointer}
+.dialog-timeline-row:hover{background:var(--bg-hover)}
+.dialog-timeline-row::before{content:'';position:absolute;left:10px;top:20px;bottom:-10px;width:1px;background:var(--border)}
+.dialog-timeline-row:last-child::before{display:none}
+.dialog-timeline-dot{position:relative;z-index:1;width:13px;height:13px;border-radius:50%;border:2px solid var(--primary);background:var(--bg);margin-top:3px;flex:0 0 13px}
+.dialog-timeline-text{min-width:0;display:flex;flex-direction:column;gap:2px}
+.dialog-timeline-text strong{font-size:12.5px;font-weight:600;line-height:1.35;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dialog-timeline-text em{font-style:normal;font-size:11px;color:var(--text-secondary);font-family:var(--font-mono)}
+.dialog-folder-create,.dialog-folder-move{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) auto;gap:8px}
+.dialog-folder-create input,.dialog-folder-create select,.dialog-folder-move select,.prompt-editor input,.prompt-editor textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;outline:none}
+.dialog-folder-create input:focus,.dialog-folder-create select:focus,.dialog-folder-move select:focus,.prompt-editor input:focus,.prompt-editor textarea:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(79,70,229,.10)}
+.dialog-folder-tree{max-height:330px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:8px}
+.dialog-folder-node{border:1px solid var(--border);border-radius:8px;background:var(--bg-input);margin:6px 0;overflow:hidden}
+.dialog-folder-node summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;cursor:pointer;list-style:none}
+.dialog-folder-node summary::-webkit-details-marker{display:none}
+.dialog-folder-name{font-size:13px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dialog-folder-actions{display:flex;gap:4px;flex:0 0 auto}
+.dialog-folder-actions button{border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-secondary);font-size:11.5px;padding:3px 7px;cursor:pointer}
+.dialog-folder-actions button:hover{background:var(--bg-hover);color:var(--text)}
+.dialog-folder-children{padding:0 8px 8px 16px;border-top:1px solid var(--border)}
+.dialog-folder-chat button{width:100%;border:0;background:transparent;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border-radius:7px;padding:7px 8px;cursor:pointer;font-size:12.5px}
+.dialog-folder-chat button:hover,.dialog-folder-chat.active button{background:var(--bg-hover)}
+.dialog-folder-chat span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dialog-folder-chat em{font-style:normal;color:var(--text-secondary);font-size:11px;white-space:nowrap}
+.dialog-export-actions{display:flex;gap:8px;flex-wrap:wrap}
+.prompt-editor{display:flex;flex-direction:column;gap:8px}
+.prompt-editor textarea{resize:vertical;min-height:112px;line-height:1.55}
+.prompt-library-list{display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto}
+.prompt-card{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:10px;display:flex;flex-direction:column;gap:8px}
+.prompt-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.prompt-card-head strong{font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prompt-card-head span{font-size:11px;color:var(--text-secondary);font-family:var(--font-mono);white-space:nowrap}
+.prompt-card-content{font-size:12.5px;line-height:1.55;color:var(--text-secondary);white-space:pre-wrap;max-height:92px;overflow:hidden}
+.prompt-card-actions{display:flex;gap:7px;flex-wrap:wrap}
+.dialog-empty{padding:18px 10px;text-align:center;color:var(--text-secondary);font-size:12.5px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-input)}
+.dialog-empty.small{padding:10px;margin-top:8px}
+.dialog-timeline{position:absolute;right:18px;top:50%;transform:translateY(-50%);z-index:20;width:34px;max-height:min(68vh,560px);padding:10px 0;display:flex;justify-content:center;pointer-events:none}
+.dialog-timeline[hidden]{display:none}
+.dialog-timeline-line{position:absolute;top:14px;bottom:14px;left:50%;width:1px;background:var(--border);transform:translateX(-50%)}
+.dialog-timeline-points{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:8px;max-height:calc(min(68vh,560px) - 20px);overflow-x:hidden;overflow-y:auto;pointer-events:auto}
+.dialog-timeline-point{width:20px;height:20px;border:0;background:transparent;display:flex;align-items:center;justify-content:center;border-radius:50%;cursor:pointer;padding:0}
+.dialog-timeline-point-dot{width:8px;height:8px;border-radius:50%;background:var(--bg-sidebar);border:2px solid var(--primary);box-shadow:0 0 0 2px var(--bg-chat);transition:transform .15s,background .15s,border-color .15s}
+.dialog-timeline-point:hover .dialog-timeline-point-dot,.dialog-timeline-point.active .dialog-timeline-point-dot{background:var(--primary);transform:scale(1.25)}
+.dialog-timeline-tip{position:fixed;z-index:3000;max-width:min(320px,calc(100vw - 80px));max-height:190px;overflow:hidden;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-sidebar);color:var(--text);box-shadow:0 10px 30px rgba(15,23,42,.18);font-size:12.5px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;pointer-events:none;opacity:0;visibility:hidden;transform:translate(-100%,-50%) translateX(-6px);transition:opacity .12s,visibility .12s,transform .12s}
+.dialog-timeline-tip.show{opacity:1;visibility:visible;transform:translate(-100%,-50%)}
+.dialog-jump-highlight{animation:dialogJumpPulse 1.6s ease}
+@keyframes dialogJumpPulse{0%{background:rgba(79,70,229,.16);box-shadow:0 0 0 0 rgba(79,70,229,.24)}100%{background:transparent;box-shadow:0 0 0 12px rgba(79,70,229,0)}}
+@media (max-width:1000px){.dialog-manager-grid{grid-template-columns:1fr}.dialog-timeline{display:none!important}.main.dialog-timeline-visible .messages{padding-right:20px}}
+@media (min-width:1001px){.main.dialog-timeline-visible .messages{padding-right:64px}}
 
 .btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-weight:500}
 .btn:hover{background:var(--bg-hover)}

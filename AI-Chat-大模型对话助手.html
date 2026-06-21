@@ -215,6 +215,11 @@
     <div class="messages" id="messages">
       <div class="messages-inner" id="messagesInner"></div>
     </div>
+
+    <nav class="dialog-timeline" id="dialogTimeline" aria-label="对话时间轴" hidden>
+      <div class="dialog-timeline-line" aria-hidden="true"></div>
+      <div class="dialog-timeline-points" id="dialogTimelineList"></div>
+    </nav>
     
     <!-- 输入区 -->
     <div class="input-area">
@@ -1284,19 +1289,6 @@
       <button class="btn" onclick="copyConfigToClipboard()">复制</button>
     </div>
 
-    <div class="backup-txt-export">
-      <h3 style="font-size:15px;margin:0 0 10px;">📝 导出单个对话</h3>
-      <div class="form-group">
-        <label>选择对话</label>
-        <select id="exportTxtChatSelect"></select>
-        <div class="form-hint">导出为纯文本，按聊天界面可见顺序包含普通消息、工具调用过程和卡片内容。</div>
-      </div>
-      <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
-        <button class="btn btn-primary" onclick="exportSelectedChatTxt()">导出 TXT</button>
-        <button class="btn" onclick="exportSelectedChatDoc()">导出 DOC</button>
-      </div>
-    </div>
-    
     <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);">
     
     <h3 style="font-size:15px;margin:0 0 10px;">📥 导入</h3>
@@ -1482,6 +1474,7 @@
     <button class="settings-nav-item" data-settings-section="projectInstructions" data-desc="管理 AGENTS.md 项目规则、默认内容和注入策略。" onclick="openSettingsSection('projectInstructions')"><span><img class="settings-nav-icon" src="icon/提示_tips-one.png" alt=""></span><span>项目指令</span></button>
     <button class="settings-nav-item" data-settings-section="projectMemory" data-desc="管理当前项目的长期记忆文件和注入策略。" onclick="openSettingsSection('projectMemory')"><span><img class="settings-nav-icon" src="icon/云连接_link-cloud-sucess.png" alt=""></span><span>项目记忆</span></button>
     <button class="settings-nav-item" data-settings-section="jsonEditor" data-desc="查看实际请求、响应、模板、请求头和历史。" onclick="openSettingsSection('jsonEditor')"><span><img class="settings-nav-icon" src="icon/搜索_search.png" alt=""></span><span>JSON 查看器</span></button>
+    <button class="settings-nav-item" data-settings-section="dialogManager" data-desc="管理对话时间轴、文件夹、导出和提示词库。" onclick="openSettingsSection('dialogManager')"><span><img class="settings-nav-icon" src="icon/评论_comment.png" alt=""></span><span>对话管理</span></button>
     <button class="settings-nav-item" data-settings-section="backup" data-desc="导出和导入配置、工具、归档和模式设置。" onclick="openSettingsSection('backup')"><span><img class="settings-nav-icon" src="icon/更新_update-rotation.png" alt=""></span><span>备份恢复</span></button>
     <button class="settings-nav-item" data-settings-section="permissions" data-desc="管理工具调用授权、临时权限和本地敏感凭证。" onclick="openSettingsSection('permissions')"><span><img class="settings-nav-icon" src="icon/权限_permissions.png" alt=""></span><span>权限管理</span></button>
     <button class="settings-nav-item" data-settings-section="pricing" data-desc="配置模型 token 单价和费用估算规则。" onclick="openSettingsSection('pricing')"><span><img class="settings-nav-icon" src="icon/货币流通_currency.png" alt=""></span><span>定价管理</span></button>
@@ -1504,6 +1497,96 @@
     </div>
     <div class="settings-page-content" id="settingsPageContent"></div>
   </main>
+</div>
+
+<!-- ============ 对话管理 ============ -->
+<div class="modal-mask" id="dialogManagerModal">
+  <div class="modal wide dialog-manager-modal">
+    <h2>对话管理 <button class="modal-close" onclick="closeDialogManager()">×</button></h2>
+
+    <div class="backup-lede">
+      <div>
+        <strong>会话导航与整理</strong>
+        <span>管理当前对话时间轴、文件夹、单个对话导出和提示词库。</span>
+      </div>
+      <div class="backup-lede-note">导出内容可能包含隐私信息。</div>
+    </div>
+
+    <div class="dialog-manager-grid">
+      <section class="dialog-manager-section">
+        <div class="dialog-section-head">
+          <div>
+            <h3>时间轴导航</h3>
+            <p>每个点对应当前对话中的一条用户发言。</p>
+          </div>
+          <label class="dialog-switch"><input type="checkbox" id="dialogTimelineEnabled"><span>显示右侧时间轴</span></label>
+        </div>
+        <div class="dialog-timeline-preview" id="dialogManagerTimelineList"></div>
+        <div class="dialog-section-actions">
+          <button class="btn btn-primary" type="button" onclick="saveDialogManagerSettings()">保存设置</button>
+        </div>
+      </section>
+
+      <section class="dialog-manager-section">
+        <div class="dialog-section-head">
+          <div>
+            <h3>文件夹</h3>
+            <p>按资源管理器逻辑整理对话，文件夹支持嵌套。</p>
+          </div>
+        </div>
+        <div class="dialog-folder-create">
+          <input id="dialogFolderName" placeholder="新文件夹名称">
+          <select id="dialogFolderParentSelect"></select>
+          <button class="btn btn-primary" type="button" onclick="addDialogFolder()">新建</button>
+        </div>
+        <div class="dialog-folder-move">
+          <select id="dialogMoveChatSelect"></select>
+          <select id="dialogMoveFolderSelect"></select>
+          <button class="btn" type="button" onclick="moveDialogChatToFolder()">移动</button>
+        </div>
+        <div class="dialog-folder-tree" id="dialogFolderTree"></div>
+      </section>
+
+      <section class="dialog-manager-section">
+        <div class="dialog-section-head">
+          <div>
+            <h3>导出对话</h3>
+            <p>从备份恢复中移入的单个对话导出能力。</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>选择对话</label>
+          <select id="dialogExportChatSelect" onchange="setDialogExportChat(this.value)"></select>
+        </div>
+        <div class="dialog-export-actions">
+          <button class="btn btn-primary" type="button" onclick="exportDialogManagedChat('md')">Markdown</button>
+          <button class="btn" type="button" onclick="exportDialogManagedChat('json')">JSON</button>
+          <button class="btn" type="button" onclick="exportDialogManagedChat('txt')">TXT</button>
+          <button class="btn" type="button" onclick="exportDialogManagedChat('doc')">DOC</button>
+          <button class="btn" type="button" onclick="exportDialogManagedChat('pdf')">PDF</button>
+        </div>
+      </section>
+
+      <section class="dialog-manager-section">
+        <div class="dialog-section-head">
+          <div>
+            <h3>提示词库</h3>
+            <p>保存常用提示词，应用后会填入发送框。</p>
+          </div>
+        </div>
+        <input type="hidden" id="promptEditingId">
+        <div class="prompt-editor">
+          <input id="promptTitleInput" placeholder="提示词标题">
+          <textarea id="promptContentInput" placeholder="提示词内容..." rows="5"></textarea>
+          <div class="dialog-section-actions">
+            <button class="btn btn-primary" type="button" onclick="savePromptFromUi()">保存提示词</button>
+            <button class="btn" type="button" onclick="clearPromptEditor()">清空</button>
+          </div>
+        </div>
+        <div class="prompt-library-list" id="promptLibraryList"></div>
+      </section>
+    </div>
+  </div>
 </div>
 
 <!-- ============ 🎓 LMS 学习面板（抽屉式） ============ -->
@@ -1610,6 +1693,7 @@
 <script src="js/settings.js"></script>
 <script src="js/json-editor.js"></script>
 <script src="js/backup.js"></script>
+<script src="js/dialog-manager.js"></script>
 <script src="js/permissions.js"></script>
 <script src="js/trace.js"></script>
 <script src="js/lms.js"></script>

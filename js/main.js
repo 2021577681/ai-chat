@@ -47,6 +47,7 @@ async function init() {
   // 4. 渲染聊天列表和消息
   renderChatList();
   renderMessages();
+  if (typeof initDialogManager === 'function') initDialogManager();
   
   // 5. 恢复各按钮的激活状态
   if (state.settings.useTools) {
@@ -170,7 +171,7 @@ async function init() {
       // ⭐ 顺序：先关最上层（图片预览、终端确认）→ 普通模态 → LMS 抽屉
       const modals = [
         'imgPreview', 'termConfirmMask',
-        'toolEditModal', 'backupModal', 'projectInstructionsModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
+        'toolEditModal', 'dialogManagerModal', 'backupModal', 'projectInstructionsModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
         'planModal', 'outlineModal', 'privacyModal', 'taskQueueModal', 'concurrentRequestsModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',
         'lmsCookieModal', 'lmsModal'

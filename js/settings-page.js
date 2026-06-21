@@ -16,6 +16,7 @@ const SETTINGS_PAGE_SECTIONS = {
   projectInstructions: { open: 'openProjectInstructionsSettings', close: 'closeProjectInstructionsSettings', modalId: 'projectInstructionsModal' },
   projectMemory: { open: 'openProjectMemorySettings', close: 'closeProjectMemorySettings', modalId: 'projectMemoryModal' },
   jsonEditor: { open: 'openJsonEditor', close: 'closeJsonEditor', modalId: 'jsonEditorModal' },
+  dialogManager: { open: 'openDialogManager', close: 'closeDialogManager', modalId: 'dialogManagerModal' },
   backup: { open: 'openBackup', close: 'closeBackup', modalId: 'backupModal' },
   permissions: { open: 'openPermissions', close: 'closePermissions', modalId: 'permissionsModal' },
   pricing: { open: 'openPricingManager', close: 'closePricingManager', modalId: 'pricingModal' },
@@ -59,6 +60,7 @@ function initSettingsPage() {
     'openProjectInstructionsSettings',
     'openProjectMemorySettings',
     'openJsonEditor',
+    'openDialogManager',
     'openBackup',
     'openPermissions',
     'openPricingManager',
@@ -80,6 +82,7 @@ function initSettingsPage() {
     'closeProjectInstructionsSettings',
     'closeProjectMemorySettings',
     'closeJsonEditor',
+    'closeDialogManager',
     'closeBackup',
     'closePermissions',
     'closePricingManager',
@@ -105,6 +108,7 @@ function initSettingsPage() {
   window.openProjectInstructionsSettings = function() { openSettingsPage('projectInstructions'); };
   window.openProjectMemorySettings = function() { openSettingsPage('projectMemory'); };
   window.openJsonEditor = function() { openSettingsPage('jsonEditor'); };
+  window.openDialogManager = function() { openSettingsPage('dialogManager'); };
   window.openBackup = function() { openSettingsPage('backup'); };
   window.openPermissions = function() { openSettingsPage('permissions'); };
   window.openPricingManager = function() { openSettingsPage('pricing'); };
@@ -127,6 +131,7 @@ function initSettingsPage() {
   window.closeProjectInstructionsSettings = function() { closeSettingsProxy('projectInstructions'); };
   window.closeProjectMemorySettings = function() { closeSettingsProxy('projectMemory'); };
   window.closeJsonEditor = function() { closeSettingsProxy('jsonEditor'); };
+  window.closeDialogManager = function() { closeSettingsProxy('dialogManager'); };
   window.closeBackup = function() { closeSettingsProxy('backup'); };
   window.closePermissions = function() { closeSettingsProxy('permissions'); };
   window.closePricingManager = function() { closeSettingsProxy('pricing'); };
