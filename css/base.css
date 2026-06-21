@@ -391,7 +391,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .modal.wide{width:min(1000px,95vw)}
 .modal h2{font-size:18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between}
 .modal-close{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary);line-height:1}
-.form-group{margin-bottom:16px}
+.form-group{margin-bottom:5px}
 .form-group label{display:block;margin-bottom:6px;font-size:13px;font-weight:500}
 .form-group input,.form-group select,.form-group textarea,.form-row input,.form-row select,.form-row textarea{width:100%;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;outline:none;font-family:inherit}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus,.form-row input:focus,.form-row select:focus,.form-row textarea:focus{border-color:var(--primary)}
@@ -669,7 +669,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 
 /* 对话管理 */
 .dialog-manager-modal{width:min(1080px,95vw)}
-.dialog-manager-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.dialog-manager-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:14px}
 .dialog-manager-section{min-width:0;border:1px solid var(--border);border-radius:10px;background:var(--bg-input);padding:12px;display:flex;flex-direction:column;gap:10px}
 .dialog-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .dialog-section-head h3{font-size:14px;margin:0 0 4px;color:var(--text)}
