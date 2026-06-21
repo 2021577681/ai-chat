@@ -59,10 +59,12 @@ function dialogManagerPlainText(value) {
 }
 
 function dialogManagerMessageTitle(msg, index) {
+  if (msg && msg._timelineLabel) return msg._timelineLabel;
   return dialogManagerUserQuestionText(msg, index).slice(0, 44);
 }
 
 function dialogManagerUserQuestionText(msg, index) {
+  if (msg && msg._timelineLabel) return msg._timelineLabel;
   const text = dialogManagerPlainText(msg && msg.content).replace(/\s+/g, ' ').trim();
   if (text) return text.slice(0, 500);
   if (msg && msg.attachments && msg.attachments.length) return `带附件的提问 ${index + 1}`;
@@ -71,6 +73,24 @@ function dialogManagerUserQuestionText(msg, index) {
   if (msg && msg.outline) return '大纲模式回答';
   if (msg && msg.reflection) return '师生讨论回答';
   return `用户发言 ${index + 1}`;
+}
+
+function renameTimelineNode(index) {
+  const chat = currentChat();
+  if (!chat || !Array.isArray(chat.messages)) return;
+  const msg = chat.messages[index];
+  if (!msg || msg.role !== 'user') return;
+  const currentLabel = msg._timelineLabel || dialogManagerUserQuestionText(msg, index);
+  const newLabel = prompt('重命名节点：', currentLabel);
+  if (newLabel === null || newLabel === currentLabel) return;
+  if (newLabel.trim()) {
+    msg._timelineLabel = newLabel.trim();
+  } else {
+    delete msg._timelineLabel;
+  }
+  if (typeof persistChats === 'function') persistChats();
+  renderDialogManagerTimelinePanel();
+  if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
 }
 
 function dialogManagerMessageTime(msg, index) {
@@ -159,6 +179,7 @@ function renderDialogManagerTimelinePanel() {
         <strong>${escapeHtml(anchor.title)}</strong>
         <em>${escapeHtml(anchor.time)}</em>
       </span>
+      <span class="dialog-timeline-rename" title="重命名" onclick="event.stopPropagation();renameTimelineNode(${anchor.index})">✎</span>
     </button>
   `).join('');
 }
@@ -686,6 +707,7 @@ window.renderDialogManager = renderDialogManager;
 window.saveDialogManagerSettings = saveDialogManagerSettings;
 window.updateDialogTimeline = updateDialogTimeline;
 window.jumpToDialogMessage = jumpToDialogMessage;
+window.renameTimelineNode = renameTimelineNode;
 window.addDialogFolder = addDialogFolder;
 window.renameDialogFolder = renameDialogFolder;
 window.deleteDialogFolder = deleteDialogFolder;

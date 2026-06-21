@@ -157,6 +157,46 @@ function initSettingsPage() {
     const pageEl = document.getElementById('settingsPage');
     if (pageEl && pageEl.classList.contains('show')) closeSettingsPage();
   });
+
+  sortSettingsNav();
+}
+
+function recordSettingsNavAccess(section) {
+  if (!state.settings) state.settings = {};
+  if (!state.settings.settingsNavAccessTimes) state.settings.settingsNavAccessTimes = {};
+  state.settings.settingsNavAccessTimes[section] = Date.now();
+  if (typeof persistSettings === 'function') persistSettings();
+}
+
+function sortSettingsNav() {
+  const nav = document.querySelector('.settings-page-nav');
+  if (!nav) return;
+  const items = Array.from(nav.querySelectorAll('.settings-nav-item'));
+  if (!items.length) return;
+
+  const accessTimes = (state.settings && state.settings.settingsNavAccessTimes) || {};
+
+  // Remember original HTML order for items never accessed
+  const defaultOrder = new Map();
+  items.forEach((item, i) => {
+    defaultOrder.set(item.dataset.settingsSection, i);
+  });
+
+  items.sort((a, b) => {
+    const aSection = a.dataset.settingsSection;
+    const bSection = b.dataset.settingsSection;
+    const aTime = accessTimes[aSection];
+    const bTime = accessTimes[bSection];
+
+    if (aSection === 'main') return -1;                  // 主设置永远在第一位
+    if (bSection === 'main') return 1;
+    if (aTime && bTime) return bTime - aTime;            // both accessed → most recent first
+    if (aTime && !bTime) return -1;                       // a accessed, b not → a first
+    if (!aTime && bTime) return 1;                        // b accessed, a not → b first
+    return (defaultOrder.get(aSection) || 0) - (defaultOrder.get(bSection) || 0); // neither → original order
+  });
+
+  items.forEach(item => nav.appendChild(item));
 }
 
 async function openSettingsPage(section = 'main') {
@@ -183,6 +223,8 @@ async function openSettingsSection(section = 'main') {
   page.setAttribute('aria-hidden', 'false');
   closeDockedSection();
   SETTINGS_PAGE_STATE.activeSection = section;
+  recordSettingsNavAccess(section);
+  sortSettingsNav();
 
   let activeItem = null;
   document.querySelectorAll('.settings-nav-item').forEach(item => {
