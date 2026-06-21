@@ -311,6 +311,7 @@ body{
 .topbar-btn.reflect-active,
 .topbar-btn.plan-active,
 .topbar-btn.outline-active,
+.topbar-btn.temporary-active,
 .topbar-btn.privacy-active{
   border-color:transparent;
   box-shadow:none;
@@ -337,6 +338,16 @@ body{
 }
 
 .topbar-btn.privacy-active{
+  background:#fef7e0;
+  color:#a14200;
+}
+
+.topbar-btn.temporary-active{
+  background:#fce8e6;
+  color:#c5221f;
+}
+
+.topbar:has(:where(.privacy-active)) .topbar-btn.temporary-active{
   background:#fef7e0;
   color:#a14200;
 }
@@ -2439,6 +2450,16 @@ body.settings-page-open .settings-docked-mask.show{
   color:#aecbfa;
 }
 
+[data-theme="dark"] .topbar-btn.temporary-active{
+  background:rgba(242,139,130,.18);
+  color:#f28b82;
+}
+
+[data-theme="dark"] .topbar:has(:where(.privacy-active)) .topbar-btn.temporary-active{
+  background:rgba(253,214,99,.18);
+  color:#fdd663;
+}
+
 [data-theme="dark"] .topbar-btn.privacy-active{
   background:rgba(253,214,99,.18);
   color:#fdd663;
@@ -2809,7 +2830,8 @@ body.settings-page-open .settings-docked-mask.show{
 
 [data-theme="dark"][data-security-mode] .topbar-btn.tool-active,
 [data-theme="dark"][data-security-mode] .topbar-btn.plan-active,
-[data-theme="dark"][data-security-mode] .topbar-btn.outline-active{
+[data-theme="dark"][data-security-mode] .topbar-btn.outline-active,
+[data-theme="dark"][data-security-mode] .topbar-btn.temporary-active{
   color:#140c04;
   border-color:rgba(255,226,158,.56);
   box-shadow:0 10px 26px rgba(183,121,31,.20), inset 0 1px 0 rgba(255,255,255,.30);
@@ -2827,9 +2849,14 @@ body.settings-page-open .settings-docked-mask.show{
   background:linear-gradient(135deg,#fff5d6,#e0b85c 50%,#8f641f);
 }
 
+[data-theme="dark"][data-security-mode] .topbar-btn.temporary-active{
+  background:linear-gradient(135deg,#ffe8b8,#d8a23a 54%,#8a5515);
+}
+
 [data-theme="dark"][data-security-mode] .topbar-btn.tool-active:hover,
 [data-theme="dark"][data-security-mode] .topbar-btn.plan-active:hover,
-[data-theme="dark"][data-security-mode] .topbar-btn.outline-active:hover{
+[data-theme="dark"][data-security-mode] .topbar-btn.outline-active:hover,
+[data-theme="dark"][data-security-mode] .topbar-btn.temporary-active:hover{
   color:#0f0802;
   border-color:rgba(255,238,190,.72);
   filter:brightness(1.04);
