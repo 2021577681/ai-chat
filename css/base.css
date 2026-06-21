@@ -691,6 +691,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .dialog-timeline-rename:hover{background:var(--bg-hover);color:var(--primary)}
 .dialog-explorer-nav{display:flex;align-items:center;gap:6px;row-gap:12px;padding:6px 0;flex-wrap:wrap}
 .dialog-explorer-nav-btn{border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-secondary);cursor:pointer;font-size:13px;padding:4px 8px;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.dialog-explorer-nav-btn img{width:14px;height:14px;vertical-align:middle}
 .dialog-explorer-nav-btn:hover{background:var(--bg-hover);color:var(--text)}
 .dialog-explorer-nav-btn:disabled{opacity:.35;cursor:default}
 .dialog-explorer-nav-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -727,6 +728,13 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .dialog-explorer-context button{width:100%;border:none;border-radius:6px;background:transparent;color:var(--text);cursor:pointer;text-align:left;padding:7px 10px;font-size:12.5px;font-family:inherit;line-height:1.3;display:flex;align-items:center;gap:6px}
 .dialog-explorer-context button[hidden]{display:none}
 .dialog-explorer-context-icon{width:18px;text-align:center;flex:0 0 auto;font-size:13px;line-height:1}
+.dialog-explorer-context-icon img{width:14px;height:14px;vertical-align:middle;object-fit:contain}
+.dialog-explorer-item-icon img{width:24px;height:24px;vertical-align:middle;object-fit:contain}
+.dialog-explorer-area.list .dialog-explorer-item-icon img{width:16px;height:16px}
+.dialog-explorer-nav-btn img{width:14px;height:14px;vertical-align:middle;object-fit:contain}
+[data-theme="dark"] .dialog-explorer-item-icon img,
+[data-theme="dark"] .dialog-explorer-context-icon img,
+[data-theme="dark"] .dialog-explorer-nav-btn img{filter:brightness(0) invert(1);opacity:.86}
 .dialog-explorer-context button:hover{background:var(--bg-hover)}
 .dialog-explorer-context button.danger{color:var(--danger)}
 .prompt-editor input,.prompt-editor textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;outline:none}

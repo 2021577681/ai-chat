@@ -288,6 +288,20 @@ function dialogManagerChatsByFolder() {
 const DIALOG_EXPLORER_MAX_DEPTH = 6;
 const DIALOG_EXPLORER_MAX_NAME_LEN = 15;
 
+const ICON_FOLDER = '<img src="icon/文件夹-开_folder-open.png" alt="">';
+const ICON_TASK_GROUP = '<img src="icon/流水线_assembly-line.png" alt="">';
+const ICON_CHAT = '<img src="icon/评论_comment.png" alt="">';
+const ICON_EXPORT_MD = '<img src="icon/井号文件_file-hash.png" alt="">';
+const ICON_EXPORT_TXT = '<img src="icon/文本文件_file-text.png" alt="">';
+const ICON_EXPORT_JSON = '<img src="icon/代码文件_file-code.png" alt="">';
+const ICON_EXPORT_DOC = '<img src="icon/文件-word_file-word.png" alt="">';
+const ICON_EXPORT_PDF = '<img src="icon/pdf文件_file-pdf-one.png" alt="">';
+const ICON_RENAME = '<img src="icon/铅笔_pencil.png" alt="">';
+const ICON_DELETE = '<img src="icon/删除_delete.png" alt="">';
+const ICON_BREADCRUMB = '<img src="icon/文件夹-开_folder-open.png" alt="">';
+const ICON_VIEW_ICONS = '<img src="icon/全部_all-application.png" alt="">';
+const ICON_VIEW_LIST = '<img src="icon/汉堡图标_hamburger-button.png" alt="">';
+
 function dialogExplorerFolderDepth(folderId) {
   const dm = ensureDialogManagerSettings();
   const byId = new Map(dm.folders.map(f => [f.id, f]));
@@ -309,6 +323,59 @@ function touchFolder(folderId) {
   const dm = ensureDialogManagerSettings();
   const folder = dm.folders.find(f => f.id === folderId);
   if (folder) folder._modifiedAt = Date.now();
+}
+
+function dialogExplorerResolveFolderTarget(targetFolderId, dm = ensureDialogManagerSettings()) {
+  const id = targetFolderId || '';
+  if (!id) return '';
+  if (id.startsWith('__group_')) return null;
+  return dm.folders.some(folder => folder.id === id) ? id : null;
+}
+
+function dialogExplorerIsTaskGroupChat(chat) {
+  if (!chat || !chat.taskQueue) return false;
+  if (typeof isTaskQueueSidebarGroupedChat === 'function') {
+    return isTaskQueueSidebarGroupedChat(chat);
+  }
+  return chat.taskQueue.type === 'task_queue_item'
+    && !!chat.taskQueue.groupId
+    && !!chat.taskQueue.groupFinalized;
+}
+
+function dialogManagerCleanupTaskQueueDeletedChats(deletedChats) {
+  const ids = new Set((deletedChats || []).map(chat => chat && chat.id).filter(Boolean));
+  if (!ids.size || !state.taskQueue || !Array.isArray(state.taskQueue.items)) return;
+
+  const deletedGroupIds = new Set(
+    (deletedChats || [])
+      .map(chat => chat && chat.taskQueue && chat.taskQueue.groupId)
+      .filter(Boolean)
+  );
+  let changed = false;
+
+  for (const item of state.taskQueue.items) {
+    if (!item || !ids.has(item.chatId)) continue;
+    item.chatId = null;
+    item.sidebarGroupId = '';
+    item.promptHash = '';
+    changed = true;
+  }
+
+  if (state.taskQueue.sidebarGroupId && deletedGroupIds.has(state.taskQueue.sidebarGroupId)) {
+    const hasRemainingGroupChat = (state.chats || []).some(chat =>
+      chat && chat.taskQueue && chat.taskQueue.groupId === state.taskQueue.sidebarGroupId
+    );
+    if (!hasRemainingGroupChat) {
+      state.taskQueue.sidebarGroupId = null;
+      state.taskQueue.sidebarGroupStartedAt = null;
+      state.taskQueue.sidebarGroupFinalizedAt = null;
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+  if (typeof saveTaskQueue === 'function') saveTaskQueue();
+  if (typeof renderTaskQueueModal === 'function') renderTaskQueueModal();
 }
 
 function dialogExplorerMaxChildDepth(folderId) {
@@ -359,25 +426,25 @@ function renderDialogExplorerNav(dm) {
   if (isGroupView) {
     canGoUp = true;
     const groupChats = (state.chats || []).filter(c =>
-      c && c.taskQueue && c.taskQueue.groupId === groupId
+      dialogExplorerIsTaskGroupChat(c) && c.taskQueue.groupId === groupId
     );
     const groupName = (typeof taskQueueGroupTitle === 'function')
       ? taskQueueGroupTitle(groupChats)
       : ('任务组 ' + groupId.slice(0, 6));
     segments = [
-      { id: '', name: '📂 根目录' },
-      { id: currentId, name: '📦 ' + groupName }
+      { id: '', name: '根目录' },
+      { id: currentId, name: groupName }
     ];
   } else {
     canGoUp = !!currentId;
     const folder = canGoUp ? dm.folders.find(f => f.id === currentId) : null;
-    segments = [{ id: '', name: '📂 根目录' }];
+    segments = [{ id: '', name: '根目录' }];
     const chain = [];
     let cur = currentId;
     while (cur) {
       const f = dm.folders.find(f => f.id === cur);
       if (!f) break;
-      chain.unshift({ id: f.id, name: '📂 ' + f.name });
+      chain.unshift({ id: f.id, name: f.name });
       cur = f.parentId || '';
     }
     segments.push(...chain);
@@ -397,7 +464,7 @@ function renderDialogExplorerNav(dm) {
              ondragover="dialogExplorerBreadcrumbDragOver(event)"
              ondragleave="dialogExplorerBreadcrumbDragLeave(event)"
              ondrop="dialogExplorerItemDrop(event, '${escapeHtml(seg.id)}')"
-             >${escapeHtml(seg.name)}</button>`;
+             >${ICON_BREADCRUMB} ${escapeHtml(seg.name)}</button>`;
   });
 
   html += `<span class="dialog-explorer-nav-spacer"></span>`;
@@ -412,8 +479,8 @@ function renderDialogExplorerNav(dm) {
     html += `<option value="${opt.value}"${sortMode === opt.value ? ' selected' : ''}>${opt.label}</option>`;
   });
   html += `</select>`;
-  html += `<button class="dialog-explorer-nav-btn${mode === 'icons' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('icons')">▦ 图标</button>`;
-  html += `<button class="dialog-explorer-nav-btn${mode === 'list' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('list')">☰ 列表</button>`;
+  html += `<button class="dialog-explorer-nav-btn${mode === 'icons' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('icons')">${ICON_VIEW_ICONS} 图标</button>`;
+  html += `<button class="dialog-explorer-nav-btn${mode === 'list' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('list')">${ICON_VIEW_LIST} 列表</button>`;
   nav.innerHTML = html;
 }
 
@@ -443,7 +510,7 @@ function renderDialogExplorerItems(dm) {
   if (isGroupView) {
     // Virtual task queue group view - read-only, show only group chats
     const groupChats = (state.chats || []).filter(c =>
-      c && !c._hiddenFromUI && c.taskQueue && c.taskQueue.groupId === groupId
+      dialogExplorerIsTaskGroupChat(c) && !c._hiddenFromUI && c.taskQueue.groupId === groupId
     );
     const sorted = (typeof sortTaskQueueGroupChats === 'function')
       ? sortTaskQueueGroupChats(groupChats)
@@ -461,7 +528,7 @@ function renderDialogExplorerItems(dm) {
                data-explorer-type="chat" data-explorer-id="${escapeHtml(chat.id)}"
                onclick="switchDialogManagerChat('${escapeHtml(chat.id)}')"
                oncontextmenu="return dialogExplorerContextMenu(event, 'chat', '${escapeHtml(chat.id)}')">
-            <span class="dialog-explorer-item-icon">💬</span>
+            <span class="dialog-explorer-item-icon">${ICON_CHAT}</span>
             <span class="dialog-explorer-item-label">${escapeHtml(title)}</span>
             <span class="dialog-explorer-item-meta">${count} 条</span>
           </div>`;
@@ -473,6 +540,7 @@ function renderDialogExplorerItems(dm) {
     area.ondragover = null;
     area.ondragleave = null;
     area.ondrop = null;
+    return;
   } else {
     // Normal view - regular folders first
     const folders = dm.folders.filter(f => (f.parentId || '') === currentId)
@@ -490,7 +558,7 @@ function renderDialogExplorerItems(dm) {
     const groupMap = new Map();
     const standaloneChats = [];
     allChats.forEach(chat => {
-      const gid = chat.taskQueue && chat.taskQueue.groupId;
+      const gid = dialogExplorerIsTaskGroupChat(chat) && chat.taskQueue && chat.taskQueue.groupId;
       if (gid) {
         if (!groupMap.has(gid)) groupMap.set(gid, []);
         groupMap.get(gid).push(chat);
@@ -570,7 +638,7 @@ function renderDialogExplorerItems(dm) {
                ondragover="dialogExplorerItemDragOver(event)"
                ondragleave="dialogExplorerItemDragLeave(event)"
                ondrop="dialogExplorerItemDrop(event, '${escapeHtml(folder.id)}')">
-            <span class="dialog-explorer-item-icon">📁</span>
+            <span class="dialog-explorer-item-icon">${ICON_FOLDER}</span>
             <span class="dialog-explorer-item-label">${escapeHtml(folder.name)}</span>
             ${mode === 'list' ? '<span class="dialog-explorer-item-meta">文件夹</span>' : ''}
           </div>`;
@@ -584,7 +652,7 @@ function renderDialogExplorerItems(dm) {
                  data-explorer-type="taskGroup" data-explorer-id="${escapeHtml(vf.id)}"
                  onclick="dialogExplorerEnterFolder('${escapeHtml(vf.id)}')"
                  oncontextmenu="return dialogExplorerContextMenu(event, 'taskGroup', '${escapeHtml(vf.id)}')">
-              <span class="dialog-explorer-item-icon">📦</span>
+              <span class="dialog-explorer-item-icon">${ICON_TASK_GROUP}</span>
               <span class="dialog-explorer-item-label">${escapeHtml(vf.name)}</span>
               <span class="dialog-explorer-item-meta">${vf.count} 个对话</span>
             </div>`;
@@ -599,7 +667,7 @@ function renderDialogExplorerItems(dm) {
                  oncontextmenu="return dialogExplorerContextMenu(event, 'chat', '${escapeHtml(chat.id)}')"
                  ondragstart="dialogExplorerDragStart(event, 'chat', '${escapeHtml(chat.id)}')"
                  ondragend="dialogExplorerDragEnd(event)">
-              <span class="dialog-explorer-item-icon">💬</span>
+              <span class="dialog-explorer-item-icon">${ICON_CHAT}</span>
               <span class="dialog-explorer-item-label">${escapeHtml(title)}</span>
               <span class="dialog-explorer-item-meta">${count} 条</span>
             </div>`;
@@ -681,13 +749,19 @@ function dialogExplorerItemDrop(e, targetFolderId) {
 
 function dialogExplorerDrop(id, type, targetFolderId) {
   if (type === 'chat') {
+    const targetId = dialogExplorerResolveFolderTarget(targetFolderId);
+    if (targetId === null) {
+      if (typeof toast === 'function') toast('目标文件夹不存在', 2000);
+      renderDialogManagerFolders();
+      return;
+    }
     const chat = chatById(id);
     if (!chat) return;
     const oldFolderId = chat.dialogFolderId || '';
-    if (targetFolderId) chat.dialogFolderId = targetFolderId;
+    if (targetId) chat.dialogFolderId = targetId;
     else delete chat.dialogFolderId;
     touchFolder(oldFolderId);
-    touchFolder(targetFolderId);
+    touchFolder(targetId);
     saveData();
     renderChatList();
     renderDialogManagerFolders();
@@ -695,26 +769,32 @@ function dialogExplorerDrop(id, type, targetFolderId) {
     const dm = ensureDialogManagerSettings();
     const folder = dm.folders.find(f => f.id === id);
     if (!folder) return;
+    const targetId = dialogExplorerResolveFolderTarget(targetFolderId, dm);
+    if (targetId === null) {
+      if (typeof toast === 'function') toast('目标文件夹不存在', 2000);
+      renderDialogManagerFolders();
+      return;
+    }
     // Prevent moving into self or descendant (would create cycle)
-    if (id === targetFolderId) return;
-    let cur = targetFolderId;
+    if (id === targetId) return;
+    let cur = targetId;
     while (cur) {
       if (cur === id) return;
       const parent = dm.folders.find(f => f.id === cur);
       cur = parent ? (parent.parentId || '') : '';
     }
     // Check max depth - need to know depth of this folder's subtree
-    const targetDepth = targetFolderId ? dialogExplorerFolderDepth(targetFolderId) : 0;
+    const targetDepth = targetId ? dialogExplorerFolderDepth(targetId) : 0;
     const maxChildDepth = dialogExplorerMaxChildDepth(id);
     if (targetDepth + maxChildDepth + 1 > DIALOG_EXPLORER_MAX_DEPTH) {
       if (typeof toast === 'function') toast(`移动后将超过 ${DIALOG_EXPLORER_MAX_DEPTH} 层嵌套限制`, 2000);
       return;
     }
     const oldParentId = folder.parentId || '';
-    folder.parentId = targetFolderId || '';
+    folder.parentId = targetId || '';
     folder._modifiedAt = Date.now();
     touchFolder(oldParentId);
-    touchFolder(targetFolderId);
+    touchFolder(targetId);
     persistSettings();
     renderDialogManagerFolders();
   }
@@ -780,7 +860,7 @@ function dialogExplorerContextMenu(e, type, id) {
       newFolderBtn = document.createElement('button');
       newFolderBtn.type = 'button';
       newFolderBtn.dataset.explorerAction = 'newFolder';
-      newFolderBtn.innerHTML = '<span class="dialog-explorer-context-icon">📁</span>新建文件夹';
+      newFolderBtn.innerHTML = '<span class="dialog-explorer-context-icon">' + ICON_FOLDER + '</span>新建文件夹';
       menu.insertBefore(newFolderBtn, menu.firstChild);
     }
     newFolderBtn.hidden = false;
@@ -850,6 +930,10 @@ function dialogExplorerHandleContextAction(e) {
 }
 
 function dialogExplorerNewFolder() {
+  if (dialogManagerCurrentFolderId.startsWith('__group_')) {
+    if (typeof toast === 'function') toast('任务组视图不能新建文件夹', 2000);
+    return;
+  }
   const dm = ensureDialogManagerSettings();
   const newDepth = (dialogManagerCurrentFolderId ? dialogExplorerFolderDepth(dialogManagerCurrentFolderId) : 0) + 1;
   if (newDepth > DIALOG_EXPLORER_MAX_DEPTH) {
@@ -910,12 +994,13 @@ function dialogExplorerDeleteFolder(folderId) {
   collectDescendants(folderId);
   descendantIds.add(folderId);
   const allIds = Array.from(descendantIds);
+  const childFolderCount = Math.max(0, allIds.length - 1);
 
   // Count chats to be deleted
   const affectedChats = (state.chats || []).filter(c => allIds.includes(c.dialogFolderId || ''));
   const totalChats = affectedChats.length;
 
-  if (!confirm(`删除文件夹"${folder.name}"？\n将级联删除 ${allIds.length} 个子文件夹和 ${totalChats} 个对话，不可恢复。`)) return;
+  if (!confirm(`删除文件夹"${folder.name}"？\n将级联删除 ${childFolderCount} 个子文件夹和 ${totalChats} 个对话，不可恢复。`)) return;
 
   // Abort generating chats before deletion
   affectedChats.forEach(c => {
@@ -930,6 +1015,7 @@ function dialogExplorerDeleteFolder(folderId) {
   if (deleteIds.has(state.currentId)) {
     state.currentId = ((state.chats || []).find(c => c && !c._hiddenFromUI) || {}).id || null;
   }
+  dialogManagerCleanupTaskQueueDeletedChats(affectedChats);
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
 
   // Delete all descendant folders
@@ -942,6 +1028,7 @@ function dialogExplorerDeleteFolder(folderId) {
   renderChatList();
   if (typeof renderMessages === 'function') renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   renderDialogManagerFolders();
 }
 
