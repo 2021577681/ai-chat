@@ -9,14 +9,18 @@ function ensureDialogManagerSettings() {
   }
   const dm = state.settings.dialogManager;
   if (dm.timelineEnabled === undefined) dm.timelineEnabled = true;
+  if (!dm.explorerViewMode || !['icons','list'].includes(dm.explorerViewMode)) dm.explorerViewMode = 'icons';
+  if (!dm.explorerSortMode || !['created','name','recent'].includes(dm.explorerSortMode)) dm.explorerSortMode = 'created';
   if (!Array.isArray(dm.folders)) dm.folders = [];
   if (!Array.isArray(dm.prompts)) dm.prompts = [];
   dm.folders = dm.folders
     .filter(folder => folder && typeof folder === 'object')
     .map(folder => ({
       id: folder.id || ('folder_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)),
-      name: String(folder.name || '未命名文件夹').trim() || '未命名文件夹',
-      parentId: folder.parentId || ''
+      name: (String(folder.name || '未命名文件夹').trim() || '未命名文件夹').slice(0, DIALOG_EXPLORER_MAX_NAME_LEN),
+      parentId: folder.parentId || '',
+      createdAt: Number(folder.createdAt) || Date.now(),
+      _modifiedAt: Number(folder._modifiedAt) || Number(folder.createdAt) || Date.now()
     }));
   const folderIds = new Set(dm.folders.map(folder => folder.id));
   dm.folders.forEach(folder => {
@@ -88,7 +92,7 @@ function renameTimelineNode(index) {
   } else {
     delete msg._timelineLabel;
   }
-  if (typeof persistChats === 'function') persistChats();
+  if (typeof saveData === 'function') saveData();
   renderDialogManagerTimelinePanel();
   if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
 }
@@ -255,6 +259,20 @@ function closeDialogManagerSurface() {
   if (modal && modal.classList.contains('show')) closeDialogManager();
 }
 
+let dialogManagerCurrentFolderId = '';
+
+function chatLatestMessageTime(chat) {
+  if (!chat || !Array.isArray(chat.messages)) return 0;
+  let latest = 0;
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    const m = chat.messages[i];
+    if (!m || m._hiddenFromUI) continue;
+    const t = Number(m._startTime || m.createdAt || m._endTime || 0);
+    if (t > latest) latest = t;
+  }
+  return latest || Number(chat.createdAt) || 0;
+}
+
 function dialogManagerChatsByFolder() {
   const dm = ensureDialogManagerSettings();
   const folderIds = new Set(dm.folders.map(folder => folder.id));
@@ -267,68 +285,45 @@ function dialogManagerChatsByFolder() {
   return groups;
 }
 
-function renderDialogManagerFolders() {
+const DIALOG_EXPLORER_MAX_DEPTH = 6;
+const DIALOG_EXPLORER_MAX_NAME_LEN = 15;
+
+function dialogExplorerFolderDepth(folderId) {
   const dm = ensureDialogManagerSettings();
-  const tree = document.getElementById('dialogFolderTree');
-  if (!tree) return;
-  const byParent = new Map();
-  dm.folders.forEach(folder => {
-    const parent = folder.parentId || '';
-    if (!byParent.has(parent)) byParent.set(parent, []);
-    byParent.get(parent).push(folder);
-  });
-  for (const folders of byParent.values()) folders.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
-  const chatsByFolder = dialogManagerChatsByFolder();
-  tree.innerHTML = renderDialogFolderBranch('', byParent, chatsByFolder, 0);
-  renderDialogFolderControls(dm);
-}
-
-function renderDialogFolderBranch(parentId, byParent, chatsByFolder, depth) {
-  const folders = byParent.get(parentId) || [];
-  const chats = (chatsByFolder.get(parentId) || []).slice()
-    .sort((a, b) => (Number(b.pinnedAt) || 0) - (Number(a.pinnedAt) || 0) || (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
-  const folderHtml = folders.map(folder => {
-    const childHtml = renderDialogFolderBranch(folder.id, byParent, chatsByFolder, depth + 1);
-    return `
-      <details class="dialog-folder-node" open>
-        <summary>
-          <span class="dialog-folder-name">📁 ${escapeHtml(folder.name)}</span>
-          <span class="dialog-folder-actions">
-            <button type="button" onclick="event.stopPropagation();renameDialogFolder('${escapeHtml(folder.id)}')">重命名</button>
-            <button type="button" onclick="event.stopPropagation();deleteDialogFolder('${escapeHtml(folder.id)}')">删除</button>
-          </span>
-        </summary>
-        <div class="dialog-folder-children">${childHtml || '<div class="dialog-empty small">空文件夹</div>'}</div>
-      </details>`;
-  }).join('');
-  const chatHtml = chats.map(chat => `
-    <div class="dialog-folder-chat ${chat.id === state.currentId ? 'active' : ''}">
-      <button type="button" onclick="switchDialogManagerChat('${escapeHtml(chat.id)}')">
-        <span>💬 ${escapeHtml(dialogManagerChatTitle(chat))}</span>
-        <em>${dialogManagerVisibleMessages(chat).length} 条</em>
-      </button>
-    </div>
-  `).join('');
-  if (!folderHtml && !chatHtml && depth === 0) return '<div class="dialog-empty">暂无对话</div>';
-  return folderHtml + chatHtml;
-}
-
-function renderDialogFolderControls(dm) {
-  const folderSelect = document.getElementById('dialogMoveFolderSelect');
-  const chatSelect = document.getElementById('dialogMoveChatSelect');
-  const parentSelect = document.getElementById('dialogFolderParentSelect');
-  if (chatSelect) {
-    chatSelect.innerHTML = (state.chats || []).map(chat => {
-      const selected = chat.id === (dialogManagerSelectedChatId || state.currentId) ? ' selected' : '';
-      return `<option value="${escapeHtml(chat.id)}"${selected}>${escapeHtml(dialogManagerChatTitle(chat))}</option>`;
-    }).join('');
+  const byId = new Map(dm.folders.map(f => [f.id, f]));
+  let depth = 0;
+  let cur = folderId;
+  const seen = new Set();
+  while (cur) {
+    if (seen.has(cur)) break;
+    seen.add(cur);
+    depth++;
+    const f = byId.get(cur);
+    cur = f ? (f.parentId || '') : '';
   }
-  const folderOptions = [
-    '<option value="">根目录</option>',
-    ...dm.folders.map(folder => `<option value="${escapeHtml(folder.id)}">${escapeHtml(dialogFolderPath(folder.id))}</option>`)
-  ].join('');
-  if (folderSelect) folderSelect.innerHTML = folderOptions;
-  if (parentSelect) parentSelect.innerHTML = folderOptions;
+  return depth;
+}
+
+function touchFolder(folderId) {
+  if (!folderId) return;
+  const dm = ensureDialogManagerSettings();
+  const folder = dm.folders.find(f => f.id === folderId);
+  if (folder) folder._modifiedAt = Date.now();
+}
+
+function dialogExplorerMaxChildDepth(folderId) {
+  const dm = ensureDialogManagerSettings();
+  let maxDepth = 0;
+  function walk(pid, depth) {
+    dm.folders.forEach(f => {
+      if ((f.parentId || '') === pid) {
+        if (depth > maxDepth) maxDepth = depth;
+        walk(f.id, depth + 1);
+      }
+    });
+  }
+  walk(folderId, 1);
+  return maxDepth;
 }
 
 function dialogFolderPath(folderId) {
@@ -345,71 +340,667 @@ function dialogFolderPath(folderId) {
   return parts.join(' / ') || '根目录';
 }
 
-function addDialogFolder() {
-  const nameInput = document.getElementById('dialogFolderName');
-  const parentSelect = document.getElementById('dialogFolderParentSelect');
-  const name = (nameInput && nameInput.value.trim()) || '';
-  if (!name) {
-    if (typeof toast === 'function') toast('请输入文件夹名称');
-    return;
-  }
+function renderDialogManagerFolders() {
   const dm = ensureDialogManagerSettings();
-  dm.folders.push({
-    id: 'folder_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7),
-    name: name.slice(0, 60),
-    parentId: parentSelect ? parentSelect.value : ''
+  renderDialogExplorerNav(dm);
+  renderDialogExplorerItems(dm);
+}
+
+function renderDialogExplorerNav(dm) {
+  const nav = document.getElementById('dialogExplorerNav');
+  if (!nav) return;
+  const currentId = dialogManagerCurrentFolderId;
+  const mode = dm.explorerViewMode || 'icons';
+  const isGroupView = currentId.startsWith('__group_');
+  const groupId = isGroupView ? currentId.slice(8) : '';
+
+  let canGoUp, segments;
+
+  if (isGroupView) {
+    canGoUp = true;
+    const groupChats = (state.chats || []).filter(c =>
+      c && c.taskQueue && c.taskQueue.groupId === groupId
+    );
+    const groupName = (typeof taskQueueGroupTitle === 'function')
+      ? taskQueueGroupTitle(groupChats)
+      : ('任务组 ' + groupId.slice(0, 6));
+    segments = [
+      { id: '', name: '📂 根目录' },
+      { id: currentId, name: '📦 ' + groupName }
+    ];
+  } else {
+    canGoUp = !!currentId;
+    const folder = canGoUp ? dm.folders.find(f => f.id === currentId) : null;
+    segments = [{ id: '', name: '📂 根目录' }];
+    const chain = [];
+    let cur = currentId;
+    while (cur) {
+      const f = dm.folders.find(f => f.id === cur);
+      if (!f) break;
+      chain.unshift({ id: f.id, name: '📂 ' + f.name });
+      cur = f.parentId || '';
+    }
+    segments.push(...chain);
+  }
+
+  const isRoot = segments.length <= 1;
+
+  let html = `<button class="dialog-explorer-nav-btn" type="button" onclick="dialogExplorerGoUp()"${canGoUp ? '' : ' disabled'}>⬅ 返回</button>`;
+  html += `<span class="dialog-explorer-nav-sep">›</span>`;
+
+  segments.forEach((seg, i) => {
+    if (i > 0) html += `<span class="dialog-explorer-nav-sep">›</span>`;
+    const isLast = i === segments.length - 1;
+    html += `<button class="dialog-explorer-nav-btn dialog-explorer-breadcrumb${isLast && !isRoot ? ' active' : ''}"
+             type="button"
+             onclick="dialogExplorerEnterFolder('${escapeHtml(seg.id)}')"
+             ondragover="dialogExplorerBreadcrumbDragOver(event)"
+             ondragleave="dialogExplorerBreadcrumbDragLeave(event)"
+             ondrop="dialogExplorerItemDrop(event, '${escapeHtml(seg.id)}')"
+             >${escapeHtml(seg.name)}</button>`;
   });
-  if (nameInput) nameInput.value = '';
+
+  html += `<span class="dialog-explorer-nav-spacer"></span>`;
+  const sortMode = dm.explorerSortMode || 'created';
+  const sortOptions = [
+    { value: 'created', label: '创建时间' },
+    { value: 'name', label: '名称' },
+    { value: 'recent', label: '最近修改' }
+  ];
+  html += `<select class="dialog-explorer-sort" onchange="dialogExplorerToggleSort(this.value)">`;
+  sortOptions.forEach(opt => {
+    html += `<option value="${opt.value}"${sortMode === opt.value ? ' selected' : ''}>${opt.label}</option>`;
+  });
+  html += `</select>`;
+  html += `<button class="dialog-explorer-nav-btn${mode === 'icons' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('icons')">▦ 图标</button>`;
+  html += `<button class="dialog-explorer-nav-btn${mode === 'list' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('list')">☰ 列表</button>`;
+  nav.innerHTML = html;
+}
+
+function dialogExplorerBreadcrumbDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('breadcrumb-drag-over');
+}
+
+function dialogExplorerBreadcrumbDragLeave(e) {
+  e.currentTarget.classList.remove('breadcrumb-drag-over');
+}
+
+function renderDialogExplorerItems(dm) {
+  const area = document.getElementById('dialogExplorerArea');
+  if (!area) return;
+  const currentId = dialogManagerCurrentFolderId;
+  const mode = dm.explorerViewMode || 'icons';
+
+  area.className = 'dialog-explorer-area ' + mode;
+
+  const sortMode = dm.explorerSortMode || 'created';
+  const isGroupView = currentId.startsWith('__group_');
+  const groupId = isGroupView ? currentId.slice(8) : '';
+
+  if (isGroupView) {
+    // Virtual task queue group view - read-only, show only group chats
+    const groupChats = (state.chats || []).filter(c =>
+      c && !c._hiddenFromUI && c.taskQueue && c.taskQueue.groupId === groupId
+    );
+    const sorted = (typeof sortTaskQueueGroupChats === 'function')
+      ? sortTaskQueueGroupChats(groupChats)
+      : groupChats;
+
+    if (!sorted.length) {
+      area.innerHTML = '<div class="dialog-explorer-empty">该任务组中没有对话</div>';
+    } else {
+      let html = '';
+      sorted.forEach(chat => {
+        const title = dialogManagerChatTitle(chat);
+        const count = dialogManagerVisibleMessages(chat).length;
+        html += `
+          <div class="dialog-explorer-item ${chat.id === state.currentId ? 'selected' : ''}"
+               data-explorer-type="chat" data-explorer-id="${escapeHtml(chat.id)}"
+               onclick="switchDialogManagerChat('${escapeHtml(chat.id)}')"
+               oncontextmenu="return dialogExplorerContextMenu(event, 'chat', '${escapeHtml(chat.id)}')">
+            <span class="dialog-explorer-item-icon">💬</span>
+            <span class="dialog-explorer-item-label">${escapeHtml(title)}</span>
+            <span class="dialog-explorer-item-meta">${count} 条</span>
+          </div>`;
+      });
+      area.innerHTML = html;
+    }
+    // Read-only: no drag, no context menu
+    area.oncontextmenu = null;
+    area.ondragover = null;
+    area.ondragleave = null;
+    area.ondrop = null;
+  } else {
+    // Normal view - regular folders first
+    const folders = dm.folders.filter(f => (f.parentId || '') === currentId)
+      .sort((a, b) => {
+        if (sortMode === 'name') return a.name.localeCompare(b.name, 'zh-Hans-CN');
+        if (sortMode === 'recent') return (Number(b._modifiedAt) || 0) - (Number(a._modifiedAt) || 0);
+        return (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0);
+      });
+
+    // Chats in current directory, split into task groups and standalone
+    const chatsByFolder = dialogManagerChatsByFolder();
+    const allChats = (chatsByFolder.get(currentId) || []).slice();
+
+    // Detect task queue groups
+    const groupMap = new Map();
+    const standaloneChats = [];
+    allChats.forEach(chat => {
+      const gid = chat.taskQueue && chat.taskQueue.groupId;
+      if (gid) {
+        if (!groupMap.has(gid)) groupMap.set(gid, []);
+        groupMap.get(gid).push(chat);
+      } else {
+        standaloneChats.push(chat);
+      }
+    });
+
+    // Build virtual folder entries for task groups
+    const virtualFolders = [];
+    groupMap.forEach((chats, gid) => {
+      const title = (typeof taskQueueGroupTitle === 'function')
+        ? taskQueueGroupTitle(chats)
+        : ('任务组 ' + gid.slice(0, 6));
+      virtualFolders.push({ id: '__group_' + gid, name: title, count: chats.length, chats });
+    });
+
+    // Sort standalone chats
+    standaloneChats.sort((a, b) => {
+      const pa = Number(a.pinnedAt) || 0;
+      const pb = Number(b.pinnedAt) || 0;
+      if (pa && !pb) return -1;
+      if (!pa && pb) return 1;
+      if (pa && pb) return pb - pa;
+      if (sortMode === 'name') {
+        return dialogManagerChatTitle(a).localeCompare(dialogManagerChatTitle(b), 'zh-Hans-CN');
+      }
+      if (sortMode === 'recent') {
+        return chatLatestMessageTime(b) - chatLatestMessageTime(a);
+      }
+      return (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0);
+    });
+
+    // Merge virtual folders and standalone chats, sorted together
+    const mixedItems = [
+      ...virtualFolders.map(vf => ({ type: 'taskGroup', data: vf })),
+      ...standaloneChats.map(chat => ({ type: 'chat', data: chat }))
+    ];
+
+    mixedItems.sort((a, b) => {
+      // Pinned chats always first
+      const pa = a.type === 'chat' ? (Number(a.data.pinnedAt) || 0) : 0;
+      const pb = b.type === 'chat' ? (Number(b.data.pinnedAt) || 0) : 0;
+      if (pa && !pb) return -1;
+      if (!pa && pb) return 1;
+      if (pa && pb) return pb - pa;
+      // Sort by mode
+      if (sortMode === 'name') {
+        const na = a.type === 'taskGroup' ? a.data.name : dialogManagerChatTitle(a.data);
+        const nb = b.type === 'taskGroup' ? b.data.name : dialogManagerChatTitle(b.data);
+        return na.localeCompare(nb, 'zh-Hans-CN');
+      }
+      if (sortMode === 'recent') {
+        const ta = a.type === 'taskGroup' ? Math.max(...a.data.chats.map(c => chatLatestMessageTime(c))) : chatLatestMessageTime(a.data);
+        const tb = b.type === 'taskGroup' ? Math.max(...b.data.chats.map(c => chatLatestMessageTime(c))) : chatLatestMessageTime(b.data);
+        return tb - ta;
+      }
+      // created
+      const ca = a.type === 'taskGroup' ? Math.min(...a.data.chats.map(c => Number(c.createdAt) || 0)) : (Number(a.data.createdAt) || 0);
+      const cb = b.type === 'taskGroup' ? Math.min(...b.data.chats.map(c => Number(c.createdAt) || 0)) : (Number(b.data.createdAt) || 0);
+      return cb - ca;
+    });
+
+    if (!folders.length && !mixedItems.length) {
+      area.innerHTML = '<div class="dialog-explorer-empty">右键此处新建文件夹，或拖动对话到此</div>';
+    } else {
+      let html = '';
+      // Regular folders first
+      folders.forEach(folder => {
+        html += `
+          <div class="dialog-explorer-item" draggable="true"
+               data-explorer-type="folder" data-explorer-id="${escapeHtml(folder.id)}"
+               onclick="dialogExplorerEnterFolder('${escapeHtml(folder.id)}')"
+               oncontextmenu="return dialogExplorerContextMenu(event, 'folder', '${escapeHtml(folder.id)}')"
+               ondragstart="dialogExplorerDragStart(event, 'folder', '${escapeHtml(folder.id)}')"
+               ondragend="dialogExplorerDragEnd(event)"
+               ondragover="dialogExplorerItemDragOver(event)"
+               ondragleave="dialogExplorerItemDragLeave(event)"
+               ondrop="dialogExplorerItemDrop(event, '${escapeHtml(folder.id)}')">
+            <span class="dialog-explorer-item-icon">📁</span>
+            <span class="dialog-explorer-item-label">${escapeHtml(folder.name)}</span>
+            ${mode === 'list' ? '<span class="dialog-explorer-item-meta">文件夹</span>' : ''}
+          </div>`;
+      });
+      // Mixed: virtual task groups + standalone chats
+      mixedItems.forEach(item => {
+        if (item.type === 'taskGroup') {
+          const vf = item.data;
+          html += `
+            <div class="dialog-explorer-item"
+                 data-explorer-type="taskGroup" data-explorer-id="${escapeHtml(vf.id)}"
+                 onclick="dialogExplorerEnterFolder('${escapeHtml(vf.id)}')"
+                 oncontextmenu="return dialogExplorerContextMenu(event, 'taskGroup', '${escapeHtml(vf.id)}')">
+              <span class="dialog-explorer-item-icon">📦</span>
+              <span class="dialog-explorer-item-label">${escapeHtml(vf.name)}</span>
+              <span class="dialog-explorer-item-meta">${vf.count} 个对话</span>
+            </div>`;
+        } else {
+          const chat = item.data;
+          const title = dialogManagerChatTitle(chat);
+          const count = dialogManagerVisibleMessages(chat).length;
+          html += `
+            <div class="dialog-explorer-item ${chat.id === state.currentId ? 'selected' : ''}" draggable="true"
+                 data-explorer-type="chat" data-explorer-id="${escapeHtml(chat.id)}"
+                 onclick="switchDialogManagerChat('${escapeHtml(chat.id)}')"
+                 oncontextmenu="return dialogExplorerContextMenu(event, 'chat', '${escapeHtml(chat.id)}')"
+                 ondragstart="dialogExplorerDragStart(event, 'chat', '${escapeHtml(chat.id)}')"
+                 ondragend="dialogExplorerDragEnd(event)">
+              <span class="dialog-explorer-item-icon">💬</span>
+              <span class="dialog-explorer-item-label">${escapeHtml(title)}</span>
+              <span class="dialog-explorer-item-meta">${count} 条</span>
+            </div>`;
+        }
+      });
+      area.innerHTML = html;
+    }
+  }
+
+  // Bind area-level events
+  area.oncontextmenu = function(e) {
+    if (e.target === area || e.target.classList.contains('dialog-explorer-empty')) {
+      return dialogExplorerContextMenu(e, 'area', '');
+    }
+  };
+  area.ondragover = function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    area.classList.add('drag-over');
+  };
+  area.ondragleave = function(e) {
+    if (!area.contains(e.relatedTarget)) area.classList.remove('drag-over');
+  };
+  area.ondrop = function(e) {
+    e.preventDefault();
+    area.classList.remove('drag-over');
+    const type = e.dataTransfer.getData('text/type');
+    const id = e.dataTransfer.getData('text/id');
+    if (type && id) dialogExplorerDrop(id, type, currentId);
+  };
+}
+
+function dialogExplorerToggleView(mode) {
+  const dm = ensureDialogManagerSettings();
+  dm.explorerViewMode = mode;
   persistSettings();
   renderDialogManagerFolders();
 }
 
-function renameDialogFolder(folderId) {
+function dialogExplorerToggleSort(mode) {
   const dm = ensureDialogManagerSettings();
-  const folder = dm.folders.find(item => item.id === folderId);
+  dm.explorerSortMode = mode;
+  persistSettings();
+  renderDialogManagerFolders();
+}
+
+// --- Drag & Drop ---
+
+function dialogExplorerDragStart(e, type, id) {
+  e.dataTransfer.setData('text/type', type);
+  e.dataTransfer.setData('text/id', id);
+  e.dataTransfer.effectAllowed = 'move';
+  e.target.classList.add('dragging');
+}
+
+function dialogExplorerDragEnd(e) {
+  e.target.classList.remove('dragging');
+}
+
+function dialogExplorerItemDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function dialogExplorerItemDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function dialogExplorerItemDrop(e, targetFolderId) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.classList.remove('drag-over');
+  const type = e.dataTransfer.getData('text/type');
+  const id = e.dataTransfer.getData('text/id');
+  if (type && id) dialogExplorerDrop(id, type, targetFolderId);
+}
+
+function dialogExplorerDrop(id, type, targetFolderId) {
+  if (type === 'chat') {
+    const chat = chatById(id);
+    if (!chat) return;
+    const oldFolderId = chat.dialogFolderId || '';
+    if (targetFolderId) chat.dialogFolderId = targetFolderId;
+    else delete chat.dialogFolderId;
+    touchFolder(oldFolderId);
+    touchFolder(targetFolderId);
+    saveData();
+    renderChatList();
+    renderDialogManagerFolders();
+  } else if (type === 'folder') {
+    const dm = ensureDialogManagerSettings();
+    const folder = dm.folders.find(f => f.id === id);
+    if (!folder) return;
+    // Prevent moving into self or descendant (would create cycle)
+    if (id === targetFolderId) return;
+    let cur = targetFolderId;
+    while (cur) {
+      if (cur === id) return;
+      const parent = dm.folders.find(f => f.id === cur);
+      cur = parent ? (parent.parentId || '') : '';
+    }
+    // Check max depth - need to know depth of this folder's subtree
+    const targetDepth = targetFolderId ? dialogExplorerFolderDepth(targetFolderId) : 0;
+    const maxChildDepth = dialogExplorerMaxChildDepth(id);
+    if (targetDepth + maxChildDepth + 1 > DIALOG_EXPLORER_MAX_DEPTH) {
+      if (typeof toast === 'function') toast(`移动后将超过 ${DIALOG_EXPLORER_MAX_DEPTH} 层嵌套限制`, 2000);
+      return;
+    }
+    const oldParentId = folder.parentId || '';
+    folder.parentId = targetFolderId || '';
+    folder._modifiedAt = Date.now();
+    touchFolder(oldParentId);
+    touchFolder(targetFolderId);
+    persistSettings();
+    renderDialogManagerFolders();
+  }
+}
+
+// --- Navigation ---
+
+function dialogExplorerEnterFolder(folderId) {
+  if (folderId && folderId.startsWith('__group_')) {
+    dialogManagerCurrentFolderId = folderId;
+    renderDialogManagerFolders();
+    return;
+  }
+  const dm = ensureDialogManagerSettings();
+  if (folderId && !dm.folders.some(f => f.id === folderId)) return;
+  dialogManagerCurrentFolderId = folderId || '';
+  renderDialogManagerFolders();
+}
+
+function dialogExplorerGoUp() {
+  if (!dialogManagerCurrentFolderId) return;
+  if (dialogManagerCurrentFolderId.startsWith('__group_')) {
+    dialogManagerCurrentFolderId = '';
+    renderDialogManagerFolders();
+    return;
+  }
+  const dm = ensureDialogManagerSettings();
+  const folder = dm.folders.find(f => f.id === dialogManagerCurrentFolderId);
+  dialogManagerCurrentFolderId = folder ? (folder.parentId || '') : '';
+  renderDialogManagerFolders();
+}
+
+// --- Context Menu ---
+
+let _dialogExplorerContextTarget = null;
+
+function dialogExplorerContextMenu(e, type, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  _dialogExplorerContextTarget = { type, id };
+  const menu = document.getElementById('dialogExplorerContextMenu');
+  if (!menu) return false;
+
+  // Show/hide actions based on type
+  const isChat = type === 'chat';
+  const isTaskGroup = type === 'taskGroup';
+  const inGroupView = dialogManagerCurrentFolderId.startsWith('__group_');
+  const renameBtn = menu.querySelector('[data-explorer-action="rename"]');
+  const deleteBtn = menu.querySelector('[data-explorer-action="delete"]');
+  if (renameBtn) renameBtn.hidden = (type === 'area' || inGroupView);
+  if (deleteBtn) deleteBtn.hidden = (type === 'area' || inGroupView);
+
+  // Export buttons only for standalone chat (not for taskGroup)
+  ['exportMd','exportTxt','exportJson','exportDoc','exportPdf'].forEach(action => {
+    const btn = menu.querySelector(`[data-explorer-action="${action}"]`);
+    if (btn) btn.hidden = !(isChat && !isTaskGroup);
+  });
+
+  // Add "new folder" for area
+  let newFolderBtn = menu.querySelector('[data-explorer-action="newFolder"]');
+  if (type === 'area') {
+    if (!newFolderBtn) {
+      newFolderBtn = document.createElement('button');
+      newFolderBtn.type = 'button';
+      newFolderBtn.dataset.explorerAction = 'newFolder';
+      newFolderBtn.innerHTML = '<span class="dialog-explorer-context-icon">📁</span>新建文件夹';
+      menu.insertBefore(newFolderBtn, menu.firstChild);
+    }
+    newFolderBtn.hidden = false;
+  } else if (newFolderBtn) {
+    newFolderBtn.hidden = true;
+  }
+
+  // Adjust danger styling
+  if (deleteBtn) {
+    deleteBtn.classList.toggle('danger', type === 'chat' || type === 'folder');
+  }
+
+  menu.hidden = false;
+  const menuWidth = menu.offsetWidth || 130;
+  const menuHeight = menu.offsetHeight || 80;
+  let left = e.clientX;
+  let top = e.clientY;
+  if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+  if (top + menuHeight > window.innerHeight - 8) top = window.innerHeight - menuHeight - 8;
+  menu.style.left = Math.max(4, left) + 'px';
+  menu.style.top = Math.max(4, top) + 'px';
+
+  // Close on outside click or scroll
+  setTimeout(() => {
+    document.addEventListener('click', dialogExplorerHideContext, { once: true });
+    document.addEventListener('contextmenu', dialogExplorerHideContext, { once: true });
+    document.addEventListener('scroll', dialogExplorerHideContext, { once: true, capture: true });
+  }, 0);
+
+  return false;
+}
+
+function dialogExplorerHideContext() {
+  const menu = document.getElementById('dialogExplorerContextMenu');
+  if (menu) menu.hidden = true;
+  _dialogExplorerContextTarget = null;
+}
+
+function dialogExplorerHandleContextAction(e) {
+  const btn = e.target.closest('[data-explorer-action]');
+  if (!btn) return;
+  e.stopPropagation();
+  const action = btn.dataset.explorerAction;
+  const target = _dialogExplorerContextTarget;
+  dialogExplorerHideContext();
+
+  if (action === 'newFolder') {
+    dialogExplorerNewFolder();
+  } else if (action.startsWith('export')) {
+    if (target && target.type === 'chat') {
+      const formatMap = { exportMd: 'md', exportTxt: 'txt', exportJson: 'json', exportDoc: 'doc', exportPdf: 'pdf' };
+      dialogExplorerExportChat(target.id, formatMap[action] || 'md');
+    }
+  } else if (!target) {
+    return;
+  } else if (target.type === 'taskGroup') {
+    const realGroupId = target.id.startsWith('__group_') ? target.id.slice(8) : target.id;
+    if (action === 'rename') dialogExplorerRenameTaskGroup(realGroupId);
+    else if (action === 'delete') dialogExplorerDeleteTaskGroup(realGroupId);
+  } else if (target.type === 'folder') {
+    if (action === 'rename') dialogExplorerRenameFolder(target.id);
+    else if (action === 'delete') dialogExplorerDeleteFolder(target.id);
+  } else if (target.type === 'chat') {
+    if (action === 'rename') dialogExplorerRenameChat(target.id);
+    else if (action === 'delete') dialogExplorerDeleteChat(target.id);
+  }
+}
+
+function dialogExplorerNewFolder() {
+  const dm = ensureDialogManagerSettings();
+  const newDepth = (dialogManagerCurrentFolderId ? dialogExplorerFolderDepth(dialogManagerCurrentFolderId) : 0) + 1;
+  if (newDepth > DIALOG_EXPLORER_MAX_DEPTH) {
+    if (typeof toast === 'function') toast(`文件夹嵌套最多 ${DIALOG_EXPLORER_MAX_DEPTH} 层`, 2000);
+    return;
+  }
+  const id = 'folder_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+  const now = Date.now();
+  dm.folders.push({
+    id,
+    name: '新建文件夹',
+    parentId: dialogManagerCurrentFolderId || '',
+    createdAt: now,
+    _modifiedAt: now
+  });
+  touchFolder(dialogManagerCurrentFolderId);
+  persistSettings();
+  renderDialogManagerFolders();
+  // Immediately trigger rename
+  setTimeout(() => dialogExplorerRenameFolder(id), 50);
+}
+
+// --- Folder CRUD ---
+
+function dialogExplorerRenameFolder(folderId) {
+  const dm = ensureDialogManagerSettings();
+  const folder = dm.folders.find(f => f.id === folderId);
   if (!folder) return;
-  const raw = prompt('重命名文件夹', folder.name);
+  const raw = prompt('重命名文件夹（最多' + DIALOG_EXPLORER_MAX_NAME_LEN + '字）', folder.name);
   if (raw === null) return;
   const name = raw.trim();
-  if (!name) {
-    if (typeof toast === 'function') toast('名称不能为空');
+  if (!name) { if (typeof toast === 'function') toast('名称不能为空'); return; }
+  if (name.length > DIALOG_EXPLORER_MAX_NAME_LEN) {
+    if (typeof toast === 'function') toast(`文件夹名称最多 ${DIALOG_EXPLORER_MAX_NAME_LEN} 个字`, 2000);
     return;
   }
-  folder.name = name.slice(0, 60);
+  folder.name = name;
+  folder._modifiedAt = Date.now();
   persistSettings();
   renderDialogManagerFolders();
 }
 
-function deleteDialogFolder(folderId) {
+function dialogExplorerDeleteFolder(folderId) {
   const dm = ensureDialogManagerSettings();
-  const folder = dm.folders.find(item => item.id === folderId);
+  const folder = dm.folders.find(f => f.id === folderId);
   if (!folder) return;
-  if (!confirm(`删除文件夹“${folder.name}”？\n子文件夹和对话会移动到根目录。`)) return;
-  dm.folders.forEach(item => {
-    if (item.parentId === folderId) item.parentId = '';
-  });
-  (state.chats || []).forEach(chat => {
-    if (chat.dialogFolderId === folderId) delete chat.dialogFolderId;
-  });
-  dm.folders = dm.folders.filter(item => item.id !== folderId);
-  persistSettings();
-  saveData();
-  renderDialogManagerFolders();
-}
 
-function moveDialogChatToFolder() {
-  const chatSelect = document.getElementById('dialogMoveChatSelect');
-  const folderSelect = document.getElementById('dialogMoveFolderSelect');
-  const chat = chatSelect ? chatById(chatSelect.value) : null;
-  if (!chat) {
-    if (typeof toast === 'function') toast('请选择对话');
-    return;
+  // Collect all descendant folder IDs
+  const descendantIds = new Set();
+  function collectDescendants(pid) {
+    dm.folders.forEach(f => {
+      if (f.parentId === pid && !descendantIds.has(f.id)) {
+        descendantIds.add(f.id);
+        collectDescendants(f.id);
+      }
+    });
   }
-  const folderId = folderSelect ? folderSelect.value : '';
-  if (folderId) chat.dialogFolderId = folderId;
-  else delete chat.dialogFolderId;
+  collectDescendants(folderId);
+  descendantIds.add(folderId);
+  const allIds = Array.from(descendantIds);
+
+  // Count chats to be deleted
+  const affectedChats = (state.chats || []).filter(c => allIds.includes(c.dialogFolderId || ''));
+  const totalChats = affectedChats.length;
+
+  if (!confirm(`删除文件夹"${folder.name}"？\n将级联删除 ${allIds.length} 个子文件夹和 ${totalChats} 个对话，不可恢复。`)) return;
+
+  // Abort generating chats before deletion
+  affectedChats.forEach(c => {
+    if (typeof isChatGenerating === 'function' && isChatGenerating(c.id) && typeof _abortCurrentTaskIfAny === 'function') {
+      _abortCurrentTaskIfAny(c.id);
+    }
+  });
+
+  // Delete chats in all affected folders (manual, no per-chat confirm)
+  const deleteIds = new Set(affectedChats.map(c => c.id));
+  state.chats = (state.chats || []).filter(c => !deleteIds.has(c.id));
+  if (deleteIds.has(state.currentId)) {
+    state.currentId = ((state.chats || []).find(c => c && !c._hiddenFromUI) || {}).id || null;
+  }
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+
+  // Delete all descendant folders
+  const parentId = folder.parentId || '';
+  dm.folders = dm.folders.filter(f => !allIds.includes(f.id));
+
+  touchFolder(parentId);
+  persistSettings();
   saveData();
   renderChatList();
+  if (typeof renderMessages === 'function') renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  renderDialogManagerFolders();
+}
+
+// --- Chat CRUD (syncs with sidebar) ---
+
+function dialogExplorerRenameChat(chatId) {
+  const chat = chatById(chatId);
+  if (!chat) return;
+  const raw = prompt('重命名对话', chat.title || '新对话');
+  if (raw === null) return;
+  const title = raw.trim();
+  if (!title) { if (typeof toast === 'function') toast('名称不能为空'); return; }
+  chat.title = title.slice(0, 80);
+  touchFolder(chat.dialogFolderId || '');
+  saveData();
+  renderChatList();
+  renderDialogManagerFolders();
+  if (typeof toast === 'function') toast('已重命名');
+}
+
+function dialogExplorerExportChat(chatId, format) {
+  const chat = chatById(chatId);
+  if (!chat) return;
+  dialogManagerSelectedChatId = chatId;
+  exportDialogManagedChat(format);
+}
+
+function dialogExplorerRenameTaskGroup(groupId) {
+  if (typeof renameTaskQueueGroup === 'function') {
+    renameTaskQueueGroup(groupId);
+  }
+  renderDialogManagerFolders();
+}
+
+function dialogExplorerDeleteTaskGroup(groupId) {
+  if (typeof deleteTaskQueueGroup === 'function') {
+    deleteTaskQueueGroup(groupId);
+  }
+  if (dialogManagerCurrentFolderId === '__group_' + groupId) {
+    dialogManagerCurrentFolderId = '';
+  }
+  renderDialogManagerFolders();
+}
+
+function dialogExplorerDeleteChat(chatId) {
+  const chat = chatById(chatId);
+  if (!chat) return;
+  const folderId = chat.dialogFolderId || '';
+  if (typeof deleteChat === 'function') {
+    deleteChat(chatId);
+  } else {
+    if (!confirm(`删除对话"${chat.title || '新对话'}"？`)) return;
+    state.chats = (state.chats || []).filter(c => c.id !== chatId);
+    if (state.currentId === chatId) state.currentId = ((state.chats || [])[0] && state.chats[0].id) || '';
+    saveData();
+    renderChatList();
+    if (typeof toast === 'function') toast('已删除');
+  }
+  touchFolder(folderId);
   renderDialogManagerFolders();
 }
 
@@ -533,7 +1124,7 @@ function exportDialogPdf(chat, filename) {
     try {
       frame.contentWindow.focus();
       frame.contentWindow.print();
-      if (typeof toast === 'function') toast(`请选择“另存为 PDF”：${filename}`, 3500);
+      if (typeof toast === 'function') toast(`请选择"另存为 PDF"：${filename}`, 3500);
     } finally {
       setTimeout(() => frame.remove(), 1200);
     }
@@ -623,7 +1214,7 @@ function deletePrompt(promptId) {
   const dm = ensureDialogManagerSettings();
   const prompt = dm.prompts.find(item => item.id === promptId);
   if (!prompt) return;
-  if (!confirm(`删除提示词“${prompt.title}”？`)) return;
+  if (!confirm(`删除提示词"${prompt.title}"？`)) return;
   dm.prompts = dm.prompts.filter(item => item.id !== promptId);
   persistSettings();
   renderPromptLibrary();
@@ -657,6 +1248,13 @@ function initDialogManager() {
   }
   bindDialogTimelineHover();
   updateDialogTimeline();
+
+  // Context menu click handler
+  const ctxMenu = document.getElementById('dialogExplorerContextMenu');
+  if (ctxMenu && !ctxMenu._explorerBound) {
+    ctxMenu._explorerBound = true;
+    ctxMenu.addEventListener('click', dialogExplorerHandleContextAction);
+  }
 }
 
 function bindDialogTimelineHover() {
@@ -708,10 +1306,6 @@ window.saveDialogManagerSettings = saveDialogManagerSettings;
 window.updateDialogTimeline = updateDialogTimeline;
 window.jumpToDialogMessage = jumpToDialogMessage;
 window.renameTimelineNode = renameTimelineNode;
-window.addDialogFolder = addDialogFolder;
-window.renameDialogFolder = renameDialogFolder;
-window.deleteDialogFolder = deleteDialogFolder;
-window.moveDialogChatToFolder = moveDialogChatToFolder;
 window.switchDialogManagerChat = switchDialogManagerChat;
 window.setDialogExportChat = setDialogExportChat;
 window.exportDialogManagedChat = exportDialogManagedChat;
@@ -721,3 +1315,18 @@ window.editPrompt = editPrompt;
 window.deletePrompt = deletePrompt;
 window.applyPromptToChat = applyPromptToChat;
 window.initDialogManager = initDialogManager;
+
+// Explorer functions
+window.dialogExplorerEnterFolder = dialogExplorerEnterFolder;
+window.dialogExplorerGoUp = dialogExplorerGoUp;
+window.dialogExplorerContextMenu = dialogExplorerContextMenu;
+window.dialogExplorerDragStart = dialogExplorerDragStart;
+window.dialogExplorerDragEnd = dialogExplorerDragEnd;
+window.dialogExplorerItemDragOver = dialogExplorerItemDragOver;
+window.dialogExplorerItemDragLeave = dialogExplorerItemDragLeave;
+window.dialogExplorerItemDrop = dialogExplorerItemDrop;
+window.dialogExplorerBreadcrumbDragOver = dialogExplorerBreadcrumbDragOver;
+window.dialogExplorerBreadcrumbDragLeave = dialogExplorerBreadcrumbDragLeave;
+window.dialogExplorerHandleContextAction = dialogExplorerHandleContextAction;
+window.dialogExplorerToggleView = dialogExplorerToggleView;
+window.dialogExplorerToggleSort = dialogExplorerToggleSort;

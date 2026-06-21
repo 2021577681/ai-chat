@@ -689,22 +689,48 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .dialog-timeline-rename{flex:0 0 auto;align-self:center;margin-left:auto;width:22px;height:22px;border:none;border-radius:6px;background:#fff;color:var(--text-secondary);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s,background .15s,color .15s}
 .dialog-timeline-row:hover .dialog-timeline-rename{opacity:1}
 .dialog-timeline-rename:hover{background:var(--bg-hover);color:var(--primary)}
-.dialog-folder-create,.dialog-folder-move{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) auto;gap:8px}
-.dialog-folder-create input,.dialog-folder-create select,.dialog-folder-move select,.prompt-editor input,.prompt-editor textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;outline:none}
-.dialog-folder-create input:focus,.dialog-folder-create select:focus,.dialog-folder-move select:focus,.prompt-editor input:focus,.prompt-editor textarea:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(79,70,229,.10)}
-.dialog-folder-tree{max-height:330px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:8px}
-.dialog-folder-node{border:1px solid var(--border);border-radius:8px;background:var(--bg-input);margin:6px 0;overflow:hidden}
-.dialog-folder-node summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;cursor:pointer;list-style:none}
-.dialog-folder-node summary::-webkit-details-marker{display:none}
-.dialog-folder-name{font-size:13px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dialog-folder-actions{display:flex;gap:4px;flex:0 0 auto}
-.dialog-folder-actions button{border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-secondary);font-size:11.5px;padding:3px 7px;cursor:pointer}
-.dialog-folder-actions button:hover{background:var(--bg-hover);color:var(--text)}
-.dialog-folder-children{padding:0 8px 8px 16px;border-top:1px solid var(--border)}
-.dialog-folder-chat button{width:100%;border:0;background:transparent;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border-radius:7px;padding:7px 8px;cursor:pointer;font-size:12.5px}
-.dialog-folder-chat button:hover,.dialog-folder-chat.active button{background:var(--bg-hover)}
-.dialog-folder-chat span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dialog-folder-chat em{font-style:normal;color:var(--text-secondary);font-size:11px;white-space:nowrap}
+.dialog-explorer-nav{display:flex;align-items:center;gap:6px;row-gap:12px;padding:6px 0;flex-wrap:wrap}
+.dialog-explorer-nav-btn{border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-secondary);cursor:pointer;font-size:13px;padding:4px 8px;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.dialog-explorer-nav-btn:hover{background:var(--bg-hover);color:var(--text)}
+.dialog-explorer-nav-btn:disabled{opacity:.35;cursor:default}
+.dialog-explorer-nav-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.dialog-explorer-nav-btn.breadcrumb-drag-over{outline:2px solid var(--primary);outline-offset:1px}
+.dialog-explorer-nav-sep{color:var(--text-secondary);font-size:12px}
+.dialog-explorer-nav-path{font-size:12.5px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dialog-explorer-nav-spacer{flex:1}
+.dialog-explorer-sort{border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text-secondary);font-size:12px;padding:4px 6px;cursor:pointer;outline:none;font-family:inherit}
+.dialog-explorer-sort:focus{border-color:var(--primary)}
+.dialog-explorer-area{min-height:80px;max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:6px}
+.dialog-explorer-area.drag-over{background:var(--bg-hover);border-color:var(--primary)}
+.dialog-explorer-area.icons{display:flex;flex-wrap:wrap;align-content:flex-start;gap:4px}
+.dialog-explorer-area.list{display:flex;flex-direction:column;gap:0}
+.dialog-explorer-item{user-select:none}
+.dialog-explorer-area.icons .dialog-explorer-item{width:80px;padding:6px 4px;border:1px solid transparent;border-radius:6px;background:transparent;cursor:pointer;text-align:center;font-size:11.5px;line-height:1.3;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--text)}
+.dialog-explorer-area.icons .dialog-explorer-item:hover{background:var(--bg-hover);border-color:var(--border)}
+.dialog-explorer-area.icons .dialog-explorer-item.selected{background:rgba(79,70,229,.08);border-color:var(--primary)}
+.dialog-explorer-area.icons .dialog-explorer-item.dragging{opacity:.4}
+.dialog-explorer-area.icons .dialog-explorer-item.drag-over{background:rgba(79,70,229,.10);border-color:var(--primary)}
+.dialog-explorer-area.icons .dialog-explorer-item-icon{font-size:26px;line-height:1}
+.dialog-explorer-area.icons .dialog-explorer-item-label{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dialog-explorer-area.icons .dialog-explorer-item-meta{font-size:10px;color:var(--text-secondary)}
+.dialog-explorer-area.list .dialog-explorer-item{width:100%;padding:7px 8px;border:0;border-radius:6px;background:transparent;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--text);font-size:12.5px;text-align:left}
+.dialog-explorer-area.list .dialog-explorer-item:hover{background:var(--bg-hover)}
+.dialog-explorer-area.list .dialog-explorer-item.selected{background:rgba(79,70,229,.08)}
+.dialog-explorer-area.list .dialog-explorer-item.dragging{opacity:.4}
+.dialog-explorer-area.list .dialog-explorer-item.drag-over{background:rgba(79,70,229,.10);outline:1px solid var(--primary);border-radius:6px}
+.dialog-explorer-area.list .dialog-explorer-item-icon{font-size:18px;line-height:1;flex:0 0 auto}
+.dialog-explorer-area.list .dialog-explorer-item-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dialog-explorer-area.list .dialog-explorer-item-meta{font-size:11px;color:var(--text-secondary);flex:0 0 auto;margin-left:auto}
+.dialog-explorer-empty{width:100%;display:flex;align-items:center;justify-content:center;min-height:64px;color:var(--text-secondary);font-size:12.5px}
+.dialog-explorer-context{position:fixed;z-index:4000;min-width:130px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);padding:4px;display:flex;flex-direction:column;gap:1px}
+.dialog-explorer-context[hidden]{display:none}
+.dialog-explorer-context button{width:100%;border:none;border-radius:6px;background:transparent;color:var(--text);cursor:pointer;text-align:left;padding:7px 10px;font-size:12.5px;font-family:inherit;line-height:1.3;display:flex;align-items:center;gap:6px}
+.dialog-explorer-context button[hidden]{display:none}
+.dialog-explorer-context-icon{width:18px;text-align:center;flex:0 0 auto;font-size:13px;line-height:1}
+.dialog-explorer-context button:hover{background:var(--bg-hover)}
+.dialog-explorer-context button.danger{color:var(--danger)}
+.prompt-editor input,.prompt-editor textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;font-size:13px;outline:none}
+.prompt-editor input:focus,.prompt-editor textarea:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(79,70,229,.10)}
 .dialog-export-actions{display:flex;gap:8px;flex-wrap:wrap}
 .prompt-editor{display:flex;flex-direction:column;gap:8px}
 .prompt-editor textarea{resize:vertical;min-height:112px;line-height:1.55}

@@ -1531,20 +1531,20 @@
         <div class="dialog-section-head">
           <div>
             <h3>文件夹</h3>
-            <p>按资源管理器逻辑整理对话，文件夹支持嵌套。</p>
+            <p>右键空白处新建文件夹，拖动对话或文件夹移动，单击进入。</p>
           </div>
         </div>
-        <div class="dialog-folder-create">
-          <input id="dialogFolderName" placeholder="新文件夹名称">
-          <select id="dialogFolderParentSelect"></select>
-          <button class="btn btn-primary" type="button" onclick="addDialogFolder()">新建</button>
+        <div class="dialog-explorer-nav" id="dialogExplorerNav"></div>
+        <div class="dialog-explorer-area" id="dialogExplorerArea"></div>
+        <div class="dialog-explorer-context" id="dialogExplorerContextMenu" hidden>
+          <button type="button" data-explorer-action="exportMd"><span class="dialog-explorer-context-icon">📄</span>导出到 Markdown</button>
+          <button type="button" data-explorer-action="exportTxt"><span class="dialog-explorer-context-icon">📃</span>导出到 TXT</button>
+          <button type="button" data-explorer-action="exportJson"><span class="dialog-explorer-context-icon">📋</span>导出到 JSON</button>
+          <button type="button" data-explorer-action="exportDoc"><span class="dialog-explorer-context-icon">📝</span>导出到 DOC</button>
+          <button type="button" data-explorer-action="exportPdf"><span class="dialog-explorer-context-icon">🖨️</span>导出到 PDF</button>
+          <button type="button" data-explorer-action="rename"><span class="dialog-explorer-context-icon">✏️</span>重命名</button>
+          <button type="button" data-explorer-action="delete"><span class="dialog-explorer-context-icon">🗑</span>删除</button>
         </div>
-        <div class="dialog-folder-move">
-          <select id="dialogMoveChatSelect"></select>
-          <select id="dialogMoveFolderSelect"></select>
-          <button class="btn" type="button" onclick="moveDialogChatToFolder()">移动</button>
-        </div>
-        <div class="dialog-folder-tree" id="dialogFolderTree"></div>
       </section>
 
       <section class="dialog-manager-section">
