@@ -533,8 +533,15 @@ class GitMixin:
         r = self._git_run(cmd, cwd_abs, timeout=15)
         if not r['ok']:
             if 'does not have any commits' in (r['stderr'] or '') or 'bad default revision' in (r['stderr'] or ''):
-                return self._send_json(200, {'ok': True, 'commits': []})
+                return self._send_json(200, {'ok': True, 'commits': [], 'commitCount': 0})
             return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+        commit_count = None
+        if not body.get('file'):
+            count_r = self._git_run(['git', 'rev-list', '--count', 'HEAD'], cwd_abs, timeout=10, max_output=4096)
+            if count_r['ok']:
+                count_text = (count_r['stdout'] or '').strip()
+                if count_text.isdigit():
+                    commit_count = int(count_text)
         commits = []
         for rec in r['stdout'].split('\x1e'):
             rec = rec.strip('\n\r')
@@ -551,7 +558,7 @@ class GitMixin:
                 'ts': int(parts[4]) if parts[4].isdigit() else 0,
                 'subject': parts[5],
             })
-        return self._send_json(200, {'ok': True, 'commits': commits})
+        return self._send_json(200, {'ok': True, 'commits': commits, 'commitCount': commit_count if commit_count is not None else len(commits)})
 
     def _git_reflog(self, body, cwd_abs):
         limit = max(1, min(int(body.get('limit', 30)), 100))

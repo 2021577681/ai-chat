@@ -805,7 +805,7 @@
     <h2>🎭 师生讨论模式 <button class="modal-close" onclick="closeReflectionSettings()">×</button></h2>
     
     <div class="json-help">
-      💡 学生先答 → 老师评审 → 学生改进 → 循环。用户看到的是最终答案，可展开过程。
+      💡 学生先答 → 老师评审 → 学生改进 → 循环。最大轮数表示老师最多评审 N 次，最终一定停在学生回答。
     </div>
     
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
@@ -814,7 +814,7 @@
     </div>
     
     <div class="form-group">
-      <label>最大轮数</label>
+      <label>最大评审轮数</label>
       <div class="slider-row">
         <input type="range" id="ref_rounds" min="1" max="5" step="1" oninput="document.getElementById('refRoundsVal').textContent=this.value">
         <span class="slider-val" id="refRoundsVal">3</span>

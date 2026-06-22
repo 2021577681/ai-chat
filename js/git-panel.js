@@ -156,7 +156,10 @@ async function _refreshGitPanel() {
         </div>
       </div>
       <div class="git-right-col">
-        <div class="git-section-title">📜 提交历史</div>
+        <div class="git-section-title">
+          <span>📜 提交历史</span>
+          <span class="git-count-badge" id="gitHistoryCount">--</span>
+        </div>
         <div id="gitHistory" class="git-history-list"><div class="git-loading">加载中…</div></div>
       </div>
       <div class="git-detail-col">
@@ -306,15 +309,25 @@ async function _loadHistory() {
   const box = document.getElementById('gitHistory');
   if (!box) return;
   if (!r.ok) {
+    _setGitHistoryCount(0);
     box.innerHTML = `<div class="git-error">❌ ${escapeHtml(r.error || '加载失败')}</div>`;
     return;
   }
   GIT_STATE.commits = r.commits;
+  _setGitHistoryCount(Number.isFinite(r.commitCount) ? r.commitCount : r.commits.length);
   if (!r.commits.length) {
     box.innerHTML = `<div class="git-empty-state-small">还没有任何提交。<br>先在左侧添加文件并提交吧～</div>`;
     return;
   }
   box.innerHTML = r.commits.map(c => _renderCommitRow(c)).join('');
+}
+
+function _setGitHistoryCount(count) {
+  const el = document.getElementById('gitHistoryCount');
+  if (!el) return;
+  const n = Math.max(0, parseInt(count, 10) || 0);
+  el.textContent = `commit: ${n}`;
+  el.title = `仓库提交总数：${n}`;
 }
 
 function _renderCommitRow(c) {

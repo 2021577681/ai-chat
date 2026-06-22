@@ -68,7 +68,7 @@ async function callAPIWithReflection(options = {}) {
     let currentAnswer = '';
     let teacherFeedback = null;
     
-    for (let round = 1; round <= s.refRounds; round++) {
+    for (let round = 1; round <= s.refRounds + 1; round++) {
       // ===== 1. 学生回答（支持多轮工具调用 + 流式）=====
       aiMsg.reflection.progressText = `🎓 学生${round === 1 ? '思考' : '改进'}中（第 ${round} 轮）...`;
       
@@ -122,6 +122,11 @@ async function callAPIWithReflection(options = {}) {
       studentTurn.content = currentAnswer;
       studentTurn._running = false;
       refreshReflectionLive(aiMsg, true, c);
+
+      if (round > s.refRounds) {
+        aiMsg.reflection.progressText = `⏱ 已达最大评审轮数，使用学生最终改进版`;
+        break;
+      }
       
       // ===== 2. 老师评审（只看最终答案，可调工具验证）=====
       aiMsg.reflection.progressText = `👨‍🏫 老师评审中（第 ${round} 轮）...`;
@@ -176,10 +181,6 @@ async function callAPIWithReflection(options = {}) {
       // ===== 3. 终止条件 =====
       if (critique.score >= s.refMinScore) {
         aiMsg.reflection.progressText = `✅ 已达目标分 ${critique.score}/${s.refMinScore}`;
-        break;
-      }
-      if (round === s.refRounds) {
-        aiMsg.reflection.progressText = `⏱ 已达最大轮数`;
         break;
       }
     }
@@ -324,7 +325,7 @@ function refreshReflectionLive(aiMsg, immediate, targetChat) {
     const stats = panel.querySelector('.reflection-stats');
     if (stats) {
       const studentCount = (ref.turns || []).filter(t => t.role === 'student').length;
-      stats.textContent = `${studentCount} 轮 · 最终评分 ${ref.finalScore ?? '?'}/10`;
+      stats.textContent = `${studentCount} 次学生回答 · 最终评分 ${ref.finalScore ?? '?'}/10`;
     }
   };
   

@@ -1139,7 +1139,7 @@ function renderMsg(m, idx) {
       <div class="reflection-panel ${ref.expanded ? '' : 'collapsed'}" data-msg-idx="${idx}">
         <button class="reflection-toggle" onclick="toggleReflectionPanel(${idx})">
           <span>🎭 师生讨论过程</span>
-          <span class="reflection-stats">${ref.turns.filter(t => t.role === 'student').length} 轮 · 最终评分 ${ref.finalScore ?? '?'}/10</span>
+          <span class="reflection-stats">${ref.turns.filter(t => t.role === 'student').length} 次学生回答 · 最终评分 ${ref.finalScore ?? '?'}/10</span>
         </button>
         <div class="reflection-body">${turnsHtml}${progressHtml}</div>
       </div>`;

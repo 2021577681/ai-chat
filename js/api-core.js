@@ -39,6 +39,9 @@ function _buildRequestBodyInternal(history, modelOverride, streamOverride, optio
   let systemContent = typeof getEffectiveSystemPrompt === 'function'
     ? getEffectiveSystemPrompt()
     : (s.systemPrompt || '');
+  if (options.extraSystemPrompt) {
+    systemContent = [systemContent, options.extraSystemPrompt].filter(Boolean).join('\n\n');
+  }
   const usesTopLevelSystem = s.apiFormat === 'anthropic'
     || s.apiFormat === 'responses'
     || !!(s.useCustomJson && s.jsonTemplate && s.jsonTemplate.trim());
@@ -47,10 +50,16 @@ function _buildRequestBodyInternal(history, modelOverride, streamOverride, optio
   }
   
   // 准备所有占位符的值
+  const messageBuildOptions = {
+    extraSystemPrompt: options.extraSystemPrompt,
+    includeTextToolCallRecovery: !!options.includeTextToolCallRecovery
+  };
   const apiMessages = s.apiFormat === 'anthropic' 
-    ? buildAnthropicMessages(history)
-    : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(history) : buildOpenAIMessages(history));
-  const toolsEnabled = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
+    ? buildAnthropicMessages(history, messageBuildOptions)
+    : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(history, messageBuildOptions) : buildOpenAIMessages(history, messageBuildOptions));
+  const toolsEnabled = options.forceDisableTools
+    ? false
+    : (options.useTools !== undefined ? !!options.useTools : !!s.useTools);
   const tools = toolsEnabled ? buildToolsArray({ force: true }) : null;
   const applyReasoningEffort = (targetBody) => {
     const allowed = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -417,6 +426,19 @@ async function callAPI(roundLimit, options = {}) {
     // ⭐ 关键：首次进入时清掉"停止请求"标志（递归进入不清，以便传递停止意图）
     state.stopRequested = false;
   }
+  roundLimit = Math.max(0, parseInt(roundLimit, 10) || 0);
+  const toolBudgetLimit = Math.max(0, parseInt(s.maxToolRounds, 10) || 0);
+  const toolRoundsUsed = Math.max(0, toolBudgetLimit - roundLimit);
+  const mainToolsAllowedThisRound = taskUseTools && roundLimit > 0;
+  const shouldInjectMainToolBudgetPrompt = taskUseTools || !!options.textToolCallRecoveryUsed;
+  const mainToolBudgetPrompt = shouldInjectMainToolBudgetPrompt
+    ? buildAgentLoopToolBudgetPrompt({
+        hasTools: taskUseTools,
+        round: toolRoundsUsed,
+        maxRounds: toolBudgetLimit,
+        forceFinal: !mainToolsAllowedThisRound
+      })
+    : '';
   
   const task = (typeof beginChatTask === 'function')
     ? beginChatTask(taskChatId, null, { resetStop: isFirstCall })
@@ -526,7 +548,13 @@ async function callAPI(roundLimit, options = {}) {
   const url = buildFullUrl(s.baseUrl, s.apiPath);
   let body;
   try {
-    body = buildRequestBody(c.messages.slice(0, -1), undefined, undefined, { useTools: taskUseTools, showPrivacyReport: true });
+    body = buildRequestBody(c.messages.slice(0, -1), undefined, undefined, {
+      useTools: taskUseTools,
+      forceDisableTools: !mainToolsAllowedThisRound,
+      extraSystemPrompt: mainToolBudgetPrompt,
+      includeTextToolCallRecovery: !!options.textToolCallRecoveryUsed,
+      showPrivacyReport: true
+    });
   } catch (e) {
     c.messages[lastIdx].content = `❌ 构造请求失败：${e.message}`;
     if (isTaskVisible()) renderMessages();
@@ -648,6 +676,32 @@ async function callAPI(roundLimit, options = {}) {
     }
     
     const msg = c.messages[lastIdx];
+    if (msg && shouldInjectMainToolBudgetPrompt && !msg.tool_calls?.length && agentLoopLooksLikeTextToolCall(msg.content)) {
+      if (!options.textToolCallRecoveryUsed) {
+        if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+        msg._hiddenFromUI = true;
+        msg._textToolCallSuppressed = true;
+        msg._endTime = Date.now();
+        c.messages.push({
+          role: 'user',
+          content: '系统提示：你刚才输出的是工具调用协议文本，但它不是可执行的结构化工具调用，系统不会执行。现在不要再输出任何工具调用标记或协议文本，请基于已有上下文直接给出最终答案。',
+          _hiddenFromUI: true,
+          _textToolCallRecovery: true
+        });
+        saveData();
+        if (isTaskVisible()) renderMessages();
+        await callAPI(0, {
+          chatId: taskChatId,
+          useTools: false,
+          suppressCompletionSound,
+          textToolCallRecoveryUsed: true
+        });
+        return;
+      }
+      msg.content = '（模型连续输出了未执行的工具调用文本，已停止以避免把伪工具调用当作最终答案。）';
+      delete msg.tool_calls;
+    }
+
     if (msg.tool_calls && msg.tool_calls.length && roundLimit > 0) {
       // ⭐ 关键修复：本轮 assistant 回复（含工具调用）已结束，冻结其 timer
       // 否则 tickMsgTimers 会一直按 Date.now()-_startTime 刷新，导致"模型回答完计时还在涨"
@@ -1366,6 +1420,42 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
 // - 复用现有 _apiFetchWithTimeout / buildHeaders / executeTool / 重试机制
 // 【调用方】reflection.js（学生 / 老师）、未来可扩展给计划模式
 
+function buildAgentLoopToolBudgetPrompt({ hasTools, round, maxRounds, forceFinal = false }) {
+  const limit = Math.max(0, parseInt(maxRounds, 10) || 0);
+  const remaining = (!forceFinal && hasTools) ? Math.max(0, limit - round) : 0;
+
+  if (remaining <= 0) {
+    return `【工具调用预算】
+当前没有可执行的工具调用机会。请基于已有上下文直接输出最终答案。
+不要输出、模拟或书写任何工具调用标记或协议文本，包括但不限于 <｜｜DSML｜｜tool_calls>、<tool_calls>、tool_calls、function_call、execute_action 调用块，或 JSON/XML 形式的工具调用。`;
+  }
+
+  if (remaining === 1) {
+    return `【工具调用预算】
+这是最后一次可以发起工具调用的模型响应。只有在确实必要时才调用工具。
+如果本轮调用了工具，收到工具结果后的下一轮不会再提供任何工具，你必须直接输出最终答案，不能再尝试、模拟或书写工具调用。
+如果已有信息足够，请不要调用工具，直接输出最终答案。`;
+  }
+
+  if (remaining <= 3) {
+    return `【工具调用预算】
+还剩 ${remaining} 次可以发起工具调用的模型响应（包含本轮）。请优先完成关键验证并开始收尾，不要把可用工具轮数当成必须用完。`;
+  }
+
+  return `【工具调用预算】
+还剩 ${remaining} 次可以发起工具调用的模型响应（包含本轮）。工具只在必要时使用，完成后直接给最终答案。`;
+}
+
+function agentLoopLooksLikeTextToolCall(text) {
+  let head = String(text || '').trim().slice(0, 1200);
+  head = head.replace(/^```(?:[a-z0-9_-]+)?\s*/i, '').trimStart();
+  if (!head) return false;
+  return /<\s*[|｜]{0,2}\s*DSML\s*[|｜]{0,2}\s*tool_calls\b/i.test(head)
+    || /^<\s*tool_calls\b/i.test(head)
+    || /^<\s*invoke\b[^>]*name\s*=\s*["']?(?:execute_action|read_note|save_note|apply_patch)\b/i.test(head)
+    || /^\s*\{[\s\S]{0,200}"tool_calls"\s*:\s*\[/i.test(head);
+}
+
 async function runAgentLoop({
   initialMessages,     // 标准格式：[{role:'user'|'assistant'|'tool', content, tool_calls?, tool_call_id?, name?}]
   systemPrompt,        // 系统提示（独立于 settings.systemPrompt）
@@ -1388,13 +1478,17 @@ async function runAgentLoop({
   const effectiveSystemPrompt = typeof withActiveSkillPrompt === 'function'
     ? withActiveSkillPrompt(systemPrompt || '')
     : (systemPrompt || '');
+  const toolRoundLimit = Math.max(0, parseInt(maxRounds, 10) || 0);
   
   // 内部维护 messages（不动 c.messages）
   const messages = JSON.parse(JSON.stringify(initialMessages || []));
   const tools = useTools ? buildToolsArray({ force: true }) : null;
+  const hasUsableTools = Array.isArray(tools) ? tools.length > 0 : !!tools;
   
   let finalText = '';
   let totalUsage = null;
+  let textToolCallRecoveryUsed = false;
+  let forceFinalNoTools = false;
   
   const _emit = (ev) => { try { onProgress && onProgress(ev); } catch (e) { console.warn('[runAgentLoop] onProgress 抛错:', e); } };
   
@@ -1403,7 +1497,7 @@ async function runAgentLoop({
   const _isStopped = typeof isStopped === 'function' ? isStopped : () => !!state.stopRequested;
   const _isAborted = () => (signal && signal.aborted) || _isStopped();
   
-  for (let round = 0; round < maxRounds + 1; round++) {
+  for (let round = 0; round < toolRoundLimit + 2; round++) {
     // 中断检查
     if (_isAborted()) {
       const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
@@ -1431,9 +1525,19 @@ async function runAgentLoop({
       const apiMessages = s.apiFormat === 'anthropic'
         ? buildAnthropicMessages(messages)
         : (s.apiFormat === 'responses' ? buildOpenAIResponsesInput(messages) : buildOpenAIMessages(messages));
+      const allowToolsThisRound = hasUsableTools && !forceFinalNoTools && round < toolRoundLimit;
+      const rawLoopSystemPrompt = [
+        effectiveSystemPrompt,
+        buildAgentLoopToolBudgetPrompt({
+          hasTools: hasUsableTools && !forceFinalNoTools,
+          round,
+          maxRounds: toolRoundLimit,
+          forceFinal: forceFinalNoTools
+        })
+      ].filter(Boolean).join('\n\n');
       const loopSystemPrompt = typeof privacyGuardSanitizeSystemText === 'function'
-        ? privacyGuardSanitizeSystemText(effectiveSystemPrompt, { includeResponseGuard: true })
-        : effectiveSystemPrompt;
+        ? privacyGuardSanitizeSystemText(rawLoopSystemPrompt, { includeResponseGuard: true })
+        : rawLoopSystemPrompt;
       let nextBody;
       if (s.apiFormat === 'anthropic') {
         nextBody = {
@@ -1445,7 +1549,7 @@ async function runAgentLoop({
         };
         if (loopSystemPrompt) nextBody.system = loopSystemPrompt;
         // 最后一轮不带 tools，强制收尾
-        if (tools && round < maxRounds) nextBody.tools = tools;
+        if (allowToolsThisRound) nextBody.tools = tools;
       } else if (s.apiFormat === 'responses') {
         nextBody = {
           model,
@@ -1455,7 +1559,7 @@ async function runAgentLoop({
           stream
         };
         if (loopSystemPrompt) nextBody.instructions = loopSystemPrompt;
-        if (tools && round < maxRounds) nextBody.tools = tools;
+        if (allowToolsThisRound) nextBody.tools = tools;
       } else {
         const msgs = loopSystemPrompt ? [{ role: 'system', content: loopSystemPrompt }] : [];
         for (const m of apiMessages) if (m.role !== 'system') msgs.push(m);
@@ -1466,7 +1570,7 @@ async function runAgentLoop({
           temperature: _temp,
           stream
         };
-        if (tools && round < maxRounds) nextBody.tools = tools;
+        if (allowToolsThisRound) nextBody.tools = tools;
         if (stream) nextBody.stream_options = { include_usage: true };
       }
       return nextBody;
@@ -1719,17 +1823,31 @@ async function runAgentLoop({
     }
     messages.push(assistantMsg);
     
-    _emit({ type: 'round_end', round: round + 1, hasToolCalls: assistantToolCalls.length > 0, text: assistantText });
+    const hasTextToolCall = !assistantToolCalls.length && agentLoopLooksLikeTextToolCall(assistantText);
+    _emit({ type: 'round_end', round: round + 1, hasToolCalls: assistantToolCalls.length > 0 || (hasTextToolCall && !textToolCallRecoveryUsed), text: assistantText });
     
     // 没工具调用 → 结束
     if (!assistantToolCalls.length) {
+      if (hasTextToolCall) {
+        if (!textToolCallRecoveryUsed) {
+          textToolCallRecoveryUsed = true;
+          forceFinalNoTools = true;
+          messages.push({
+            role: 'user',
+            content: '系统提示：你刚才输出的是工具调用协议文本，但它不是可执行的结构化工具调用，系统不会执行。现在不要再输出任何工具调用标记或协议文本，请基于已有上下文直接给出最终答案。'
+          });
+          continue;
+        }
+        finalText = '（模型连续输出了未执行的工具调用文本，已停止以避免把伪工具调用当作最终答案。）';
+        break;
+      }
       finalText = assistantText;
       break;
     }
     
     // 到了 maxRounds 仍想调工具，但已无 tools → 把这次 assistant 文本当作 final
     // （上面构造 body 时最后一轮已剥掉 tools，模型还硬要 call 极少见，但兜底）
-    if (round >= maxRounds) {
+    if (round >= toolRoundLimit) {
       // ⭐ 关键修复：剥离未执行的 tool_calls，避免污染 messages
       if (assistantMsg.tool_calls) {
         console.warn('[runAgentLoop] 工具轮次已用完但仍有 tool_calls，自动清除');

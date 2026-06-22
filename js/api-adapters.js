@@ -6,6 +6,9 @@
 // ============ API 调用核心 ============
 
 function buildOpenAIMessages(history, options = {}) {
+  history = (history || []).filter(m =>
+    m && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
+  );
   history = typeof privacyGuardPrepareHistory === 'function'
     ? privacyGuardPrepareHistory(history, { format: 'openai', ...options })
     : history;
@@ -13,12 +16,17 @@ function buildOpenAIMessages(history, options = {}) {
   let systemPrompt = typeof getEffectiveSystemPrompt === 'function'
     ? getEffectiveSystemPrompt()
     : state.settings.systemPrompt;
+  if (options.extraSystemPrompt) {
+    systemPrompt = [systemPrompt, options.extraSystemPrompt].filter(Boolean).join('\n\n');
+  }
   if (typeof privacyGuardSanitizeSystemText === 'function') {
     systemPrompt = privacyGuardSanitizeSystemText(systemPrompt, { includeResponseGuard: options.includeResponseGuard !== false });
   }
   if (systemPrompt) out.push({ role: 'system', content: systemPrompt });
   
   for (const m of history) {
+    if (m._textToolCallSuppressed) continue;
+    if (m._textToolCallRecovery && !options.includeTextToolCallRecovery) continue;
     if (m._isCompressing) continue;
     if (m._isSummary) {
       out.push({ role: 'system', content: m.content });
@@ -116,12 +124,17 @@ function fixOpenAIMessageSequence(messages) {
 
 // ============ OpenAI Responses API ============
 function buildOpenAIResponsesInput(history, options = {}) {
+  history = (history || []).filter(m =>
+    m && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
+  );
   history = typeof privacyGuardPrepareHistory === 'function'
     ? privacyGuardPrepareHistory(history, { format: 'responses', ...options })
     : history;
   const out = [];
   
   for (const m of history) {
+    if (m._textToolCallSuppressed) continue;
+    if (m._textToolCallRecovery && !options.includeTextToolCallRecovery) continue;
     if (m._isCompressing) continue;
     if (m._isSummary) {
       out.push({ role: 'system', content: m.content || '' });
@@ -191,6 +204,9 @@ function buildOpenAIResponsesInput(history, options = {}) {
 
 // ⭐ 关键修复：支持 PDF 和图片
 function buildAnthropicMessages(history, options = {}) {
+  history = (history || []).filter(m =>
+    m && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
+  );
   history = typeof privacyGuardPrepareHistory === 'function'
     ? privacyGuardPrepareHistory(history, { format: 'anthropic', ...options })
     : history;
@@ -201,6 +217,8 @@ function buildAnthropicMessages(history, options = {}) {
   const summaryText = history.filter(m => m._isSummary).map(m => m.content).join('\n\n');
   
   for (const m of history) {
+    if (m._textToolCallSuppressed) continue;
+    if (m._textToolCallRecovery && !options.includeTextToolCallRecovery) continue;
     if (m._isCompressing) continue;
     if (m._isSummary) continue;
     if (m.role === 'system') continue;
