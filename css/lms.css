@@ -381,3 +381,6 @@
 [data-theme="dark"] .lms-todo-card.urgent   { background: rgba(230, 126, 34, 0.08); }
 [data-theme="dark"] .lms-todo-card.critical { background: rgba(231, 76, 60, 0.1); }
 [data-theme="dark"] .lms-todo-card.overdue  { background: rgba(149, 165, 166, 0.08); }
+
+/* LMS Cookie 弹窗层级应在学习面板之上 */
+#lmsCookieModal { z-index: 1300; }

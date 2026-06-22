@@ -563,7 +563,10 @@ function toggleMainSettingsSelectSkin(select) {
   if (!wrap || !menu || !trigger || select.disabled) return;
   const willOpen = menu.hidden;
   closeMainSettingsSelectSkins(wrap);
-  if (!willOpen) return;
+  if (!willOpen) {
+    closeMainSettingsSelectSkin(select);
+    return;
+  }
   refreshMainSettingsSelectSkin(select);
   menu.hidden = false;
   wrap.classList.add('open');
