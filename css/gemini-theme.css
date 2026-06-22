@@ -2319,11 +2319,14 @@ body.settings-page-open .settings-docked-mask.show{
 }
 
 .tool-preset,
-.backup-check,
 .perm-item-badge,
 .plan-step-status,
 .outline-status-badge{
   border-radius:999px;
+}
+
+.backup-check{
+  border-radius:10px;
 }
 
 .backup-check:hover,

@@ -83,7 +83,7 @@ function _fmtTokenUsageMoney(usd) {
   const showCny = (typeof shouldShowCny === 'function') ? shouldShowCny() : true;
   const rate = (typeof getExchangeRate === 'function') ? getExchangeRate() : 7.2;
   const cny = usd * rate;
-  return `$${usd.toFixed(6)}${showCny ? ` / ¥${cny.toFixed(4)}` : ''}`;
+  return `$${usd.toFixed(2)}${showCny ? ` / ¥${cny.toFixed(2)}` : ''}`;
 }
 
 function _fmtTokenUsageDate(ts) {

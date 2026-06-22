@@ -656,12 +656,12 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .backup-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .backup-option-section{background:var(--bg-input);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}
 .backup-section-title{font-size:11px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
-.backup-check{display:flex;align-items:flex-start;gap:9px;padding:8px;border:1px solid transparent;border-radius:8px;cursor:pointer;font-weight:normal!important;margin:0!important;transition:background .12s,border-color .12s}
+.backup-check{display:grid;grid-template-columns:16px minmax(0,1fr);align-items:flex-start;gap:9px;padding:8px;border:1px solid transparent;border-radius:8px;cursor:pointer;font-weight:normal!important;margin:0!important;transition:background .12s,border-color .12s}
 .backup-check:hover{background:var(--bg-hover);border-color:var(--border)}
-.backup-check input{width:auto!important;margin-top:2px;flex:0 0 auto}
-.backup-check span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.backup-check input{width:14px!important;height:14px!important;margin:2px 0 0;justify-self:center;flex:0 0 auto}
+.backup-check span{display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden}
 .backup-check strong{font-size:13px;font-weight:600;color:var(--text);line-height:1.25}
-.backup-check em{font-style:normal;font-size:11.5px;color:var(--text-secondary);line-height:1.35}
+.backup-check em{font-style:normal;font-size:11.5px;color:var(--text-secondary);line-height:1.35;overflow-wrap:anywhere}
 .backup-check.sensitive strong{color:var(--warning)}
 .backup-check.compact{align-items:center;padding:7px 8px}
 .backup-check.compact span{display:block}
@@ -831,10 +831,10 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .pricing-table{width:100%;min-width:900px;font-size:13px;border-collapse:collapse}
 .pricing-table thead tr{background:var(--bg-input)}
 .pricing-table thead th{
-  padding:10px 12px;text-align:left;font-weight:600;font-size:12px;
+  padding:10px 12px;text-align:center;font-weight:600;font-size:12px;
   color:var(--text-secondary);text-transform:uppercase;letter-spacing:.3px
 }
-.pricing-table thead th.num{text-align:right}
+.pricing-table thead th.num{text-align:center}
 .pricing-table thead th.act{text-align:center}
 .pricing-table tbody tr{border-top:1px solid var(--border);transition:background .15s}
 .pricing-table tbody tr:hover{background:var(--bg-hover)}
@@ -842,12 +842,12 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .pricing-table .pricing-input{
   width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;
   background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box;
-  transition:border-color .15s, box-shadow .15s
+  text-align:left;transition:border-color .15s, box-shadow .15s
 }
 .pricing-table .pricing-input:focus{
   outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(59,130,246,.15)
 }
-.pricing-table .pricing-input[type=number]{text-align:right;font-family:'SF Mono',Consolas,monospace}
+.pricing-table .pricing-input[type=number]{text-align:left;font-family:'SF Mono',Consolas,monospace}
 .pricing-currency-segment{
   width:100%;min-height:31px;display:grid;grid-template-columns:1fr 1fr;
   border:1px solid var(--border);border-radius:6px;overflow:hidden;
@@ -891,7 +891,6 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   font-family:'SF Mono',Monaco,Consolas,monospace;line-height:1.2;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap
 }
-.token-usage-card-value-money{font-size:14px}
 .token-usage-section{margin-top:2px}
 .token-usage-section-title{
   margin:0 0 10px;color:var(--text);font-size:13px;font-weight:700;
@@ -904,7 +903,10 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:10px;
   background:var(--bg)
 }
-.token-usage-table{width:100%;min-width:900px;border-collapse:collapse;font-size:12.5px}
+.token-usage-table{
+  width:100%;min-width:900px;border-collapse:collapse;font-size:12.5px;
+  font-family:var(--font-ui)
+}
 .token-usage-table th,
 .token-usage-table td{
   padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle;
@@ -912,13 +914,14 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 .token-usage-table thead th{
   position:sticky;top:0;z-index:1;background:var(--bg-sidebar);color:var(--text-secondary);
-  font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em
+  font-size:11.5px;font-weight:700;text-align:center;text-transform:uppercase;letter-spacing:.03em
 }
+.token-usage-table tbody td{text-align:left}
 .token-usage-table tbody tr{transition:background .15s}
 .token-usage-table tbody tr:hover{background:var(--bg-hover)}
 .token-usage-table tbody tr:last-child td{border-bottom:0}
-.token-usage-table th.num,
-.token-usage-table td.num{text-align:right;white-space:nowrap;font-family:'SF Mono',Monaco,Consolas,monospace}
+.token-usage-table th.num{text-align:center;white-space:nowrap;font-family:'SF Mono',Consolas,monospace}
+.token-usage-table td.num{text-align:left;white-space:nowrap;font-family:'SF Mono',Consolas,monospace}
 .token-usage-model-col{width:28%}
 .token-usage-model{min-width:220px;max-width:320px}
 .token-usage-model code,
@@ -927,10 +930,12 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   white-space:nowrap;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;
   padding:2px 6px;color:var(--text);font-family:'SF Mono',Monaco,Consolas,monospace;font-size:12px
 }
+.token-usage-table .token-usage-model code{font-family:var(--font-ui)}
 .token-usage-time-range{
   color:var(--text-secondary);font-size:11.5px;white-space:nowrap;
   font-family:'SF Mono',Monaco,Consolas,monospace
 }
+.token-usage-table .token-usage-time-range{font-family:var(--font-ui)}
 .token-usage-chart-head{
   display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px
 }

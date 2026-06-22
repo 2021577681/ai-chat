@@ -17,9 +17,19 @@ const CONTEXT_LIMIT_OVERRIDE_MIN = 1024;
 const CONTEXT_LIMIT_OVERRIDE_MAX = 4000000;
 const CONTEXT_LIMIT_RULES_KEY = 'aichat_context_limit_rules_v1';
 
-const DEFAULT_CONTEXT_LIMIT_RULES = Object.entries(MODEL_CONTEXT_LIMITS)
-  .filter(([key]) => key !== '_default')
-  .map(([key, limit]) => ({ key, limit }));
+const DEFAULT_CONTEXT_LIMIT_RULE_KEYS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4',
+  'claude-sonnet-4',
+  'claude-opus-4',
+  'deepseek-chat',
+  'deepseek-reasoner'
+];
+
+const DEFAULT_CONTEXT_LIMIT_RULES = DEFAULT_CONTEXT_LIMIT_RULE_KEYS
+  .map(key => ({ key, limit: MODEL_CONTEXT_LIMITS[key] }))
+  .filter(rule => rule.limit > 0);
 
 function normalizeContextLimitOverride(value) {
   const n = parseInt(value);
