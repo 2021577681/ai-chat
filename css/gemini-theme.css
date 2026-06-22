@@ -2075,6 +2075,8 @@ body.settings-page-open .settings-docked-mask.show{
 
 .settings-page-content .git-modal-box{
   max-height:none;
+  background:var(--bg-chat);
+  isolation:isolate;
 }
 
 .settings-page-content .git-main-grid{

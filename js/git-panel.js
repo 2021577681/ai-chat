@@ -5,6 +5,8 @@
 // 加载顺序：在 terminal.js 之后即可
 
 // 当前面板状态（每次打开重新刷新）
+const GIT_HISTORY_LIMIT = 100;
+
 const GIT_STATE = {
   status: null,        // {branch, ahead, behind, staged[], unstaged[], untracked[]}
   commits: [],         // 提交历史
@@ -305,7 +307,7 @@ function _renderFileRow(f, source) {
 
 // ============ 历史加载 ============
 async function _loadHistory() {
-  const r = await callGit('log', { limit: 100 });
+  const r = await callGit('log', { limit: GIT_HISTORY_LIMIT });
   const box = document.getElementById('gitHistory');
   if (!box) return;
   if (!r.ok) {
@@ -314,7 +316,8 @@ async function _loadHistory() {
     return;
   }
   GIT_STATE.commits = r.commits;
-  _setGitHistoryCount(Number.isFinite(r.commitCount) ? r.commitCount : r.commits.length);
+  const hasTotalCount = Number.isFinite(r.commitCount);
+  _setGitHistoryCount(hasTotalCount ? r.commitCount : r.commits.length, !hasTotalCount && r.commits.length >= GIT_HISTORY_LIMIT);
   if (!r.commits.length) {
     box.innerHTML = `<div class="git-empty-state-small">还没有任何提交。<br>先在左侧添加文件并提交吧～</div>`;
     return;
@@ -322,12 +325,12 @@ async function _loadHistory() {
   box.innerHTML = r.commits.map(c => _renderCommitRow(c)).join('');
 }
 
-function _setGitHistoryCount(count) {
+function _setGitHistoryCount(count, approximate = false) {
   const el = document.getElementById('gitHistoryCount');
   if (!el) return;
   const n = Math.max(0, parseInt(count, 10) || 0);
-  el.textContent = `commit: ${n}`;
-  el.title = `仓库提交总数：${n}`;
+  el.textContent = `commit: ${n}${approximate ? '+' : ''}`;
+  el.title = approximate ? `已加载最近 ${n} 条提交；重启本地后端后可显示准确总数` : `仓库提交总数：${n}`;
 }
 
 function _renderCommitRow(c) {

@@ -3,6 +3,11 @@
 .git-modal .modal { width: min(1100px, 95vw); max-height: 90vh; }
 .git-modal-box { display: flex; flex-direction: column; max-height: 90vh; }
 .git-modal h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#gitBody {
+  position: relative;
+  background: var(--bg-chat);
+  isolation: isolate;
+}
 
 .git-branch-badge {
   display: inline-flex; align-items: center; gap: 4px;
@@ -75,6 +80,10 @@
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 8px 12px; margin-bottom: 12px;
   background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  position: relative; z-index: 0; overflow: hidden;
+  background-clip: padding-box;
+  transform: translateZ(0);
+  contain: paint;
 }
 .git-user-meta {
   min-width: 0; display: flex; align-items: baseline; gap: 8px;
