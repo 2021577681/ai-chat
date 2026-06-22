@@ -75,6 +75,7 @@ function openSettings() {
   if (bIntervalVal) bIntervalVal.textContent = s.beaconInterval || 5;
   
   updateUrlPreview();
+  initMainSettingsSelectSkins();
 }
 
 function currentSettingsModelName() {
@@ -310,6 +311,7 @@ function testContextLimitMatch() {
 }
 
 function closeSettings() {
+  closeMainSettingsSelectSkins();
   document.getElementById('settingsModal').classList.remove('show');
 }
 
@@ -394,6 +396,258 @@ function saveSettings() {
   }
 }
 
+const SETTINGS_SELECT_SKIN_EXCLUDED_IDS = new Set(['modelSelect', 'effortSelect', 'apiProfileSelect']);
+let settingsSelectSkinObserver = null;
+let settingsSelectSkinRefreshQueued = false;
+
+function initMainSettingsSelectSkins(root = document) {
+  getSettingsSelectSkinCandidates(root).forEach(select => {
+    enhanceMainSettingsSelectSkin(select);
+    refreshMainSettingsSelectSkin(select);
+  });
+}
+
+function refreshMainSettingsSelectSkins(root = document) {
+  const scoped = getSettingsSelectSkinCandidates(root);
+  const skinned = Array.from(document.querySelectorAll('.settings-select-native'));
+  Array.from(new Set([...scoped, ...skinned])).forEach(select => {
+    if (select) refreshMainSettingsSelectSkin(select);
+  });
+}
+
+function getSettingsSelectSkinCandidates(root = document) {
+  const selects = [];
+  if (root && root.nodeType === 1 && root.matches && root.matches('select')) selects.push(root);
+  if (root && root.querySelectorAll) selects.push(...root.querySelectorAll('select'));
+  return selects.filter(isSettingsSelectSkinCandidate);
+}
+
+function isSettingsSelectSkinCandidate(select) {
+  if (!select || SETTINGS_SELECT_SKIN_EXCLUDED_IDS.has(select.id)) return false;
+  if (select.closest('.model-picker,.effort-picker,.api-profile-dropdown')) return false;
+  if (select.classList.contains('model-select') || select.classList.contains('effort-select-native')) return false;
+  if (select.style && select.style.display === 'none') return false;
+  return !!select.closest('.modal,.settings-page-content,.settings-docked-panel');
+}
+
+function enhanceMainSettingsSelectSkin(select) {
+  if (!select || select.dataset.settingsSelectSkin === '1') {
+    syncSettingsSelectSkinMetrics(select);
+    return;
+  }
+  const parent = select.parentElement;
+  if (!parent) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-select-skin';
+  wrap.dataset.selectId = select.id || '';
+  parent.insertBefore(wrap, select);
+  wrap.appendChild(select);
+
+  select.classList.add('settings-select-native');
+  select.setAttribute('aria-hidden', 'true');
+  select.tabIndex = -1;
+  syncSettingsSelectSkinMetrics(select);
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'settings-select-trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const label = document.createElement('span');
+  label.className = 'settings-select-label';
+  const caret = document.createElement('span');
+  caret.className = 'settings-select-caret';
+  caret.textContent = '▾';
+  trigger.appendChild(label);
+  trigger.appendChild(caret);
+
+  const menu = document.createElement('div');
+  menu.className = 'settings-select-menu';
+  menu.hidden = true;
+  menu.setAttribute('role', 'listbox');
+  if (select.id) {
+    menu.id = select.id + 'SkinMenu';
+    trigger.setAttribute('aria-controls', menu.id);
+  }
+
+  trigger.addEventListener('click', event => {
+    event.stopPropagation();
+    toggleMainSettingsSelectSkin(select);
+  });
+  trigger.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleMainSettingsSelectSkin(select);
+    } else if (event.key === 'Escape') {
+      closeMainSettingsSelectSkin(select);
+    }
+  });
+
+  wrap.appendChild(trigger);
+  wrap.appendChild(menu);
+  select.addEventListener('change', () => refreshMainSettingsSelectSkin(select));
+  select.dataset.settingsSelectSkin = '1';
+}
+
+function syncSettingsSelectSkinMetrics(select) {
+  if (!select || !select.closest) return;
+  const wrap = select.closest('.settings-select-skin');
+  if (!wrap || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return;
+  const wasSkinned = select.classList.contains('settings-select-native');
+  if (wasSkinned) select.classList.remove('settings-select-native');
+  const cs = window.getComputedStyle(select);
+  wrap.style.setProperty('--settings-select-padding', `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`);
+  wrap.style.setProperty('--settings-select-font-size', cs.fontSize || '13px');
+  wrap.style.setProperty('--settings-select-line-height', cs.lineHeight || '1.35');
+  wrap.style.setProperty('--settings-select-min-width', cs.minWidth && cs.minWidth !== 'auto' ? cs.minWidth : '0px');
+  wrap.style.setProperty('--settings-select-height', parseFloat(cs.height) > 0 ? cs.height : 'auto');
+  const fullWidth = isFullWidthSettingsSelect(select);
+  wrap.classList.toggle('full-width', fullWidth);
+  if (!fullWidth && parseFloat(cs.width) > 0) {
+    wrap.style.setProperty('--settings-select-width', cs.width);
+  } else {
+    wrap.style.removeProperty('--settings-select-width');
+  }
+  if (wasSkinned) select.classList.add('settings-select-native');
+}
+
+function isFullWidthSettingsSelect(select) {
+  return !!select.closest('.form-group,.form-row,.music-setting,.concurrent-field,.debate-field,.git-proxy-field,.security-records-filter');
+}
+
+function refreshMainSettingsSelectSkin(select) {
+  const wrap = select ? select.closest('.settings-select-skin') : null;
+  if (!wrap) return;
+  syncSettingsSelectSkinMetrics(select);
+  const label = wrap.querySelector('.settings-select-label');
+  const menu = wrap.querySelector('.settings-select-menu');
+  const trigger = wrap.querySelector('.settings-select-trigger');
+  const current = select.selectedOptions && select.selectedOptions[0];
+  if (label) label.textContent = current ? current.textContent : (select.value || '');
+  if (trigger) trigger.disabled = !!select.disabled;
+  wrap.classList.toggle('disabled', !!select.disabled);
+  if (!menu) return;
+
+  menu.innerHTML = '';
+  Array.from(select.options).forEach(option => {
+    if (option.hidden) return;
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'settings-select-option';
+    item.dataset.value = option.value;
+    item.disabled = option.disabled;
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', option.value === select.value ? 'true' : 'false');
+    item.title = option.textContent || option.value;
+    if (option.value === select.value) item.classList.add('active');
+
+    const text = document.createElement('span');
+    text.className = 'settings-select-option-text';
+    text.textContent = option.textContent || option.value;
+    const check = document.createElement('span');
+    check.className = 'settings-select-option-check';
+    check.textContent = '✓';
+    item.appendChild(text);
+    item.appendChild(check);
+    item.addEventListener('click', event => selectMainSettingsSelectOption(select, option.value, event));
+    menu.appendChild(item);
+  });
+}
+
+function toggleMainSettingsSelectSkin(select) {
+  const wrap = select ? select.closest('.settings-select-skin') : null;
+  const menu = wrap ? wrap.querySelector('.settings-select-menu') : null;
+  const trigger = wrap ? wrap.querySelector('.settings-select-trigger') : null;
+  if (!wrap || !menu || !trigger || select.disabled) return;
+  const willOpen = menu.hidden;
+  closeMainSettingsSelectSkins(wrap);
+  if (!willOpen) return;
+  refreshMainSettingsSelectSkin(select);
+  menu.hidden = false;
+  wrap.classList.add('open');
+  trigger.setAttribute('aria-expanded', 'true');
+}
+
+function closeMainSettingsSelectSkin(select) {
+  const wrap = select ? select.closest('.settings-select-skin') : null;
+  if (!wrap) return;
+  const menu = wrap.querySelector('.settings-select-menu');
+  const trigger = wrap.querySelector('.settings-select-trigger');
+  if (menu) menu.hidden = true;
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  wrap.classList.remove('open');
+}
+
+function closeMainSettingsSelectSkins(exceptWrap = null) {
+  document.querySelectorAll('.settings-select-skin.open').forEach(wrap => {
+    if (exceptWrap && wrap === exceptWrap) return;
+    const menu = wrap.querySelector('.settings-select-menu');
+    const trigger = wrap.querySelector('.settings-select-trigger');
+    if (menu) menu.hidden = true;
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    wrap.classList.remove('open');
+  });
+}
+
+function selectMainSettingsSelectOption(select, value, event) {
+  if (event) event.stopPropagation();
+  const oldValue = select.value;
+  select.value = value;
+  if (select.value !== oldValue) {
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  refreshMainSettingsSelectSkins();
+  closeMainSettingsSelectSkin(select);
+}
+
+window.initMainSettingsSelectSkins = initMainSettingsSelectSkins;
+window.refreshMainSettingsSelectSkins = refreshMainSettingsSelectSkins;
+window.initSettingsSelectSkins = initMainSettingsSelectSkins;
+window.refreshSettingsSelectSkins = refreshMainSettingsSelectSkins;
+
+function scheduleSettingsSelectSkinRefresh(root = document) {
+  if (settingsSelectSkinRefreshQueued) return;
+  settingsSelectSkinRefreshQueued = true;
+  const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
+  raf(() => {
+    settingsSelectSkinRefreshQueued = false;
+    initMainSettingsSelectSkins(root);
+  });
+}
+
+function installSettingsSelectSkinObserver() {
+  if (settingsSelectSkinObserver || !document.body || typeof MutationObserver === 'undefined') return;
+  settingsSelectSkinObserver = new MutationObserver(mutations => {
+    let root = null;
+    for (const mutation of mutations) {
+      if (mutation.type === 'attributes' && mutation.target && mutation.target.matches && mutation.target.matches('select')) {
+        refreshMainSettingsSelectSkin(mutation.target);
+        continue;
+      }
+      const nodes = Array.from(mutation.addedNodes || []);
+      if (nodes.some(node => node.nodeType === 1 && ((node.matches && node.matches('select')) || (node.querySelector && node.querySelector('select'))))) {
+        root = root || document;
+      }
+    }
+    if (root) scheduleSettingsSelectSkinRefresh(root);
+  });
+  settingsSelectSkinObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['disabled']
+  });
+  initMainSettingsSelectSkins();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', installSettingsSelectSkinObserver);
+} else {
+  installSettingsSelectSkinObserver();
+}
+
 function onProviderChange() {
   const p = document.getElementById('provider').value;
   if (PROVIDERS[p]) {
@@ -403,6 +657,7 @@ function onProviderChange() {
     document.getElementById('modelName').value = PROVIDERS[p].models;
     updateUrlPreview();
     updateContextLimitModeUI();
+    refreshMainSettingsSelectSkins();
   }
 }
 
@@ -543,12 +798,14 @@ function setReasoningEffort(value, event) {
 document.addEventListener('click', e => {
   if (!e.target.closest('.model-picker')) closeModelMenu();
   if (!e.target.closest('.effort-picker')) closeReasoningEffortMenu();
+  if (!e.target.closest('.settings-select-skin')) closeMainSettingsSelectSkins();
 });
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeModelMenu();
     closeReasoningEffortMenu();
+    closeMainSettingsSelectSkins();
   }
 });
 

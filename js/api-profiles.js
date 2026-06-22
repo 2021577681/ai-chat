@@ -511,6 +511,7 @@ function _refreshSettingsModalFromState() {
     if (bIntervalVal) bIntervalVal.textContent = v;
   }
   if (typeof updateUrlPreview === 'function') updateUrlPreview();
+  if (typeof refreshMainSettingsSelectSkins === 'function') refreshMainSettingsSelectSkins();
 }
 
 // 让 saveAndClose 之后能自动同步当前激活的 profile（如果有）

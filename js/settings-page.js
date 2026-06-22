@@ -317,6 +317,7 @@ function dockSettingsPanel(mask, modal, section, config) {
   content.innerHTML = '';
   ensureSettingsFooterSpacer(modal);
   content.appendChild(modal);
+  if (typeof initSettingsSelectSkins === 'function') initSettingsSelectSkins(modal);
   content.scrollTop = 0;
 
   if (config.focusId) focusSettingsTarget(config.focusId);

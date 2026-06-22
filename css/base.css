@@ -301,7 +301,9 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .plan-step-result{margin-top:8px;padding:8px 10px;background:var(--bg-chat);border:1px solid var(--border);border-radius:6px;font-size:12.5px;line-height:1.6}
 .plan-step-result-label{font-size:10px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:4px;letter-spacing:.5px}
 .plan-step-result ul{list-style:none;padding-left:0;margin:6px 0}
+.plan-step-result ol{list-style-position:outside;padding-left:32px;margin:6px 0 6px 4px}
 .plan-step-result li{margin:2px 0}
+.plan-step-result ol > li{padding-left:3px}
 .plan-step-result .table-wrap{max-width:100%;margin:10px 0 2px;border-radius:12px;overflow-x:auto}
 .plan-step-result table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px}
 .plan-step-result thead{background:var(--bg-input)}
@@ -1754,8 +1756,9 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .msg-content.plan-final-answer ol,
 .ref-final-answer ul,
 .ref-final-answer ol {
-  padding-left: 30px;
-  margin: 8px 0;
+  list-style-position: outside;
+  padding-left: 34px;
+  margin: 8px 0 8px 4px;
 }
 .msg-content.plan-final-answer li,
 .ref-final-answer li {
