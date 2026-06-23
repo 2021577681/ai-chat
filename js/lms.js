@@ -71,7 +71,7 @@ function lmsParseSession(cookieStr) {
 async function lmsApiGet(path, params = {}) {
   const cookie = lmsGetCookie();
   if (!cookie) {
-    return { ok: false, error: 'NO_COOKIE', message: '⚠️ 尚未配置 LMS Cookie，请打开 🎓 学习面板填写。' };
+    return { ok: false, error: 'NO_COOKIE', message: '⚠️ 尚未登录 LMS，请打开 🎓 学习面板使用统一认证登录或手动填写 Cookie。' };
   }
 
   // 确保本地代理可用 + token 有效
@@ -285,6 +285,38 @@ function lmsCanProxyDownload(url) {
   }
 }
 
+async function lmsLoginRequest(payload) {
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: 'LOCAL_SERVER_NOT_READY', message: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  try {
+    const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Token': TERMINAL_CONFIG.token,
+      },
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (resp.status === 403) {
+      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+    }
+    if (!data) {
+      return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, error: 'NETWORK_ERROR', message: `连接本地登录服务失败：${e.message}` };
+  }
+}
+
+function lmsApplyLoginCookie(cookie) {
+  lmsSetCookie(cookie || '');
+  if (typeof lmsPanelRefreshStatus === 'function') lmsPanelRefreshStatus();
+}
+
 // ============ 工具：把 LMS 返回数据格式化为 Markdown ============
 
 function lmsRenderCourses(courses) {
@@ -422,7 +454,7 @@ function lmsRenderMaterials(activities, modules, cid) {
 async function lmsToolStatus() {
   const cookie = lmsGetCookie();
   if (!cookie) {
-    return '⚠️ **尚未配置 LMS Cookie**\n\n请打开 🎓 学习面板填写 Cookie。\n\n获取方法：浏览器登录 https://lms.xjtu.edu.cn 后，F12 → Console → 输入 `copy(document.cookie)` 回车。';
+    return '⚠️ **尚未登录 LMS**\n\n请打开 🎓 学习面板，使用统一身份认证登录；如果自动登录不可用，也可以手动填写 Cookie。';
   }
   const info = lmsParseSession(cookie);
   // 实测

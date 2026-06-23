@@ -5,6 +5,9 @@
 const LMS_PANEL_STATE = {
   tab: 'overview',           // overview | todos | courses | materials
   loading: false,
+  authMode: 'login',
+  loginFlowId: '',
+  loginUsesSavedCredential: false,
   cache: {                    // 缓存上次拉取结果
     todos: null,
     courses: null,
@@ -42,7 +45,9 @@ function lmsPanelRefreshStatus() {
   if (!cookie) {
     el.innerHTML = `
       <span class="lms-badge lms-badge-warn">⚠️ 未配置 Cookie</span>
-      <span class="lms-status-hint">点击下方"配置 Cookie"按钮开始</span>
+      <span class="lms-status-hint">可直接使用统一认证登录</span>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">登录</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">手动 Cookie</button>
     `;
     return;
   }
@@ -53,7 +58,8 @@ function lmsPanelRefreshStatus() {
     el.innerHTML = `
       <span class="lms-badge lms-badge-warn">⚠️ Cookie 格式异常</span>
       <span class="lms-status-hint">未找到 session 字段</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor()">✏️ 修改</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">✏️ 修改</button>
       <button class="lms-mini-btn" onclick="lmsPanelClearCookie()">🗑 清空</button>
     `;
     return;
@@ -63,19 +69,21 @@ function lmsPanelRefreshStatus() {
   if (h < 0) {
     el.innerHTML = `
       <span class="lms-badge lms-badge-err">⛔ 已过期 ${(-h).toFixed(1)} 小时</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor()">🔄 更新 Cookie</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">手动更新</button>
     `;
   } else if (h < 2) {
     el.innerHTML = `
       <span class="lms-badge lms-badge-warn">⏰ 即将过期 ${h.toFixed(1)}h</span>
       <span class="lms-status-hint">👤 ${uidSafe}</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor()">🔄 更新</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
     `;
   } else {
     el.innerHTML = `
       <span class="lms-badge lms-badge-ok">✅ Cookie 有效</span>
       <span class="lms-status-hint">👤 ${uidSafe} · 还有 ${h.toFixed(1)}h</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor()">✏️ 修改</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
+      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">✏️ Cookie</button>
     `;
   }
 }
@@ -127,7 +135,8 @@ function lmsPanelRenderBadCookie() {
         ${escapeHtml(preview) || '<em>（空）</em>'}
       </p>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-        <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor()">✏️ 重新填写</button>
+        <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor('login')">🔑 重新登录</button>
+        <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor('cookie')">✏️ 重新填写 Cookie</button>
         <button class="lms-big-btn" style="background:var(--danger,#e74c3c);" onclick="lmsPanelClearCookie()">🗑 清空重来</button>
       </div>
       <div class="lms-guide">
@@ -145,11 +154,12 @@ function lmsPanelRenderNoCookie() {
       <div class="lms-empty-icon">🔐</div>
       <h3>欢迎使用学习面板</h3>
       <p>这是西安交大 LMS (lms.xjtu.edu.cn) 的可视化助手</p>
-      <p>第一步：配置你的 LMS Cookie</p>
-      <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor()">🔑 配置 Cookie</button>
+      <p>第一步：使用统一身份认证登录</p>
+      <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor('login')">🔑 账号密码登录</button>
+      <button class="lms-big-btn" style="background:var(--bg-card,#fff);color:var(--text,#1f2328);border:1px solid var(--border,#d0d7de);" onclick="lmsPanelOpenCookieEditor('cookie')">手动填写 Cookie</button>
 
       <div class="lms-guide">
-        <h4>📝 如何获取 Cookie</h4>
+        <h4>📝 手动 Cookie 兜底方式</h4>
         <ol>
           <li>浏览器打开并登录 <a href="https://lms.xjtu.edu.cn" target="_blank">https://lms.xjtu.edu.cn</a></li>
           <li>按 <kbd>F12</kbd> 打开开发者工具</li>
@@ -412,7 +422,7 @@ async function lmsPanelFetchTodos() {
     toast(`✅ 已加载 ${LMS_PANEL_STATE.cache.todos.length} 项待办`);
   } else {
     toast('❌ ' + (r.message || r.error));
-    if (r.error === 'COOKIE_EXPIRED') lmsPanelOpenCookieEditor();
+    if (r.error === 'COOKIE_EXPIRED') lmsPanelOpenCookieEditor('login');
   }
   lmsPanelRender();
   lmsPanelRefreshStatus();
@@ -426,7 +436,7 @@ async function lmsPanelFetchCourses() {
     toast(`✅ 已加载 ${LMS_PANEL_STATE.cache.courses.length} 门课程`);
   } else {
     toast('❌ ' + (r.message || r.error));
-    if (r.error === 'COOKIE_EXPIRED') lmsPanelOpenCookieEditor();
+    if (r.error === 'COOKIE_EXPIRED') lmsPanelOpenCookieEditor('login');
   }
   lmsPanelRender();
 }
@@ -490,24 +500,43 @@ function lmsPanelShowLoading(text) {
   }
 }
 
-// ============ Cookie 编辑器 ============
+// ============ 登录 / Cookie 编辑器 ============
 
-function lmsPanelOpenCookieEditor() {
+function lmsPanelOpenCookieEditor(mode = 'login') {
   const cur = lmsGetCookie();
-  document.getElementById('lmsCookieInput').value = cur;
+  const input = document.getElementById('lmsCookieInput');
+  if (input) input.value = cur;
+  lmsPanelResetLoginFlow(false);
+  lmsPanelSetAuthMode(mode);
   document.getElementById('lmsCookieModal').classList.add('show');
-  // 触发解析显示
   lmsPanelCookieParse();
+  lmsPanelLoadCredentialStatus();
 }
 
 function lmsPanelCloseCookieEditor() {
+  lmsPanelResetLoginFlow(true);
   document.getElementById('lmsCookieModal').classList.remove('show');
 }
 
+function lmsPanelSetAuthMode(mode) {
+  LMS_PANEL_STATE.authMode = mode === 'cookie' ? 'cookie' : 'login';
+  const isLogin = LMS_PANEL_STATE.authMode === 'login';
+  const loginPane = document.getElementById('lmsPasswordLoginPane');
+  const cookiePane = document.getElementById('lmsCookiePane');
+  const loginTab = document.getElementById('lmsAuthTabLogin');
+  const cookieTab = document.getElementById('lmsAuthTabCookie');
+  if (loginPane) loginPane.style.display = isLogin ? '' : 'none';
+  if (cookiePane) cookiePane.style.display = isLogin ? 'none' : '';
+  if (loginTab) loginTab.classList.toggle('active', isLogin);
+  if (cookieTab) cookieTab.classList.toggle('active', !isLogin);
+}
+
 function lmsPanelCookieParse() {
-  const val = document.getElementById('lmsCookieInput').value.trim();
-  const info = lmsParseSession(val);
+  const input = document.getElementById('lmsCookieInput');
   const el = document.getElementById('lmsCookieParseResult');
+  if (!input || !el) return;
+  const val = input.value.trim();
+  const info = lmsParseSession(val);
   if (!val) {
     el.innerHTML = '<span style="color:var(--text-secondary)">在上方粘贴 Cookie 字符串</span>';
     return;
@@ -521,20 +550,266 @@ function lmsPanelCookieParse() {
     ? `<span style="color:var(--danger,#e74c3c)">⛔ 已过期 ${(-h).toFixed(1)} 小时</span>`
     : `<span style="color:var(--success,#27ae60)">✅ 有效，还有 ${h.toFixed(1)} 小时</span>`;
   el.innerHTML = `
-    <div>👤 用户 ID：<code>${info.uid || '?'}</code></div>
+    <div>👤 用户 ID：<code>${escapeHtml(info.uid || '?')}</code></div>
     <div>⏰ 过期时间：${lmsFmtTime(info.expireAt)}</div>
     <div>${status}</div>
   `;
 }
 
+function lmsPanelResetLoginFlow(clearFields = true) {
+  LMS_PANEL_STATE.loginFlowId = '';
+  LMS_PANEL_STATE.loginUsesSavedCredential = false;
+  ['lmsLoginCaptchaBox', 'lmsLoginMfaBox', 'lmsLoginAccountBox'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  const verifyBtn = document.getElementById('lmsLoginVerifyMfaBtn');
+  const submitBtn = document.getElementById('lmsLoginSubmitBtn');
+  if (verifyBtn) verifyBtn.style.display = 'none';
+  if (submitBtn) {
+    submitBtn.style.display = '';
+    submitBtn.textContent = '登录';
+  }
+  if (clearFields) {
+    ['lmsLoginPassword', 'lmsLoginCaptcha', 'lmsLoginMfaCode'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+  }
+  lmsPanelSetLoginStatus('', 'info');
+}
+
+async function lmsPanelLoadCredentialStatus() {
+  const box = document.getElementById('lmsSavedCredentialBox');
+  if (!box) return;
+  box.style.display = 'none';
+  const result = await lmsLoginRequest({ action: 'credential_status' });
+  if (!result || !result.ok || !result.has_credential) return;
+
+  const username = result.username || '';
+  const savedAt = result.saved_at ? lmsFmtTime(new Date(result.saved_at * 1000)) : '未知时间';
+  const usernameInput = document.getElementById('lmsLoginUsername');
+  if (usernameInput && !usernameInput.value && username) usernameInput.value = username;
+  box.innerHTML = `
+    <div class="lms-saved-main">
+      <div>
+        <div class="lms-saved-title">已保存账号</div>
+        <div class="lms-saved-sub">${escapeHtml(username || '未知账号')} · ${escapeHtml(savedAt)}</div>
+      </div>
+      <div class="lms-saved-actions">
+        <button class="btn btn-primary" onclick="lmsPanelLoginWithSavedCredential()">使用保存账号登录</button>
+        <button class="btn" onclick="lmsPanelClearSavedCredential()">忘记</button>
+      </div>
+    </div>
+  `;
+  box.style.display = '';
+}
+
+async function lmsPanelLoginWithSavedCredential() {
+  LMS_PANEL_STATE.loginUsesSavedCredential = true;
+  lmsPanelSetLoginBusy(true);
+  lmsPanelSetLoginStatus('正在使用保存的账号登录...', 'info');
+  const result = await lmsLoginRequest({
+    ...lmsPanelLoginPayloadBase('start_saved'),
+  });
+  lmsPanelSetLoginBusy(false);
+  lmsPanelHandleLoginResponse(result);
+}
+
+async function lmsPanelClearSavedCredential() {
+  if (!confirm('确定忘记已保存的 LMS 账号密码吗？')) return;
+  lmsPanelSetLoginStatus('正在清除保存的账号密码...', 'info');
+  const result = await lmsLoginRequest({ action: 'clear_credentials' });
+  if (result && result.ok) {
+    lmsPanelSetLoginStatus('已忘记保存的账号密码。', 'success');
+    const box = document.getElementById('lmsSavedCredentialBox');
+    if (box) box.style.display = 'none';
+  } else {
+    lmsPanelSetLoginStatus((result && (result.message || result.error)) || '清除失败。', 'error');
+  }
+}
+
+function lmsPanelSetLoginBusy(busy) {
+  ['lmsLoginSubmitBtn', 'lmsLoginVerifyMfaBtn', 'lmsLoginSendMfaBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = Boolean(busy);
+  });
+}
+
+function lmsPanelSetLoginStatus(message, type = 'info') {
+  const el = document.getElementById('lmsLoginStatus');
+  if (!el) return;
+  el.className = `lms-login-status ${type}`;
+  el.innerHTML = message ? escapeHtml(message) : '';
+}
+
+function lmsPanelLoginPayloadBase(action) {
+  return {
+    action,
+    flow_id: LMS_PANEL_STATE.loginFlowId,
+    account_type: 'postgraduate',
+    trust_agent: document.getElementById('lmsLoginTrustAgent')?.checked !== false,
+  };
+}
+
+async function lmsPanelLoginWithPassword() {
+  const username = document.getElementById('lmsLoginUsername')?.value.trim() || '';
+  const password = document.getElementById('lmsLoginPassword')?.value || '';
+  const captchaVisible = document.getElementById('lmsLoginCaptchaBox')?.style.display !== 'none';
+  const captcha = document.getElementById('lmsLoginCaptcha')?.value.trim() || '';
+  const continuingCaptcha = captchaVisible && LMS_PANEL_STATE.loginFlowId;
+
+  if (!continuingCaptcha && (!username || !password)) {
+    lmsPanelSetLoginStatus('请填写账号和密码。', 'error');
+    return;
+  }
+  if (captchaVisible && !captcha) {
+    lmsPanelSetLoginStatus('请填写图片验证码。', 'error');
+    return;
+  }
+
+  lmsPanelSetLoginBusy(true);
+  lmsPanelSetLoginStatus(captchaVisible ? '正在提交验证码...' : '正在登录统一身份认证...', 'info');
+  const payload = continuingCaptcha
+    ? { ...lmsPanelLoginPayloadBase('submit_captcha'), captcha }
+    : {
+        ...lmsPanelLoginPayloadBase('start'),
+        username,
+        password,
+        captcha,
+        remember: document.getElementById('lmsLoginRemember')?.checked === true,
+      };
+  const result = await lmsLoginRequest(payload);
+  lmsPanelSetLoginBusy(false);
+  lmsPanelHandleLoginResponse(result);
+}
+
+async function lmsPanelSendMfaCode() {
+  if (!LMS_PANEL_STATE.loginFlowId) {
+    lmsPanelSetLoginStatus('登录流程已失效，请重新登录。', 'error');
+    return;
+  }
+  lmsPanelSetLoginBusy(true);
+  lmsPanelSetLoginStatus('正在发送短信验证码...', 'info');
+  const result = await lmsLoginRequest({
+    action: 'send_mfa',
+    flow_id: LMS_PANEL_STATE.loginFlowId,
+  });
+  lmsPanelSetLoginBusy(false);
+  if (result.ok) {
+    lmsPanelSetLoginStatus(result.message || '短信验证码已发送。', 'success');
+  } else {
+    lmsPanelSetLoginStatus(result.message || result.error || '发送失败。', 'error');
+  }
+}
+
+async function lmsPanelVerifyMfaCode() {
+  const code = document.getElementById('lmsLoginMfaCode')?.value.trim() || '';
+  if (!LMS_PANEL_STATE.loginFlowId) {
+    lmsPanelSetLoginStatus('登录流程已失效，请重新登录。', 'error');
+    return;
+  }
+  if (!code) {
+    lmsPanelSetLoginStatus('请填写短信验证码。', 'error');
+    return;
+  }
+  lmsPanelSetLoginBusy(true);
+  lmsPanelSetLoginStatus('正在验证短信验证码...', 'info');
+  const result = await lmsLoginRequest({
+    ...lmsPanelLoginPayloadBase('verify_mfa'),
+    code,
+  });
+  lmsPanelSetLoginBusy(false);
+  lmsPanelHandleLoginResponse(result);
+}
+
+async function lmsPanelFinishAccountChoice(accountType) {
+  if (!LMS_PANEL_STATE.loginFlowId) {
+    lmsPanelSetLoginStatus('登录流程已失效，请重新登录。', 'error');
+    return;
+  }
+  lmsPanelSetLoginBusy(true);
+  lmsPanelSetLoginStatus('正在确认身份...', 'info');
+  const result = await lmsLoginRequest({
+    ...lmsPanelLoginPayloadBase('finish_account_choice'),
+    account_type: accountType,
+  });
+  lmsPanelSetLoginBusy(false);
+  lmsPanelHandleLoginResponse(result);
+}
+
+function lmsPanelHandleLoginResponse(result) {
+  if (!result || !result.ok) {
+    lmsPanelSetLoginStatus((result && (result.message || result.error)) || '登录失败。', 'error');
+    return;
+  }
+
+  if (result.status === 'success') {
+    if (!result.cookie) {
+      lmsPanelSetLoginStatus('登录成功，但本地服务没有返回 Cookie。', 'error');
+      return;
+    }
+    lmsApplyLoginCookie(result.cookie);
+    LMS_PANEL_STATE.cache = { todos: null, courses: null, materialsByCid: {} };
+    lmsPanelCloseCookieEditor();
+    lmsPanelRefreshStatus();
+    lmsPanelRender();
+    toast(result.has_session_cookie ? '✅ LMS 登录成功' : '✅ 登录成功，已保存 Cookie');
+    if (LMS_PANEL_STATE.tab === 'overview') lmsPanelFetchAll();
+    return;
+  }
+
+  if (result.status === 'require_captcha') {
+    LMS_PANEL_STATE.loginFlowId = result.flow_id || '';
+    const box = document.getElementById('lmsLoginCaptchaBox');
+    const img = document.getElementById('lmsLoginCaptchaImg');
+    const submitBtn = document.getElementById('lmsLoginSubmitBtn');
+    if (box) box.style.display = '';
+    if (img && result.captcha_image) img.src = result.captcha_image;
+    if (submitBtn) submitBtn.textContent = '继续登录';
+    lmsPanelSetLoginStatus(result.message || '请输入验证码后继续登录。', 'error');
+    return;
+  }
+
+  if (result.status === 'require_mfa') {
+    LMS_PANEL_STATE.loginFlowId = result.flow_id || '';
+    const box = document.getElementById('lmsLoginMfaBox');
+    const phone = document.getElementById('lmsLoginMfaPhone');
+    const submitBtn = document.getElementById('lmsLoginSubmitBtn');
+    const verifyBtn = document.getElementById('lmsLoginVerifyMfaBtn');
+    if (box) box.style.display = '';
+    if (phone) phone.textContent = `绑定手机：${result.phone || '未知'}`;
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (verifyBtn) verifyBtn.style.display = '';
+    lmsPanelSetLoginStatus(result.message || '需要短信二次验证。', 'info');
+    return;
+  }
+
+  if (result.status === 'require_account_choice') {
+    LMS_PANEL_STATE.loginFlowId = result.flow_id || '';
+    const box = document.getElementById('lmsLoginAccountBox');
+    const choices = document.getElementById('lmsLoginAccountChoices');
+    if (box) box.style.display = '';
+    if (choices) {
+      choices.innerHTML = (result.choices || [])
+        .map(c => `<div>${escapeHtml(c.name || c.label || '')}</div>`)
+        .join('') || '服务器要求选择登录身份。';
+    }
+    lmsPanelSetLoginStatus(result.message || '请选择要登录的账户身份。', 'info');
+    return;
+  }
+
+  lmsPanelSetLoginStatus(result.message || `需要继续处理：${result.status || '未知状态'}`, 'info');
+}
+
 function lmsPanelSaveCookie() {
   const val = document.getElementById('lmsCookieInput').value.trim();
   lmsSetCookie(val);
+  LMS_PANEL_STATE.cache = { todos: null, courses: null, materialsByCid: {} };
   lmsPanelCloseCookieEditor();
   lmsPanelRefreshStatus();
   lmsPanelRender();
   toast(val ? '✅ Cookie 已保存' : '🗑 Cookie 已清空');
-  // 自动拉一次数据
   if (val && LMS_PANEL_STATE.tab === 'overview') {
     lmsPanelFetchAll();
   }

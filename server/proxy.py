@@ -4,6 +4,7 @@
 # 提供 ProxyMixin。包含：
 #   handle_llm_proxy_post  - POST /llm-proxy   绕过浏览器 CORS 转发到 LLM 中转商
 #   handle_lms_proxy_get   - GET  /lms-proxy   代理学校 LMS API
+#   handle_lms_login_post  - POST /lms-login   通过统一认证登录学校 LMS
 #   handle_static_file     - GET  /xxx.html|js|css   本地静态文件托管（白名单扩展名）
 #   handle_token_request   - GET  /token       浏览器自动拉取 Token
 #   handle_workspace_info  - GET  /workspace   公开沙箱信息（不含 token）
@@ -68,6 +69,34 @@ class ProxyMixin:
             'workspace': config.WORKSPACE_ROOT,
             'cwd': config.get_current_cwd()
         })
+
+    # ============ POST /lms-login ============
+    def handle_lms_login_post(self):
+        """使用西交统一认证登录 LMS，并返回可供现有 LMS 代理复用的 Cookie 字符串。"""
+        token = self.headers.get('X-Token', '')
+        if token != config.TOKEN:
+            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
+            return
+
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
+            body = json.loads(raw or '{}')
+            if not isinstance(body, dict):
+                raise ValueError('请求体必须是 JSON 对象')
+        except Exception as e:
+            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            return
+
+        action = body.get('action', 'start')
+        print(f'🎓 [LMS 登录] action={action}')
+        try:
+            from .lms_login import handle_lms_login_request
+
+            status, payload = handle_lms_login_request(body)
+        except Exception as e:
+            status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
+        self._send_json(status, payload)
 
     # ============ GET /xxx 静态文件 ============
     def handle_static_file(self):

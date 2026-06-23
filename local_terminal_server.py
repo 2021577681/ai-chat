@@ -90,6 +90,7 @@ def _print_banner():
     print('   - GET  /token      浏览器自动拉取 Token（本机自动授权）')
     print('   - GET  /workspace  查询当前沙箱目录（公开，无需鉴权）')
     print('   - GET  /lms-proxy  代理 LMS API 请求（需 X-Token + X-LMS-Cookie）')
+    print('   - POST /lms-login  西交统一认证登录 LMS（需 X-Token）')
     print('   - POST /llm-proxy  代理 LLM 请求（绕过浏览器 CORS）')
     print('   - execute          执行 shell 命令')
     print('   - read_file        读取文本文件')

@@ -1620,29 +1620,87 @@
   </div>
 </aside>
 
-<!-- ============ LMS Cookie 编辑器（小弹窗） ============ -->
+<!-- ============ LMS 登录 / Cookie 编辑器（小弹窗） ============ -->
 <div class="modal-mask" id="lmsCookieModal">
   <div class="modal">
-    <h2>🔑 配置 LMS Cookie <button class="modal-close" onclick="lmsPanelCloseCookieEditor()">×</button></h2>
-    <div class="form-group">
-      <label>📋 粘贴你的 LMS Cookie（含 <code>session=...</code> 字段）</label>
-      <textarea id="lmsCookieInput" rows="5" placeholder="_ga=...; session=V2-1-...; ..." oninput="lmsPanelCookieParse()" style="width:100%;font-family:Consolas,monospace;font-size:12px;"></textarea>
+    <h2>🔑 登录 LMS <button class="modal-close" onclick="lmsPanelCloseCookieEditor()">×</button></h2>
+
+    <div class="lms-auth-tabs">
+      <button class="lms-auth-tab active" id="lmsAuthTabLogin" onclick="lmsPanelSetAuthMode('login')">账号登录</button>
+      <button class="lms-auth-tab" id="lmsAuthTabCookie" onclick="lmsPanelSetAuthMode('cookie')">手动 Cookie</button>
     </div>
-    <div id="lmsCookieParseResult" style="background:var(--bg-input);padding:10px;border-radius:6px;font-size:13px;line-height:1.7;"></div>
-    <details style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
-      <summary style="cursor:pointer;">📝 如何获取 Cookie？</summary>
-      <ol style="padding-left:20px;line-height:1.8;">
-        <li>浏览器登录 <a href="https://lms.xjtu.edu.cn" target="_blank">lms.xjtu.edu.cn</a></li>
-        <li>按 <kbd>F12</kbd> → 切到 <strong>Console</strong></li>
-        <li>输入 <code>copy(document.cookie)</code> 回车</li>
-        <li>回到这里粘贴</li>
-      </ol>
-      <p style="margin-top:8px;">⏰ Cookie 大约 24 小时过期，过期后重新走一遍。</p>
-    </details>
-    <div class="modal-footer">
-      <button class="btn" onclick="lmsPanelClearCookie()" style="color:var(--danger,#e74c3c);">🗑 清空</button>
-      <button class="btn" onclick="lmsPanelCloseCookieEditor()">取消</button>
-      <button class="btn btn-primary" onclick="lmsPanelSaveCookie()">💾 保存</button>
+
+    <div id="lmsPasswordLoginPane" class="lms-auth-pane">
+      <div class="lms-login-note">通过本地服务连接西交统一认证，成功后保存 LMS 会话 Cookie；勾选记住时，密码仅用 Windows 凭据加密保存在本机。</div>
+      <div id="lmsSavedCredentialBox" class="lms-saved-credential" style="display:none;"></div>
+      <div class="form-group">
+        <label>账号</label>
+        <input id="lmsLoginUsername" type="text" autocomplete="username" placeholder="学号 / 手机号 / 邮箱" class="lms-login-input">
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <input id="lmsLoginPassword" type="password" autocomplete="current-password" placeholder="统一身份认证密码" class="lms-login-input" onkeydown="if(event.key==='Enter') lmsPanelLoginWithPassword()">
+      </div>
+      <div id="lmsLoginCaptchaBox" class="lms-login-step" style="display:none;">
+        <div class="lms-login-step-title">验证码</div>
+        <div class="lms-captcha-row">
+          <input id="lmsLoginCaptcha" type="text" placeholder="输入图片验证码" class="lms-login-input">
+          <img id="lmsLoginCaptchaImg" alt="验证码" title="验证码">
+        </div>
+      </div>
+      <div id="lmsLoginMfaBox" class="lms-login-step" style="display:none;">
+        <div class="lms-login-step-title">短信验证</div>
+        <div class="lms-login-muted" id="lmsLoginMfaPhone"></div>
+        <div class="lms-mfa-row">
+          <input id="lmsLoginMfaCode" type="text" inputmode="numeric" placeholder="短信验证码" class="lms-login-input" onkeydown="if(event.key==='Enter') lmsPanelVerifyMfaCode()">
+          <button class="btn" id="lmsLoginSendMfaBtn" onclick="lmsPanelSendMfaCode()">发送验证码</button>
+        </div>
+        <label class="lms-login-check">
+          <input type="checkbox" id="lmsLoginTrustAgent" checked>
+          信任当前设备
+        </label>
+      </div>
+      <label class="lms-login-check">
+        <input type="checkbox" id="lmsLoginRemember">
+        记住账号密码（本机加密）
+      </label>
+      <div id="lmsLoginAccountBox" class="lms-login-step" style="display:none;">
+        <div class="lms-login-step-title">选择身份</div>
+        <div class="lms-login-muted" id="lmsLoginAccountChoices"></div>
+        <div class="lms-account-actions">
+          <button class="btn" onclick="lmsPanelFinishAccountChoice('undergraduate')">本科生</button>
+          <button class="btn btn-primary" onclick="lmsPanelFinishAccountChoice('postgraduate')">研究生</button>
+        </div>
+      </div>
+      <div id="lmsLoginStatus" class="lms-login-status"></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="lmsPanelCloseCookieEditor()">取消</button>
+        <button class="btn btn-primary" id="lmsLoginSubmitBtn" onclick="lmsPanelLoginWithPassword()">登录</button>
+        <button class="btn btn-primary" id="lmsLoginVerifyMfaBtn" onclick="lmsPanelVerifyMfaCode()" style="display:none;">验证并登录</button>
+      </div>
+    </div>
+
+    <div id="lmsCookiePane" class="lms-auth-pane" style="display:none;">
+      <div class="form-group">
+        <label>📋 粘贴你的 LMS Cookie（含 <code>session=...</code> 字段）</label>
+        <textarea id="lmsCookieInput" rows="5" placeholder="_ga=...; session=V2-1-...; ..." oninput="lmsPanelCookieParse()" style="width:100%;font-family:Consolas,monospace;font-size:12px;"></textarea>
+      </div>
+      <div id="lmsCookieParseResult" style="background:var(--bg-input);padding:10px;border-radius:6px;font-size:13px;line-height:1.7;"></div>
+      <details style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
+        <summary style="cursor:pointer;">📝 如何获取 Cookie？</summary>
+        <ol style="padding-left:20px;line-height:1.8;">
+          <li>浏览器登录 <a href="https://lms.xjtu.edu.cn" target="_blank">lms.xjtu.edu.cn</a></li>
+          <li>按 <kbd>F12</kbd> → 切到 <strong>Console</strong></li>
+          <li>输入 <code>copy(document.cookie)</code> 回车</li>
+          <li>回到这里粘贴</li>
+        </ol>
+        <p style="margin-top:8px;">⏰ Cookie 大约 24 小时过期，过期后重新走一遍。</p>
+      </details>
+      <div class="modal-footer">
+        <button class="btn" onclick="lmsPanelClearCookie()" style="color:var(--danger,#e74c3c);">🗑 清空</button>
+        <button class="btn" onclick="lmsPanelCloseCookieEditor()">取消</button>
+        <button class="btn btn-primary" onclick="lmsPanelSaveCookie()">💾 保存</button>
+      </div>
     </div>
   </div>
 </div>

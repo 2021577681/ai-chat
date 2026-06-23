@@ -200,6 +200,156 @@
   font-family: Consolas, monospace;
 }
 
+/* ============ 登录 / Cookie 弹窗 ============ */
+.lms-auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  margin: 4px 0 14px;
+  background: var(--bg-input, #f1f3f5);
+  border: 1px solid var(--border, #e1e4e8);
+  border-radius: 8px;
+}
+.lms-auth-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #6e7681);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.lms-auth-tab.active {
+  background: var(--bg-card, #fff);
+  color: var(--text, #1f2328);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.08);
+}
+.lms-auth-pane {
+  font-size: 13px;
+}
+.lms-login-note {
+  margin: 0 0 12px;
+  color: var(--text-secondary, #6e7681);
+  line-height: 1.6;
+}
+.lms-saved-credential {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(9, 105, 218, 0.22);
+  border-radius: 8px;
+  background: rgba(9, 105, 218, 0.06);
+}
+.lms-saved-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lms-saved-title {
+  font-weight: 600;
+  color: var(--text, #1f2328);
+}
+.lms-saved-sub {
+  margin-top: 2px;
+  color: var(--text-secondary, #6e7681);
+  font-size: 12px;
+  word-break: break-all;
+}
+.lms-saved-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.lms-login-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  background: var(--bg-input, #f6f8fa);
+  color: var(--text, #1f2328);
+  font-size: 13px;
+  outline: none;
+}
+.lms-login-input:focus {
+  border-color: var(--primary, #0969da);
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.15);
+}
+.lms-login-step {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border, #e1e4e8);
+  border-radius: 8px;
+  background: var(--bg-input, #f6f8fa);
+}
+.lms-login-step-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--text, #1f2328);
+}
+.lms-login-muted {
+  margin-bottom: 8px;
+  color: var(--text-secondary, #6e7681);
+  line-height: 1.5;
+}
+.lms-captcha-row,
+.lms-mfa-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.lms-captcha-row img {
+  width: 100px;
+  height: 30px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 6px;
+  background: #fff;
+  object-fit: contain;
+}
+.lms-login-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-secondary, #6e7681);
+  user-select: none;
+}
+.lms-account-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.lms-login-status {
+  min-height: 20px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #6e7681);
+  line-height: 1.5;
+  font-size: 13px;
+}
+.lms-login-status:empty {
+  display: none;
+}
+.lms-login-status.info {
+  background: rgba(9, 105, 218, 0.08);
+  color: var(--primary, #0969da);
+}
+.lms-login-status.success {
+  background: rgba(35, 134, 54, 0.10);
+  color: var(--success, #1a7f37);
+}
+.lms-login-status.error {
+  background: rgba(207, 34, 46, 0.10);
+  color: var(--danger, #cf222e);
+}
+
 /* ============ 概览统计卡 ============ */
 .lms-stat-grid {
   display: grid;
