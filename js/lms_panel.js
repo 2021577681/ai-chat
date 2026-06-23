@@ -3,6 +3,7 @@
 // 4 个标签页：📊 概览 / 📝 待办 / 📚 课程 / 📂 课件
 
 const LMS_PANEL_STATE = {
+  page: 'home',              // home | lms | scores
   tab: 'overview',           // overview | todos | courses | materials
   loading: false,
   authMode: 'login',
@@ -12,25 +13,47 @@ const LMS_PANEL_STATE = {
     todos: null,
     courses: null,
     materialsByCid: {},
+    scores: null,
+    scoreSummary: null,
   },
   selectedCid: null,         // 当前 materials 页选中的课程 id
+  scoreAccountType: 'auto',
+  scoreResolvedAccountType: '',
+  scoreTerm: '',
+  scoreError: '',
 };
 
+function lmsPanelEmptyCache() {
+  return {
+    todos: null,
+    courses: null,
+    materialsByCid: {},
+    scores: null,
+    scoreSummary: null,
+  };
+}
+
 function openLmsPanel() {
+  LMS_PANEL_STATE.page = 'home';
   document.getElementById('lmsPanel').classList.add('show');
   lmsPanelRefreshStatus();
   lmsPanelRender();
-  // 自动拉一次最新数据（如果 Cookie 有效）
-  if (lmsGetCookie() && !LMS_PANEL_STATE.cache.todos) {
-    lmsPanelFetchAll();
-  }
 }
 
 function closeLmsPanel() {
   document.getElementById('lmsPanel').classList.remove('show');
 }
 
+function lmsPanelSetPage(page) {
+  LMS_PANEL_STATE.page = page || 'home';
+  lmsPanelRender();
+  if (LMS_PANEL_STATE.page === 'lms' && lmsGetCookie() && !LMS_PANEL_STATE.cache.todos) {
+    lmsPanelFetchAll();
+  }
+}
+
 function lmsPanelSetTab(tab) {
+  LMS_PANEL_STATE.page = 'lms';
   LMS_PANEL_STATE.tab = tab;
   lmsPanelRender();
 }
@@ -98,29 +121,187 @@ function lmsPanelRender() {
     if (b) b.classList.toggle('active', LMS_PANEL_STATE.tab === t);
   });
 
+  const tabs = document.getElementById('lmsPanelTabs');
+  if (tabs) tabs.style.display = LMS_PANEL_STATE.page === 'lms' ? '' : 'none';
+
   const body = document.getElementById('lmsPanelBody');
   if (!body) return;
 
+  if (LMS_PANEL_STATE.page === 'home') {
+    body.innerHTML = lmsPanelRenderHome();
+    return;
+  }
+
+  if (LMS_PANEL_STATE.page === 'scores') {
+    body.innerHTML = lmsPanelRenderScoresPage();
+    return;
+  }
+
   const _cookie = lmsGetCookie();
   if (!_cookie) {
-    body.innerHTML = lmsPanelRenderNoCookie();
+    body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + lmsPanelRenderNoCookie();
     return;
   }
   // 🛠 Cookie 已保存但解析失败 → 直接进入"修复模式"，避免用户被困
   if (!lmsParseSession(_cookie)) {
-    body.innerHTML = lmsPanelRenderBadCookie();
+    body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + lmsPanelRenderBadCookie();
     return;
   }
 
+  let content = '';
   switch (LMS_PANEL_STATE.tab) {
-    case 'overview':  body.innerHTML = lmsPanelRenderOverview(); break;
-    case 'todos':     body.innerHTML = lmsPanelRenderTodos();    break;
-    case 'courses':   body.innerHTML = lmsPanelRenderCourses();  break;
-    case 'materials': body.innerHTML = lmsPanelRenderMaterials();break;
+    case 'overview':  content = lmsPanelRenderOverview(); break;
+    case 'todos':     content = lmsPanelRenderTodos();    break;
+    case 'courses':   content = lmsPanelRenderCourses();  break;
+    case 'materials': content = lmsPanelRenderMaterials();break;
+    default:          content = lmsPanelRenderOverview(); break;
   }
+  body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + content;
 }
 
 // ============ 各个标签页内容 ============
+
+function lmsPanelRenderSubHeader(title) {
+  return `
+    <div class="lms-subpage-head">
+      <button class="lms-mini-btn" onclick="lmsPanelSetPage('home')">返回</button>
+      <div class="lms-subpage-title">${escapeHtml(title || '')}</div>
+    </div>
+  `;
+}
+
+function lmsPanelRenderHome() {
+  return `
+    <div class="lms-nav-page">
+      <div class="lms-nav-list">
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('lms')">
+          <span class="lms-nav-title">思源学堂</span>
+          <span class="lms-nav-desc">课程、待办、作业详情和课件下载</span>
+        </button>
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('scores')">
+          <span class="lms-nav-title">成绩查询</span>
+          <span class="lms-nav-desc">查询本科教务或研究生系统成绩</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function lmsPanelRenderScoresPage() {
+  const accountType = LMS_PANEL_STATE.scoreAccountType || 'auto';
+  const term = LMS_PANEL_STATE.scoreTerm || '';
+  const scores = LMS_PANEL_STATE.cache.scores;
+  const summary = LMS_PANEL_STATE.cache.scoreSummary || {};
+  const resolvedType = LMS_PANEL_STATE.scoreResolvedAccountType || accountType;
+
+  let html = lmsPanelRenderSubHeader('成绩查询');
+  html += `
+    <div class="lms-score-controls">
+      <label class="lms-score-field">
+        <span>身份</span>
+        <select id="lmsScoreAccountType" class="lms-login-input" onchange="lmsPanelSetScoreAccountType(this.value)">
+          <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
+          <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
+          <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>学期</span>
+        <input id="lmsScoreTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="本科可选，如 2024-2025-1" oninput="lmsPanelSetScoreTerm(this.value)">
+      </label>
+      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchScores()">查询成绩</button>
+    </div>
+  `;
+
+  if (LMS_PANEL_STATE.scoreError) {
+    html += `
+      <div class="lms-score-error">
+        <div>${escapeHtml(LMS_PANEL_STATE.scoreError)}</div>
+        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+      </div>
+    `;
+  }
+
+  if (!scores) {
+    html += `
+      <div class="lms-empty-mini">
+        成绩查询使用本机加密保存的统一认证账号密码。
+      </div>
+    `;
+    return html;
+  }
+
+  if (!scores.length) {
+    html += '<div class="lms-empty"><h3>未查询到成绩</h3><p>可以切换身份后重试。</p></div>';
+    return html;
+  }
+
+  html += `
+    <div class="lms-score-summary">
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${summary.count ?? scores.length}</div>
+        <div class="lms-stat-lbl">${escapeHtml(lmsScoreAccountLabel(resolvedType))}课程数</div>
+      </div>
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${lmsFmtScoreValue(summary.totalCredits)}</div>
+        <div class="lms-stat-lbl">总学分</div>
+      </div>
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${lmsFmtScoreValue(summary.weightedAverageScore)}</div>
+        <div class="lms-stat-lbl">加权平均分</div>
+      </div>
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${lmsFmtScoreValue(summary.weightedGpa)}</div>
+        <div class="lms-stat-lbl">加权 GPA</div>
+      </div>
+    </div>
+    <div class="lms-score-table-wrap">
+      <table class="lms-score-table">
+        <thead>
+          <tr>
+            <th>学期/类型</th>
+            <th>课程</th>
+            <th>学分</th>
+            <th>成绩</th>
+            <th>GPA</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${scores.map(lmsPanelRenderScoreRow).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  return html;
+}
+
+function lmsPanelRenderScoreRow(item) {
+  const group = item.term || item.type || '-';
+  const failed = item.passFlag === false ? ' failed' : '';
+  return `
+    <tr class="${failed}">
+      <td>${escapeHtml(group)}</td>
+      <td>${escapeHtml(item.courseName || '-')}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.coursePoint))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.score))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.gpa))}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelSetScoreAccountType(value) {
+  LMS_PANEL_STATE.scoreAccountType = value || 'auto';
+}
+
+function lmsPanelSetScoreTerm(value) {
+  LMS_PANEL_STATE.scoreTerm = value || '';
+}
+
+function lmsPanelOpenCredentialLogin() {
+  lmsPanelOpenCookieEditor('login');
+  const remember = document.getElementById('lmsLoginRemember');
+  if (remember) remember.checked = true;
+}
 
 function lmsPanelRenderBadCookie() {
   // 当 Cookie 已保存但 lmsParseSession 失败时调用，提供醒目的修复入口
@@ -460,7 +641,35 @@ async function lmsPanelFetchMaterials(cid) {
   lmsPanelRender();
 }
 
+async function lmsPanelFetchScores() {
+  const accountType = document.getElementById('lmsScoreAccountType')?.value || LMS_PANEL_STATE.scoreAccountType || 'auto';
+  const term = document.getElementById('lmsScoreTerm')?.value.trim() || '';
+  LMS_PANEL_STATE.scoreAccountType = accountType;
+  LMS_PANEL_STATE.scoreTerm = term;
+  LMS_PANEL_STATE.scoreError = '';
+  lmsPanelShowLoading('正在查询成绩...');
+
+  const result = await lmsScoreQuery({
+    account_type: accountType,
+    term,
+  });
+  if (result && result.ok) {
+    LMS_PANEL_STATE.cache.scores = result.scores || [];
+    LMS_PANEL_STATE.cache.scoreSummary = result.summary || {};
+    LMS_PANEL_STATE.scoreResolvedAccountType = result.account_type || accountType;
+    toast(`成绩已加载：${LMS_PANEL_STATE.cache.scores.length} 门课程`);
+  } else {
+    LMS_PANEL_STATE.cache.scores = null;
+    LMS_PANEL_STATE.cache.scoreSummary = null;
+    LMS_PANEL_STATE.scoreResolvedAccountType = '';
+    LMS_PANEL_STATE.scoreError = (result && (result.message || result.error)) || '成绩查询失败。';
+    toast(LMS_PANEL_STATE.scoreError);
+  }
+  lmsPanelRender();
+}
+
 async function lmsPanelShowMaterials(cid) {
+  LMS_PANEL_STATE.page = 'lms';
   LMS_PANEL_STATE.selectedCid = cid;
   LMS_PANEL_STATE.tab = 'materials';
   lmsPanelRender();
@@ -750,12 +959,12 @@ function lmsPanelHandleLoginResponse(result) {
       return;
     }
     lmsApplyLoginCookie(result.cookie);
-    LMS_PANEL_STATE.cache = { todos: null, courses: null, materialsByCid: {} };
+    LMS_PANEL_STATE.cache = lmsPanelEmptyCache();
     lmsPanelCloseCookieEditor();
     lmsPanelRefreshStatus();
     lmsPanelRender();
     toast(result.has_session_cookie ? '✅ LMS 登录成功' : '✅ 登录成功，已保存 Cookie');
-    if (LMS_PANEL_STATE.tab === 'overview') lmsPanelFetchAll();
+    if (LMS_PANEL_STATE.page === 'lms' && LMS_PANEL_STATE.tab === 'overview') lmsPanelFetchAll();
     return;
   }
 
@@ -805,12 +1014,12 @@ function lmsPanelHandleLoginResponse(result) {
 function lmsPanelSaveCookie() {
   const val = document.getElementById('lmsCookieInput').value.trim();
   lmsSetCookie(val);
-  LMS_PANEL_STATE.cache = { todos: null, courses: null, materialsByCid: {} };
+  LMS_PANEL_STATE.cache = lmsPanelEmptyCache();
   lmsPanelCloseCookieEditor();
   lmsPanelRefreshStatus();
   lmsPanelRender();
   toast(val ? '✅ Cookie 已保存' : '🗑 Cookie 已清空');
-  if (val && LMS_PANEL_STATE.tab === 'overview') {
+  if (val && LMS_PANEL_STATE.page === 'lms' && LMS_PANEL_STATE.tab === 'overview') {
     lmsPanelFetchAll();
   }
 }
@@ -818,7 +1027,7 @@ function lmsPanelSaveCookie() {
 function lmsPanelClearCookie() {
   if (!confirm('确定清空 LMS Cookie 吗？')) return;
   lmsSetCookie('');
-  LMS_PANEL_STATE.cache = { todos: null, courses: null, materialsByCid: {} };
+  LMS_PANEL_STATE.cache = lmsPanelEmptyCache();
   lmsPanelCloseCookieEditor();
   lmsPanelRefreshStatus();
   lmsPanelRender();
