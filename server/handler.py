@@ -114,6 +114,14 @@ class Handler(BaseHTTPRequestHandler,
         if self.path.startswith('/lms-scores'):
             return self.handle_lms_scores_post()
 
+        # ⭐ LMS 课表查询（POST）
+        if self.path.startswith('/lms-schedule'):
+            return self.handle_lms_schedule_post()
+
+        # ⭐ LMS 空闲教室查询（POST）
+        if self.path.startswith('/lms-empty-rooms'):
+            return self.handle_lms_empty_rooms_post()
+
         # 鉴权（除 llm-proxy 外，POST 都要求 X-Token）
         token = self.headers.get('X-Token', '')
         if token != config.TOKEN:

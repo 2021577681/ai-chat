@@ -344,6 +344,60 @@ async function lmsScoreQuery(options = {}) {
   }
 }
 
+async function lmsScheduleQuery(options = {}) {
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: 'LOCAL_SERVER_NOT_READY', message: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  try {
+    const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-schedule`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Token': TERMINAL_CONFIG.token,
+      },
+      body: JSON.stringify(options || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (resp.status === 403) {
+      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+    }
+    if (!data) {
+      return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, error: 'NETWORK_ERROR', message: `连接本地课表查询服务失败：${e.message}` };
+  }
+}
+
+async function lmsEmptyRoomsQuery(options = {}) {
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: 'LOCAL_SERVER_NOT_READY', message: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  try {
+    const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-empty-rooms`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Token': TERMINAL_CONFIG.token,
+      },
+      body: JSON.stringify(options || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (resp.status === 403) {
+      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+    }
+    if (!data) {
+      return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, error: 'NETWORK_ERROR', message: `连接本地空闲教室查询服务失败：${e.message}` };
+  }
+}
+
 function lmsScoreAccountLabel(accountType) {
   if (accountType === 'undergraduate') return '本科';
   if (accountType === 'postgraduate') return '研究生';
@@ -514,6 +568,54 @@ function lmsRenderScores(data) {
   return parts.join('\n');
 }
 
+function lmsWeekdayName(day) {
+  return ['-', '周一', '周二', '周三', '周四', '周五', '周六', '周日'][Number(day)] || '-';
+}
+
+function lmsRenderSchedule(data) {
+  if (!data || !data.ok) {
+    return `错误：${(data && (data.message || data.error)) || '课表查询失败'}`;
+  }
+  const lessons = data.lessons || [];
+  const accountLabel = lmsScoreAccountLabel(data.account_type);
+  const titleTerm = data.term ? ` ${data.term}` : '';
+  if (!lessons.length) return `## 课表查询${titleTerm}\n\n${accountLabel}课表系统暂未查询到课程。`;
+
+  const parts = [`## 课表查询（${accountLabel}${titleTerm}）\n`];
+  parts.push(`共 ${lessons.length} 条课程安排`);
+  parts.push('');
+  parts.push('| 星期 | 节次 | 课程 | 教师 | 教室 | 周次 |');
+  parts.push('|---|---:|---|---|---|---|');
+  lessons.forEach(item => {
+    const periods = `${lmsFmtScoreValue(item.periodStart)}-${lmsFmtScoreValue(item.periodEnd)}`;
+    parts.push(`| ${lmsWeekdayName(item.dayOfWeek)} | ${periods} | ${item.name || '-'} | ${item.teacher || '-'} | ${item.classroom || '-'} | ${item.weeksText || '-'} |`);
+  });
+  return parts.join('\n');
+}
+
+function lmsRenderEmptyRooms(data) {
+  if (!data || !data.ok) {
+    return `错误：${(data && (data.message || data.error)) || '空闲教室查询失败'}`;
+  }
+  const rooms = data.rooms || [];
+  const campus = data.campus || '-';
+  const building = data.building || '-';
+  const periods = `${lmsFmtScoreValue(data.start_period)}-${lmsFmtScoreValue(data.end_period)}`;
+  if (!rooms.length) {
+    return `## 空闲教室\n\n${campus} ${building} 在 ${data.date || '-'} 第 ${periods} 节暂未查询到空闲教室。`;
+  }
+
+  const parts = [`## 空闲教室（${campus} ${building}）\n`];
+  parts.push(`日期 ${data.date || '-'} · 节次 ${periods} · 共 ${rooms.length} 间`);
+  parts.push('');
+  parts.push('| 教室 | 教学楼 | 类型 | 座位 | 考试座位 | 校区 |');
+  parts.push('|---|---|---|---:|---:|---|');
+  rooms.forEach(item => {
+    parts.push(`| ${item.name || '-'} | ${item.buildingName || '-'} | ${item.type || '-'} | ${lmsFmtScoreValue(item.capacity)} | ${lmsFmtScoreValue(item.examCapacity)} | ${item.campusName || '-'} |`);
+  });
+  return parts.join('\n');
+}
+
 // ============ 工具实现函数（被 config.js 中 BUILTIN_TOOLS 的 code 调用） ============
 
 async function lmsToolScores(accountType = 'auto', term = '') {
@@ -522,6 +624,25 @@ async function lmsToolScores(accountType = 'auto', term = '') {
     term: term || '',
   });
   return lmsRenderScores(result);
+}
+
+async function lmsToolSchedule(accountType = 'auto', term = '') {
+  const result = await lmsScheduleQuery({
+    account_type: accountType || 'auto',
+    term: term || '',
+  });
+  return lmsRenderSchedule(result);
+}
+
+async function lmsToolEmptyRooms(campus = '兴庆校区', building = '主楼D', date = '', startPeriod = 1, endPeriod = 11) {
+  const result = await lmsEmptyRoomsQuery({
+    campus: campus || '兴庆校区',
+    building: building || '主楼D',
+    date: date || '',
+    start_period: Number(startPeriod) || 1,
+    end_period: Number(endPeriod) || 11,
+  });
+  return lmsRenderEmptyRooms(result);
 }
 
 async function lmsToolStatus() {
@@ -694,6 +815,6 @@ async function lmsToolSetCookie(cookie) {
 }
 
 // ============ 工具注册说明 ============
-// 8 个 LMS 工具的元信息已迁移到 config.js 的 BUILTIN_TOOLS 数组中
+// LMS 工具的元信息已迁移到 config.js 的 BUILTIN_TOOLS 数组中
 // （与 execute_action / read_note 等其他内置工具地位相同）
 // 本文件只负责提供 lmsToolXxx 系列实现函数，由 BUILTIN_TOOLS 的 code 字段调用。

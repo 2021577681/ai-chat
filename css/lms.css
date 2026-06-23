@@ -218,6 +218,11 @@
   width: 100%;
   margin-top: 2px;
 }
+.lms-period-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
 .lms-score-error {
   margin: 0 0 14px;
   padding: 10px 12px;
@@ -271,6 +276,49 @@
 .lms-score-table tr.failed td {
   color: var(--danger, #cf222e);
   background: rgba(207, 34, 46, 0.04);
+}
+.lms-schedule-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  color: var(--text-secondary, #6e7681);
+  font-size: 12px;
+}
+.lms-schedule-summary span {
+  padding: 3px 8px;
+  border: 1px solid var(--border, #e1e4e8);
+  border-radius: 999px;
+  background: var(--bg-card, #fff);
+}
+.lms-schedule-table th:nth-child(3),
+.lms-schedule-table td:nth-child(3) {
+  min-width: 150px;
+}
+.lms-schedule-table td:nth-child(3),
+.lms-schedule-table td:nth-child(4),
+.lms-schedule-table td:nth-child(5),
+.lms-schedule-table td:nth-child(6) {
+  text-align: left;
+  white-space: normal;
+}
+.lms-schedule-table th:nth-child(6),
+.lms-schedule-table td:nth-child(6) {
+  min-width: 90px;
+}
+.lms-empty-room-table th:nth-child(1),
+.lms-empty-room-table td:nth-child(1) {
+  min-width: 120px;
+}
+.lms-empty-room-table td:nth-child(3),
+.lms-empty-room-table td:nth-child(6) {
+  text-align: left;
+  white-space: normal;
+}
+.lms-empty-room-table td:nth-child(4),
+.lms-empty-room-table td:nth-child(5) {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .lms-panel-foot {

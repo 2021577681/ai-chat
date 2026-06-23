@@ -445,6 +445,8 @@ function injectBuiltinTools() {
   ]);
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || OPTIONAL_TOOL_PREFIXES.some(p => name.startsWith(p));
+  const hasEnabledOptionalPrefix = (prefix) =>
+    state.tools.some(t => String((t && t.name) || '').startsWith(prefix));
 
   let refreshed = 0;
   state.tools = state.tools.map(tool => {
@@ -461,8 +463,14 @@ function injectBuiltinTools() {
     if (!existingNames.has(tool.name)) {
       if (!loadedSignatures.includes(tool.name)) {
         // 可选工具组：首次见到时跳过自动注入
-        if (isOptional(tool.name)) continue;
+        if (isOptional(tool.name)) {
+          const enabledOptionalPrefix = OPTIONAL_TOOL_PREFIXES.some(prefix =>
+            tool.name.startsWith(prefix) && hasEnabledOptionalPrefix(prefix)
+          );
+          if (!enabledOptionalPrefix) continue;
+        }
         state.tools.push(JSON.parse(JSON.stringify(tool)));
+        existingNames.add(tool.name);
         added++;
       }
     }

@@ -3,7 +3,7 @@
 // 4 个标签页：📊 概览 / 📝 待办 / 📚 课程 / 📂 课件
 
 const LMS_PANEL_STATE = {
-  page: 'home',              // home | lms | scores
+  page: 'home',              // home | lms | scores | schedule | emptyRooms
   tab: 'overview',           // overview | todos | courses | materials
   loading: false,
   authMode: 'login',
@@ -15,12 +15,46 @@ const LMS_PANEL_STATE = {
     materialsByCid: {},
     scores: null,
     scoreSummary: null,
+    scheduleLessons: null,
+    scheduleSummary: null,
+    emptyRooms: null,
+    emptyRoomSummary: null,
   },
   selectedCid: null,         // 当前 materials 页选中的课程 id
   scoreAccountType: 'auto',
   scoreResolvedAccountType: '',
   scoreTerm: '',
   scoreError: '',
+  scheduleAccountType: 'auto',
+  scheduleResolvedAccountType: '',
+  scheduleResultTerm: '',
+  scheduleTerm: '',
+  scheduleError: '',
+  emptyRoomCampus: '兴庆校区',
+  emptyRoomBuilding: '主楼D',
+  emptyRoomDate: '',
+  emptyRoomStartPeriod: 1,
+  emptyRoomEndPeriod: 11,
+  emptyRoomError: '',
+};
+
+const LMS_EMPTY_ROOM_OPTIONS = {
+  '兴庆校区': [
+    '主楼A', '主楼B', '主楼C', '主楼D', '中2', '中3', '西2东', '西2西',
+    '外文楼A', '外文楼B', '东1东', '东2', '仲英楼', '东1西', '教2西',
+    '教2楼', '中1', '主楼E座', '工程馆', '工程坊A区', '文管', '计教中心', '田家炳',
+  ],
+  '雁塔校区': [
+    '东配楼', '微免楼', '综合楼', '教学楼', '药学楼', '解剖楼', '生化楼',
+    '病理楼', '西配楼', '一附院科教楼', '二院教学楼', '护理楼', '卫法楼',
+  ],
+  '曲江校区': ['西一楼', '西五楼', '西四楼', '西六楼'],
+  '创新港校区': [
+    '1号巨构', '2号巨构', '3号巨构', '4号巨构', '5号巨构', '9号巨构',
+    '18号巨构', '19号巨构', '20号巨构', '21号巨构', '图书馆', '2号绿楔',
+    '3号绿楔', '主楼运动场', '工程博物馆-创新港',
+  ],
+  '苏州校区': ['公共学院5号楼'],
 };
 
 function lmsPanelEmptyCache() {
@@ -30,6 +64,10 @@ function lmsPanelEmptyCache() {
     materialsByCid: {},
     scores: null,
     scoreSummary: null,
+    scheduleLessons: null,
+    scheduleSummary: null,
+    emptyRooms: null,
+    emptyRoomSummary: null,
   };
 }
 
@@ -137,6 +175,16 @@ function lmsPanelRender() {
     return;
   }
 
+  if (LMS_PANEL_STATE.page === 'schedule') {
+    body.innerHTML = lmsPanelRenderSchedulePage();
+    return;
+  }
+
+  if (LMS_PANEL_STATE.page === 'emptyRooms') {
+    body.innerHTML = lmsPanelRenderEmptyRoomsPage();
+    return;
+  }
+
   const _cookie = lmsGetCookie();
   if (!_cookie) {
     body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + lmsPanelRenderNoCookie();
@@ -181,6 +229,14 @@ function lmsPanelRenderHome() {
         <button class="lms-nav-btn" onclick="lmsPanelSetPage('scores')">
           <span class="lms-nav-title">成绩查询</span>
           <span class="lms-nav-desc">查询本科教务或研究生系统成绩</span>
+        </button>
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('schedule')">
+          <span class="lms-nav-title">课表查询</span>
+          <span class="lms-nav-desc">查询当前或指定学期课表</span>
+        </button>
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('emptyRooms')">
+          <span class="lms-nav-title">空闲教室</span>
+          <span class="lms-nav-desc">按校区、教学楼、日期和节次查询空教室</span>
         </button>
       </div>
     </div>
@@ -301,6 +357,275 @@ function lmsPanelOpenCredentialLogin() {
   lmsPanelOpenCookieEditor('login');
   const remember = document.getElementById('lmsLoginRemember');
   if (remember) remember.checked = true;
+}
+
+function lmsPanelRenderSchedulePage() {
+  const accountType = LMS_PANEL_STATE.scheduleAccountType || 'auto';
+  const term = LMS_PANEL_STATE.scheduleTerm || '';
+  const lessons = LMS_PANEL_STATE.cache.scheduleLessons;
+  const summary = LMS_PANEL_STATE.cache.scheduleSummary || {};
+  const resolvedType = LMS_PANEL_STATE.scheduleResolvedAccountType || accountType;
+
+  let html = lmsPanelRenderSubHeader('课表查询');
+  html += `
+    <div class="lms-score-controls">
+      <label class="lms-score-field">
+        <span>身份</span>
+        <select id="lmsScheduleAccountType" class="lms-login-input" onchange="lmsPanelSetScheduleAccountType(this.value)">
+          <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
+          <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
+          <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>学期</span>
+        <input id="lmsScheduleTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="留空查当前学期，如 2024-2025-1" oninput="lmsPanelSetScheduleTerm(this.value)">
+      </label>
+      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchSchedule()">查询课表</button>
+    </div>
+  `;
+
+  if (LMS_PANEL_STATE.scheduleError) {
+    html += `
+      <div class="lms-score-error">
+        <div>${escapeHtml(LMS_PANEL_STATE.scheduleError)}</div>
+        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+      </div>
+    `;
+  }
+
+  if (!lessons) {
+    html += `
+      <div class="lms-empty-mini">
+        课表查询使用本机加密保存的统一认证账号密码。
+      </div>
+    `;
+    return html;
+  }
+
+  if (!lessons.length) {
+    html += '<div class="lms-empty"><h3>未查询到课表</h3><p>可以切换身份或学期后重试。</p></div>';
+    return html;
+  }
+
+  html += `
+    <div class="lms-schedule-summary">
+      <span>${escapeHtml(lmsScoreAccountLabel(resolvedType))}</span>
+      <span>${escapeHtml(LMS_PANEL_STATE.scheduleResultTerm || '')}</span>
+      <span>共 ${summary.count ?? lessons.length} 条课程安排</span>
+    </div>
+    <div class="lms-score-table-wrap">
+      <table class="lms-score-table lms-schedule-table">
+        <thead>
+          <tr>
+            <th>星期</th>
+            <th>节次</th>
+            <th>课程</th>
+            <th>地点</th>
+            <th>教师</th>
+            <th>周次</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${lessons.map(lmsPanelRenderScheduleRow).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  return html;
+}
+
+function lmsPanelRenderScheduleRow(item) {
+  return `
+    <tr>
+      <td>${escapeHtml(lmsWeekdayName(item.dayOfWeek))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.periodStart))}-${escapeHtml(lmsFmtScoreValue(item.periodEnd))}</td>
+      <td>${escapeHtml(item.name || '-')}</td>
+      <td>${escapeHtml(item.classroom || '-')}</td>
+      <td>${escapeHtml(item.teacher || '-')}</td>
+      <td>${escapeHtml(item.weeksText || '-')}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelSetScheduleAccountType(value) {
+  LMS_PANEL_STATE.scheduleAccountType = value || 'auto';
+}
+
+function lmsPanelSetScheduleTerm(value) {
+  LMS_PANEL_STATE.scheduleTerm = value || '';
+}
+
+function lmsPanelTodayString() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function lmsPanelRenderEmptyRoomCampusOptions(selected) {
+  return Object.keys(LMS_EMPTY_ROOM_OPTIONS).map(campus =>
+    `<option value="${escapeHtml(campus)}" ${campus === selected ? 'selected' : ''}>${escapeHtml(campus)}</option>`
+  ).join('');
+}
+
+function lmsPanelRenderEmptyRoomBuildingOptions(campus, selected) {
+  const buildings = LMS_EMPTY_ROOM_OPTIONS[campus] || [];
+  return buildings.map(building =>
+    `<option value="${escapeHtml(building)}" ${building === selected ? 'selected' : ''}>${escapeHtml(building)}</option>`
+  ).join('');
+}
+
+function lmsPanelRenderPeriodOptions(selected) {
+  const current = Number(selected) || 1;
+  return Array.from({ length: 11 }, (_, idx) => idx + 1)
+    .map(period => `<option value="${period}" ${period === current ? 'selected' : ''}>第 ${period} 节</option>`)
+    .join('');
+}
+
+function lmsPanelRenderEmptyRoomsPage() {
+  const campus = LMS_PANEL_STATE.emptyRoomCampus || '兴庆校区';
+  const buildings = LMS_EMPTY_ROOM_OPTIONS[campus] || [];
+  const building = buildings.includes(LMS_PANEL_STATE.emptyRoomBuilding)
+    ? LMS_PANEL_STATE.emptyRoomBuilding
+    : (buildings[0] || '');
+  LMS_PANEL_STATE.emptyRoomBuilding = building;
+
+  const queryDate = LMS_PANEL_STATE.emptyRoomDate || lmsPanelTodayString();
+  const startPeriod = Number(LMS_PANEL_STATE.emptyRoomStartPeriod) || 1;
+  const endPeriod = Number(LMS_PANEL_STATE.emptyRoomEndPeriod) || 11;
+  const rooms = LMS_PANEL_STATE.cache.emptyRooms;
+  const summary = LMS_PANEL_STATE.cache.emptyRoomSummary || {};
+
+  let html = lmsPanelRenderSubHeader('空闲教室');
+  html += `
+    <div class="lms-score-controls">
+      <label class="lms-score-field">
+        <span>校区</span>
+        <select id="lmsEmptyRoomCampus" class="lms-login-input" onchange="lmsPanelSetEmptyRoomCampus(this.value)">
+          ${lmsPanelRenderEmptyRoomCampusOptions(campus)}
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>教学楼</span>
+        <select id="lmsEmptyRoomBuilding" class="lms-login-input" onchange="lmsPanelSetEmptyRoomBuilding(this.value)">
+          ${lmsPanelRenderEmptyRoomBuildingOptions(campus, building)}
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>日期</span>
+        <input id="lmsEmptyRoomDate" class="lms-login-input" type="date" value="${escapeHtml(queryDate)}" onchange="lmsPanelSetEmptyRoomDate(this.value)">
+      </label>
+      <div class="lms-period-grid">
+        <label class="lms-score-field">
+          <span>开始节次</span>
+          <select id="lmsEmptyRoomStartPeriod" class="lms-login-input" onchange="lmsPanelSetEmptyRoomStartPeriod(this.value)">
+            ${lmsPanelRenderPeriodOptions(startPeriod)}
+          </select>
+        </label>
+        <label class="lms-score-field">
+          <span>结束节次</span>
+          <select id="lmsEmptyRoomEndPeriod" class="lms-login-input" onchange="lmsPanelSetEmptyRoomEndPeriod(this.value)">
+            ${lmsPanelRenderPeriodOptions(endPeriod)}
+          </select>
+        </label>
+      </div>
+      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchEmptyRooms()">查询空闲教室</button>
+    </div>
+  `;
+
+  if (LMS_PANEL_STATE.emptyRoomError) {
+    html += `
+      <div class="lms-score-error">
+        <div>${escapeHtml(LMS_PANEL_STATE.emptyRoomError)}</div>
+        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+      </div>
+    `;
+  }
+
+  if (!rooms) {
+    html += `
+      <div class="lms-empty-mini">
+        空闲教室查询使用本机加密保存的统一认证账号密码，并访问本科教务系统。
+      </div>
+    `;
+    return html;
+  }
+
+  if (!rooms.length) {
+    html += '<div class="lms-empty"><h3>未查询到空闲教室</h3><p>可以切换教学楼、日期或节次后重试。</p></div>';
+    return html;
+  }
+
+  html += `
+    <div class="lms-schedule-summary">
+      <span>${escapeHtml(campus)}</span>
+      <span>${escapeHtml(building)}</span>
+      <span>${escapeHtml(queryDate)}</span>
+      <span>第 ${startPeriod}-${endPeriod} 节</span>
+      <span>共 ${summary.count ?? rooms.length} 间</span>
+    </div>
+    <div class="lms-score-table-wrap">
+      <table class="lms-score-table lms-empty-room-table">
+        <thead>
+          <tr>
+            <th>教室</th>
+            <th>教学楼</th>
+            <th>类型</th>
+            <th>座位</th>
+            <th>考试座位</th>
+            <th>校区</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rooms.map(lmsPanelRenderEmptyRoomRow).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  return html;
+}
+
+function lmsPanelRenderEmptyRoomRow(item) {
+  return `
+    <tr>
+      <td>${escapeHtml(item.name || '-')}</td>
+      <td>${escapeHtml(item.buildingName || '-')}</td>
+      <td>${escapeHtml(item.type || '-')}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.capacity))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.examCapacity))}</td>
+      <td>${escapeHtml(item.campusName || '-')}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelSetEmptyRoomCampus(value) {
+  LMS_PANEL_STATE.emptyRoomCampus = value || '兴庆校区';
+  const buildings = LMS_EMPTY_ROOM_OPTIONS[LMS_PANEL_STATE.emptyRoomCampus] || [];
+  if (!buildings.includes(LMS_PANEL_STATE.emptyRoomBuilding)) {
+    LMS_PANEL_STATE.emptyRoomBuilding = buildings[0] || '';
+  }
+  LMS_PANEL_STATE.cache.emptyRooms = null;
+  LMS_PANEL_STATE.cache.emptyRoomSummary = null;
+  LMS_PANEL_STATE.emptyRoomError = '';
+  lmsPanelRender();
+}
+
+function lmsPanelSetEmptyRoomBuilding(value) {
+  LMS_PANEL_STATE.emptyRoomBuilding = value || '';
+}
+
+function lmsPanelSetEmptyRoomDate(value) {
+  LMS_PANEL_STATE.emptyRoomDate = value || '';
+}
+
+function lmsPanelSetEmptyRoomStartPeriod(value) {
+  LMS_PANEL_STATE.emptyRoomStartPeriod = Number(value) || 1;
+}
+
+function lmsPanelSetEmptyRoomEndPeriod(value) {
+  LMS_PANEL_STATE.emptyRoomEndPeriod = Number(value) || 11;
 }
 
 function lmsPanelRenderBadCookie() {
@@ -668,6 +993,70 @@ async function lmsPanelFetchScores() {
   lmsPanelRender();
 }
 
+async function lmsPanelFetchSchedule() {
+  const accountType = document.getElementById('lmsScheduleAccountType')?.value || LMS_PANEL_STATE.scheduleAccountType || 'auto';
+  const term = document.getElementById('lmsScheduleTerm')?.value.trim() || '';
+  LMS_PANEL_STATE.scheduleAccountType = accountType;
+  LMS_PANEL_STATE.scheduleTerm = term;
+  LMS_PANEL_STATE.scheduleError = '';
+  lmsPanelShowLoading('正在查询课表...');
+
+  const result = await lmsScheduleQuery({
+    account_type: accountType,
+    term,
+  });
+  if (result && result.ok) {
+    LMS_PANEL_STATE.cache.scheduleLessons = result.lessons || [];
+    LMS_PANEL_STATE.cache.scheduleSummary = result.summary || {};
+    LMS_PANEL_STATE.scheduleResolvedAccountType = result.account_type || accountType;
+    LMS_PANEL_STATE.scheduleResultTerm = result.term || '';
+    toast(`课表已加载：${LMS_PANEL_STATE.cache.scheduleLessons.length} 条课程安排`);
+  } else {
+    LMS_PANEL_STATE.cache.scheduleLessons = null;
+    LMS_PANEL_STATE.cache.scheduleSummary = null;
+    LMS_PANEL_STATE.scheduleResolvedAccountType = '';
+    LMS_PANEL_STATE.scheduleResultTerm = '';
+    LMS_PANEL_STATE.scheduleError = (result && (result.message || result.error)) || '课表查询失败。';
+    toast(LMS_PANEL_STATE.scheduleError);
+  }
+  lmsPanelRender();
+}
+
+async function lmsPanelFetchEmptyRooms() {
+  const campus = document.getElementById('lmsEmptyRoomCampus')?.value || LMS_PANEL_STATE.emptyRoomCampus || '兴庆校区';
+  const building = document.getElementById('lmsEmptyRoomBuilding')?.value || LMS_PANEL_STATE.emptyRoomBuilding || '主楼D';
+  const queryDate = document.getElementById('lmsEmptyRoomDate')?.value || LMS_PANEL_STATE.emptyRoomDate || lmsPanelTodayString();
+  const startPeriod = Number(document.getElementById('lmsEmptyRoomStartPeriod')?.value || LMS_PANEL_STATE.emptyRoomStartPeriod || 1);
+  const endPeriod = Number(document.getElementById('lmsEmptyRoomEndPeriod')?.value || LMS_PANEL_STATE.emptyRoomEndPeriod || 11);
+
+  LMS_PANEL_STATE.emptyRoomCampus = campus;
+  LMS_PANEL_STATE.emptyRoomBuilding = building;
+  LMS_PANEL_STATE.emptyRoomDate = queryDate;
+  LMS_PANEL_STATE.emptyRoomStartPeriod = startPeriod;
+  LMS_PANEL_STATE.emptyRoomEndPeriod = endPeriod;
+  LMS_PANEL_STATE.emptyRoomError = '';
+  lmsPanelShowLoading('正在查询空闲教室...');
+
+  const result = await lmsEmptyRoomsQuery({
+    campus,
+    building,
+    date: queryDate,
+    start_period: startPeriod,
+    end_period: endPeriod,
+  });
+  if (result && result.ok) {
+    LMS_PANEL_STATE.cache.emptyRooms = result.rooms || [];
+    LMS_PANEL_STATE.cache.emptyRoomSummary = result.summary || {};
+    toast(`空闲教室已加载：${LMS_PANEL_STATE.cache.emptyRooms.length} 间`);
+  } else {
+    LMS_PANEL_STATE.cache.emptyRooms = null;
+    LMS_PANEL_STATE.cache.emptyRoomSummary = null;
+    LMS_PANEL_STATE.emptyRoomError = (result && (result.message || result.error)) || '空闲教室查询失败。';
+    toast(LMS_PANEL_STATE.emptyRoomError);
+  }
+  lmsPanelRender();
+}
+
 async function lmsPanelShowMaterials(cid) {
   LMS_PANEL_STATE.page = 'lms';
   LMS_PANEL_STATE.selectedCid = cid;
@@ -702,7 +1091,14 @@ async function lmsPanelDownload(uploadId, filename) {
 function lmsPanelShowLoading(text) {
   const body = document.getElementById('lmsPanelBody');
   if (body) {
-    body.innerHTML = `<div class="lms-loading">
+    const header = LMS_PANEL_STATE.page === 'scores'
+      ? lmsPanelRenderSubHeader('成绩查询')
+      : (LMS_PANEL_STATE.page === 'schedule'
+        ? lmsPanelRenderSubHeader('课表查询')
+        : (LMS_PANEL_STATE.page === 'emptyRooms'
+          ? lmsPanelRenderSubHeader('空闲教室')
+          : (LMS_PANEL_STATE.page === 'lms' ? lmsPanelRenderSubHeader('思源学堂') : '')));
+    body.innerHTML = `${header}<div class="lms-loading">
       <div class="lms-spinner"></div>
       <div>${escapeHtml(text || '加载中...')}</div>
     </div>`;

@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v10';  // ⭐ v10：新增 checkpoint 查看/恢复工具
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v10';  // v10：新增 checkpoint 查看/恢复工具
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -505,6 +505,48 @@ const BUILTIN_TOOLS = [
     description: '🎓【LMS】列出西安交大 LMS 上所有未完成的作业/待办事项，按截止时间排序。当用户问"作业""待办""ddl""有什么要交"时用。',
     parameters: { type: 'object', properties: {}, required: [] },
     code: 'return await lmsToolTodos();'
+  },
+  {
+    name: 'lms_scores',
+    description: '🎓【LMS】查询西安交大学生的本科教务或研究生系统成绩，返回课程、学分、成绩、GPA 和汇总统计。需要用户已在学习面板中加密保存统一认证账号密码；受 LMS 工具开关控制。',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_type: { type: 'string', description: '身份类型：auto 自动识别，undergraduate 本科生，postgraduate 研究生。默认 auto。' },
+        term: { type: 'string', description: '本科成绩可选学期，格式如 2024-2025-1；研究生成绩会忽略该字段。' }
+      },
+      required: []
+    },
+    code: 'return await lmsToolScores(args.account_type || "auto", args.term || "");'
+  },
+  {
+    name: 'lms_schedule',
+    description: '🎓【LMS】查询西安交大学生的本科教务或研究生系统课表，返回星期、节次、课程、教师、教室和周次。需要用户已在学习面板中加密保存统一认证账号密码；受 LMS 工具开关控制。',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_type: { type: 'string', description: '身份类型：auto 自动识别，undergraduate 本科生，postgraduate 研究生。默认 auto。' },
+        term: { type: 'string', description: '可选学期，格式如 2024-2025-1；留空查询当前学期。' }
+      },
+      required: []
+    },
+    code: 'return await lmsToolSchedule(args.account_type || "auto", args.term || "");'
+  },
+  {
+    name: 'lms_empty_rooms',
+    description: '🎓【LMS】查询西安交大本科教务系统空闲教室，按校区、教学楼、日期和节次返回教室、类型、座位数。需要用户已在学习面板中加密保存统一认证账号密码；受 LMS 工具开关控制。',
+    parameters: {
+      type: 'object',
+      properties: {
+        campus: { type: 'string', description: '校区名称，默认兴庆校区。可选：兴庆校区、雁塔校区、曲江校区、创新港校区、苏州校区。' },
+        building: { type: 'string', description: '教学楼名称，默认主楼D。例：主楼D、仲英楼、1号巨构。' },
+        date: { type: 'string', description: '查询日期，格式 YYYY-MM-DD；留空默认今天。' },
+        start_period: { type: 'number', description: '开始节次，1-11，默认 1。' },
+        end_period: { type: 'number', description: '结束节次，1-11，默认 11。返回在整个节次范围内均空闲的教室。' }
+      },
+      required: []
+    },
+    code: 'return await lmsToolEmptyRooms(args.campus || "兴庆校区", args.building || "主楼D", args.date || "", args.start_period || 1, args.end_period || 11);'
   },
   {
     name: 'lms_homework',

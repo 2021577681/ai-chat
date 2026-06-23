@@ -126,6 +126,63 @@ class ProxyMixin:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
         self._send_json(status, payload)
 
+    # ============ POST /lms-schedule ============
+    def handle_lms_schedule_post(self):
+        """使用本机加密保存的统一认证凭据查询本科/研究生课表。"""
+        token = self.headers.get('X-Token', '')
+        if token != config.TOKEN:
+            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
+            return
+
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
+            body = json.loads(raw or '{}')
+            if not isinstance(body, dict):
+                raise ValueError('请求体必须是 JSON 对象')
+        except Exception as e:
+            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            return
+
+        account_type = body.get('account_type', 'auto')
+        print(f'🎓 [LMS 课表] account_type={account_type}')
+        try:
+            from .lms_schedule import handle_lms_schedule_request
+
+            status, payload = handle_lms_schedule_request(body)
+        except Exception as e:
+            status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
+        self._send_json(status, payload)
+
+    # ============ POST /lms-empty-rooms ============
+    def handle_lms_empty_rooms_post(self):
+        """使用本机加密保存的统一认证凭据查询本科教务空闲教室。"""
+        token = self.headers.get('X-Token', '')
+        if token != config.TOKEN:
+            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
+            return
+
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
+            body = json.loads(raw or '{}')
+            if not isinstance(body, dict):
+                raise ValueError('请求体必须是 JSON 对象')
+        except Exception as e:
+            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            return
+
+        campus = body.get('campus', '兴庆校区')
+        building = body.get('building', '主楼D')
+        print(f'🎓 [LMS 空闲教室] campus={campus} building={building}')
+        try:
+            from .lms_empty_rooms import handle_lms_empty_rooms_request
+
+            status, payload = handle_lms_empty_rooms_request(body)
+        except Exception as e:
+            status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
+        self._send_json(status, payload)
+
     # ============ GET /xxx 静态文件 ============
     def handle_static_file(self):
         """安全的静态文件服务（只允许放出白名单扩展名，禁止越权）"""
