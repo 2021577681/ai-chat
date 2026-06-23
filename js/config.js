@@ -549,6 +549,23 @@ const BUILTIN_TOOLS = [
     code: 'return await lmsToolEmptyRooms(args.campus || "兴庆校区", args.building || "主楼D", args.date || "", args.start_period || 1, args.end_period || 11);'
   },
   {
+    name: 'lms_attendance',
+    description: '🎓【LMS】查询西安交大本科/研究生考勤，返回日期范围内的刷卡流水、课程考勤统计和总统计。需要用户已在学习面板中加密保存统一认证账号密码；受 LMS 工具开关控制。',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_type: { type: 'string', description: '身份类型：auto 自动识别，undergraduate 本科生，postgraduate 研究生。默认 auto。' },
+        start_date: { type: 'string', description: '开始日期，格式 YYYY-MM-DD；留空默认最近 30 天。' },
+        end_date: { type: 'string', description: '结束日期，格式 YYYY-MM-DD；留空默认今天。' },
+        page: { type: 'number', description: '刷卡流水页码，默认 1。' },
+        page_size: { type: 'number', description: '每页流水数量，1-100，默认 20。' },
+        access_mode: { type: 'string', description: '访问方式：auto 自动先直连后 WebVPN；normal 普通直连；webvpn 强制使用 WebVPN。默认 auto。' }
+      },
+      required: []
+    },
+    code: 'return await lmsToolAttendance(args.account_type || "auto", args.start_date || "", args.end_date || "", args.page || 1, args.page_size || 20, args.access_mode || "auto");'
+  },
+  {
     name: 'lms_homework',
     description: '🎓【LMS】查看某项作业的详细要求（说明文字、附件、截止时间等）。需要先用 lms_todos 拿到作业 ID（hw_id）。',
     parameters: {

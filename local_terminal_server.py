@@ -94,6 +94,7 @@ def _print_banner():
     print('   - POST /lms-scores 查询本科/研究生成绩（需 X-Token + 本机保存凭据）')
     print('   - POST /lms-schedule 查询本科/研究生课表（需 X-Token + 本机保存凭据）')
     print('   - POST /lms-empty-rooms 查询本科教务空闲教室（需 X-Token + 本机保存凭据）')
+    print('   - POST /lms-attendance 查询本科/研究生考勤（需 X-Token + 本机保存凭据）')
     print('   - POST /llm-proxy  代理 LLM 请求（绕过浏览器 CORS）')
     print('   - execute          执行 shell 命令')
     print('   - read_file        读取文本文件')

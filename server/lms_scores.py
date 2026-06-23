@@ -155,29 +155,55 @@ def _normalize_undergraduate_score(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _query_undergraduate_scores(session: requests.Session, term: str | None) -> list[dict[str, Any]]:
-    response = session.post(
-        JWXT_SCORE_URL,
-        data={
-            "pageSize": 1000,
-            "pageNumber": 1,
-            "querySetting": _query_setting(term),
-        },
-        headers={
-            "Referer": "https://jwxt.xjtu.edu.cn/jwapp/sys/cjcx/*default/index.do",
-            "X-Requested-With": "XMLHttpRequest",
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise ScoreQueryError("JWXT_BAD_RESPONSE", "本科教务系统没有返回可解析的成绩数据，可能登录态已失效。") from exc
-
-    rows = (((data or {}).get("datas") or {}).get("xscjcx") or {}).get("rows")
+def _extract_undergraduate_score_rows(data: dict[str, Any]) -> tuple[list[Any], int | None]:
+    table = (((data or {}).get("datas") or {}).get("xscjcx") or {})
+    rows = table.get("rows")
     if not isinstance(rows, list):
         raise ScoreQueryError("JWXT_PARSE_FAILED", "本科成绩接口返回格式无法识别。")
+    total = (
+        _to_float(table.get("totalSize"))
+        or _to_float(table.get("total"))
+        or _to_float((data or {}).get("totalSize"))
+        or _to_float((data or {}).get("total"))
+    )
+    return rows, int(total) if total is not None else None
+
+
+def _query_undergraduate_scores(session: requests.Session, term: str | None) -> list[dict[str, Any]]:
+    page_size = 1000
+    page_number = 1
+    rows: list[Any] = []
+    total: int | None = None
+
+    while True:
+        response = session.post(
+            JWXT_SCORE_URL,
+            data={
+                "pageSize": page_size,
+                "pageNumber": page_number,
+                "querySetting": _query_setting(term),
+            },
+            headers={
+                "Referer": "https://jwxt.xjtu.edu.cn/jwapp/sys/cjcx/*default/index.do",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ScoreQueryError("JWXT_BAD_RESPONSE", "本科教务系统没有返回可解析的成绩数据，可能登录态已失效。") from exc
+
+        page_rows, page_total = _extract_undergraduate_score_rows(data)
+        rows.extend(page_rows)
+        total = page_total if page_total is not None else total
+        if not page_rows or len(page_rows) < page_size or (total is not None and len(rows) >= total):
+            break
+        page_number += 1
+        if page_number > 20:
+            break
+
     return [_normalize_undergraduate_score(row) for row in rows if isinstance(row, dict)]
 
 

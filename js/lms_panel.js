@@ -3,7 +3,7 @@
 // 4 个标签页：📊 概览 / 📝 待办 / 📚 课程 / 📂 课件
 
 const LMS_PANEL_STATE = {
-  page: 'home',              // home | lms | scores | schedule | emptyRooms
+  page: 'home',              // home | lms | scores | schedule | emptyRooms | attendance
   tab: 'overview',           // overview | todos | courses | materials
   loading: false,
   authMode: 'login',
@@ -19,6 +19,10 @@ const LMS_PANEL_STATE = {
     scheduleSummary: null,
     emptyRooms: null,
     emptyRoomSummary: null,
+    attendanceFlows: null,
+    attendanceSubjects: null,
+    attendanceStatistics: null,
+    attendancePagination: null,
   },
   selectedCid: null,         // 当前 materials 页选中的课程 id
   scoreAccountType: 'auto',
@@ -36,6 +40,15 @@ const LMS_PANEL_STATE = {
   emptyRoomStartPeriod: 1,
   emptyRoomEndPeriod: 11,
   emptyRoomError: '',
+  attendanceAccountType: 'auto',
+  attendanceAccessMode: 'auto',
+  attendanceResolvedAccountType: '',
+  attendanceResolvedAccessMode: '',
+  attendanceStartDate: '',
+  attendanceEndDate: '',
+  attendancePage: 1,
+  attendancePageSize: 20,
+  attendanceError: '',
 };
 
 const LMS_EMPTY_ROOM_OPTIONS = {
@@ -68,6 +81,10 @@ function lmsPanelEmptyCache() {
     scheduleSummary: null,
     emptyRooms: null,
     emptyRoomSummary: null,
+    attendanceFlows: null,
+    attendanceSubjects: null,
+    attendanceStatistics: null,
+    attendancePagination: null,
   };
 }
 
@@ -185,6 +202,11 @@ function lmsPanelRender() {
     return;
   }
 
+  if (LMS_PANEL_STATE.page === 'attendance') {
+    body.innerHTML = lmsPanelRenderAttendancePage();
+    return;
+  }
+
   const _cookie = lmsGetCookie();
   if (!_cookie) {
     body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + lmsPanelRenderNoCookie();
@@ -237,6 +259,10 @@ function lmsPanelRenderHome() {
         <button class="lms-nav-btn" onclick="lmsPanelSetPage('emptyRooms')">
           <span class="lms-nav-title">空闲教室</span>
           <span class="lms-nav-desc">按校区、教学楼、日期和节次查询空教室</span>
+        </button>
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('attendance')">
+          <span class="lms-nav-title">考勤查询</span>
+          <span class="lms-nav-desc">查询刷卡流水、课程考勤和出勤统计</span>
         </button>
       </div>
     </div>
@@ -626,6 +652,238 @@ function lmsPanelSetEmptyRoomStartPeriod(value) {
 
 function lmsPanelSetEmptyRoomEndPeriod(value) {
   LMS_PANEL_STATE.emptyRoomEndPeriod = Number(value) || 11;
+}
+
+function lmsPanelDateOffsetString(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + Number(days || 0));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function lmsPanelAttendanceAccessModeLabel(mode) {
+  if (mode === 'webvpn') return 'WebVPN';
+  if (mode === 'normal') return '普通直连';
+  return '自动';
+}
+
+function lmsPanelRenderAttendancePage() {
+  const accountType = LMS_PANEL_STATE.attendanceAccountType || 'auto';
+  const accessMode = LMS_PANEL_STATE.attendanceAccessMode || 'auto';
+  const startDate = LMS_PANEL_STATE.attendanceStartDate || lmsPanelDateOffsetString(-30);
+  const endDate = LMS_PANEL_STATE.attendanceEndDate || lmsPanelTodayString();
+  const page = Number(LMS_PANEL_STATE.attendancePage) || 1;
+  const pageSize = Number(LMS_PANEL_STATE.attendancePageSize) || 20;
+  const flows = LMS_PANEL_STATE.cache.attendanceFlows;
+  const subjects = LMS_PANEL_STATE.cache.attendanceSubjects || [];
+  const stats = LMS_PANEL_STATE.cache.attendanceStatistics || {};
+  const pagination = LMS_PANEL_STATE.cache.attendancePagination || {};
+  const resolvedType = LMS_PANEL_STATE.attendanceResolvedAccountType || accountType;
+  const resolvedAccessMode = LMS_PANEL_STATE.attendanceResolvedAccessMode || accessMode;
+
+  let html = lmsPanelRenderSubHeader('考勤查询');
+  html += `
+    <div class="lms-score-controls">
+      <label class="lms-score-field">
+        <span>身份</span>
+        <select id="lmsAttendanceAccountType" class="lms-login-input" onchange="lmsPanelSetAttendanceAccountType(this.value)">
+          <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
+          <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
+          <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>访问方式</span>
+        <select id="lmsAttendanceAccessMode" class="lms-login-input" onchange="lmsPanelSetAttendanceAccessMode(this.value)">
+          <option value="auto" ${accessMode === 'auto' ? 'selected' : ''}>自动</option>
+          <option value="normal" ${accessMode === 'normal' ? 'selected' : ''}>普通直连</option>
+          <option value="webvpn" ${accessMode === 'webvpn' ? 'selected' : ''}>WebVPN</option>
+        </select>
+      </label>
+      <div class="lms-period-grid">
+        <label class="lms-score-field">
+          <span>开始日期</span>
+          <input id="lmsAttendanceStartDate" class="lms-login-input" type="date" value="${escapeHtml(startDate)}" onchange="lmsPanelSetAttendanceStartDate(this.value)">
+        </label>
+        <label class="lms-score-field">
+          <span>结束日期</span>
+          <input id="lmsAttendanceEndDate" class="lms-login-input" type="date" value="${escapeHtml(endDate)}" onchange="lmsPanelSetAttendanceEndDate(this.value)">
+        </label>
+      </div>
+      <div class="lms-period-grid">
+        <label class="lms-score-field">
+          <span>流水页码</span>
+          <input id="lmsAttendancePage" class="lms-login-input" type="number" min="1" max="1000" value="${page}" onchange="lmsPanelSetAttendancePage(this.value)">
+        </label>
+        <label class="lms-score-field">
+          <span>每页数量</span>
+          <select id="lmsAttendancePageSize" class="lms-login-input" onchange="lmsPanelSetAttendancePageSize(this.value)">
+            ${[10, 20, 50, 100].map(size => `<option value="${size}" ${size === pageSize ? 'selected' : ''}>${size} 条</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchAttendance()">查询考勤</button>
+    </div>
+  `;
+
+  if (LMS_PANEL_STATE.attendanceError) {
+    html += `
+      <div class="lms-score-error">
+        <div>${escapeHtml(LMS_PANEL_STATE.attendanceError)}</div>
+        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+      </div>
+    `;
+  }
+
+  if (!flows) {
+    html += `
+      <div class="lms-empty-mini">
+        考勤查询使用本机加密保存的统一认证账号密码，并访问本科/研究生考勤系统。
+      </div>
+    `;
+    return html;
+  }
+
+  html += `
+    <div class="lms-score-summary">
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${lmsFmtScoreValue(stats.total)}</div>
+        <div class="lms-stat-lbl">${escapeHtml(lmsScoreAccountLabel(resolvedType))}总课次</div>
+      </div>
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${lmsFmtScoreValue(stats.normalCount)}</div>
+        <div class="lms-stat-lbl">正常</div>
+      </div>
+      <div class="lms-stat-card ${stats.lateCount ? 'urgent' : ''}">
+        <div class="lms-stat-num">${lmsFmtScoreValue(stats.lateCount)}</div>
+        <div class="lms-stat-lbl">迟到</div>
+      </div>
+      <div class="lms-stat-card ${stats.absenceCount ? 'overdue' : ''}">
+        <div class="lms-stat-num">${lmsFmtScoreValue(stats.absenceCount)}</div>
+        <div class="lms-stat-lbl">缺勤</div>
+      </div>
+    </div>
+    <div class="lms-schedule-summary">
+      <span>${escapeHtml(startDate)} 至 ${escapeHtml(endDate)}</span>
+      <span>${escapeHtml(lmsPanelAttendanceAccessModeLabel(resolvedAccessMode))}</span>
+      <span>流水 ${pagination.totalCount ?? flows.length} 条</span>
+      <span>第 ${pagination.page || page}/${pagination.totalPages || 1} 页</span>
+      <span>请假 ${lmsFmtScoreValue(stats.leaveCount)}</span>
+      <span>早退 ${lmsFmtScoreValue(stats.leaveEarlyCount)}</span>
+    </div>
+  `;
+
+  if (!flows.length) {
+    html += '<div class="lms-empty"><h3>未查询到刷卡流水</h3><p>可以调整日期范围或身份后重试。</p></div>';
+  } else {
+    html += `
+      <div class="lms-score-table-wrap">
+        <table class="lms-score-table lms-attendance-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>地点</th>
+              <th>状态</th>
+              <th>编号</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${flows.map(lmsPanelRenderAttendanceFlowRow).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="lms-attendance-pager">
+        <button class="lms-mini-btn" onclick="lmsPanelAttendancePrevPage()" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+        <button class="lms-mini-btn" onclick="lmsPanelAttendanceNextPage()" ${pagination.totalPages && page >= pagination.totalPages ? 'disabled' : ''}>下一页</button>
+      </div>
+    `;
+  }
+
+  if (subjects.length) {
+    html += `
+      <h3 class="lms-section-title">课程统计</h3>
+      <div class="lms-score-table-wrap">
+        <table class="lms-score-table lms-attendance-subject-table">
+          <thead>
+            <tr>
+              <th>课程</th>
+              <th>总课次</th>
+              <th>正常</th>
+              <th>迟到</th>
+              <th>缺勤</th>
+              <th>请假</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${subjects.map(lmsPanelRenderAttendanceSubjectRow).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  return html;
+}
+
+function lmsPanelRenderAttendanceFlowRow(item) {
+  const type = Number(item.type);
+  const level = type === 1 ? 'ok' : (type === 0 ? 'bad' : (type === 2 ? 'warn' : ''));
+  return `
+    <tr>
+      <td>${escapeHtml(item.time || '-')}</td>
+      <td>${escapeHtml(item.place || '-')}</td>
+      <td><span class="lms-attendance-status ${level}">${escapeHtml(item.typeLabel || '-')}</span></td>
+      <td>${escapeHtml(item.id || '-')}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelRenderAttendanceSubjectRow(item) {
+  return `
+    <tr>
+      <td>${escapeHtml(item.subjectName || item.subjectCode || '-')}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.total))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.normalCount))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.lateCount))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.absenceCount))}</td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.leaveCount))}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelSetAttendanceAccountType(value) {
+  LMS_PANEL_STATE.attendanceAccountType = value || 'auto';
+}
+
+function lmsPanelSetAttendanceAccessMode(value) {
+  LMS_PANEL_STATE.attendanceAccessMode = value || 'auto';
+}
+
+function lmsPanelSetAttendanceStartDate(value) {
+  LMS_PANEL_STATE.attendanceStartDate = value || '';
+}
+
+function lmsPanelSetAttendanceEndDate(value) {
+  LMS_PANEL_STATE.attendanceEndDate = value || '';
+}
+
+function lmsPanelSetAttendancePage(value) {
+  LMS_PANEL_STATE.attendancePage = Number(value) || 1;
+}
+
+function lmsPanelSetAttendancePageSize(value) {
+  LMS_PANEL_STATE.attendancePageSize = Number(value) || 20;
+}
+
+function lmsPanelAttendancePrevPage() {
+  LMS_PANEL_STATE.attendancePage = Math.max(1, (Number(LMS_PANEL_STATE.attendancePage) || 1) - 1);
+  lmsPanelFetchAttendance();
+}
+
+function lmsPanelAttendanceNextPage() {
+  LMS_PANEL_STATE.attendancePage = (Number(LMS_PANEL_STATE.attendancePage) || 1) + 1;
+  lmsPanelFetchAttendance();
 }
 
 function lmsPanelRenderBadCookie() {
@@ -1057,6 +1315,53 @@ async function lmsPanelFetchEmptyRooms() {
   lmsPanelRender();
 }
 
+async function lmsPanelFetchAttendance() {
+  const accountType = document.getElementById('lmsAttendanceAccountType')?.value || LMS_PANEL_STATE.attendanceAccountType || 'auto';
+  const accessMode = document.getElementById('lmsAttendanceAccessMode')?.value || LMS_PANEL_STATE.attendanceAccessMode || 'auto';
+  const startDate = document.getElementById('lmsAttendanceStartDate')?.value || LMS_PANEL_STATE.attendanceStartDate || lmsPanelDateOffsetString(-30);
+  const endDate = document.getElementById('lmsAttendanceEndDate')?.value || LMS_PANEL_STATE.attendanceEndDate || lmsPanelTodayString();
+  const page = Number(document.getElementById('lmsAttendancePage')?.value || LMS_PANEL_STATE.attendancePage || 1);
+  const pageSize = Number(document.getElementById('lmsAttendancePageSize')?.value || LMS_PANEL_STATE.attendancePageSize || 20);
+
+  LMS_PANEL_STATE.attendanceAccountType = accountType;
+  LMS_PANEL_STATE.attendanceAccessMode = accessMode;
+  LMS_PANEL_STATE.attendanceStartDate = startDate;
+  LMS_PANEL_STATE.attendanceEndDate = endDate;
+  LMS_PANEL_STATE.attendancePage = page;
+  LMS_PANEL_STATE.attendancePageSize = pageSize;
+  LMS_PANEL_STATE.attendanceError = '';
+  lmsPanelShowLoading('正在查询考勤...');
+
+  const result = await lmsAttendanceQuery({
+    account_type: accountType,
+    start_date: startDate,
+    end_date: endDate,
+    page,
+    page_size: pageSize,
+    access_mode: accessMode,
+  });
+  if (result && result.ok) {
+    LMS_PANEL_STATE.cache.attendanceFlows = result.flows || [];
+    LMS_PANEL_STATE.cache.attendanceSubjects = result.subjects || [];
+    LMS_PANEL_STATE.cache.attendanceStatistics = result.statistics || {};
+    LMS_PANEL_STATE.cache.attendancePagination = result.pagination || {};
+    LMS_PANEL_STATE.attendanceResolvedAccountType = result.account_type || accountType;
+    LMS_PANEL_STATE.attendanceResolvedAccessMode = result.access_mode || accessMode;
+    LMS_PANEL_STATE.attendancePage = (result.pagination && result.pagination.page) || page;
+    toast(`考勤已加载：${LMS_PANEL_STATE.cache.attendanceFlows.length} 条流水`);
+  } else {
+    LMS_PANEL_STATE.cache.attendanceFlows = null;
+    LMS_PANEL_STATE.cache.attendanceSubjects = null;
+    LMS_PANEL_STATE.cache.attendanceStatistics = null;
+    LMS_PANEL_STATE.cache.attendancePagination = null;
+    LMS_PANEL_STATE.attendanceResolvedAccountType = '';
+    LMS_PANEL_STATE.attendanceResolvedAccessMode = '';
+    LMS_PANEL_STATE.attendanceError = (result && (result.message || result.error)) || '考勤查询失败。';
+    toast(LMS_PANEL_STATE.attendanceError);
+  }
+  lmsPanelRender();
+}
+
 async function lmsPanelShowMaterials(cid) {
   LMS_PANEL_STATE.page = 'lms';
   LMS_PANEL_STATE.selectedCid = cid;
@@ -1097,7 +1402,9 @@ function lmsPanelShowLoading(text) {
         ? lmsPanelRenderSubHeader('课表查询')
         : (LMS_PANEL_STATE.page === 'emptyRooms'
           ? lmsPanelRenderSubHeader('空闲教室')
-          : (LMS_PANEL_STATE.page === 'lms' ? lmsPanelRenderSubHeader('思源学堂') : '')));
+          : (LMS_PANEL_STATE.page === 'attendance'
+            ? lmsPanelRenderSubHeader('考勤查询')
+            : (LMS_PANEL_STATE.page === 'lms' ? lmsPanelRenderSubHeader('思源学堂') : ''))));
     body.innerHTML = `${header}<div class="lms-loading">
       <div class="lms-spinner"></div>
       <div>${escapeHtml(text || '加载中...')}</div>

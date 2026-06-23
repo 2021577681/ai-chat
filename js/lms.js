@@ -398,6 +398,33 @@ async function lmsEmptyRoomsQuery(options = {}) {
   }
 }
 
+async function lmsAttendanceQuery(options = {}) {
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: 'LOCAL_SERVER_NOT_READY', message: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  try {
+    const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-attendance`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Token': TERMINAL_CONFIG.token,
+      },
+      body: JSON.stringify(options || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (resp.status === 403) {
+      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+    }
+    if (!data) {
+      return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, error: 'NETWORK_ERROR', message: `连接本地考勤查询服务失败：${e.message}` };
+  }
+}
+
 function lmsScoreAccountLabel(accountType) {
   if (accountType === 'undergraduate') return '本科';
   if (accountType === 'postgraduate') return '研究生';
@@ -616,6 +643,51 @@ function lmsRenderEmptyRooms(data) {
   return parts.join('\n');
 }
 
+function lmsAttendanceAccessModeLabel(mode) {
+  if (mode === 'webvpn') return 'WebVPN';
+  if (mode === 'normal') return '普通直连';
+  return '自动';
+}
+
+function lmsRenderAttendance(data) {
+  if (!data || !data.ok) {
+    return `错误：${(data && (data.message || data.error)) || '考勤查询失败'}`;
+  }
+  const accountLabel = lmsScoreAccountLabel(data.account_type);
+  const flows = data.flows || [];
+  const subjects = data.subjects || [];
+  const stats = data.statistics || {};
+  const pagination = data.pagination || {};
+  const parts = [`## 考勤查询（${accountLabel}）\n`];
+  parts.push(`${data.start_date || '-'} 至 ${data.end_date || '-'} · ${lmsAttendanceAccessModeLabel(data.access_mode)} · 流水第 ${pagination.page || 1}/${pagination.totalPages || 1} 页 · 共 ${pagination.totalCount ?? flows.length} 条流水`);
+  parts.push('');
+  parts.push(`总课次 ${stats.total ?? 0} · 正常 ${stats.normalCount ?? 0} · 迟到 ${stats.lateCount ?? 0} · 缺勤 ${stats.absenceCount ?? 0} · 早退 ${stats.leaveEarlyCount ?? 0} · 请假 ${stats.leaveCount ?? 0}`);
+  parts.push('');
+
+  if (flows.length) {
+    parts.push('### 刷卡流水');
+    parts.push('| 时间 | 地点 | 状态 | 编号 |');
+    parts.push('|---|---|---|---|');
+    flows.forEach(item => {
+      parts.push(`| ${item.time || '-'} | ${item.place || '-'} | ${item.typeLabel || '-'} | ${item.id || '-'} |`);
+    });
+    parts.push('');
+  } else {
+    parts.push('暂无刷卡流水。');
+    parts.push('');
+  }
+
+  if (subjects.length) {
+    parts.push('### 课程统计');
+    parts.push('| 课程 | 总课次 | 正常 | 迟到 | 缺勤 | 早退 | 请假 |');
+    parts.push('|---|---:|---:|---:|---:|---:|---:|');
+    subjects.forEach(item => {
+      parts.push(`| ${item.subjectName || item.subjectCode || '-'} | ${item.total ?? 0} | ${item.normalCount ?? 0} | ${item.lateCount ?? 0} | ${item.absenceCount ?? 0} | ${item.leaveEarlyCount ?? 0} | ${item.leaveCount ?? 0} |`);
+    });
+  }
+  return parts.join('\n');
+}
+
 // ============ 工具实现函数（被 config.js 中 BUILTIN_TOOLS 的 code 调用） ============
 
 async function lmsToolScores(accountType = 'auto', term = '') {
@@ -643,6 +715,18 @@ async function lmsToolEmptyRooms(campus = '兴庆校区', building = '主楼D', 
     end_period: Number(endPeriod) || 11,
   });
   return lmsRenderEmptyRooms(result);
+}
+
+async function lmsToolAttendance(accountType = 'auto', startDate = '', endDate = '', page = 1, pageSize = 20, accessMode = 'auto') {
+  const result = await lmsAttendanceQuery({
+    account_type: accountType || 'auto',
+    start_date: startDate || '',
+    end_date: endDate || '',
+    page: Number(page) || 1,
+    page_size: Number(pageSize) || 20,
+    access_mode: accessMode || 'auto',
+  });
+  return lmsRenderAttendance(result);
 }
 
 async function lmsToolStatus() {

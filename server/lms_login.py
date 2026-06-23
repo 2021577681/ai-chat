@@ -237,8 +237,12 @@ class XjtCasLogin:
                 if status is not None and status not in (2, "2"):
                     raise LmsLoginError("MFA_VERIFY_FAILED", data.get("message") or "验证码验证失败")
 
-    def __init__(self, login_url: str = LMS_LOGIN_URL, visitor_id: str | None = None):
-        self.session = _get_session()
+    def __init__(
+            self,
+            login_url: str = LMS_LOGIN_URL,
+            visitor_id: str | None = None,
+            session: requests.Session | None = None):
+        self.session = session or _get_session()
         response = self._get(login_url, allow_redirects=True, timeout=30)
         response.raise_for_status()
         self.initial_login_page_html = response.text
