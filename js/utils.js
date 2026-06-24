@@ -118,6 +118,117 @@ function updateTopUrlPreview() {
 
 // ⭐ 刷新顶部沙箱信息栏（从本地服务读取 workspace）
 let _wsRefreshTimer = null;
+let _workspaceSelectInFlight = false;
+
+function updateWorkspaceDisplay(info) {
+  const pathEl = document.getElementById('workspacePath');
+  const statusEl = document.getElementById('workspaceStatus');
+  if (!pathEl || !statusEl) return;
+  const ws = (info && (info.workspace || info.cwd)) || '(未知)';
+  const cwd = (info && (info.cwd || info.workspace)) || ws;
+  if (typeof TERMINAL_CONFIG !== 'undefined') {
+    TERMINAL_CONFIG.workspace = ws;
+    TERMINAL_CONFIG.cwd = cwd;
+  }
+  pathEl.textContent = ws;
+  pathEl.title = `点击复制\n沙箱根：${ws}\n当前 cwd：${cwd}`;
+  pathEl.onclick = () => {
+    navigator.clipboard.writeText(ws).then(() => toast('✓ 路径已复制'));
+  };
+  statusEl.className = 'workspace-status online';
+  statusEl.title = '本地服务在线';
+}
+
+async function workspaceBackendAction(action, params = {}) {
+  const url = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl)
+    ? TERMINAL_CONFIG.serverUrl : 'http://localhost:8765';
+  let token = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token) ? TERMINAL_CONFIG.token : '';
+  if (!token && typeof fetchTerminalToken === 'function') {
+    token = await fetchTerminalToken(true);
+  }
+  if (!token) {
+    const tokenResp = await fetch(url + '/token', { method: 'GET' });
+    if (!tokenResp.ok) throw new Error('无法获取本地服务 Token');
+    const tokenJson = await tokenResp.json();
+    token = tokenJson.token || '';
+    if (token && typeof saveTerminalToken === 'function') saveTerminalToken(token);
+  }
+  if (!token) throw new Error('未获取到本地服务 Token');
+
+  const body = {
+    action,
+    ...params,
+    session_id: (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.sessionId)
+      ? TERMINAL_CONFIG.sessionId
+      : 'workspace-ui'
+  };
+  const doPost = () => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Token': token },
+    body: JSON.stringify(body)
+  });
+
+  let resp = await doPost();
+  if (resp.status === 403 && typeof fetchTerminalToken === 'function') {
+    token = await fetchTerminalToken(false);
+    resp = await doPost();
+  }
+  let data = null;
+  try {
+    data = await resp.json();
+  } catch (e) {}
+  if (!resp.ok) throw new Error((data && data.error) || ('HTTP ' + resp.status));
+  return data || {};
+}
+
+function refreshWorkspaceDependentContext() {
+  try {
+    if (typeof initProjectInstructions === 'function') initProjectInstructions(false);
+  } catch (e) {
+    console.warn('[workspace] refresh project instructions failed:', e);
+  }
+  try {
+    if (typeof clearLoadedProjectMemory === 'function') clearLoadedProjectMemory();
+  } catch (e) {
+    console.warn('[workspace] clear project memory failed:', e);
+  }
+}
+
+async function selectWorkspaceFromUi() {
+  if (_workspaceSelectInFlight) return;
+  _workspaceSelectInFlight = true;
+  const pathEl = document.getElementById('workspacePath');
+  const statusEl = document.getElementById('workspaceStatus');
+  const previousText = pathEl ? pathEl.textContent : '';
+  try {
+    if (statusEl) {
+      statusEl.className = 'workspace-status checking';
+      statusEl.title = '正在选择沙箱目录...';
+    }
+    if (pathEl) {
+      pathEl.textContent = '等待选择文件夹...';
+      pathEl.title = '请在弹出的系统窗口里选择新的沙箱目录';
+    }
+    const initial = (typeof TERMINAL_CONFIG !== 'undefined' && (TERMINAL_CONFIG.workspace || TERMINAL_CONFIG.cwd)) || '';
+    const r = await workspaceBackendAction('select_workspace', { initial_dir: initial });
+    if (r.cancelled) {
+      toast('已取消选择沙箱目录');
+      await refreshWorkspaceInfo();
+      return;
+    }
+    if (!r.ok) throw new Error(r.error || '切换沙箱目录失败');
+    updateWorkspaceDisplay(r);
+    refreshWorkspaceDependentContext();
+    toast('✓ 沙箱目录已切换');
+  } catch (e) {
+    if (pathEl && previousText) pathEl.textContent = previousText;
+    toast('切换沙箱目录失败：' + e.message, 4500);
+    await refreshWorkspaceInfo();
+  } finally {
+    _workspaceSelectInFlight = false;
+  }
+}
+
 async function refreshWorkspaceInfo() {
   const pathEl = document.getElementById('workspacePath');
   const statusEl = document.getElementById('workspaceStatus');
@@ -132,14 +243,7 @@ async function refreshWorkspaceInfo() {
     const resp = await fetch(url + '/workspace', { method: 'GET' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const j = await resp.json();
-    const ws = j.workspace || j.cwd || '(未知)';
-    pathEl.textContent = ws;
-    pathEl.title = `点击复制\n沙箱根：${ws}\n当前 cwd：${j.cwd || ws}`;
-    pathEl.onclick = () => {
-      navigator.clipboard.writeText(ws).then(() => toast('✓ 路径已复制'));
-    };
-    statusEl.className = 'workspace-status online';
-    statusEl.title = '本地服务在线';
+    updateWorkspaceDisplay(j);
   } catch (e) {
     pathEl.textContent = '⚠️ 未连接到本地服务（python local_terminal_server.py）';
     pathEl.title = e.message;
@@ -149,6 +253,7 @@ async function refreshWorkspaceInfo() {
   }
 }
 window.refreshWorkspaceInfo = refreshWorkspaceInfo;
+window.selectWorkspaceFromUi = selectWorkspaceFromUi;
 
 function updateUrlPreview() {
   const baseUrl = document.getElementById('baseUrl').value.trim();

@@ -397,11 +397,20 @@ body{
   color:var(--text-secondary);
 }
 
-.sidebar-workspace .workspace-status{
+.sidebar-workspace .workspace-actions{
   margin-left:auto;
+  height:24px;
+  gap:6px;
 }
 
-.sidebar-workspace .workspace-refresh{
+.sidebar-workspace .workspace-status{
+  margin-left:0;
+  width:24px;
+  height:24px;
+}
+
+.sidebar-workspace .workspace-refresh,
+.sidebar-workspace .workspace-select{
   width:24px;
   height:24px;
   padding:0;
@@ -464,6 +473,7 @@ body{
 
 .workspace-path:hover,
 .workspace-refresh:hover,
+.workspace-select:hover,
 .token-compress-btn:hover{
   background:var(--bg-hover);
   border-color:transparent;

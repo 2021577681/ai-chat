@@ -151,8 +151,11 @@
       <div class="workspace-head">
         <img class="workspace-icon" src="icon/保护_protect.png" alt="">
         <span class="workspace-label">沙箱目录</span>
-        <span class="workspace-status" id="workspaceStatus">●</span>
-        <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
+        <div class="workspace-actions">
+          <span class="workspace-status" id="workspaceStatus">●</span>
+          <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
+          <button class="workspace-select" onclick="selectWorkspaceFromUi()" title="选择沙箱目录">📂</button>
+        </div>
       </div>
       <span class="workspace-path" id="workspacePath">未连接</span>
     </div>

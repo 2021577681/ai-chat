@@ -23,11 +23,12 @@ from .music import MusicMixin
 from .proxy import ProxyMixin
 from .screenshot import ScreenshotMixin
 from .web import WebMixin
+from .workspace import WorkspaceMixin
 
 
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
-              McpSkillsMixin, MusicMixin):
+              McpSkillsMixin, MusicMixin, WorkspaceMixin):
     """主 HTTP Handler，通过 mixin 组合所有功能。
     各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
@@ -215,6 +216,10 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_skill_read(body)
             elif action == 'music':
                 self.handle_music_action(body)
+            elif action == 'select_workspace':
+                self.handle_select_workspace(body)
+            elif action == 'set_workspace':
+                self.handle_set_workspace(body)
             else:
                 self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:
