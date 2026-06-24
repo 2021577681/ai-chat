@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-import types
 from typing import Any
 
 import requests
@@ -21,43 +19,12 @@ from .lms_scores import (
 
 
 GSTE_LOGIN_URL = "https://cas.xjtu.edu.cn/login?TARGET=http%3A%2F%2Fgste.xjtu.edu.cn%2Flogin.do"
-
-_XJTUTOOLBOX_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "XJTUToolBox-main"))
-if _XJTUTOOLBOX_ROOT not in sys.path:
-    sys.path.insert(0, _XJTUTOOLBOX_ROOT)
-
-
-def _install_fake_useragent_fallback() -> None:
-    try:
-        __import__("fake_useragent")
-        return
-    except ImportError:
-        pass
-
-    class UserAgent:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
-
-        @property
-        def random(self) -> str:
-            return (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/148.0.0.0 Safari/537.36"
-            )
-
-    module = types.ModuleType("fake_useragent")
-    module.UserAgent = UserAgent
-    sys.modules["fake_useragent"] = module
-
-
-_install_fake_useragent_fallback()
+_TEMPLATE_ROOT = os.path.join(os.path.dirname(__file__), "lms_judge_core", "jwxt", "templates")
 
 try:
-    from jwxt import AutoJudge, QuestionnaireTemplate
-    from gste.judge import GraduateAutoJudge
-    from gmis.lesson_detail import GraduateLessonDetail
-    from gmis.score import GraduateScore
+    from .lms_judge_core.jwxt import AutoJudge, QuestionnaireTemplate
+    from .lms_judge_core.gste import GraduateAutoJudge
+    from .lms_judge_core.gmis import GraduateLessonDetail, GraduateScore
 except Exception as exc:  # pragma: no cover - import error is reported to UI at runtime
     AutoJudge = None
     QuestionnaireTemplate = None
@@ -191,7 +158,7 @@ def _load_undergraduate_template(questionnaire: Any, score: int) -> Any:
     type_value = _undergraduate_template_type(questionnaire)
     score_value = _undergraduate_template_score(score)
     filename = f"{type_names[type_value]}-{score_names[score_value]}.json"
-    path = os.path.join(_XJTUTOOLBOX_ROOT, "jwxt", "templates", filename)
+    path = os.path.join(_TEMPLATE_ROOT, filename)
     with open(path, "r", encoding="utf-8") as f:
         return QuestionnaireTemplate.from_json(json.load(f))
 
