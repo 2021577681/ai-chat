@@ -143,6 +143,9 @@
         <div class="logo-icon">🐍</div>
         <span>SNAKE</span>
       </div>
+      <button class="sidebar-mode-btn" id="sidebarExplorerBtn" onclick="toggleSidebarExplorer()" title="资源管理器" aria-pressed="false">
+        <img src="icon/文件夹-开_folder-open.png" alt="">
+      </button>
       <button class="sidebar-collapse-btn" onclick="collapseSidebar()" title="收起侧栏">◀</button>
     </div>
 
@@ -160,9 +163,24 @@
       <span class="workspace-path" id="workspacePath">未连接</span>
     </div>
     
-    <button class="btn-new" onclick="newChat()">+ 新建对话</button>
-    
-    <div class="chat-list" id="chatList"></div>
+    <div class="sidebar-panel sidebar-chat-panel" id="sidebarChatPanel">
+      <button class="btn-new" onclick="newChat()">+ 新建对话</button>
+      <div class="chat-list" id="chatList"></div>
+    </div>
+
+    <div class="sidebar-panel sidebar-explorer-panel" id="sidebarExplorerPanel" hidden>
+      <div class="file-explorer-toolbar">
+        <button class="file-explorer-nav" id="fileExplorerUpBtn" onclick="fileExplorerGoUp()" title="上级目录">↑</button>
+        <div class="file-explorer-title">
+          <span>资源管理器</span>
+          <small id="fileExplorerPath">.</small>
+        </div>
+        <button class="file-explorer-nav" onclick="refreshFileExplorer()" title="刷新">⟳</button>
+      </div>
+      <div class="file-explorer-list" id="fileExplorerList">
+        <div class="file-explorer-empty">切换到资源管理器后会显示当前沙箱目录。</div>
+      </div>
+    </div>
     
     <!-- 侧边栏底部：设置 + 主题 -->
     <div class="sidebar-footer">
@@ -547,6 +565,27 @@
       <button class="btn" onclick="closeSettings()">取消</button>
       <button class="btn" onclick="testConnection()">测试连接</button>
       <button class="btn btn-primary" onclick="saveAndClose()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 文本文件编辑器 -->
+<div class="modal-mask file-editor-mask" id="fileEditorModal">
+  <div class="modal wide file-editor-modal">
+    <h2>
+      <span>文本编辑器</span>
+      <button class="modal-close" onclick="closeFileEditor()">×</button>
+    </h2>
+    <div class="file-editor-meta">
+      <code id="fileEditorPath">-</code>
+      <span id="fileEditorStatus">未加载</span>
+    </div>
+    <textarea id="fileEditorContent" spellcheck="false" placeholder="文件内容..."></textarea>
+    <div class="modal-footer file-editor-footer">
+      <button class="btn" type="button" onclick="copyFileEditorContent()">复制内容</button>
+      <button class="btn" type="button" onclick="reloadFileEditor()">重新读取</button>
+      <button class="btn" type="button" onclick="closeFileEditor()">关闭</button>
+      <button class="btn btn-primary" type="button" onclick="saveFileEditor()">保存修改</button>
     </div>
   </div>
 </div>
@@ -1744,6 +1783,7 @@
 <script src="js/tools.js"></script>
 <script src="js/shell-audit.js"></script>
 <script src="js/terminal.js"></script>
+<script src="js/file-explorer.js"></script>
 <script src="js/git-panel.js"></script>
 <script src="js/reflection.js"></script>
 <script src="js/plan-core.js"></script>

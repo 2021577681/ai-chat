@@ -219,6 +219,7 @@ async function selectWorkspaceFromUi() {
     if (!r.ok) throw new Error(r.error || '切换沙箱目录失败');
     updateWorkspaceDisplay(r);
     refreshWorkspaceDependentContext();
+    if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
     toast('✓ 沙箱目录已切换');
   } catch (e) {
     if (pathEl && previousText) pathEl.textContent = previousText;

@@ -97,6 +97,7 @@ body{
 }
 
 .sidebar-collapse-btn,
+.sidebar-mode-btn,
 .menu-toggle{
   border:0;
   border-radius:999px;
@@ -105,6 +106,8 @@ body{
 }
 
 .sidebar-collapse-btn:hover,
+.sidebar-mode-btn:hover,
+.sidebar-mode-btn.active,
 .menu-toggle:hover{
   background:rgba(60,64,67,.055);
   color:var(--text);
@@ -127,6 +130,43 @@ body{
 
 .chat-list{
   padding:0 8px 8px;
+}
+
+.sidebar-explorer-panel{
+  padding:0 8px 8px;
+}
+
+.file-explorer-toolbar{
+  padding:6px 2px 4px;
+}
+
+.file-explorer-nav{
+  border:0;
+  border-radius:999px;
+}
+
+.file-explorer-nav:hover:not(:disabled),
+.file-explorer-item:hover,
+.file-explorer-item:focus-visible{
+  background:rgba(60,64,67,.055);
+}
+
+.file-explorer-item{
+  border-radius:999px;
+}
+
+.file-editor-modal{
+  border-radius:18px;
+}
+
+.file-editor-meta code,
+#fileEditorContent{
+  border-color:rgba(60,64,67,.10);
+}
+
+[data-theme="dark"] .file-editor-meta code,
+[data-theme="dark"] #fileEditorContent{
+  border-color:rgba(232,234,237,.12);
 }
 
 .chat-item{
