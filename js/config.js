@@ -566,6 +566,20 @@ const BUILTIN_TOOLS = [
     code: 'return await lmsToolAttendance(args.account_type || "auto", args.start_date || "", args.end_date || "", args.page || 1, args.page_size || 20, args.access_mode || "auto");'
   },
   {
+    name: 'lms_training_plan',
+    description: '🎓【LMS】查询西安交大学生的个人培养方案，返回培养方案代码、学分要求、完成进度、课程组要求、指导计划和课程列表。需要用户已在学习面板中加密保存统一认证账号密码；受 LMS 工具开关控制。',
+    parameters: {
+      type: 'object',
+      properties: {
+        account_type: { type: 'string', description: '身份类型：auto 自动识别，undergraduate 本科生，postgraduate 研究生。默认 auto。' },
+        plan_code: { type: 'string', description: '可选培养方案代码；首次查询可留空，返回多个方案时可再次传入指定代码查看。' },
+        max_courses: { type: 'number', description: '最多返回课程数量，默认 200，最大 500；课程很多时可调大或调小。' }
+      },
+      required: []
+    },
+    code: 'return await lmsToolTrainingPlan(args.account_type || "auto", args.plan_code || "", args.max_courses || 200);'
+  },
+  {
     name: 'lms_homework',
     description: '🎓【LMS】查看某项作业的详细要求（说明文字、附件、截止时间等）。需要先用 lms_todos 拿到作业 ID（hw_id）。',
     parameters: {

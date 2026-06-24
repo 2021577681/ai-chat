@@ -452,6 +452,33 @@ async function lmsJudgeQuery(options = {}) {
   }
 }
 
+async function lmsTrainingPlanQuery(options = {}) {
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: 'LOCAL_SERVER_NOT_READY', message: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  try {
+    const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-training-plan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Token': TERMINAL_CONFIG.token,
+      },
+      body: JSON.stringify(options || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (resp.status === 403) {
+      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+    }
+    if (!data) {
+      return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, error: 'NETWORK_ERROR', message: `连接本地培养方案服务失败：${e.message}` };
+  }
+}
+
 function lmsScoreAccountLabel(accountType) {
   if (accountType === 'undergraduate') return '本科';
   if (accountType === 'postgraduate') return '研究生';
@@ -715,6 +742,111 @@ function lmsRenderAttendance(data) {
   return parts.join('\n');
 }
 
+function lmsMarkdownCell(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value).replace(/\|/g, '\\|').replace(/\s*\n+\s*/g, ' ').trim() || '-';
+}
+
+function lmsRenderTrainingPlan(data, maxCourses = 200) {
+  if (!data || !data.ok) {
+    return `错误：${(data && (data.message || data.error)) || '培养方案查询失败'}`;
+  }
+
+  const plans = data.plans || [];
+  const selectedPlan = data.selected_plan || null;
+  const groups = data.groups || [];
+  const courses = data.courses || [];
+  const guidanceTerms = data.guidance_terms || [];
+  const summary = data.summary || {};
+  const accountLabel = lmsScoreAccountLabel(data.account_type);
+
+  if (!selectedPlan && !plans.length) {
+    return `## 个人培养方案\n\n${accountLabel}账号暂未查询到个人培养方案。`;
+  }
+
+  maxCourses = Math.max(0, Math.min(Number(maxCourses) || 200, 500));
+  const plan = selectedPlan || plans[0] || {};
+  const progressText = (summary.progressPercent ?? plan.progressPercent) != null
+    ? `${lmsFmtScoreValue(summary.progressPercent ?? plan.progressPercent)}%`
+    : '-';
+  const title = plan.name || '个人培养方案';
+  const meta = [plan.majorName, plan.routeName, plan.grade, plan.departmentName].filter(Boolean).join(' · ');
+  const parts = [`## ${title}\n`];
+
+  parts.push(`账号类型：${accountLabel}`);
+  if (meta) parts.push(`专业信息：${meta}`);
+  if (plan.code) parts.push(`培养方案代码：\`${plan.code}\``);
+  if (plan.durationYears) parts.push(`学制：${lmsFmtScoreValue(plan.durationYears)} 年`);
+  parts.push('');
+
+  parts.push('| 指标 | 数值 |');
+  parts.push('|---|---:|');
+  parts.push(`| 要求学分 | ${lmsMarkdownCell(lmsFmtScoreValue(summary.requiredCredits ?? plan.requiredCredits))} |`);
+  parts.push(`| 已完成学分 | ${lmsMarkdownCell(lmsFmtScoreValue(summary.completedCredits ?? plan.completedCredits))} |`);
+  parts.push(`| 剩余学分 | ${lmsMarkdownCell(lmsFmtScoreValue(summary.remainingCredits ?? plan.remainingCredits))} |`);
+  parts.push(`| 完成进度 | ${lmsMarkdownCell(progressText)} |`);
+  parts.push(`| 课程组 | ${lmsMarkdownCell(summary.groupCount ?? groups.length)} |`);
+  parts.push(`| 课程 | ${lmsMarkdownCell(summary.courseCount ?? courses.length)} |`);
+  parts.push(`| 指导计划学期 | ${lmsMarkdownCell(summary.guidanceTermCount ?? guidanceTerms.length)} |`);
+  parts.push('');
+
+  if (plans.length > 1) {
+    parts.push('### 可选培养方案');
+    parts.push('| 代码 | 名称 | 专业 |');
+    parts.push('|---|---|---|');
+    plans.forEach(item => {
+      parts.push(`| \`${lmsMarkdownCell(item.code)}\` | ${lmsMarkdownCell(item.name)} | ${lmsMarkdownCell(item.majorName || item.routeName)} |`);
+    });
+    parts.push('');
+    parts.push('如需查看其他方案，可再次调用本工具并传入 `plan_code`。');
+    parts.push('');
+  }
+
+  if (guidanceTerms.length) {
+    parts.push('### 指导计划');
+    parts.push('| 学期 | 学年 | 学期名 | 要求学分 | 要求 |');
+    parts.push('|---:|---|---|---:|---|');
+    guidanceTerms.forEach(item => {
+      parts.push(`| ${lmsMarkdownCell(item.semester)} | ${lmsMarkdownCell(item.academicYear)} | ${lmsMarkdownCell(item.term)} | ${lmsMarkdownCell(lmsFmtScoreValue(item.requiredCredits))} | ${lmsMarkdownCell(item.requirement)} |`);
+    });
+    parts.push('');
+  }
+
+  if (groups.length) {
+    parts.push('### 课程组要求');
+    parts.push('| 课程组 | 要求学分 | 课程学分 | 课程数 | 类型 |');
+    parts.push('|---|---:|---:|---:|---|');
+    groups.forEach(item => {
+      const indent = '  '.repeat(Math.min(Number(item.depth) || 0, 6));
+      const creditText = item.maxCredits
+        ? `${lmsFmtScoreValue(item.requiredCredits)}-${lmsFmtScoreValue(item.maxCredits)}`
+        : lmsFmtScoreValue(item.requiredCredits);
+      const plannedText = item.remainingPlannedCredits
+        ? `${lmsFmtScoreValue(item.plannedCredits)}（差 ${lmsFmtScoreValue(item.remainingPlannedCredits)}）`
+        : lmsFmtScoreValue(item.plannedCredits);
+      parts.push(`| ${lmsMarkdownCell(indent + (item.name || '-'))} | ${lmsMarkdownCell(creditText)} | ${lmsMarkdownCell(plannedText)} | ${lmsMarkdownCell(lmsFmtScoreValue(item.courseCount))} | ${lmsMarkdownCell(item.typeName || item.courseNature)} |`);
+    });
+    parts.push('');
+  }
+
+  if (courses.length) {
+    const shownCourses = courses.slice(0, maxCourses);
+    parts.push(`### 课程列表${shownCourses.length < courses.length ? `（前 ${shownCourses.length}/${courses.length} 门）` : ''}`);
+    parts.push('| 学期 | 课程 | 学分 | 性质 | 课程组 |');
+    parts.push('|---|---|---:|---|---|');
+    shownCourses.forEach(item => {
+      const courseName = item.courseCode ? `${item.courseName || '-'} (${item.courseCode})` : (item.courseName || '-');
+      parts.push(`| ${lmsMarkdownCell(item.plannedTermText || (item.plannedSemester ? `第${item.plannedSemester}学期` : '-'))} | ${lmsMarkdownCell(courseName)} | ${lmsMarkdownCell(lmsFmtScoreValue(item.credits))} | ${lmsMarkdownCell(item.nature || item.examType)} | ${lmsMarkdownCell(item.groupName)} |`);
+    });
+    if (shownCourses.length < courses.length) {
+      parts.push('');
+      parts.push(`课程列表已截断；再次调用时把 \`max_courses\` 调大可查看更多，最大 500。`);
+    }
+  }
+
+  return parts.join('\n');
+}
+
 // ============ 工具实现函数（被 config.js 中 BUILTIN_TOOLS 的 code 调用） ============
 
 async function lmsToolScores(accountType = 'auto', term = '') {
@@ -754,6 +886,14 @@ async function lmsToolAttendance(accountType = 'auto', startDate = '', endDate =
     access_mode: accessMode || 'auto',
   });
   return lmsRenderAttendance(result);
+}
+
+async function lmsToolTrainingPlan(accountType = 'auto', planCode = '', maxCourses = 200) {
+  const result = await lmsTrainingPlanQuery({
+    account_type: accountType || 'auto',
+    plan_code: planCode || '',
+  });
+  return lmsRenderTrainingPlan(result, maxCourses);
 }
 
 async function lmsToolStatus() {

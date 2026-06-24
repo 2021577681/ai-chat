@@ -241,6 +241,35 @@ class ProxyMixin:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
         self._send_json(status, payload)
 
+    # ============ POST /lms-training-plan ============
+    def handle_lms_training_plan_post(self):
+        """使用本机加密保存的统一认证凭据查询本科个人培养方案。"""
+        token = self.headers.get('X-Token', '')
+        if token != config.TOKEN:
+            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
+            return
+
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
+            body = json.loads(raw or '{}')
+            if not isinstance(body, dict):
+                raise ValueError('请求体必须是 JSON 对象')
+        except Exception as e:
+            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            return
+
+        account_type = body.get('account_type', 'auto')
+        plan_code = body.get('plan_code', '')
+        print(f'🎓 [LMS 培养方案] account_type={account_type} has_plan_code={bool(plan_code)}')
+        try:
+            from .lms_training_plan import handle_lms_training_plan_request
+
+            status, payload = handle_lms_training_plan_request(body)
+        except Exception as e:
+            status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
+        self._send_json(status, payload)
+
     # ============ GET /xxx 静态文件 ============
     def handle_static_file(self):
         """安全的静态文件服务（只允许放出白名单扩展名，禁止越权）"""

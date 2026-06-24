@@ -3,7 +3,7 @@
 // 4 个标签页：📊 概览 / 📝 待办 / 📚 课程 / 📂 课件
 
 const LMS_PANEL_STATE = {
-  page: 'home',              // home | lms | scores | schedule | emptyRooms | attendance | judge
+  page: 'home',              // home | lms | scores | schedule | emptyRooms | attendance | judge | trainingPlan
   tab: 'overview',           // overview | todos | courses | materials
   loading: false,
   authMode: 'login',
@@ -25,6 +25,12 @@ const LMS_PANEL_STATE = {
     attendancePagination: null,
     judgeQuestionnaires: null,
     judgeResults: null,
+    trainingPlans: null,
+    trainingPlan: null,
+    trainingPlanGroups: null,
+    trainingPlanCourses: null,
+    trainingPlanGuidanceTerms: null,
+    trainingPlanSummary: null,
   },
   selectedCid: null,         // 当前 materials 页选中的课程 id
   scoreAccountType: 'auto',
@@ -58,6 +64,10 @@ const LMS_PANEL_STATE = {
   judgeGraduateScore: '3',
   judgeComment: '无',
   judgeError: '',
+  trainingPlanAccountType: 'auto',
+  trainingPlanResolvedAccountType: '',
+  trainingPlanSelectedCode: '',
+  trainingPlanError: '',
 };
 
 const LMS_EMPTY_ROOM_OPTIONS = {
@@ -96,6 +106,12 @@ function lmsPanelEmptyCache() {
     attendancePagination: null,
     judgeQuestionnaires: null,
     judgeResults: null,
+    trainingPlans: null,
+    trainingPlan: null,
+    trainingPlanGroups: null,
+    trainingPlanCourses: null,
+    trainingPlanGuidanceTerms: null,
+    trainingPlanSummary: null,
   };
 }
 
@@ -223,6 +239,11 @@ function lmsPanelRender() {
     return;
   }
 
+  if (LMS_PANEL_STATE.page === 'trainingPlan') {
+    body.innerHTML = lmsPanelRenderTrainingPlanPage();
+    return;
+  }
+
   const _cookie = lmsGetCookie();
   if (!_cookie) {
     body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + lmsPanelRenderNoCookie();
@@ -283,6 +304,10 @@ function lmsPanelRenderHome() {
         <button class="lms-nav-btn" onclick="lmsPanelSetPage('judge')">
           <span class="lms-nav-title">一键评教</span>
           <span class="lms-nav-desc">查看未评教问卷，并批量提交评教</span>
+        </button>
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('trainingPlan')">
+          <span class="lms-nav-title">培养方案</span>
+          <span class="lms-nav-desc">查看个人培养方案、课程组、学分要求和指导计划</span>
         </button>
       </div>
     </div>
@@ -469,10 +494,11 @@ function lmsPanelRenderScoreRow(item, idx) {
   const group = item.term || item.type || '-';
   const failed = item.passFlag === false ? ' failed' : '';
   const key = lmsPanelScoreKey(item, idx);
+  const keyForJs = escapeHtml(JSON.stringify(key));
   const checked = lmsPanelIsScoreSelected(item, idx) ? 'checked' : '';
   return `
     <tr class="${failed}">
-      <td><input type="checkbox" ${checked} onchange="lmsPanelToggleScoreSelection('${escapeHtml(key)}', this.checked)"></td>
+      <td><input type="checkbox" ${checked} onchange="lmsPanelToggleScoreSelection(${keyForJs}, this.checked)"></td>
       <td>${escapeHtml(group)}</td>
       <td>${escapeHtml(item.courseName || '-')}</td>
       <td>${escapeHtml(lmsFmtScoreValue(item.coursePoint))}</td>
@@ -1149,6 +1175,224 @@ function lmsPanelSetJudgeScore(value) { LMS_PANEL_STATE.judgeScore = value || '1
 function lmsPanelSetJudgeGraduateScore(value) { LMS_PANEL_STATE.judgeGraduateScore = value || '3'; }
 function lmsPanelSetJudgeComment(value) { LMS_PANEL_STATE.judgeComment = value || ''; }
 
+function lmsPanelRenderTrainingPlanPage() {
+  const accountType = LMS_PANEL_STATE.trainingPlanAccountType || 'auto';
+  const plans = LMS_PANEL_STATE.cache.trainingPlans;
+  const selectedPlan = LMS_PANEL_STATE.cache.trainingPlan || {};
+  const groups = LMS_PANEL_STATE.cache.trainingPlanGroups || [];
+  const courses = LMS_PANEL_STATE.cache.trainingPlanCourses || [];
+  const guidanceTerms = LMS_PANEL_STATE.cache.trainingPlanGuidanceTerms || [];
+  const summary = LMS_PANEL_STATE.cache.trainingPlanSummary || {};
+  const selectedCode = LMS_PANEL_STATE.trainingPlanSelectedCode || selectedPlan.code || '';
+  const resolvedType = LMS_PANEL_STATE.trainingPlanResolvedAccountType || accountType;
+
+  let html = lmsPanelRenderSubHeader('个人培养方案');
+  html += `
+    <div class="lms-score-controls">
+      <label class="lms-score-field">
+        <span>身份</span>
+        <select id="lmsTrainingPlanAccountType" class="lms-login-input" onchange="lmsPanelSetTrainingPlanAccountType(this.value)">
+          <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
+          <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
+          <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
+        </select>
+      </label>
+      ${Array.isArray(plans) && plans.length > 1 ? `
+        <label class="lms-score-field">
+          <span>方案</span>
+          <select id="lmsTrainingPlanCode" class="lms-login-input" onchange="lmsPanelSetTrainingPlanCode(this.value)">
+            ${plans.map(plan => {
+              const code = plan.code || '';
+              const label = [plan.name, plan.routeName].filter(Boolean).join(' · ') || code || '未命名方案';
+              return `<option value="${escapeHtml(code)}" ${code === selectedCode ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('')}
+          </select>
+        </label>
+      ` : ''}
+      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchTrainingPlan()">查询培养方案</button>
+    </div>
+  `;
+
+  if (LMS_PANEL_STATE.trainingPlanError) {
+    html += `
+      <div class="lms-score-error">
+        <div>${escapeHtml(LMS_PANEL_STATE.trainingPlanError)}</div>
+        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+      </div>
+    `;
+  }
+
+  if (!plans) {
+    html += `
+      <div class="lms-empty-mini">
+        培养方案查询使用本机加密保存的统一认证账号密码，并访问本科教务个人培养方案入口。
+      </div>
+    `;
+    return html;
+  }
+
+  if (!plans.length || !selectedPlan.code) {
+    html += '<div class="lms-empty"><h3>未查询到个人培养方案</h3><p>当前本科教务账号下没有返回培养方案。</p></div>';
+    return html;
+  }
+
+  const progress = summary.progressPercent ?? selectedPlan.progressPercent;
+  const progressText = progress === null || progress === undefined ? '-' : `${lmsFmtScoreValue(progress)}%`;
+  html += `
+    <div class="lms-score-summary">
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${escapeHtml(lmsFmtScoreValue(summary.requiredCredits ?? selectedPlan.requiredCredits))}</div>
+        <div class="lms-stat-lbl">要求学分</div>
+      </div>
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${escapeHtml(lmsFmtScoreValue(summary.completedCredits ?? selectedPlan.completedCredits))}</div>
+        <div class="lms-stat-lbl">已完成学分</div>
+      </div>
+      <div class="lms-stat-card ${(summary.remainingCredits ?? selectedPlan.remainingCredits) ? 'urgent' : ''}">
+        <div class="lms-stat-num">${escapeHtml(lmsFmtScoreValue(summary.remainingCredits ?? selectedPlan.remainingCredits))}</div>
+        <div class="lms-stat-lbl">剩余学分</div>
+      </div>
+      <div class="lms-stat-card">
+        <div class="lms-stat-num">${escapeHtml(progressText)}</div>
+        <div class="lms-stat-lbl">完成进度</div>
+      </div>
+    </div>
+    <div class="lms-training-plan-head">
+      <div>
+        <div class="lms-training-plan-title">${escapeHtml(selectedPlan.name || '个人培养方案')}</div>
+        <div class="lms-training-plan-meta">
+          ${escapeHtml([selectedPlan.majorName, selectedPlan.routeName, selectedPlan.grade].filter(Boolean).join(' · ') || lmsScoreAccountLabel(resolvedType))}
+        </div>
+      </div>
+      <div class="lms-training-plan-code">${escapeHtml(selectedPlan.code || '-')}</div>
+    </div>
+    <div class="lms-schedule-summary">
+      <span>${escapeHtml(lmsScoreAccountLabel(resolvedType))}</span>
+      <span>课程组 ${summary.groupCount ?? groups.length}</span>
+      <span>课程 ${summary.courseCount ?? courses.length}</span>
+      <span>指导计划 ${summary.guidanceTermCount ?? guidanceTerms.length} 学期</span>
+      ${selectedPlan.departmentName ? `<span>${escapeHtml(selectedPlan.departmentName)}</span>` : ''}
+      ${selectedPlan.durationYears ? `<span>学制 ${escapeHtml(lmsFmtScoreValue(selectedPlan.durationYears))} 年</span>` : ''}
+    </div>
+  `;
+
+  if (guidanceTerms.length) {
+    html += `
+      <h3 class="lms-section-title">指导计划</h3>
+      <div class="lms-training-term-grid">
+        ${guidanceTerms.map(lmsPanelRenderTrainingTerm).join('')}
+      </div>
+    `;
+  }
+
+  html += `
+    <h3 class="lms-section-title">课程组要求</h3>
+    <div class="lms-score-table-wrap">
+      <table class="lms-score-table lms-training-group-table">
+        <thead>
+          <tr>
+            <th>课程组</th>
+            <th>要求学分</th>
+            <th>课程学分</th>
+            <th>课程数</th>
+            <th>类型</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${groups.length ? groups.map(lmsPanelRenderTrainingGroupRow).join('') : '<tr><td colspan="5">暂无课程组数据</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  html += `
+    <h3 class="lms-section-title">课程列表</h3>
+    <div class="lms-score-table-wrap">
+      <table class="lms-score-table lms-training-course-table">
+        <thead>
+          <tr>
+            <th>学期</th>
+            <th>课程</th>
+            <th>学分</th>
+            <th>性质</th>
+            <th>课程组</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${courses.length ? courses.map(lmsPanelRenderTrainingCourseRow).join('') : '<tr><td colspan="5">暂无课程数据</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+  return html;
+}
+
+function lmsPanelRenderTrainingTerm(item) {
+  const title = item.semester ? `第 ${item.semester} 学期` : (item.term || '学期');
+  const sub = [item.academicYear, item.term].filter(Boolean).join(' ');
+  return `
+    <div class="lms-training-term">
+      <div class="lms-training-term-title">${escapeHtml(title)}</div>
+      <div class="lms-training-term-sub">${escapeHtml(sub || '-')}</div>
+      <div class="lms-training-term-credit">${escapeHtml(lmsFmtScoreValue(item.requiredCredits))} 学分</div>
+    </div>
+  `;
+}
+
+function lmsPanelRenderTrainingGroupRow(item) {
+  const depth = Math.min(Number(item.depth) || 0, 6);
+  const remaining = item.remainingPlannedCredits;
+  const creditText = item.maxCredits
+    ? `${lmsFmtScoreValue(item.requiredCredits)}-${lmsFmtScoreValue(item.maxCredits)}`
+    : lmsFmtScoreValue(item.requiredCredits);
+  return `
+    <tr>
+      <td>
+        <div class="lms-training-group-name" style="padding-left:${depth * 14}px">
+          ${depth ? '<span class="lms-training-branch"></span>' : ''}
+          <span>${escapeHtml(item.name || '-')}</span>
+        </div>
+        ${item.requirement ? `<div class="lms-training-note">${escapeHtml(item.requirement)}</div>` : ''}
+      </td>
+      <td>${escapeHtml(creditText)}</td>
+      <td>
+        ${escapeHtml(lmsFmtScoreValue(item.plannedCredits))}
+        ${remaining ? `<span class="lms-training-warn">差 ${escapeHtml(lmsFmtScoreValue(remaining))}</span>` : ''}
+      </td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.courseCount))}</td>
+      <td><span class="lms-training-tag">${escapeHtml(item.typeName || item.courseNature || '-')}</span></td>
+    </tr>
+  `;
+}
+
+function lmsPanelRenderTrainingCourseRow(item) {
+  const term = item.plannedTermText || (item.plannedSemester ? `第${item.plannedSemester}学期` : '-');
+  return `
+    <tr>
+      <td>${escapeHtml(term)}</td>
+      <td>
+        <div>${escapeHtml(item.courseName || '-')}</div>
+        <div class="lms-training-note">${escapeHtml(item.courseCode || '')}</div>
+      </td>
+      <td>${escapeHtml(lmsFmtScoreValue(item.credits))}</td>
+      <td>
+        <span class="lms-training-tag">${escapeHtml(item.nature || '-')}</span>
+        ${item.examType ? `<div class="lms-training-note">${escapeHtml(item.examType)}</div>` : ''}
+      </td>
+      <td>${escapeHtml(item.groupName || '-')}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelSetTrainingPlanAccountType(value) {
+  LMS_PANEL_STATE.trainingPlanAccountType = value || 'auto';
+}
+
+function lmsPanelSetTrainingPlanCode(value) {
+  LMS_PANEL_STATE.trainingPlanSelectedCode = value || '';
+  lmsPanelFetchTrainingPlan();
+}
+
 function lmsPanelRenderBadCookie() {
   // 当 Cookie 已保存但 lmsParseSession 失败时调用，提供醒目的修复入口
   const raw = lmsGetCookie();
@@ -1698,6 +1942,42 @@ async function lmsPanelSubmitJudgeAll() {
   lmsPanelRender();
 }
 
+async function lmsPanelFetchTrainingPlan() {
+  const accountType = document.getElementById('lmsTrainingPlanAccountType')?.value || LMS_PANEL_STATE.trainingPlanAccountType || 'auto';
+  const selectedCode = document.getElementById('lmsTrainingPlanCode')?.value || LMS_PANEL_STATE.trainingPlanSelectedCode || '';
+  LMS_PANEL_STATE.trainingPlanAccountType = accountType;
+  LMS_PANEL_STATE.trainingPlanSelectedCode = selectedCode;
+  LMS_PANEL_STATE.trainingPlanError = '';
+  lmsPanelShowLoading('正在查询个人培养方案...');
+
+  const result = await lmsTrainingPlanQuery({
+    account_type: accountType,
+    plan_code: selectedCode,
+  });
+  if (result && result.ok) {
+    LMS_PANEL_STATE.cache.trainingPlans = result.plans || [];
+    LMS_PANEL_STATE.cache.trainingPlan = result.selected_plan || null;
+    LMS_PANEL_STATE.cache.trainingPlanGroups = result.groups || [];
+    LMS_PANEL_STATE.cache.trainingPlanCourses = result.courses || [];
+    LMS_PANEL_STATE.cache.trainingPlanGuidanceTerms = result.guidance_terms || [];
+    LMS_PANEL_STATE.cache.trainingPlanSummary = result.summary || {};
+    LMS_PANEL_STATE.trainingPlanSelectedCode = result.selected_plan_code || (result.selected_plan && result.selected_plan.code) || selectedCode;
+    LMS_PANEL_STATE.trainingPlanResolvedAccountType = result.account_type || accountType;
+    toast(`培养方案已加载：${LMS_PANEL_STATE.cache.trainingPlanCourses.length} 门课程`);
+  } else {
+    LMS_PANEL_STATE.cache.trainingPlans = null;
+    LMS_PANEL_STATE.cache.trainingPlan = null;
+    LMS_PANEL_STATE.cache.trainingPlanGroups = null;
+    LMS_PANEL_STATE.cache.trainingPlanCourses = null;
+    LMS_PANEL_STATE.cache.trainingPlanGuidanceTerms = null;
+    LMS_PANEL_STATE.cache.trainingPlanSummary = null;
+    LMS_PANEL_STATE.trainingPlanResolvedAccountType = '';
+    LMS_PANEL_STATE.trainingPlanError = (result && (result.message || result.error)) || '培养方案查询失败。';
+    toast(LMS_PANEL_STATE.trainingPlanError);
+  }
+  lmsPanelRender();
+}
+
 async function lmsPanelShowMaterials(cid) {
   LMS_PANEL_STATE.page = 'lms';
   LMS_PANEL_STATE.selectedCid = cid;
@@ -1732,17 +2012,17 @@ async function lmsPanelDownload(uploadId, filename) {
 function lmsPanelShowLoading(text) {
   const body = document.getElementById('lmsPanelBody');
   if (body) {
-    const header = LMS_PANEL_STATE.page === 'scores'
-      ? lmsPanelRenderSubHeader('成绩查询')
-      : (LMS_PANEL_STATE.page === 'schedule'
-        ? lmsPanelRenderSubHeader('课表查询')
-        : (LMS_PANEL_STATE.page === 'emptyRooms'
-          ? lmsPanelRenderSubHeader('空闲教室')
-          : (LMS_PANEL_STATE.page === 'judge'
-            ? lmsPanelRenderSubHeader('一键评教')
-          : (LMS_PANEL_STATE.page === 'attendance'
-            ? lmsPanelRenderSubHeader('考勤查询')
-            : (LMS_PANEL_STATE.page === 'lms' ? lmsPanelRenderSubHeader('思源学堂') : '')))));
+    const titles = {
+      scores: '成绩查询',
+      schedule: '课表查询',
+      emptyRooms: '空闲教室',
+      attendance: '考勤查询',
+      judge: '一键评教',
+      trainingPlan: '个人培养方案',
+      lms: '思源学堂',
+    };
+    const title = titles[LMS_PANEL_STATE.page] || '';
+    const header = title ? lmsPanelRenderSubHeader(title) : '';
     body.innerHTML = `${header}<div class="lms-loading">
       <div class="lms-spinner"></div>
       <div>${escapeHtml(text || '加载中...')}</div>
@@ -1879,6 +2159,35 @@ async function lmsPanelClearSavedCredential() {
   } else {
     lmsPanelSetLoginStatus((result && (result.message || result.error)) || '清除失败。', 'error');
   }
+}
+
+function lmsPanelSameAccountId(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+async function lmsPanelClearStaleCredentialForManualCookie(cookie) {
+  const info = lmsParseSession(cookie);
+  const cookieUid = info && info.uid ? String(info.uid).trim() : '';
+  if (!cookieUid) return { cleared: false };
+
+  const status = await lmsLoginRequest({ action: 'credential_status' });
+  if (!status || !status.ok || !status.has_credential || status.broken) {
+    return { cleared: false };
+  }
+
+  const savedUsername = String(status.username || '').trim();
+  if (!savedUsername || lmsPanelSameAccountId(savedUsername, cookieUid)) {
+    return { cleared: false };
+  }
+
+  const cleared = await lmsLoginRequest({ action: 'clear_credentials' });
+  if (cleared && cleared.ok) return { cleared: true, savedUsername, cookieUid };
+  return {
+    cleared: false,
+    error: (cleared && (cleared.message || cleared.error)) || '清理旧保存账号失败',
+    savedUsername,
+    cookieUid,
+  };
 }
 
 function lmsPanelSetLoginBusy(busy) {
@@ -2054,14 +2363,21 @@ function lmsPanelHandleLoginResponse(result) {
   lmsPanelSetLoginStatus(result.message || `需要继续处理：${result.status || '未知状态'}`, 'info');
 }
 
-function lmsPanelSaveCookie() {
+async function lmsPanelSaveCookie() {
   const val = document.getElementById('lmsCookieInput').value.trim();
+  const sync = val ? await lmsPanelClearStaleCredentialForManualCookie(val) : { cleared: false };
   lmsSetCookie(val);
   LMS_PANEL_STATE.cache = lmsPanelEmptyCache();
   lmsPanelCloseCookieEditor();
   lmsPanelRefreshStatus();
   lmsPanelRender();
-  toast(val ? '✅ Cookie 已保存' : '🗑 Cookie 已清空');
+  if (sync.error) {
+    toast(`Cookie 已保存，但${sync.error}`, 3000);
+  } else if (sync.cleared) {
+    toast('Cookie 已保存，已清除旧保存账号');
+  } else {
+    toast(val ? '✅ Cookie 已保存' : '🗑 Cookie 已清空');
+  }
   if (val && LMS_PANEL_STATE.page === 'lms' && LMS_PANEL_STATE.tab === 'overview') {
     lmsPanelFetchAll();
   }
