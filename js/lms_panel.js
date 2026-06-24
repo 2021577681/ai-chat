@@ -3,7 +3,7 @@
 // 4 个标签页：📊 概览 / 📝 待办 / 📚 课程 / 📂 课件
 
 const LMS_PANEL_STATE = {
-  page: 'home',              // home | lms | scores | schedule | emptyRooms | attendance
+  page: 'home',              // home | lms | scores | schedule | emptyRooms | attendance | judge
   tab: 'overview',           // overview | todos | courses | materials
   loading: false,
   authMode: 'login',
@@ -23,11 +23,14 @@ const LMS_PANEL_STATE = {
     attendanceSubjects: null,
     attendanceStatistics: null,
     attendancePagination: null,
+    judgeQuestionnaires: null,
+    judgeResults: null,
   },
   selectedCid: null,         // 当前 materials 页选中的课程 id
   scoreAccountType: 'auto',
   scoreResolvedAccountType: '',
   scoreTerm: '',
+  scoreSelectedKeys: null,
   scoreError: '',
   scheduleAccountType: 'auto',
   scheduleResolvedAccountType: '',
@@ -49,6 +52,12 @@ const LMS_PANEL_STATE = {
   attendancePage: 1,
   attendancePageSize: 20,
   attendanceError: '',
+  judgeAccountType: 'auto',
+  judgeResolvedAccountType: '',
+  judgeScore: '100',
+  judgeGraduateScore: '3',
+  judgeComment: '无',
+  judgeError: '',
 };
 
 const LMS_EMPTY_ROOM_OPTIONS = {
@@ -85,6 +94,8 @@ function lmsPanelEmptyCache() {
     attendanceSubjects: null,
     attendanceStatistics: null,
     attendancePagination: null,
+    judgeQuestionnaires: null,
+    judgeResults: null,
   };
 }
 
@@ -207,6 +218,11 @@ function lmsPanelRender() {
     return;
   }
 
+  if (LMS_PANEL_STATE.page === 'judge') {
+    body.innerHTML = lmsPanelRenderJudgePage();
+    return;
+  }
+
   const _cookie = lmsGetCookie();
   if (!_cookie) {
     body.innerHTML = lmsPanelRenderSubHeader('思源学堂') + lmsPanelRenderNoCookie();
@@ -264,6 +280,10 @@ function lmsPanelRenderHome() {
           <span class="lms-nav-title">考勤查询</span>
           <span class="lms-nav-desc">查询刷卡流水、课程考勤和出勤统计</span>
         </button>
+        <button class="lms-nav-btn" onclick="lmsPanelSetPage('judge')">
+          <span class="lms-nav-title">一键评教</span>
+          <span class="lms-nav-desc">查看未评教问卷，并批量提交评教</span>
+        </button>
       </div>
     </div>
   `;
@@ -274,6 +294,8 @@ function lmsPanelRenderScoresPage() {
   const term = LMS_PANEL_STATE.scoreTerm || '';
   const scores = LMS_PANEL_STATE.cache.scores;
   const summary = LMS_PANEL_STATE.cache.scoreSummary || {};
+  const selectedScores = Array.isArray(scores) ? lmsPanelGetSelectedScores(scores) : [];
+  const selectedSummary = Array.isArray(scores) ? lmsPanelSummarizeScores(selectedScores) : summary;
   const resolvedType = LMS_PANEL_STATE.scoreResolvedAccountType || accountType;
 
   let html = lmsPanelRenderSubHeader('成绩查询');
@@ -289,7 +311,7 @@ function lmsPanelRenderScoresPage() {
       </label>
       <label class="lms-score-field">
         <span>学期</span>
-        <input id="lmsScoreTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="本科可选，如 2024-2025-1" oninput="lmsPanelSetScoreTerm(this.value)">
+        <input id="lmsScoreTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="留空/填 all 查询全部；或如 2024-2025-1" oninput="lmsPanelSetScoreTerm(this.value)">
       </label>
       <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchScores()">查询成绩</button>
     </div>
@@ -313,34 +335,47 @@ function lmsPanelRenderScoresPage() {
     return html;
   }
 
+  const allSelected = selectedScores.length === scores.length;
+
   if (!scores.length) {
     html += '<div class="lms-empty"><h3>未查询到成绩</h3><p>可以切换身份后重试。</p></div>';
     return html;
   }
 
   html += `
+    <div class="lms-score-selection-bar">
+      <div>
+        已选择 <b>${selectedScores.length}</b> / ${scores.length} 门课程用于统计
+        ${term ? '' : '<span class="lms-score-tip">当前为全部学期结果</span>'}
+      </div>
+      <div class="lms-score-selection-actions">
+        <button class="lms-mini-btn" onclick="lmsPanelSelectAllScores(true)" ${allSelected ? 'disabled' : ''}>全选</button>
+        <button class="lms-mini-btn" onclick="lmsPanelSelectAllScores(false)" ${selectedScores.length ? '' : 'disabled'}>清空</button>
+      </div>
+    </div>
     <div class="lms-score-summary">
       <div class="lms-stat-card">
-        <div class="lms-stat-num">${summary.count ?? scores.length}</div>
-        <div class="lms-stat-lbl">${escapeHtml(lmsScoreAccountLabel(resolvedType))}课程数</div>
+        <div class="lms-stat-num">${selectedSummary.count ?? selectedScores.length}</div>
+        <div class="lms-stat-lbl">已选课程数</div>
       </div>
       <div class="lms-stat-card">
-        <div class="lms-stat-num">${lmsFmtScoreValue(summary.totalCredits)}</div>
-        <div class="lms-stat-lbl">总学分</div>
+        <div class="lms-stat-num">${lmsFmtScoreValue(selectedSummary.totalCredits)}</div>
+        <div class="lms-stat-lbl">已选总学分</div>
       </div>
       <div class="lms-stat-card">
-        <div class="lms-stat-num">${lmsFmtScoreValue(summary.weightedAverageScore)}</div>
-        <div class="lms-stat-lbl">加权平均分</div>
+        <div class="lms-stat-num">${lmsFmtScoreValue(selectedSummary.weightedAverageScore)}</div>
+        <div class="lms-stat-lbl">已选加权平均分</div>
       </div>
       <div class="lms-stat-card">
-        <div class="lms-stat-num">${lmsFmtScoreValue(summary.weightedGpa)}</div>
-        <div class="lms-stat-lbl">加权 GPA</div>
+        <div class="lms-stat-num">${lmsFmtScoreValue(selectedSummary.weightedGpa)}</div>
+        <div class="lms-stat-lbl">已选加权 GPA</div>
       </div>
     </div>
     <div class="lms-score-table-wrap">
       <table class="lms-score-table">
         <thead>
           <tr>
+            <th><input type="checkbox" ${allSelected ? 'checked' : ''} onchange="lmsPanelSelectAllScores(this.checked)"></th>
             <th>学期/类型</th>
             <th>课程</th>
             <th>学分</th>
@@ -349,7 +384,7 @@ function lmsPanelRenderScoresPage() {
           </tr>
         </thead>
         <tbody>
-          ${scores.map(lmsPanelRenderScoreRow).join('')}
+          ${scores.map((item, idx) => lmsPanelRenderScoreRow(item, idx)).join('')}
         </tbody>
       </table>
     </div>
@@ -357,11 +392,87 @@ function lmsPanelRenderScoresPage() {
   return html;
 }
 
-function lmsPanelRenderScoreRow(item) {
+function lmsPanelScoreKey(item, idx) {
+  return [
+    item && (item.term || item.type || ''),
+    item && (item.courseCode || ''),
+    item && (item.courseName || ''),
+    item && (item.coursePoint ?? ''),
+    item && (item.score ?? ''),
+    idx,
+  ].map(v => String(v).replace(/\|/g, '/')).join('|');
+}
+
+function lmsPanelGetScoreSelectedMap(scores) {
+  if (!LMS_PANEL_STATE.scoreSelectedKeys || typeof LMS_PANEL_STATE.scoreSelectedKeys !== 'object') {
+    const map = {};
+    (scores || []).forEach((item, idx) => { map[lmsPanelScoreKey(item, idx)] = true; });
+    LMS_PANEL_STATE.scoreSelectedKeys = map;
+  }
+  return LMS_PANEL_STATE.scoreSelectedKeys;
+}
+
+function lmsPanelIsScoreSelected(item, idx) {
+  const scores = LMS_PANEL_STATE.cache.scores || [];
+  const map = lmsPanelGetScoreSelectedMap(scores);
+  return !!map[lmsPanelScoreKey(item, idx)];
+}
+
+function lmsPanelGetSelectedScores(scores) {
+  const map = lmsPanelGetScoreSelectedMap(scores || []);
+  return (scores || []).filter((item, idx) => !!map[lmsPanelScoreKey(item, idx)]);
+}
+
+function lmsPanelToNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function lmsPanelSummarizeScores(scores) {
+  let totalCredits = 0;
+  let weightedScoreSum = 0;
+  let weightedScoreCredits = 0;
+  let weightedGpaSum = 0;
+  let weightedGpaCredits = 0;
+  let passed = 0;
+  let failed = 0;
+
+  (scores || []).forEach(item => {
+    const credit = lmsPanelToNumber(item.coursePoint) || 0;
+    const score = lmsPanelToNumber(item.score);
+    const gpa = lmsPanelToNumber(item.gpa);
+    if (credit > 0) totalCredits += credit;
+    if (score !== null && credit > 0) {
+      weightedScoreSum += score * credit;
+      weightedScoreCredits += credit;
+    }
+    if (gpa !== null && credit > 0) {
+      weightedGpaSum += gpa * credit;
+      weightedGpaCredits += credit;
+    }
+    if (item.passFlag === true) passed += 1;
+    else if (item.passFlag === false) failed += 1;
+  });
+
+  return {
+    count: (scores || []).length,
+    totalCredits: Math.round(totalCredits * 100) / 100,
+    weightedAverageScore: weightedScoreCredits ? Math.round((weightedScoreSum / weightedScoreCredits) * 100) / 100 : null,
+    weightedGpa: weightedGpaCredits ? Math.round((weightedGpaSum / weightedGpaCredits) * 1000) / 1000 : null,
+    passed,
+    failed,
+  };
+}
+
+function lmsPanelRenderScoreRow(item, idx) {
   const group = item.term || item.type || '-';
   const failed = item.passFlag === false ? ' failed' : '';
+  const key = lmsPanelScoreKey(item, idx);
+  const checked = lmsPanelIsScoreSelected(item, idx) ? 'checked' : '';
   return `
     <tr class="${failed}">
+      <td><input type="checkbox" ${checked} onchange="lmsPanelToggleScoreSelection('${escapeHtml(key)}', this.checked)"></td>
       <td>${escapeHtml(group)}</td>
       <td>${escapeHtml(item.courseName || '-')}</td>
       <td>${escapeHtml(lmsFmtScoreValue(item.coursePoint))}</td>
@@ -369,6 +480,23 @@ function lmsPanelRenderScoreRow(item) {
       <td>${escapeHtml(lmsFmtScoreValue(item.gpa))}</td>
     </tr>
   `;
+}
+
+function lmsPanelToggleScoreSelection(key, checked) {
+  const scores = LMS_PANEL_STATE.cache.scores || [];
+  const map = lmsPanelGetScoreSelectedMap(scores);
+  map[key] = !!checked;
+  lmsPanelRender();
+}
+
+function lmsPanelSelectAllScores(checked) {
+  const scores = LMS_PANEL_STATE.cache.scores || [];
+  const map = {};
+  scores.forEach((item, idx) => {
+    map[lmsPanelScoreKey(item, idx)] = !!checked;
+  });
+  LMS_PANEL_STATE.scoreSelectedKeys = map;
+  lmsPanelRender();
 }
 
 function lmsPanelSetScoreAccountType(value) {
@@ -886,6 +1014,141 @@ function lmsPanelAttendanceNextPage() {
   lmsPanelFetchAttendance();
 }
 
+function lmsPanelRenderJudgePage() {
+  const accountType = LMS_PANEL_STATE.judgeAccountType || 'auto';
+  const ugScore = LMS_PANEL_STATE.judgeScore || '100';
+  const pgScore = LMS_PANEL_STATE.judgeGraduateScore || '3';
+  const comment = LMS_PANEL_STATE.judgeComment || '';
+  const questionnaires = LMS_PANEL_STATE.cache.judgeQuestionnaires;
+  const results = LMS_PANEL_STATE.cache.judgeResults;
+  const resolvedType = LMS_PANEL_STATE.judgeResolvedAccountType || accountType;
+
+  let html = lmsPanelRenderSubHeader('一键评教');
+  html += `
+    <div class="lms-score-controls">
+      <label class="lms-score-field">
+        <span>身份</span>
+        <select id="lmsJudgeAccountType" class="lms-login-input" onchange="lmsPanelSetJudgeAccountType(this.value)">
+          <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
+          <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
+          <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>本科评分</span>
+        <select id="lmsJudgeScore" class="lms-login-input" onchange="lmsPanelSetJudgeScore(this.value)">
+          ${[100, 80, 60, 40].map(score => `<option value="${score}" ${String(score) === String(ugScore) ? 'selected' : ''}>${score} 分</option>`).join('')}
+        </select>
+      </label>
+      <label class="lms-score-field">
+        <span>研究生评分</span>
+        <select id="lmsJudgeGraduateScore" class="lms-login-input" onchange="lmsPanelSetJudgeGraduateScore(this.value)">
+          <option value="3" ${String(pgScore) === '3' ? 'selected' : ''}>优秀</option>
+          <option value="2" ${String(pgScore) === '2' ? 'selected' : ''}>良好</option>
+          <option value="1" ${String(pgScore) === '1' ? 'selected' : ''}>合格</option>
+          <option value="0" ${String(pgScore) === '0' ? 'selected' : ''}>不合格</option>
+        </select>
+      </label>
+      <label class="lms-score-field lms-score-field-wide">
+        <span>统一评语</span>
+        <textarea id="lmsJudgeComment" class="lms-login-input" rows="3" placeholder="主观题统一填写内容，可留空" oninput="lmsPanelSetJudgeComment(this.value)">${escapeHtml(comment)}</textarea>
+      </label>
+      <div class="lms-period-grid">
+        <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchJudgeStatus()">刷新待评教</button>
+        <button class="lms-big-btn lms-score-query-btn" style="background:var(--danger,#e74c3c);" onclick="lmsPanelSubmitJudgeAll()">提交全部评教</button>
+      </div>
+    </div>
+  `;
+
+  if (LMS_PANEL_STATE.judgeError) {
+    html += `
+      <div class="lms-score-error">
+        <div>${escapeHtml(LMS_PANEL_STATE.judgeError)}</div>
+        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+      </div>
+    `;
+  }
+
+  if (!questionnaires && !results) {
+    html += `
+      <div class="lms-empty-mini">
+        一键评教使用本机加密保存的统一认证账号密码，只在学习面板内使用，不会暴露为 AI 工具。请先点击“刷新待评教”确认列表，再提交。
+      </div>
+    `;
+    return html;
+  }
+
+  if (questionnaires) {
+    html += `
+      <div class="lms-score-summary">
+        <div class="lms-stat-card">
+          <div class="lms-stat-num">${escapeHtml(questionnaires.length)}</div>
+          <div class="lms-stat-lbl">${escapeHtml(lmsScoreAccountLabel(resolvedType))}待评教</div>
+        </div>
+      </div>
+    `;
+    if (!questionnaires.length) {
+      html += '<div class="lms-empty"><h3>暂无待评教问卷</h3><p>当前身份下没有需要评教的课程。</p></div>';
+    } else {
+      html += `
+        <div class="lms-score-table-wrap">
+          <table class="lms-score-table">
+            <thead><tr><th>课程</th><th>教师</th><th>问卷</th><th>学期</th></tr></thead>
+            <tbody>${questionnaires.map(lmsPanelRenderJudgeQuestionnaireRow).join('')}</tbody>
+          </table>
+        </div>
+      `;
+    }
+  }
+
+  if (results) {
+    const okCount = results.filter(item => item && item.ok).length;
+    html += `
+      <h3 class="lms-section-title">提交结果</h3>
+      <div class="lms-schedule-summary">
+        <span>成功 ${okCount}/${results.length}</span>
+        <span>${escapeHtml(lmsScoreAccountLabel(resolvedType))}</span>
+      </div>
+      <div class="lms-score-table-wrap">
+        <table class="lms-score-table">
+          <thead><tr><th>状态</th><th>课程</th><th>教师</th><th>消息</th></tr></thead>
+          <tbody>${results.map(lmsPanelRenderJudgeResultRow).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  return html;
+}
+
+function lmsPanelRenderJudgeQuestionnaireRow(item) {
+  return `
+    <tr>
+      <td>${escapeHtml(item.courseName || '-')}</td>
+      <td>${escapeHtml(item.teacher || '-')}</td>
+      <td>${escapeHtml(item.questionnaireName || '-')}</td>
+      <td>${escapeHtml(item.term || '-')}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelRenderJudgeResultRow(item) {
+  const ok = item && item.ok;
+  return `
+    <tr class="${ok ? '' : 'failed'}">
+      <td>${ok ? '✅ 成功' : '❌ 失败'}</td>
+      <td>${escapeHtml(item.courseName || '-')}</td>
+      <td>${escapeHtml(item.teacher || '-')}</td>
+      <td>${escapeHtml(item.message || '-')}</td>
+    </tr>
+  `;
+}
+
+function lmsPanelSetJudgeAccountType(value) { LMS_PANEL_STATE.judgeAccountType = value || 'auto'; }
+function lmsPanelSetJudgeScore(value) { LMS_PANEL_STATE.judgeScore = value || '100'; }
+function lmsPanelSetJudgeGraduateScore(value) { LMS_PANEL_STATE.judgeGraduateScore = value || '3'; }
+function lmsPanelSetJudgeComment(value) { LMS_PANEL_STATE.judgeComment = value || ''; }
+
 function lmsPanelRenderBadCookie() {
   // 当 Cookie 已保存但 lmsParseSession 失败时调用，提供醒目的修复入口
   const raw = lmsGetCookie();
@@ -1240,12 +1503,14 @@ async function lmsPanelFetchScores() {
     LMS_PANEL_STATE.cache.scores = result.scores || [];
     LMS_PANEL_STATE.cache.scoreSummary = result.summary || {};
     LMS_PANEL_STATE.scoreResolvedAccountType = result.account_type || accountType;
+    LMS_PANEL_STATE.scoreSelectedKeys = null;
     toast(`成绩已加载：${LMS_PANEL_STATE.cache.scores.length} 门课程`);
   } else {
     LMS_PANEL_STATE.cache.scores = null;
     LMS_PANEL_STATE.cache.scoreSummary = null;
     LMS_PANEL_STATE.scoreResolvedAccountType = '';
     LMS_PANEL_STATE.scoreError = (result && (result.message || result.error)) || '成绩查询失败。';
+    LMS_PANEL_STATE.scoreSelectedKeys = null;
     toast(LMS_PANEL_STATE.scoreError);
   }
   lmsPanelRender();
@@ -1362,6 +1627,77 @@ async function lmsPanelFetchAttendance() {
   lmsPanelRender();
 }
 
+function lmsPanelJudgePayload(action) {
+  const accountType = document.getElementById('lmsJudgeAccountType')?.value || LMS_PANEL_STATE.judgeAccountType || 'auto';
+  const score = document.getElementById('lmsJudgeScore')?.value || LMS_PANEL_STATE.judgeScore || '100';
+  const graduateScore = document.getElementById('lmsJudgeGraduateScore')?.value || LMS_PANEL_STATE.judgeGraduateScore || '3';
+  const comment = document.getElementById('lmsJudgeComment')?.value || LMS_PANEL_STATE.judgeComment || '无';
+  LMS_PANEL_STATE.judgeAccountType = accountType;
+  LMS_PANEL_STATE.judgeScore = score;
+  LMS_PANEL_STATE.judgeGraduateScore = graduateScore;
+  LMS_PANEL_STATE.judgeComment = comment;
+  return {
+    action,
+    account_type: accountType,
+    score: accountType === 'postgraduate' ? graduateScore : score,
+    graduate_score: graduateScore,
+    comment,
+  };
+}
+
+async function lmsPanelFetchJudgeStatus() {
+  LMS_PANEL_STATE.judgeError = '';
+  LMS_PANEL_STATE.cache.judgeResults = null;
+  lmsPanelShowLoading('正在获取待评教问卷...');
+
+  const result = await lmsJudgeQuery(lmsPanelJudgePayload('status'));
+  if (result && result.ok) {
+    LMS_PANEL_STATE.cache.judgeQuestionnaires = result.questionnaires || [];
+    LMS_PANEL_STATE.judgeResolvedAccountType = result.account_type || LMS_PANEL_STATE.judgeAccountType;
+    toast(`待评教问卷：${LMS_PANEL_STATE.cache.judgeQuestionnaires.length} 份`);
+  } else {
+    LMS_PANEL_STATE.cache.judgeQuestionnaires = null;
+    LMS_PANEL_STATE.judgeResolvedAccountType = '';
+    LMS_PANEL_STATE.judgeError = (result && (result.message || result.error)) || '获取待评教问卷失败。';
+    toast(LMS_PANEL_STATE.judgeError);
+  }
+  lmsPanelRender();
+}
+
+async function lmsPanelSubmitJudgeAll() {
+  const payload = lmsPanelJudgePayload('submit_all');
+  const scoreLabel = payload.account_type === 'postgraduate'
+    ? ({3: '优秀', 2: '良好', 1: '合格', 0: '不合格'}[String(payload.graduate_score)] || payload.graduate_score)
+    : `${payload.score} 分`;
+  const ok = confirm(`确定提交全部待评教问卷吗？\n身份：${lmsScoreAccountLabel(payload.account_type)}\n评分：${scoreLabel}\n评语：${payload.comment || '无'}`);
+  if (!ok) return;
+
+  LMS_PANEL_STATE.judgeError = '';
+  lmsPanelShowLoading('正在提交全部评教，请勿关闭页面...');
+
+  const result = await lmsJudgeQuery(payload);
+  if (result && (result.ok || result.partial_ok)) {
+    const results = result.results || [];
+    if (!results.length && Number(result.count || 0) === 0) {
+      LMS_PANEL_STATE.cache.judgeResults = null;
+      LMS_PANEL_STATE.cache.judgeQuestionnaires = [];
+      LMS_PANEL_STATE.judgeResolvedAccountType = result.account_type || LMS_PANEL_STATE.judgeAccountType;
+      toast('暂无待评教问卷');
+      lmsPanelRender();
+      return;
+    }
+    LMS_PANEL_STATE.cache.judgeResults = results;
+    LMS_PANEL_STATE.cache.judgeQuestionnaires = null;
+    LMS_PANEL_STATE.judgeResolvedAccountType = result.account_type || LMS_PANEL_STATE.judgeAccountType;
+    toast(`评教完成：成功 ${result.success_count || 0}/${results.length}`);
+  } else {
+    LMS_PANEL_STATE.cache.judgeResults = null;
+    LMS_PANEL_STATE.judgeError = (result && (result.message || result.error)) || '一键评教失败。';
+    toast(LMS_PANEL_STATE.judgeError);
+  }
+  lmsPanelRender();
+}
+
 async function lmsPanelShowMaterials(cid) {
   LMS_PANEL_STATE.page = 'lms';
   LMS_PANEL_STATE.selectedCid = cid;
@@ -1402,9 +1738,11 @@ function lmsPanelShowLoading(text) {
         ? lmsPanelRenderSubHeader('课表查询')
         : (LMS_PANEL_STATE.page === 'emptyRooms'
           ? lmsPanelRenderSubHeader('空闲教室')
+          : (LMS_PANEL_STATE.page === 'judge'
+            ? lmsPanelRenderSubHeader('一键评教')
           : (LMS_PANEL_STATE.page === 'attendance'
             ? lmsPanelRenderSubHeader('考勤查询')
-            : (LMS_PANEL_STATE.page === 'lms' ? lmsPanelRenderSubHeader('思源学堂') : ''))));
+            : (LMS_PANEL_STATE.page === 'lms' ? lmsPanelRenderSubHeader('思源学堂') : '')))));
     body.innerHTML = `${header}<div class="lms-loading">
       <div class="lms-spinner"></div>
       <div>${escapeHtml(text || '加载中...')}</div>
@@ -1502,6 +1840,8 @@ async function lmsPanelLoadCredentialStatus() {
   const savedAt = result.saved_at ? lmsFmtTime(new Date(result.saved_at * 1000)) : '未知时间';
   const usernameInput = document.getElementById('lmsLoginUsername');
   if (usernameInput && !usernameInput.value && username) usernameInput.value = username;
+  const remember = document.getElementById('lmsLoginRemember');
+  if (remember) remember.checked = true;
   box.innerHTML = `
     <div class="lms-saved-main">
       <div>

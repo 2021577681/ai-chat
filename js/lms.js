@@ -425,6 +425,33 @@ async function lmsAttendanceQuery(options = {}) {
   }
 }
 
+async function lmsJudgeQuery(options = {}) {
+  if (!(await lmsEnsureProxyToken())) {
+    return { ok: false, error: 'LOCAL_SERVER_NOT_READY', message: '本地代理服务未就绪，请先启动 local_terminal_server.py' };
+  }
+
+  try {
+    const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-judge`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Token': TERMINAL_CONFIG.token,
+      },
+      body: JSON.stringify(options || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (resp.status === 403) {
+      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+    }
+    if (!data) {
+      return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, error: 'NETWORK_ERROR', message: `连接本地一键评教服务失败：${e.message}` };
+  }
+}
+
 function lmsScoreAccountLabel(accountType) {
   if (accountType === 'undergraduate') return '本科';
   if (accountType === 'postgraduate') return '研究生';

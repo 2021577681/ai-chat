@@ -414,7 +414,8 @@ def _error_payload(error: Exception) -> dict[str, str]:
 def handle_lms_scores_request(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     try:
         account_type = str(body.get("account_type") or "auto").strip().lower()
-        term = _norm_text(body.get("term")) or None
+        raw_term = _norm_text(body.get("term"))
+        term = None if raw_term.lower() in ("", "all", "*") else raw_term
         if term and not re.fullmatch(r"\d{4}-\d{4}-[1-3]", term):
             raise ScoreQueryError("BAD_REQUEST", "学期格式应为 2024-2025-1。", http_status=400)
 

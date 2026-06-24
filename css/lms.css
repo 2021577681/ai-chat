@@ -237,6 +237,28 @@
   flex-wrap: wrap;
   font-size: 13px;
 }
+.lms-score-selection-bar {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e1e4e8);
+  border-radius: 8px;
+  background: var(--bg-card, #fff);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-secondary, #6e7681);
+}
+.lms-score-selection-actions {
+  display: flex;
+  gap: 8px;
+}
+.lms-score-tip {
+  margin-left: 8px;
+  color: var(--accent, #0969da);
+}
 .lms-score-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -267,12 +289,13 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.lms-score-table td:nth-child(3),
 .lms-score-table td:nth-child(4),
-.lms-score-table td:nth-child(5) {
+.lms-score-table td:nth-child(5),
+.lms-score-table td:nth-child(6) {
   text-align: right;
   white-space: nowrap;
 }
+.lms-score-table th:first-child, .lms-score-table td:first-child { text-align: center; width: 36px; }
 .lms-score-table tr.failed td {
   color: var(--danger, #cf222e);
   background: rgba(207, 34, 46, 0.04);

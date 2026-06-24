@@ -126,6 +126,10 @@ class Handler(BaseHTTPRequestHandler,
         if self.path.startswith('/lms-attendance'):
             return self.handle_lms_attendance_post()
 
+        # ⭐ LMS 一键评教（POST）
+        if self.path.startswith('/lms-judge'):
+            return self.handle_lms_judge_post()
+
         # 鉴权（除 llm-proxy 外，POST 都要求 X-Token）
         token = self.headers.get('X-Token', '')
         if token != config.TOKEN:

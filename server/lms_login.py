@@ -558,15 +558,33 @@ def _delete_flow(flow_id: str) -> None:
         _FLOWS.pop(flow_id, None)
 
 
-def _save_remembered_credentials(flow_id: str | None, username: str = "", password: str = "") -> dict[str, Any] | None:
+def _clear_stale_credential(username: str) -> dict[str, Any] | None:
+    username = (username or "").strip()
+    if not username:
+        return None
+    status = credential_status()
+    if not status.get("ok") or not status.get("has_credential") or status.get("broken"):
+        return None
+    saved_username = str(status.get("username") or "").strip()
+    if saved_username and saved_username != username:
+        return clear_lms_credential()
+    return None
+
+
+def _sync_login_credentials(
+        flow_id: str | None,
+        *,
+        remember_credentials: bool = False,
+        username: str = "",
+        password: str = "") -> dict[str, Any] | None:
     if flow_id:
         flow = _get_flow(flow_id)
         if flow.remember_credentials and flow.username and flow.password:
             return save_lms_credential(flow.username, flow.password)
-        return None
-    if username and password:
+        return _clear_stale_credential(flow.username)
+    if remember_credentials and username and password:
         return save_lms_credential(username, password)
-    return None
+    return _clear_stale_credential(username)
 
 
 def _format_login_result(
@@ -579,10 +597,11 @@ def _format_login_result(
         username: str = "",
         password: str = "") -> dict[str, Any]:
     if state == LoginState.SUCCESS:
-        credential = _save_remembered_credentials(
+        credential = _sync_login_credentials(
             flow_id,
-            username=username if remember_credentials else "",
-            password=password if remember_credentials else "",
+            remember_credentials=remember_credentials,
+            username=username,
+            password=password,
         )
         if flow_id:
             _delete_flow(flow_id)
