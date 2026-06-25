@@ -1107,13 +1107,10 @@ body{
 [data-theme="dark"][data-security-mode] .topbar,
 [data-theme="dark"][data-security-mode] .status-bar,
 [data-theme="dark"][data-security-mode] .messages,
-[data-theme="dark"][data-security-mode] .input-area,
-[data-theme="dark"][data-security-mode] .main-content{
+[data-theme="dark"][data-security-mode] .input-area{
   position:relative;
   z-index:1;
 }
-
-[data-theme="dark"][data-security-mode] .main-content{z-index:2;background:rgba(8,8,10,.96)}
 
 [data-theme="dark"][data-security-mode] .main.chat-start-state .input-area{
   position:absolute;
