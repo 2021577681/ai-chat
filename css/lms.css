@@ -292,10 +292,20 @@
 .lms-score-table td:nth-child(4),
 .lms-score-table td:nth-child(5),
 .lms-score-table td:nth-child(6) {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 .lms-score-table th:first-child, .lms-score-table td:first-child { text-align: center; width: 36px; }
+.lms-score-table th:nth-child(2),
+.lms-score-table td:nth-child(2) {
+  width: 140px;
+  white-space: nowrap;
+  text-align: center;
+}
+.lms-score-table th:nth-child(3),
+.lms-score-table td:nth-child(3) {
+  max-width: 200px;
+}
 .lms-score-table tr.failed td {
   color: var(--danger, #cf222e);
   background: rgba(207, 34, 46, 0.04);
@@ -331,30 +341,45 @@
 }
 .lms-empty-room-table th:nth-child(1),
 .lms-empty-room-table td:nth-child(1) {
-  min-width: 120px;
+  width: 90px;
+  text-align: center;
+}
+.lms-empty-room-table th:nth-child(2),
+.lms-empty-room-table td:nth-child(2) {
+  width: 80px;
+  text-align: center;
 }
 .lms-empty-room-table td:nth-child(3),
 .lms-empty-room-table td:nth-child(6) {
-  text-align: left;
+  text-align: center;
   white-space: normal;
+  min-width: 90px;
 }
 .lms-empty-room-table td:nth-child(4),
 .lms-empty-room-table td:nth-child(5) {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 .lms-attendance-table td:nth-child(1) {
-  min-width: 138px;
+  width: 138px;
+  text-align: center;
   white-space: nowrap;
 }
 .lms-attendance-table td:nth-child(2),
+.lms-attendance-table td:nth-child(3),
 .lms-attendance-table td:nth-child(4) {
-  text-align: left;
+  text-align: center;
   white-space: normal;
 }
+.lms-attendance-subject-table td:nth-child(1) {
+  text-align: left;
+  white-space: normal;
+  min-width: 240px;
+}
 .lms-attendance-subject-table td:nth-child(n+2) {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
+  width: 70px;
 }
 .lms-attendance-status {
   display: inline-flex;
