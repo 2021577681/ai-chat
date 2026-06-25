@@ -509,11 +509,14 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   
   if (needConfirm) {
     const taskAllow = getTaskAllowForChat(chatId);
-    const alreadyAllowed =
-      TERMINAL_CONFIG.permanentAllow[category] ||
-      taskAllow[category];
+    const taskAllowed = !!taskAllow[category];
+    const permanentlyAllowed = !!TERMINAL_CONFIG.permanentAllow[category];
+    const alreadyAllowed = permanentlyAllowed || taskAllowed;
     
-    if (forceConfirm || !alreadyAllowed) {
+    // forceConfirm 用于 Git 命令在快照工具未启用时绕过“永久允许执行命令”，
+    // 避免旧的永久 execute 权限静默放行 Git 写入/恢复类命令。
+    // 但用户点击“本任务后续允许执行命令”后，应在当前任务内继续生效。
+    if ((forceConfirm && !taskAllowed) || !alreadyAllowed) {
       const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, {
         ...(context && typeof context === 'object' ? context : {}),
         chatId

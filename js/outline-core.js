@@ -624,14 +624,41 @@ function outlineToolResultText(result) {
   return value === undefined ? '' : String(value);
 }
 
-function outlineToolResultOutcome(result, content) {
+function outlineToolCanBeUserRejected(toolName) {
+  // 只有会弹权限/危险确认的工具，才允许把纯文本里的“用户拒绝”识别为用户拒绝。
+  // read_tool_artifact/read_note 等只读工具可能读取到历史日志或源码中的“用户拒绝”字样，
+  // 不能因此把一次普通读取误判为用户拒绝并中断大纲任务。
+  const name = String(toolName || '');
+  return new Set([
+    'execute_action',
+    'save_note',
+    'append_note',
+    'edit_note',
+    'apply_patch',
+    'delete_note',
+    'attach_file',
+    'ai_screenshot',
+    'list_windows',
+    'mcp_call_tool',
+    'mcp_list_tools',
+    'note_status',
+    'note_history',
+    'note_diff',
+    'note_snapshot',
+    'note_restore',
+    'restore_checkpoint'
+  ]).has(name);
+}
+
+function outlineToolResultOutcome(result, content, toolName) {
   const value = result && result.value;
   const isObject = value && typeof value === 'object';
   const text = String(content || '');
+  const canBeRejected = outlineToolCanBeUserRejected(toolName);
   const stopAll = !!(isObject && value._stopAll)
-    || /(?:🛑|用户拒绝).*?(?:停止|后续|所有)/.test(text);
+    || (canBeRejected && /(?:🛑|用户拒绝).*?(?:停止|后续|所有)/.test(text));
   const userRejected = !!(isObject && value._userRejected)
-    || /(?:⏭️|用户拒绝此次|用户拒绝此操作|用户拒绝了此操作)/.test(text);
+    || (canBeRejected && /(?:⏭️|用户拒绝此次|用户拒绝此操作|用户拒绝了此操作)/.test(text));
   const valueFailed = !!(isObject && value.ok === false);
   return {
     ok: !!(result && result.ok) && !stopAll && !userRejected && !valueFailed,
@@ -1310,7 +1337,7 @@ async function callAPIWithOutline(options = {}) {
               })
             : { content: rawContent, archived: false };
           const content = preparedToolResult.content;
-          const outcome = outlineToolResultOutcome(result, content);
+          const outcome = outlineToolResultOutcome(result, content, fname);
           preparedExternalToolResult = preparedToolResult;
           liveEntry.result = content.slice(0, 500);
           liveEntry.ok = outcome.ok;
@@ -1339,7 +1366,7 @@ async function callAPIWithOutline(options = {}) {
         let content = outlineToolResultText(result);
         let preparedToolResult = preparedExternalToolResult || { content, archived: false };
         if (preparedExternalToolResult) content = preparedExternalToolResult.content;
-        const outcome = outlineToolResultOutcome(result, content);
+        const outcome = outlineToolResultOutcome(result, content, fname);
         conversationMessages.push({
           role: 'tool',
           tool_call_id: tc.id,
