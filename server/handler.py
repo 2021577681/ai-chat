@@ -1,12 +1,12 @@
 # ============================================================
-# server/handler.py - HTTP Handler 涓荤被
+# server/handler.py - HTTP Handler 主类
 # ============================================================
-# 閫氳繃 mixin 缁勫悎鎵€鏈夊姛鑳斤細ExecMixin / FilesMixin / WebMixin / GitMixin / ProxyMixin銆?
-# 鑷韩璐熻矗锛?
-#   - HTTP 鍩虹锛坃send_json / _write_cors_headers锛?
-#   - OPTIONS 棰勬
-#   - GET 璺敱鍒嗗彂锛?workspace / /health / /lms-proxy / 闈欐€佹枃浠讹級
-#   - POST 璺敱鍒嗗彂锛?llm-proxy / 閴存潈 + action 鍒嗗彂锛?
+# 通过 mixin 组合所有功能：ExecMixin / FilesMixin / WebMixin / GitMixin / ProxyMixin。
+# 自身负责：
+#   - HTTP 基础（_send_json / _write_cors_headers）
+#   - OPTIONS 预检
+#   - GET 路由分发（/workspace / /health / /lms-proxy / 静态文件）
+#   - POST 路由分发（/llm-proxy / 鉴权 + action 分发）
 # ============================================================
 
 import copy
@@ -32,24 +32,24 @@ from .workspace import WorkspaceMixin
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
               McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin):
-    """涓?HTTP Handler锛岄€氳繃 mixin 缁勫悎鎵€鏈夊姛鑳姐€?
-    鍚?mixin 閮戒緷璧栨湰绫绘彁渚涚殑 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile銆?
+    """主 HTTP Handler，通过 mixin 组合所有功能。
+    各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
 
-    # ============ 鏃ュ織 ============
+    # ============ 日志 ============
     def log_message(self, format, *args):
         print(f'[{self.log_date_time_string()}] {format % args}')
 
-    # ============ HTTP 鍩虹宸ュ叿 ============
+    # ============ HTTP 基础工具 ============
     def _send_json(self, code, data):
-        """缁熶竴鍦ㄥ搷搴旈噷闄勫姞娌欑淇℃伅锛屽墠绔彲瀹炴椂鏄剧ず"""
+        """统一在响应里附加沙箱信息，前端可实时显示"""
         if isinstance(data, dict):
             data.setdefault('workspace', config.WORKSPACE_ROOT)
             data.setdefault('cwd', config.get_current_cwd())
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
-        # 馃寪 CORS 鍏ㄥ紑锛氬洖鏄捐姹傛柟 Origin锛堝惈 'null'锛屽搴?file:// 鍙屽嚮鎵撳紑锛?
+        # 🌐 CORS 全开：回显请求方 Origin（含 'null'，对应 file:// 双击打开）
         origin = self.headers.get('Origin', '')
         self.send_header('Access-Control-Allow-Origin', origin or '*')
         self.send_header('Vary', 'Origin')
@@ -67,7 +67,7 @@ class Handler(BaseHTTPRequestHandler,
 
     # ============ OPTIONS ============
     def do_OPTIONS(self):
-        # 馃寪 棰勬鍏ㄩ儴鏀捐
+        # 🌐 预检全部放行
         origin = self.headers.get('Origin', '')
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', origin or '*')
@@ -77,9 +77,9 @@ class Handler(BaseHTTPRequestHandler,
         self.send_header('Access-Control-Max-Age', '600')
         self.end_headers()
 
-    # ============ GET 璺敱 ============
+    # ============ GET 路由 ============
     def do_GET(self):
-        # 猸?LMS 浠ｇ悊锛圙ET锛?
+        # ⭐ LMS 代理（GET）
         if self.path.startswith('/lms-proxy'):
             return self.handle_lms_proxy_get()
 
@@ -87,7 +87,7 @@ class Handler(BaseHTTPRequestHandler,
         if self.path == '/workspace':
             return self.handle_workspace_info()
 
-        # /health 鏄惧紡鍋ュ悍妫€鏌?
+        # /health 显式健康检查
         if self.path == '/health':
             self._send_json(200, {'ok': True,
                                   'cwd': config.get_current_cwd(),
@@ -110,59 +110,59 @@ class Handler(BaseHTTPRequestHandler,
             })
             return
 
-        # 闈欐€佹枃浠讹紙http://localhost:8765/ 鍙洿鎺ユ墦寮€ HTML锛?
+        # 静态文件（http://localhost:8765/ 可直接打开 HTML）
         return self.handle_static_file()
 
-    # ============ POST 璺敱 ============
+    # ============ POST 路由 ============
     def do_POST(self):
-        # 猸?LLM 浠ｇ悊锛圥OST锛?
+        # ⭐ LLM 代理（POST）
         if self.path.startswith('/llm-proxy'):
             return self.handle_llm_proxy_post()
 
-        # 猸?LMS 璐﹀彿瀵嗙爜鐧诲綍锛圥OST锛?
+        # ⭐ LMS 账号密码登录（POST）
         if self.path.startswith('/lms-login'):
             return self.handle_lms_login_post()
 
-        # 猸?LMS 鎴愮哗鏌ヨ锛圥OST锛?
+        # ⭐ LMS 成绩查询（POST）
         if self.path.startswith('/lms-scores'):
             return self.handle_lms_scores_post()
 
-        # 猸?LMS 璇捐〃鏌ヨ锛圥OST锛?
+        # ⭐ LMS 课表查询（POST）
         if self.path.startswith('/lms-schedule'):
             return self.handle_lms_schedule_post()
 
-        # 猸?LMS 绌洪棽鏁欏鏌ヨ锛圥OST锛?
+        # ⭐ LMS 空闲教室查询（POST）
         if self.path.startswith('/lms-empty-rooms'):
             return self.handle_lms_empty_rooms_post()
 
-        # 猸?LMS 鑰冨嫟鏌ヨ锛圥OST锛?
+        # ⭐ LMS 考勤查询（POST）
         if self.path.startswith('/lms-attendance'):
             return self.handle_lms_attendance_post()
 
-        # 猸?LMS 涓€閿瘎鏁欙紙POST锛?
+        # ⭐ LMS 一键评教（POST）
         if self.path.startswith('/lms-judge'):
             return self.handle_lms_judge_post()
 
-        # 猸?LMS 涓汉鍩瑰吇鏂规锛圥OST锛?
+        # ⭐ LMS 个人培养方案（POST）
         if self.path.startswith('/lms-training-plan'):
             return self.handle_lms_training_plan_post()
 
-        # 璇昏姹備綋
+        # 读请求体
         try:
             length = int(self.headers.get('Content-Length', 0))
             raw = self.rfile.read(length).decode('utf-8')
             body = json.loads(raw)
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'璇锋眰鏍煎紡閿欒: {e}'})
+            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
-        # 璋冭瘯鏃ュ織
+        # 调试日志
         action = body.get('action', 'execute')
         session_id = body.get('session_id') or self.headers.get('X-Session-Id', '')
         self.session_id = config.normalize_session_id(session_id)
         _cwd_token = config.bind_request_cwd(config.get_session_cwd(self.session_id))
         print(f'\n{"="*60}')
-        print(f'馃摜 鏀跺埌璇锋眰: action="{action}", session="{self.session_id}"')
+        print(f'📥 收到请求: action="{action}", session="{self.session_id}"')
         if action != 'read_file_binary':
             log_body = body
             if action in ('mcp_list_tools', 'mcp_call_tool'):
@@ -173,12 +173,12 @@ class Handler(BaseHTTPRequestHandler,
                 log_body = copy.deepcopy(body)
                 if log_body.get('password'):
                     log_body['password'] = '***'
-            print(f'馃摝 瀹屾暣璇锋眰浣? {json.dumps(log_body, ensure_ascii=False)[:500]}')
+            print(f'📦 完整请求体: {json.dumps(log_body, ensure_ascii=False)[:500]}')
         else:
-            print(f'馃摝 璇锋眰浣? action=read_file_binary, path={body.get("path", "")}')
+            print(f'📦 请求体: action=read_file_binary, path={body.get("path", "")}')
         print(f'{"="*60}')
 
-        # 鍒嗗彂鍒板悇 mixin
+        # 分发到各 mixin
         try:
             if action == 'execute':
                 self.handle_execute(body)
@@ -237,9 +237,9 @@ class Handler(BaseHTTPRequestHandler,
             elif action == 'remote_disconnect':
                 self.handle_remote_disconnect(body)
             else:
-                self._send_json(400, {'ok': False, 'error': f'鉂?鏈煡鎿嶄綔: {action}'})
+                self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:
-            self._send_json(500, {'ok': False, 'error': f'鍐呴儴閿欒: {e}'})
+            self._send_json(500, {'ok': False, 'error': f'内部错误: {e}'})
         finally:
             config.reset_request_cwd(_cwd_token)
             self.session_id = ''
