@@ -152,7 +152,33 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 @media (max-width:768px){.more-menu-wrap.open .more-menu{opacity:1;visibility:visible;transform:translateY(0)}}
 
 /* 主区域 */
-.main{position:relative;flex:1;display:flex;flex-direction:column;background:var(--bg-chat);min-width:0}
+.main{position:relative;flex:1;display:flex;flex-direction:column;background:var(--bg-chat);min-width:0;min-height:0}
+.main-content{flex:1;min-height:0;display:flex;overflow:hidden}
+.chat-column{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;position:relative}
+.main-content.has-inline-file .chat-column{flex:0 0 var(--chat-column-width,50%);width:var(--chat-column-width,50%)}
+.main-content.has-inline-file .inline-file-panel{flex:1 1 auto;width:auto}
+.main-content.inline-file-left .inline-file-panel{order:1;border-left:0;border-right:1px solid var(--border)}
+.main-content.inline-file-left .inline-file-resizer{order:2}
+.main-content.inline-file-left .chat-column{order:3}
+.main-content.inline-file-right .chat-column{order:1}.main-content.inline-file-right .inline-file-resizer{order:2}.main-content.inline-file-right .inline-file-panel{order:3}
+.inline-file-resizer{flex:0 0 5px;width:5px;background:transparent;cursor:col-resize;display:none;position:relative;z-index:2}
+.main-content.has-inline-file .inline-file-resizer{display:block}
+.inline-file-resizer:hover,.main-content.is-resizing .inline-file-resizer{background:rgba(79,70,229,.18)}
+.inline-file-panel{min-width:0;border-left:1px solid var(--border);background:var(--bg-chat);display:flex;flex-direction:column;overflow:hidden}
+.inline-file-panel[hidden]{display:none}
+.inline-file-header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);background:var(--bg-sidebar)}
+.inline-file-title{min-width:0;flex:1;display:flex;align-items:center;gap:8px;font-weight:700;color:var(--text);font-size:13px}
+.inline-file-title code{display:none}
+.inline-file-side-toggle{height:24px;padding:0 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;font-family:inherit}
+.inline-file-side-toggle:hover{background:var(--bg-hover);color:var(--primary)}
+.inline-file-close{width:24px;height:24px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center}
+.inline-file-close:hover{background:var(--bg-hover);color:var(--danger)}
+.inline-file-status{display:none}
+.inline-file-status.ok{color:var(--success)}.inline-file-status.error{color:var(--danger)}.inline-file-status.loading{color:var(--warning)}
+.inline-file-body{flex:1;min-height:0;overflow:auto;background:var(--bg-input)}
+.inline-file-body textarea{display:block;width:100%;height:100%;min-height:100%;max-height:none;box-sizing:border-box;border:0;outline:0;resize:none;background:transparent;color:var(--text);font-family:var(--font-mono);font-size:13px;line-height:1.6;padding:14px;white-space:pre;overflow:auto}
+.inline-file-body iframe{width:100%;height:100%;border:0;background:var(--bg-input)}
+.inline-file-footer{flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px;padding:10px 12px;border-top:1px solid var(--border);background:var(--bg-sidebar)}
 .topbar{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .menu-toggle{display:none;background:none;border:none;font-size:20px;cursor:pointer;color:var(--text)}
 .model-picker{position:relative;flex:0 1 180px;min-width:140px;max-width:220px}
@@ -225,7 +251,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .compressing-anim{display:inline-block;animation:pulseDanger 1.2s infinite}
 
 /* 消息区 */
-.messages{flex:1;overflow-y:auto;padding:20px}
+.messages{flex:1;min-height:0;overflow-y:auto;padding:20px}
 .messages-inner{max-width:800px;margin:0 auto}
 .welcome{text-align:center;padding:60px 20px}
 .welcome h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#8b5cf6,#ef4444);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}

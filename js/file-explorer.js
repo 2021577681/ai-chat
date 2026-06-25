@@ -17,7 +17,11 @@ const FILE_EXPLORER_STATE = {
   contextPath: '',
   contextType: '',
   mediaKind: '',
-  contextScope: ''
+  contextScope: '',
+  inlineFilePath: '',
+  inlineFileKind: '',
+  inlineFileSide: 'right',
+  inlineChatWidth: 50
 };
 
 const FILE_EXPLORER_TEXT_EXTENSIONS = new Set([
@@ -246,6 +250,241 @@ function resetFileExplorerToRoot() {
   FILE_EXPLORER_STATE.entries = [];
   if (FILE_EXPLORER_STATE.visible) loadFileExplorer('.');
   else renderFileExplorer();
+}
+
+function setInlineFileStatus(message, kind = '') {
+  const el = document.getElementById('inlineFileStatus');
+  if (!el) return;
+  el.textContent = message || '';
+  el.className = kind ? `inline-file-status ${kind}` : 'inline-file-status';
+}
+
+function setInlineFileChrome(path, title) {
+  const titleEl = document.getElementById('inlineFileTitle');
+  const pathEl = document.getElementById('inlineFilePath');
+  const name = fileExplorerBasename(path) || title || '文件内容';
+  if (titleEl) titleEl.textContent = name;
+  if (pathEl) pathEl.textContent = path || '-';
+}
+
+function clearInlineFileContent() {
+  const body = document.getElementById('inlineFileBody');
+  const footer = document.getElementById('inlineFileFooter');
+  if (body) {
+    body.querySelectorAll('iframe').forEach(frame => frame.removeAttribute('src'));
+    body.innerHTML = '';
+  }
+  if (footer) footer.innerHTML = '';
+}
+
+function inlineFileCanStayOpen() {
+  const mainContent = document.getElementById('mainContent');
+  const width = mainContent ? mainContent.getBoundingClientRect().width : window.innerWidth;
+  return window.innerWidth >= 1100 && width >= 820;
+}
+
+function enforceInlineFileResponsive() {
+  const panel = document.getElementById('inlineFilePanel');
+  if (!panel || panel.hidden) return;
+  if (!inlineFileCanStayOpen()) {
+    closeInlineFilePanel();
+    if (typeof toast === 'function') toast('窗口较窄，已关闭文件内容列');
+  }
+}
+
+function applyInlineFileLayout() {
+  const mainContent = document.getElementById('mainContent');
+  const toggle = document.getElementById('inlineFileSideToggle');
+  if (!mainContent) return;
+  const side = FILE_EXPLORER_STATE.inlineFileSide === 'left' ? 'left' : 'right';
+  const width = Math.min(75, Math.max(35, Number(FILE_EXPLORER_STATE.inlineChatWidth || 50)));
+  mainContent.classList.toggle('inline-file-left', side === 'left');
+  mainContent.classList.toggle('inline-file-right', side !== 'left');
+  mainContent.style.setProperty('--chat-column-width', `${width}%`);
+  if (toggle) toggle.textContent = side === 'left' ? '右列' : '左列';
+}
+
+function toggleInlineFileSide() {
+  FILE_EXPLORER_STATE.inlineFileSide = FILE_EXPLORER_STATE.inlineFileSide === 'left' ? 'right' : 'left';
+  applyInlineFileLayout();
+}
+
+function setInlineChatWidth(percent) {
+  FILE_EXPLORER_STATE.inlineChatWidth = Math.min(75, Math.max(35, Number(percent) || 50));
+  applyInlineFileLayout();
+}
+
+function showInlineFilePanel(kind, path) {
+  if (!inlineFileCanStayOpen()) {
+    if (typeof toast === 'function') toast('窗口较窄，暂不打开双列文件视图');
+    return false;
+  }
+  const mainContent = document.getElementById('mainContent');
+  const panel = document.getElementById('inlineFilePanel');
+  if (!mainContent || !panel) return false;
+  FILE_EXPLORER_STATE.inlineFileKind = kind || '';
+  FILE_EXPLORER_STATE.inlineFilePath = normalizeExplorerPath(path);
+  panel.hidden = false;
+  mainContent.classList.add('has-inline-file');
+  applyInlineFileLayout();
+  setInlineFileChrome(FILE_EXPLORER_STATE.inlineFilePath, kind === 'pdf' ? 'PDF 阅读器' : '文本内容');
+  return true;
+}
+
+function closeInlineFilePanel() {
+  const mainContent = document.getElementById('mainContent');
+  const panel = document.getElementById('inlineFilePanel');
+  if (mainContent) {
+    mainContent.classList.remove('has-inline-file', 'inline-file-left', 'inline-file-right', 'is-resizing');
+    mainContent.style.removeProperty('--chat-column-width');
+  }
+  if (panel) panel.hidden = true;
+  clearInlineFileContent();
+  FILE_EXPLORER_STATE.inlineFilePath = '';
+  FILE_EXPLORER_STATE.inlineFileKind = '';
+}
+
+async function openTextInMainPanel(path, initialContent = null, initialSize = null) {
+  const normalizedPath = normalizeExplorerPath(path);
+  if (!isFileExplorerTextFile(normalizedPath)) {
+    if (typeof toast === 'function') toast('暂只支持文本类文件');
+    return;
+  }
+  if (!showInlineFilePanel('text', normalizedPath)) return;
+  const body = document.getElementById('inlineFileBody');
+  const footer = document.getElementById('inlineFileFooter');
+  if (!body || !footer) return;
+  clearInlineFileContent();
+  const textarea = document.createElement('textarea');
+  textarea.spellcheck = false;
+  textarea.placeholder = '文件内容...';
+  body.appendChild(textarea);
+  footer.innerHTML = `
+    <button class="btn" type="button" onclick="copyInlineFileContent()">复制内容</button>
+    <button class="btn" type="button" onclick="reloadInlineFilePanel()">重新读取</button>
+  `;
+  if (initialContent !== null && initialContent !== undefined) {
+    textarea.value = String(initialContent);
+    setInlineFileStatus(`${initialSize !== null && initialSize !== undefined ? formatSize(Number(initialSize || 0)) : `${textarea.value.length} 字符`} / 已显示`, 'ok');
+    textarea.focus();
+    return;
+  }
+  textarea.disabled = true;
+  setInlineFileStatus('正在读取...', 'loading');
+  try {
+    if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
+    const r = await callAgentBackend('read_file', { path: normalizedPath });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '读取文件失败');
+    textarea.value = r.content || '';
+    textarea.disabled = false;
+    setInlineFileStatus(`${formatSize(Number(r.size || 0))} / 已读取`, 'ok');
+    textarea.focus();
+  } catch (e) {
+    textarea.disabled = true;
+    setInlineFileStatus(e.message || String(e), 'error');
+  }
+}
+
+async function openPdfInMainPanel(path, existingUrl = '') {
+  const normalizedPath = normalizeExplorerPath(path);
+  if (!isFileExplorerPdfFile(normalizedPath)) {
+    if (typeof toast === 'function') toast('仅支持 PDF 文件');
+    return;
+  }
+  if (!showInlineFilePanel('pdf', normalizedPath)) return;
+  const body = document.getElementById('inlineFileBody');
+  const footer = document.getElementById('inlineFileFooter');
+  if (!body || !footer) return;
+  clearInlineFileContent();
+  const frame = document.createElement('iframe');
+  frame.title = 'PDF 阅读器';
+  body.appendChild(frame);
+  footer.innerHTML = `
+    <button class="btn" type="button" onclick="reloadInlineFilePanel()">重新读取</button>
+    <button class="btn" type="button" onclick="openInlineFileInNewTab()">新标签打开</button>
+  `;
+  setInlineFileStatus('正在读取...', 'loading');
+  try {
+    const url = existingUrl || await fileExplorerPreviewUrl(normalizedPath);
+    frame.src = url;
+    setInlineFileStatus('直接预览 / 支持大文件', 'ok');
+  } catch (e) {
+    frame.removeAttribute('src');
+    setInlineFileStatus(e.message || String(e), 'error');
+  }
+}
+
+function openCurrentFileInMainPanel(kind) {
+  if (kind === 'pdf') {
+    const path = FILE_EXPLORER_STATE.pdfPath;
+    const url = FILE_EXPLORER_STATE.pdfObjectUrl;
+    if (!path) return;
+    openPdfInMainPanel(path, url);
+    closePdfViewer();
+    return;
+  }
+  const path = FILE_EXPLORER_STATE.editorPath;
+  const textarea = fileEditorTextarea();
+  if (!path) return;
+  openTextInMainPanel(path, textarea ? textarea.value : null);
+  closeFileEditor(true);
+}
+
+function copyInlineFileContent() {
+  const textarea = document.querySelector('#inlineFileBody textarea');
+  if (!textarea) return;
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    if (typeof toast === 'function') toast('内容已复制');
+  });
+}
+
+async function reloadInlineFilePanel() {
+  const path = FILE_EXPLORER_STATE.inlineFilePath;
+  const kind = FILE_EXPLORER_STATE.inlineFileKind;
+  if (!path) return;
+  if (kind === 'pdf') await openPdfInMainPanel(path);
+  else if (kind === 'text') await openTextInMainPanel(path);
+}
+
+function openInlineFileInNewTab() {
+  const frame = document.querySelector('#inlineFileBody iframe');
+  const src = frame ? frame.getAttribute('src') : '';
+  if (src) window.open(src, '_blank', 'noopener');
+}
+
+function startInlineFileResize(event) {
+  const mainContent = document.getElementById('mainContent');
+  if (!mainContent || !mainContent.classList.contains('has-inline-file')) return;
+  event.preventDefault();
+  mainContent.classList.add('is-resizing');
+  const onMove = e => {
+    const rect = mainContent.getBoundingClientRect();
+    if (!rect.width) return;
+    const x = Math.min(rect.right, Math.max(rect.left, e.clientX));
+    let chatPercent;
+    if (FILE_EXPLORER_STATE.inlineFileSide === 'left') {
+      const filePercent = ((x - rect.left) / rect.width) * 100;
+      chatPercent = 100 - filePercent;
+    } else {
+      chatPercent = ((x - rect.left) / rect.width) * 100;
+    }
+    setInlineChatWidth(chatPercent);
+  };
+  const onUp = () => {
+    mainContent.classList.remove('is-resizing');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function bindInlineFileResizer() {
+  const resizer = document.getElementById('inlineFileResizer');
+  if (!resizer || resizer.dataset.bound === '1') return;
+  resizer.dataset.bound = '1';
+  resizer.addEventListener('mousedown', startInlineFileResize);
 }
 
 function closeFileEditor(force = false) {
@@ -794,6 +1033,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') hideFileExplorerContextMenu();
   });
+  window.addEventListener('resize', enforceInlineFileResponsive);
+  bindInlineFileResizer();
   setSidebarExplorerMode(false);
 });
 
@@ -826,3 +1067,11 @@ window.openFileExplorerPath = openFileExplorerPath;
 window.createFileExplorerFile = createFileExplorerFile;
 window.createFileExplorerFolder = createFileExplorerFolder;
 window.switchFileExplorerWorkspace = switchFileExplorerWorkspace;
+window.openCurrentFileInMainPanel = openCurrentFileInMainPanel;
+window.openTextInMainPanel = openTextInMainPanel;
+window.openPdfInMainPanel = openPdfInMainPanel;
+window.closeInlineFilePanel = closeInlineFilePanel;
+window.reloadInlineFilePanel = reloadInlineFilePanel;
+window.copyInlineFileContent = copyInlineFileContent;
+window.openInlineFileInNewTab = openInlineFileInNewTab;
+window.toggleInlineFileSide = toggleInlineFileSide;

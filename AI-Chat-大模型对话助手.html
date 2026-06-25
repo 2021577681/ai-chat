@@ -233,62 +233,82 @@
       </div>
     </div>
     
-    <!-- 消息区 -->
-    <div class="messages" id="messages">
-      <div class="messages-inner" id="messagesInner"></div>
-    </div>
+    <div class="main-content" id="mainContent">
+      <section class="chat-column" id="chatColumn">
+        <!-- 消息区 -->
+        <div class="messages" id="messages">
+          <div class="messages-inner" id="messagesInner"></div>
+        </div>
 
-    <nav class="dialog-timeline" id="dialogTimeline" aria-label="对话时间轴" hidden>
-      <div class="dialog-timeline-line" aria-hidden="true"></div>
-      <div class="dialog-timeline-points" id="dialogTimelineList"></div>
-    </nav>
-    
-    <!-- 输入区 -->
-    <div class="input-area">
-      <div class="input-inner" id="inputInner">
-        <div class="pending-atts" id="pendingAtts"></div>
-        <textarea id="input" placeholder="输入消息，Enter 发送 / Shift+Enter 换行 / 可拖拽或粘贴图片..." rows="1"></textarea>
-        <div class="input-bar">
-          <button class="input-tool" id="uploadBtn" onclick="document.getElementById('fileInput').click()" title="上传文件">+</button>
-          <input type="file" id="fileInput" multiple style="display:none" onchange="onPickFiles(event)">
-          <div class="input-info" id="inputInfo">准备就绪</div>
-          <div class="effort-picker" id="effortPicker">
-            <select class="effort-select-native" id="effortSelect" onchange="saveSettings()" tabindex="-1" aria-hidden="true">
-              <option value="">不设置</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="xhigh">xhigh</option>
-              <option value="max">max</option>
-            </select>
-            <button type="button" class="effort-trigger" id="effortTrigger" onclick="toggleReasoningEffortMenu(event)" title="模型思考程度" aria-haspopup="listbox" aria-expanded="false">
-              <span class="effort-trigger-label" id="effortTriggerLabel">不设置</span>
-              <span class="effort-trigger-caret">▾</span>
-            </button>
-            <div class="effort-menu" id="effortMenu" role="listbox" hidden>
-              <button type="button" class="effort-option" data-effort="" onclick="setReasoningEffort('', event)" role="option">
-                <span class="effort-option-text">不设置</span><span class="effort-option-check">✓</span>
-              </button>
-              <button type="button" class="effort-option" data-effort="low" onclick="setReasoningEffort('low', event)" role="option">
-                <span class="effort-option-text">low</span><span class="effort-option-check">✓</span>
-              </button>
-              <button type="button" class="effort-option" data-effort="medium" onclick="setReasoningEffort('medium', event)" role="option">
-                <span class="effort-option-text">medium</span><span class="effort-option-check">✓</span>
-              </button>
-              <button type="button" class="effort-option" data-effort="high" onclick="setReasoningEffort('high', event)" role="option">
-                <span class="effort-option-text">high</span><span class="effort-option-check">✓</span>
-              </button>
-              <button type="button" class="effort-option" data-effort="xhigh" onclick="setReasoningEffort('xhigh', event)" role="option">
-                <span class="effort-option-text">xhigh</span><span class="effort-option-check">✓</span>
-              </button>
-              <button type="button" class="effort-option" data-effort="max" onclick="setReasoningEffort('max', event)" role="option">
-                <span class="effort-option-text">max</span><span class="effort-option-check">✓</span>
-              </button>
+        <nav class="dialog-timeline" id="dialogTimeline" aria-label="对话时间轴" hidden>
+          <div class="dialog-timeline-line" aria-hidden="true"></div>
+          <div class="dialog-timeline-points" id="dialogTimelineList"></div>
+        </nav>
+        
+        <!-- 输入区 -->
+        <div class="input-area">
+          <div class="input-inner" id="inputInner">
+            <div class="pending-atts" id="pendingAtts"></div>
+            <textarea id="input" placeholder="输入消息，Enter 发送 / Shift+Enter 换行 / 可拖拽或粘贴图片..." rows="1"></textarea>
+            <div class="input-bar">
+              <button class="input-tool" id="uploadBtn" onclick="document.getElementById('fileInput').click()" title="上传文件">+</button>
+              <input type="file" id="fileInput" multiple style="display:none" onchange="onPickFiles(event)">
+              <div class="input-info" id="inputInfo">准备就绪</div>
+              <div class="effort-picker" id="effortPicker">
+                <select class="effort-select-native" id="effortSelect" onchange="saveSettings()" tabindex="-1" aria-hidden="true">
+                  <option value="">不设置</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="max">max</option>
+                </select>
+                <button type="button" class="effort-trigger" id="effortTrigger" onclick="toggleReasoningEffortMenu(event)" title="模型思考程度" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="effort-trigger-label" id="effortTriggerLabel">不设置</span>
+                  <span class="effort-trigger-caret">▾</span>
+                </button>
+                <div class="effort-menu" id="effortMenu" role="listbox" hidden>
+                  <button type="button" class="effort-option" data-effort="" onclick="setReasoningEffort('', event)" role="option">
+                    <span class="effort-option-text">不设置</span><span class="effort-option-check">✓</span>
+                  </button>
+                  <button type="button" class="effort-option" data-effort="low" onclick="setReasoningEffort('low', event)" role="option">
+                    <span class="effort-option-text">low</span><span class="effort-option-check">✓</span>
+                  </button>
+                  <button type="button" class="effort-option" data-effort="medium" onclick="setReasoningEffort('medium', event)" role="option">
+                    <span class="effort-option-text">medium</span><span class="effort-option-check">✓</span>
+                  </button>
+                  <button type="button" class="effort-option" data-effort="high" onclick="setReasoningEffort('high', event)" role="option">
+                    <span class="effort-option-text">high</span><span class="effort-option-check">✓</span>
+                  </button>
+                  <button type="button" class="effort-option" data-effort="xhigh" onclick="setReasoningEffort('xhigh', event)" role="option">
+                    <span class="effort-option-text">xhigh</span><span class="effort-option-check">✓</span>
+                  </button>
+                  <button type="button" class="effort-option" data-effort="max" onclick="setReasoningEffort('max', event)" role="option">
+                    <span class="effort-option-text">max</span><span class="effort-option-check">✓</span>
+                  </button>
+                </div>
+              </div>
+              <button class="send-btn" id="sendBtn" onclick="onSend()">↑</button>
             </div>
           </div>
-          <button class="send-btn" id="sendBtn" onclick="onSend()">↑</button>
         </div>
-      </div>
+      </section>
+
+      <div class="inline-file-resizer" id="inlineFileResizer" title="拖动调整宽度"></div>
+
+      <aside class="inline-file-panel" id="inlineFilePanel" hidden>
+        <div class="inline-file-header">
+          <div class="inline-file-title">
+            <span id="inlineFileTitle">文件内容</span>
+            <code id="inlineFilePath">-</code>
+          </div>
+          <button class="inline-file-side-toggle" id="inlineFileSideToggle" type="button" onclick="toggleInlineFileSide()" title="切换左右列">左列</button>
+          <button class="inline-file-close" type="button" onclick="closeInlineFilePanel()" title="关闭">×</button>
+        </div>
+        <div class="inline-file-status" id="inlineFileStatus">未加载</div>
+        <div class="inline-file-body" id="inlineFileBody"></div>
+        <div class="inline-file-footer" id="inlineFileFooter"></div>
+      </aside>
     </div>
   </main>
 </div>
@@ -560,6 +580,7 @@
     <div class="modal-footer file-editor-footer">
       <button class="btn" type="button" onclick="copyFileEditorContent()">复制内容</button>
       <button class="btn" type="button" onclick="reloadFileEditor()">重新读取</button>
+      <button class="btn" type="button" onclick="openCurrentFileInMainPanel('text')">主页面显示</button>
       <button class="btn" type="button" onclick="closeFileEditor()">关闭</button>
       <button class="btn btn-primary" type="button" onclick="saveFileEditor()">保存修改</button>
     </div>
@@ -581,6 +602,7 @@
     <div class="modal-footer file-editor-footer">
       <button class="btn" type="button" onclick="reloadPdfViewer()">重新读取</button>
       <button class="btn" type="button" onclick="openPdfViewerInNewTab()">新标签打开</button>
+      <button class="btn" type="button" onclick="openCurrentFileInMainPanel('pdf')">主页面显示</button>
       <button class="btn" type="button" onclick="closePdfViewer()">关闭</button>
     </div>
   </div>
