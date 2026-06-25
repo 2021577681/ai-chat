@@ -65,6 +65,10 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .file-explorer-item.is-dir .file-explorer-name{font-weight:600}
 .file-explorer-empty{margin:8px 2px;padding:10px;border:1px dashed var(--border);border-radius:8px;color:var(--text-secondary);font-size:12px;line-height:1.45}
 .file-explorer-empty.error{color:var(--danger);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}
+.file-explorer-context-menu{position:fixed;z-index:4200;width:104px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;display:flex;flex-direction:column;gap:2px}
+.file-explorer-context-menu[hidden]{display:none}
+.file-explorer-context-menu button{width:100%;border:0;border-radius:6px;background:transparent;color:var(--text);cursor:pointer;text-align:left;padding:7px 10px;font-family:inherit;font-size:12.5px;line-height:1.2}
+.file-explorer-context-menu button:hover,.file-explorer-context-menu button:focus-visible{background:var(--bg-hover);color:var(--primary);outline:none}
 
 .file-editor-mask{z-index:2100}
 .file-editor-modal{height:min(760px,88vh);display:flex;flex-direction:column;overflow:hidden}

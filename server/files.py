@@ -6,6 +6,9 @@
 #   handle_write_file / handle_append_file / handle_edit_file
 #   handle_delete_file
 #   handle_list_dir
+#   handle_create_file
+#   handle_create_dir
+#   handle_rename_file
 #   handle_search
 #   handle_file_info
 # ============================================================
@@ -879,6 +882,86 @@ class FilesMixin:
             })
         except Exception as e:
             return self._send_json(200, {'ok': False, 'error': str(e)})
+
+    def handle_create_file(self, body):
+        path, err = check_path_or_error(body.get('path', ''))
+        if err: return self._send_json(200, {'ok': False, 'error': err})
+        content = body.get('content', '')
+        print(f'📄 [新建文件] {path}')
+        if os.path.exists(path):
+            return self._send_json(200, {'ok': False, 'error': '路径已存在'})
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                if not os.path.isdir(parent):
+                    return self._send_json(200, {'ok': False, 'error': '父目录不存在'})
+            checkpoint = self._checkpoint_before_mutation([path], body, 'create_file')
+            with open(path, 'x', encoding='utf-8') as f:
+                f.write(content)
+            self._send_json(200, {
+                'ok': True,
+                'path': path,
+                'type': 'file',
+                'bytes_written': len(content.encode('utf-8')),
+                'checkpoint_id': checkpoint['id'] if checkpoint else None,
+                'checkpoint': checkpoint
+            })
+        except FileExistsError:
+            self._send_json(200, {'ok': False, 'error': '路径已存在'})
+        except Exception as e:
+            self._send_json(200, {'ok': False, 'error': str(e)})
+
+    def handle_create_dir(self, body):
+        path, err = check_path_or_error(body.get('path', ''))
+        if err: return self._send_json(200, {'ok': False, 'error': err})
+        print(f'📁 [新建文件夹] {path}')
+        if os.path.exists(path):
+            return self._send_json(200, {'ok': False, 'error': '路径已存在'})
+        try:
+            parent = os.path.dirname(path)
+            if parent and not os.path.isdir(parent):
+                return self._send_json(200, {'ok': False, 'error': '父目录不存在'})
+            checkpoint = self._checkpoint_before_mutation([path], body, 'create_dir')
+            os.makedirs(path, exist_ok=False)
+            self._send_json(200, {
+                'ok': True,
+                'path': path,
+                'type': 'dir',
+                'checkpoint_id': checkpoint['id'] if checkpoint else None,
+                'checkpoint': checkpoint
+            })
+        except FileExistsError:
+            self._send_json(200, {'ok': False, 'error': '路径已存在'})
+        except Exception as e:
+            self._send_json(200, {'ok': False, 'error': str(e)})
+
+    def handle_rename_file(self, body):
+        path, err = check_path_or_error(body.get('path', ''))
+        if err: return self._send_json(200, {'ok': False, 'error': err})
+        new_path, err = check_path_or_error(body.get('new_path') or body.get('newPath') or '')
+        if err: return self._send_json(200, {'ok': False, 'error': err})
+        print(f'✏️  [重命名] {path} -> {new_path}')
+        if not os.path.exists(path):
+            return self._send_json(200, {'ok': False, 'error': '路径不存在'})
+        if os.path.exists(new_path):
+            return self._send_json(200, {'ok': False, 'error': '目标路径已存在'})
+        try:
+            src_parent = os.path.dirname(os.path.realpath(path))
+            dst_parent = os.path.dirname(os.path.realpath(new_path))
+            if src_parent != dst_parent:
+                return self._send_json(200, {'ok': False, 'error': '仅支持在同一目录内重命名'})
+            checkpoint = self._checkpoint_before_mutation([path, new_path], body, 'rename_file')
+            os.rename(path, new_path)
+            self._send_json(200, {
+                'ok': True,
+                'path': path,
+                'new_path': new_path,
+                'type': 'dir' if os.path.isdir(new_path) else 'file',
+                'checkpoint_id': checkpoint['id'] if checkpoint else None,
+                'checkpoint': checkpoint
+            })
+        except Exception as e:
+            self._send_json(200, {'ok': False, 'error': str(e)})
 
     def handle_delete_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))

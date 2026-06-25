@@ -14,7 +14,10 @@ const FILE_EXPLORER_STATE = {
   imageObjectUrl: '',
   mediaPath: '',
   mediaObjectUrl: '',
-  mediaKind: ''
+  contextPath: '',
+  contextType: '',
+  mediaKind: '',
+  contextScope: ''
 };
 
 const FILE_EXPLORER_TEXT_EXTENSIONS = new Set([
@@ -126,6 +129,39 @@ function renderFileExplorerLoading() {
   if (list) {
     list.innerHTML = '<div class="file-explorer-empty">正在读取沙箱目录...</div>';
   }
+}
+
+function ensureFileExplorerContextMenu() {
+  let menu = document.getElementById('fileExplorerContextMenu');
+  if (menu) return menu;
+  menu = document.createElement('div');
+  menu.id = 'fileExplorerContextMenu';
+  menu.className = 'file-explorer-context-menu';
+  menu.hidden = true;
+  menu.innerHTML = `
+    <div data-menu-section="item">
+      <button type="button" data-action="open">打开</button>
+      <button type="button" data-action="rename">重命名</button>
+      <button type="button" data-action="copy-path">复制路径</button>
+      <button type="button" data-action="delete">删除</button>
+    </div>
+    <div data-menu-section="blank">
+      <button type="button" data-action="new-file">新建文件</button>
+      <button type="button" data-action="new-folder">新建文件夹</button>
+      <button type="button" data-action="copy-path">复制路径</button>
+      <button type="button" data-action="switch-workspace">切换工作区</button>
+    </div>
+  `;
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function hideFileExplorerContextMenu() {
+  const menu = document.getElementById('fileExplorerContextMenu');
+  if (menu) menu.hidden = true;
+  FILE_EXPLORER_STATE.contextPath = '';
+  FILE_EXPLORER_STATE.contextType = '';
+  FILE_EXPLORER_STATE.contextScope = '';
 }
 
 function renderFileExplorer() {
@@ -303,6 +339,30 @@ function copyFileEditorContent() {
   navigator.clipboard.writeText(textarea.value).then(() => {
     if (typeof toast === 'function') toast('内容已复制');
   });
+}
+
+function openFileExplorerPath(path, type = '') {
+  const normalizedPath = normalizeExplorerPath(path);
+  if (type === 'dir') {
+    loadFileExplorer(normalizedPath);
+    return;
+  }
+  if (isFileExplorerTextFile(normalizedPath)) openFileEditor(normalizedPath);
+  else if (isFileExplorerPdfFile(normalizedPath)) openPdfViewer(normalizedPath);
+  else if (isFileExplorerImageFile(normalizedPath)) openImageViewer(normalizedPath);
+  else if (isFileExplorerMediaFile(normalizedPath)) openMediaViewer(normalizedPath);
+  else if (typeof toast === 'function') toast('暂只支持文本类文件、PDF、图片、音频和视频');
+}
+
+function siblingExplorerPath(path, newName) {
+  const parent = parentExplorerPath(path);
+  const cleanName = String(newName || '').replace(/[\\/]+/g, '').trim();
+  if (!cleanName) return '';
+  return parent === '.' ? cleanName : `${parent}/${cleanName}`;
+}
+
+function fileExplorerBasename(path) {
+  return String(path || '').split('/').filter(Boolean).pop() || '';
 }
 
 function setPdfViewerStatus(message, kind = '') {
@@ -552,25 +612,188 @@ function fileExplorerGoUp() {
   if (parent !== FILE_EXPLORER_STATE.path) loadFileExplorer(parent);
 }
 
+function showFileExplorerContextMenu(event, item) {
+  event.preventDefault();
+  const isItem = !!item;
+  const path = isItem ? (item.dataset.path || '.') : FILE_EXPLORER_STATE.path;
+  const type = isItem ? (item.dataset.type || '') : 'dir';
+  FILE_EXPLORER_STATE.contextPath = path;
+  FILE_EXPLORER_STATE.contextType = type;
+  FILE_EXPLORER_STATE.contextScope = isItem ? 'item' : 'blank';
+
+  const menu = ensureFileExplorerContextMenu();
+  menu.querySelectorAll('[data-menu-section]').forEach(section => {
+    section.hidden = section.dataset.menuSection !== FILE_EXPLORER_STATE.contextScope;
+  });
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  const padding = 8;
+  const left = Math.min(event.clientX, window.innerWidth - rect.width - padding);
+  const top = Math.min(event.clientY, window.innerHeight - rect.height - padding);
+  menu.style.left = `${Math.max(padding, left)}px`;
+  menu.style.top = `${Math.max(padding, top)}px`;
+}
+
 function handleFileExplorerClick(event) {
   const item = event.target.closest('.file-explorer-item');
   if (!item) return;
   const path = item.dataset.path || '.';
   const type = item.dataset.type || '';
-  if (type === 'dir') {
-    loadFileExplorer(path);
+  openFileExplorerPath(path, type);
+}
+
+function handleFileExplorerContextMenu(event) {
+  const item = event.target.closest('.file-explorer-item');
+  const list = event.currentTarget;
+  if (!item && list && !list.contains(event.target)) return;
+  showFileExplorerContextMenu(event, item || null);
+}
+
+function uniqueExplorerChildPath(basePath, name) {
+  const normalizedBase = normalizeExplorerPath(basePath || FILE_EXPLORER_STATE.path);
+  const cleanName = String(name || '').replace(/[\\/]+/g, '').trim();
+  if (!cleanName) return '';
+  return joinExplorerPath(normalizedBase, cleanName);
+}
+
+async function createFileExplorerFile(basePath = FILE_EXPLORER_STATE.contextPath) {
+  const name = prompt('输入新文件名称', '新建文件.txt');
+  if (name === null) return;
+  const path = uniqueExplorerChildPath(basePath, name);
+  if (!path) {
+    if (typeof toast === 'function') toast('文件名不能为空，且不能包含路径分隔符');
     return;
   }
-  if (isFileExplorerTextFile(path)) openFileEditor(path);
-  else if (isFileExplorerPdfFile(path)) openPdfViewer(path);
-  else if (isFileExplorerImageFile(path)) openImageViewer(path);
-  else if (isFileExplorerMediaFile(path)) openMediaViewer(path);
-  else if (typeof toast === 'function') toast('暂只支持文本类文件、PDF、图片、音频和视频');
+  try {
+    const r = await callAgentBackend('create_file', { path, content: '' }, { skipConfirm: true });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '新建文件失败');
+    if (typeof toast === 'function') toast('已新建文件');
+    await loadFileExplorer(basePath || FILE_EXPLORER_STATE.path);
+    openFileEditor(path);
+  } catch (e) {
+    if (typeof toast === 'function') toast(e.message || String(e));
+  }
+}
+
+async function createFileExplorerFolder(basePath = FILE_EXPLORER_STATE.contextPath) {
+  const name = prompt('输入新文件夹名称', '新建文件夹');
+  if (name === null) return;
+  const path = uniqueExplorerChildPath(basePath, name);
+  if (!path) {
+    if (typeof toast === 'function') toast('文件夹名不能为空，且不能包含路径分隔符');
+    return;
+  }
+  try {
+    const r = await callAgentBackend('create_dir', { path }, { skipConfirm: true });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '新建文件夹失败');
+    if (typeof toast === 'function') toast('已新建文件夹');
+    refreshFileExplorer();
+  } catch (e) {
+    if (typeof toast === 'function') toast(e.message || String(e));
+  }
+}
+
+async function switchFileExplorerWorkspace(path = FILE_EXPLORER_STATE.contextPath) {
+  const normalizedPath = normalizeExplorerPath(path || FILE_EXPLORER_STATE.path);
+  try {
+    const r = await callAgentBackend('set_workspace', { path: normalizedPath }, { skipConfirm: true });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '切换工作区失败');
+    FILE_EXPLORER_STATE.path = '.';
+    FILE_EXPLORER_STATE.entries = [];
+    if (typeof toast === 'function') toast('已切换工作区');
+    await loadFileExplorer('.');
+  } catch (e) {
+    if (typeof toast === 'function') toast(e.message || String(e));
+  }
+}
+
+async function copyFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
+  const normalizedPath = normalizeExplorerPath(path);
+  try {
+    await navigator.clipboard.writeText(normalizedPath);
+    if (typeof toast === 'function') toast('路径已复制');
+  } catch (e) {
+    if (typeof toast === 'function') toast('复制失败：' + (e.message || String(e)));
+  }
+}
+
+async function renameFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
+  const normalizedPath = normalizeExplorerPath(path);
+  const currentName = fileExplorerBasename(normalizedPath);
+  const nextName = prompt('输入新名称', currentName);
+  if (nextName === null) return;
+  const newPath = siblingExplorerPath(normalizedPath, nextName);
+  if (!newPath) {
+    if (typeof toast === 'function') toast('名称不能为空，且不能包含路径分隔符');
+    return;
+  }
+  if (newPath === normalizedPath) return;
+  try {
+    const r = await callAgentBackend('rename_file', { path: normalizedPath, new_path: newPath }, { skipConfirm: true });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '重命名失败');
+    if (FILE_EXPLORER_STATE.editorPath === normalizedPath) FILE_EXPLORER_STATE.editorPath = newPath;
+    if (FILE_EXPLORER_STATE.pdfPath === normalizedPath) FILE_EXPLORER_STATE.pdfPath = newPath;
+    if (FILE_EXPLORER_STATE.imagePath === normalizedPath) FILE_EXPLORER_STATE.imagePath = newPath;
+    if (FILE_EXPLORER_STATE.mediaPath === normalizedPath) FILE_EXPLORER_STATE.mediaPath = newPath;
+    if (typeof toast === 'function') toast('已重命名');
+    refreshFileExplorer();
+  } catch (e) {
+    if (typeof toast === 'function') toast(e.message || String(e));
+  }
+}
+
+async function deleteFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
+  const normalizedPath = normalizeExplorerPath(path);
+  try {
+    const r = await callAgentBackend('delete_file', { path: normalizedPath }, { skipConfirm: true });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '删除失败');
+    if (FILE_EXPLORER_STATE.editorPath === normalizedPath) closeFileEditor(true);
+    if (FILE_EXPLORER_STATE.pdfPath === normalizedPath) closePdfViewer();
+    if (FILE_EXPLORER_STATE.imagePath === normalizedPath) closeImageViewer();
+    if (FILE_EXPLORER_STATE.mediaPath === normalizedPath) closeMediaViewer();
+    if (typeof toast === 'function') toast('已删除');
+    refreshFileExplorer();
+  } catch (e) {
+    if (typeof toast === 'function') toast(e.message || String(e));
+  }
+}
+
+function handleFileExplorerContextMenuAction(event) {
+  const btn = event.target.closest('button[data-action]');
+  if (!btn) return;
+  const path = FILE_EXPLORER_STATE.contextPath;
+  const type = FILE_EXPLORER_STATE.contextType;
+  hideFileExplorerContextMenu();
+  if (!path) return;
+  const action = btn.dataset.action;
+  if (action === 'open') openFileExplorerPath(path, type);
+  else if (action === 'rename') renameFileExplorerPath(path);
+  else if (action === 'copy-path') copyFileExplorerPath(path);
+  else if (action === 'delete') deleteFileExplorerPath(path);
+  else if (action === 'new-file') createFileExplorerFile(path);
+  else if (action === 'new-folder') createFileExplorerFolder(path);
+  else if (action === 'switch-workspace') switchFileExplorerWorkspace(path);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   const list = document.getElementById('fileExplorerList');
-  if (list) list.addEventListener('click', handleFileExplorerClick);
+  if (list) {
+    list.addEventListener('click', handleFileExplorerClick);
+    list.addEventListener('contextmenu', handleFileExplorerContextMenu);
+  }
+  const menu = ensureFileExplorerContextMenu();
+  menu.addEventListener('click', handleFileExplorerContextMenuAction);
+  document.addEventListener('click', event => {
+    if (!event.target.closest('#fileExplorerContextMenu')) hideFileExplorerContextMenu();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') hideFileExplorerContextMenu();
+  });
   setSidebarExplorerMode(false);
 });
 
@@ -596,3 +819,10 @@ window.openMediaViewer = openMediaViewer;
 window.closeMediaViewer = closeMediaViewer;
 window.reloadMediaViewer = reloadMediaViewer;
 window.openMediaViewerInNewTab = openMediaViewerInNewTab;
+window.copyFileExplorerPath = copyFileExplorerPath;
+window.renameFileExplorerPath = renameFileExplorerPath;
+window.deleteFileExplorerPath = deleteFileExplorerPath;
+window.openFileExplorerPath = openFileExplorerPath;
+window.createFileExplorerFile = createFileExplorerFile;
+window.createFileExplorerFolder = createFileExplorerFolder;
+window.switchFileExplorerWorkspace = switchFileExplorerWorkspace;

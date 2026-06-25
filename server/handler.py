@@ -200,8 +200,14 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_restore_checkpoint(body)
             elif action == 'delete_file':
                 self.handle_delete_file(body)
+            elif action == 'rename_file':
+                self.handle_rename_file(body)
             elif action == 'list_dir':
                 self.handle_list_dir(body)
+            elif action == 'create_file':
+                self.handle_create_file(body)
+            elif action == 'create_dir':
+                self.handle_create_dir(body)
             elif action == 'search':
                 self.handle_search(body)
             elif action == 'web_search':
