@@ -234,6 +234,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_remote_connect(body)
             elif action == 'remote_status':
                 self.handle_remote_status(body)
+            elif action == 'remote_list_dirs':
+                self.handle_remote_list_dirs(body)
             elif action == 'remote_disconnect':
                 self.handle_remote_disconnect(body)
             else:

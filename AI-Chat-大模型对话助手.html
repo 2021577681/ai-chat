@@ -646,7 +646,20 @@
       </label>
       <label>
         <span>远程工作区沙箱目录</span>
-        <input id="remoteWorkspace" type="text" placeholder="~/project">
+        <div class="remote-path-picker-row">
+          <input id="remoteWorkspace" type="text" placeholder="留空默认使用远程主目录 ~，例如 ~/project">
+          <button class="btn" type="button" onclick="openRemoteDirPicker()">浏览...</button>
+        </div>
+        <div id="remoteDirPicker" class="remote-dir-picker">
+          <div class="remote-dir-picker-toolbar">
+            <button class="btn" type="button" onclick="remoteDirGoHome()">主目录</button>
+            <button class="btn" type="button" onclick="remoteDirGoParent()">上级</button>
+            <button class="btn" type="button" onclick="refreshRemoteDirPicker()">刷新</button>
+            <button class="btn btn-primary" type="button" onclick="selectRemoteDirCurrent()">选择当前目录</button>
+          </div>
+          <div id="remoteDirCurrent" class="remote-dir-current">未打开远程目录</div>
+          <div id="remoteDirList" class="remote-dir-list"></div>
+        </div>
       </label>
       <div class="remote-connection-row">
         <label>

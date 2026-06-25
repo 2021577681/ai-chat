@@ -217,10 +217,11 @@ async function selectWorkspaceFromUi() {
 async function refreshWorkspaceInfo() {
   const pathEl = document.getElementById('workspacePath');
   const statusEl = document.getElementById('workspaceStatus');
-  if (!pathEl || !statusEl) return;
   
-  statusEl.className = 'workspace-status checking';
-  statusEl.title = '正在连接本地服务…';
+  if (statusEl) {
+    statusEl.className = 'workspace-status checking';
+    statusEl.title = '正在连接 Agent 服务…';
+  }
   
   try {
     const url = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl)
@@ -228,15 +229,19 @@ async function refreshWorkspaceInfo() {
     const resp = await fetch(url + '/workspace', { method: 'GET' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const j = await resp.json();
-    updateWorkspaceDisplay(j);
+    if (pathEl && statusEl) updateWorkspaceDisplay(j);
     return j;
   } catch (e) {
+    console.warn('[workspace] failed to read workspace:', e);
+    if (!pathEl || !statusEl) {
+      return { ok: false, error: e.message };
+    }
     pathEl.textContent = '⚠️ 未连接到本地服务（python local_terminal_server.py）';
     pathEl.title = e.message;
     pathEl.onclick = null;
     statusEl.className = 'workspace-status offline';
     statusEl.title = '本地服务离线：' + e.message;
-    return null;
+    return { ok: false, error: e.message };
   }
 }
 window.refreshWorkspaceInfo = refreshWorkspaceInfo;
