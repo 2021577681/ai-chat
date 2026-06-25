@@ -77,6 +77,9 @@ async function init() {
     refreshWorkspaceInfo();
     setInterval(refreshWorkspaceInfo, 30000);
   }
+
+  // 7.6 恢复 Token / 请求速度统计栏收起状态
+  if (typeof initStatsBarToggle === 'function') initStatsBarToggle();
   
   // ⭐ 7.5.1 本地代理自检：双击 HTML 打开（file://）时，浏览器对 https 跨域几乎必死
   //         → 启动时主动测一下：① 本地服务在不在？② 有没有 token？③ 代理开关有没有开？

@@ -211,6 +211,7 @@
         </button>
         <div class="model-menu" id="modelMenu" role="listbox" hidden></div>
       </div>
+      <button class="stats-toggle-btn" id="statsToggleBtn" type="button" onclick="toggleStatsBar()" title="收起 Token / 请求速度统计栏">统计</button>
       <div class="topbar-spacer"></div>
       <button class="topbar-btn" id="temporaryChatBtn" onclick="startTemporaryChat()" title="临时会话：刷新保留，切换或新建对话后删除"><img class="topbar-btn-icon" src="icon/时间_time.png" alt=""><span>临时</span></button>
       <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
@@ -223,7 +224,7 @@
     </div>
     
     <!-- Token + 频率统计栏（合并为单栏，左 Token 右 Rate） -->
-    <div class="status-bar">
+    <div class="status-bar" id="statsBar">
       <div class="token-stats-bar" id="tokenStats">
         <span class="token-empty"><img class="status-icon" src="icon/分析_analysis.png" alt="">暂无对话</span>
       </div>
@@ -1910,6 +1911,7 @@
 <script src="js/tools.js"></script>
 <script src="js/shell-audit.js"></script>
 <script src="js/terminal.js"></script>
+<script src="js/stats-toggle.js"></script>
 <script src="js/file-explorer.js"></script>
 <script src="js/remote-connection.js"></script>
 <script src="js/git-panel.js"></script>

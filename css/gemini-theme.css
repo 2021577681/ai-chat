@@ -1089,10 +1089,13 @@ body{
 [data-theme="dark"][data-security-mode] .topbar,
 [data-theme="dark"][data-security-mode] .status-bar,
 [data-theme="dark"][data-security-mode] .messages,
-[data-theme="dark"][data-security-mode] .input-area{
+[data-theme="dark"][data-security-mode] .input-area,
+[data-theme="dark"][data-security-mode] .main-content{
   position:relative;
   z-index:1;
 }
+
+[data-theme="dark"][data-security-mode] .main-content{z-index:2;background:rgba(8,8,10,.96)}
 
 [data-theme="dark"][data-security-mode] .main.chat-start-state .input-area{
   position:absolute;
@@ -1160,6 +1163,23 @@ body{
   -webkit-backdrop-filter:blur(18px) saturate(130%);
   backdrop-filter:blur(18px) saturate(130%);
 }
+
+[data-theme="dark"][data-security-mode] .inline-file-panel{
+  position:relative;
+  z-index:3;
+  background:#0b0c10;
+  border-color:rgba(255,214,142,.18);
+}
+
+[data-theme="dark"][data-security-mode] .inline-file-header,
+[data-theme="dark"][data-security-mode] .inline-file-footer{
+  background:#111318;
+  border-color:rgba(255,214,142,.16);
+}
+
+[data-theme="dark"][data-security-mode] .inline-file-body,
+[data-theme="dark"][data-security-mode] .inline-file-body textarea,
+[data-theme="dark"][data-security-mode] .inline-file-body iframe{background:#0f1117}
 
 [data-theme="dark"][data-security-mode] .input-inner:focus-within{
   border-color:rgba(255,221,160,.46);
@@ -2460,7 +2480,8 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .topbar-btn-icon,
 [data-theme="dark"] .status-icon,
 [data-theme="dark"] .icon-btn-img,
-[data-theme="dark"] .workspace-icon{
+[data-theme="dark"] .workspace-icon,
+[data-theme="dark"] .sidebar-mode-btn img{
   filter:brightness(0) invert(1) opacity(.88);
 }
 
@@ -2470,6 +2491,8 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .chat-item:hover{
   background:rgba(232,234,237,.08);
 }
+
+[data-theme="dark"] .sidebar-mode-btn:hover,[data-theme="dark"] .sidebar-mode-btn.active{background:rgba(232,234,237,.10)}
 
 [data-theme="dark"] .model-trigger,
 [data-theme="dark"] .task-queue-controls select,
