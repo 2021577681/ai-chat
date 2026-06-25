@@ -49,8 +49,9 @@ function openSettings() {
     if (maxToolRoundsValEl) maxToolRoundsValEl.textContent = v;
   }
   
-  // ⭐ 终端 Token 显示
-  refreshTerminalTokenView();
+  // 兼容旧版 Token 设置：新版本地后端不再需要浏览器保存鉴权 Token。
+  // 如果旧 UI/旧脚本仍存在该函数，则刷新；否则不要阻断设置页打开。
+  if (typeof refreshTerminalTokenView === 'function') refreshTerminalTokenView();
   
   document.getElementById('testResult').className = 'test-result';
   document.getElementById('testResult').textContent = '';
@@ -855,9 +856,9 @@ async function testConnection() {
     const useProxy = document.getElementById('useLocalProxy');
     if (useProxy && useProxy.checked) {
       const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
-      if (!tc || !tc.token) {
+      if (!tc || !tc.serverUrl) {
         r.className = 'test-result error';
-        r.innerHTML = '❌ 已勾选「本地代理」，但还没获取本地服务 Token。<br>请到「本地终端 Token」一栏点【拉取 Token】并在 Python 终端按 y 授权。';
+        r.innerHTML = '❌ 已勾选「本地代理」，但本地服务配置未加载。<br>请确认 local_terminal_server.py 已启动。';
         return;
       }
       realUrl = tc.serverUrl.replace(/\/+$/, '') + '/llm-proxy';
@@ -865,7 +866,6 @@ async function testConnection() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Token': tc.token,
           'X-Target-Url': url,
           'X-Target-Headers': JSON.stringify(headers)
         },
@@ -904,66 +904,6 @@ async function testConnection() {
     r.className = 'test-result error';
     r.innerHTML = `❌ 网络错误: ${escapeHtml(e.message)}<br>URL: <code>${escapeHtml(url)}</code>`;
   }
-}
-
-// ============ 本地终端 Token 管理 ============
-
-function refreshTerminalTokenView() {
-  const input = document.getElementById('terminalTokenView');
-  const status = document.getElementById('terminalTokenStatus');
-  const toggle = document.getElementById('termTokenToggle');
-  if (!input) return;
-  
-  const tk = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token) || '';
-  input.value = tk;
-  input.type = 'password';  // 每次打开默认隐藏
-  if (toggle) toggle.textContent = '显示';
-  
-  if (status) {
-    if (tk) {
-      status.textContent = `状态：✅ 已授权（${tk.length} 字符）`;
-      status.style.color = 'var(--success, #16a34a)';
-    } else {
-      status.textContent = '状态：⚠️ 未授权（首次调用工具时会自动请求）';
-      status.style.color = 'var(--warning, #d97706)';
-    }
-  }
-}
-
-function toggleTerminalTokenView() {
-  const input = document.getElementById('terminalTokenView');
-  const btn = document.getElementById('termTokenToggle');
-  if (!input || !btn) return;
-  if (input.type === 'password') {
-    input.type = 'text';
-    btn.textContent = '隐藏';
-  } else {
-    input.type = 'password';
-    btn.textContent = '显示';
-  }
-}
-
-async function onFetchTerminalToken() {
-  if (typeof fetchTerminalToken !== 'function') {
-    toast('❌ terminal.js 未加载', 3000);
-    return;
-  }
-  // 先清掉旧的，确保拿到的是新 token
-  if (typeof saveTerminalToken === 'function') saveTerminalToken('');
-  refreshTerminalTokenView();
-  
-  const tk = await fetchTerminalToken(false);
-  refreshTerminalTokenView();
-  if (tk) {
-    toast('✅ 新 Token 已保存到浏览器', 2500);
-  }
-}
-
-function onClearTerminalToken() {
-  if (!confirm('确定要使当前 Token 失效吗？\n（只清除浏览器端，下次调用工具时会自动重新申请）')) return;
-  if (typeof saveTerminalToken === 'function') saveTerminalToken('');
-  refreshTerminalTokenView();
-  toast('🗑️ Token 已清除', 2000);
 }
 
 // ============================================================
@@ -1093,18 +1033,11 @@ async function fetchModelsViaCorrectChannel(url, headers) {
   if (!tc || !tc.serverUrl) {
     throw new Error('本地代理未加载，请确认 terminal.js 已加载');
   }
-  if (!tc.token && typeof fetchTerminalToken === 'function') {
-    await fetchTerminalToken(true);
-  }
-  if (!tc.token) {
-    throw new Error('本地代理 Token 获取失败，请确认 local_terminal_server.py 已启动');
-  }
   const proxyUrl = tc.serverUrl.replace(/\/+$/, '') + '/llm-proxy';
   const resp = await fetch(proxyUrl, {
     method: 'POST',  // /llm-proxy 始终用 POST，靠 header 传目标
     headers: {
       'Content-Type': 'application/json',
-      'X-Token': tc.token,
       'X-Target-Url': url,
       'X-Target-Method': 'GET',
       'X-Target-Headers': JSON.stringify(headers)

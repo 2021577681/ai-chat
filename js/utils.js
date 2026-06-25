@@ -142,18 +142,6 @@ function updateWorkspaceDisplay(info) {
 async function workspaceBackendAction(action, params = {}) {
   const url = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl)
     ? TERMINAL_CONFIG.serverUrl : 'http://localhost:8765';
-  let token = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token) ? TERMINAL_CONFIG.token : '';
-  if (!token && typeof fetchTerminalToken === 'function') {
-    token = await fetchTerminalToken(true);
-  }
-  if (!token) {
-    const tokenResp = await fetch(url + '/token', { method: 'GET' });
-    if (!tokenResp.ok) throw new Error('无法获取本地服务 Token');
-    const tokenJson = await tokenResp.json();
-    token = tokenJson.token || '';
-    if (token && typeof saveTerminalToken === 'function') saveTerminalToken(token);
-  }
-  if (!token) throw new Error('未获取到本地服务 Token');
 
   const body = {
     action,
@@ -164,15 +152,11 @@ async function workspaceBackendAction(action, params = {}) {
   };
   const doPost = () => fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Token': token },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
 
   let resp = await doPost();
-  if (resp.status === 403 && typeof fetchTerminalToken === 'function') {
-    token = await fetchTerminalToken(false);
-    resp = await doPost();
-  }
   let data = null;
   try {
     data = await resp.json();
@@ -245,12 +229,14 @@ async function refreshWorkspaceInfo() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const j = await resp.json();
     updateWorkspaceDisplay(j);
+    return j;
   } catch (e) {
     pathEl.textContent = '⚠️ 未连接到本地服务（python local_terminal_server.py）';
     pathEl.title = e.message;
     pathEl.onclick = null;
     statusEl.className = 'workspace-status offline';
     statusEl.title = '本地服务离线：' + e.message;
+    return null;
   }
 }
 window.refreshWorkspaceInfo = refreshWorkspaceInfo;

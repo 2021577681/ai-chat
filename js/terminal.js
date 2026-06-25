@@ -1,5 +1,4 @@
 // ============ 本地 Agent 工具集 ============
-const TERMINAL_STORAGE_KEY = 'aichat_terminal_token_v1';
 const TERMINAL_PERMS_KEY = 'aichat_terminal_perms_v1';
 
 // ⭐ 操作类别定义（共 9 类需弹窗的操作）
@@ -50,7 +49,6 @@ function savePermanentPerms(p) {
 
 const TERMINAL_CONFIG = {
   serverUrl: 'http://localhost:8765',
-  token: storage.get(TERMINAL_STORAGE_KEY) || '',
   sessionId: 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
   // ⭐ 本次任务级允许（按类别），任务结束自动清空
   taskAllow: {},
@@ -270,65 +268,6 @@ function cancelAutoResendForChat(chatId, clearAttachments = true) {
 }
 
 // ⭐ Token 持久化辅助
-function saveTerminalToken(tk) {
-  TERMINAL_CONFIG.token = tk || '';
-  try {
-    if (tk) storage.set(TERMINAL_STORAGE_KEY, tk);
-    else storage.remove(TERMINAL_STORAGE_KEY);
-  } catch (e) {
-    console.warn('[terminal] 保存 token 失败:', e);
-  }
-}
-
-// ⭐ 自动从本地服务拉取 token（首次使用 / 失效后）
-let _fetchingToken = false;
-async function fetchTerminalToken(silent = false) {
-  if (_fetchingToken) {
-    // 已经在拉取中，等它完成
-    let wait = 0;
-    while (_fetchingToken && wait < 600) {
-      await new Promise(r => setTimeout(r, 100));
-      wait++;
-    }
-    return TERMINAL_CONFIG.token;
-  }
-  _fetchingToken = true;
-  try {
-    if (!silent && typeof toast === 'function') {
-      toast('🔑 正在请求 Token 授权，请到 Python 终端窗口按 y 确认…', 6000);
-    }
-    const resp = await fetchAgentBackendWithTimeout(
-      TERMINAL_CONFIG.serverUrl + '/token',
-      { method: 'GET' },
-      null,
-      AGENT_BACKEND_TOKEN_TIMEOUT_MS
-    );
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 200)}`);
-    }
-    const j = await resp.json();
-    if (!j.ok || !j.token) throw new Error(j.error || 'Token 响应无效');
-    saveTerminalToken(j.token);
-    if (!silent && typeof toast === 'function') {
-      toast('✅ Token 已获取并保存', 2500);
-    }
-    return j.token;
-  } catch (e) {
-    console.error('[terminal] 拉取 Token 失败:', e);
-    if (!silent && typeof toast === 'function') {
-      toast('❌ 拉取 Token 失败：' + e.message, 4000);
-    }
-    return '';
-  } finally {
-    _fetchingToken = false;
-  }
-}
-
-// 暴露到全局，供设置面板调用
-window.fetchTerminalToken = fetchTerminalToken;
-window.saveTerminalToken = saveTerminalToken;
-
 let _termConfirmResolve = null;
 let _currentConfirmCategory = '';
 let _currentConfirmChatId = '';
@@ -559,21 +498,14 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   }
   const chatId = resolveToolChatId(context);
   const forceConfirm = !!(context && typeof context === 'object' && context.forceConfirm);
-  // ⭐ 没有 token？自动拉取一次
-  if (!TERMINAL_CONFIG.token) {
-    const tk = await fetchTerminalToken(false);
-    if (!tk) {
-      return '❌ 未获取到 Token。请在 Python 终端按 y 授权，或到 ⚙️ 设置 中手动操作。';
-    }
-  }
-  
+  const skipConfirm = !!(context && typeof context === 'object' && context.skipConfirm);
   const category = ACTION_TO_CATEGORY[action] || '';
   const requestParams = withCheckpointParam(params, context);
   if (typeof guardConcurrentFileOwnership === 'function') {
     const conflict = guardConcurrentFileOwnership(action, requestParams, context);
     if (conflict) return conflict;
   }
-  const needConfirm = !!category;  // 有类别即需要确认；没类别（read_file/list_dir/search/file_info）放行
+  const needConfirm = !!category && !skipConfirm;  // 有类别即需要确认；没类别（read_file/list_dir/search/file_info）放行；UI 预览可显式跳过
   
   if (needConfirm) {
     const taskAllow = getTaskAllowForChat(chatId);
@@ -696,27 +628,13 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     delete backendParams._requestTimeoutMs;
     return await fetchAgentBackendWithTimeout(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, ...backendParams, session_id: getAgentSessionId({ chatId }) })
     }, context && context.signal ? context.signal : undefined, requestTimeoutMs);
   };
   
   try {
     let resp = await doFetch();
-    
-    // ⭐ Token 失效 → 清掉 + 自动重拉 + 重试一次
-    if (resp.status === 403) {
-      console.warn('[terminal] Token 被拒绝（403），尝试重新获取…');
-      saveTerminalToken('');
-      const tk = await fetchTerminalToken(false);
-      if (!tk) {
-        if (typeof claimConcurrentFileOwnership === 'function') {
-          claimConcurrentFileOwnership(action, requestParams, { ok: false }, context);
-        }
-        return { ok: false, error: '❌ Token 失效且无法重新获取，请到 ⚙️ 设置 中处理。' };
-      }
-      resp = await doFetch();
-    }
     
     const r = await readAgentBackendJsonWithTimeout(
       resp,
@@ -1226,26 +1144,14 @@ function formatFileSize(b) {
 // 与 callAgentBackend 不同：
 //   - 不弹"工具权限确认"（用户主动点 UI 触发，自己就是权限）
 //   - 直接返回后端 JSON（不做字符串包装）
-//   - Token 失效时同样自动重拉重试
 async function callGit(subcommand, params) {
-  if (!TERMINAL_CONFIG.token) {
-    const tk = await fetchTerminalToken(false);
-    if (!tk) return { ok: false, error: '❌ 未获取到 Token，请到 ⚙️ 设置 中处理。' };
-  }
   const doFetch = async () => fetch(TERMINAL_CONFIG.serverUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Token': TERMINAL_CONFIG.token },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'git', subcommand, ...(params || {}) })
   });
   try {
     let resp = await doFetch();
-    if (resp.status === 403) {
-      console.warn('[git] Token 被拒，重新获取后重试…');
-      saveTerminalToken('');
-      const tk = await fetchTerminalToken(false);
-      if (!tk) return { ok: false, error: '❌ Token 失效且无法重新获取' };
-      resp = await doFetch();
-    }
     return await resp.json();
   } catch (e) {
     return { ok: false, error: `无法连接后端：${e.message}` };

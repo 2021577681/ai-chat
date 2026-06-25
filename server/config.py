@@ -1,8 +1,8 @@
 # ============================================================
 # server/config.py - 全局配置 & 启动时初始化
 # ============================================================
-# 这里持有所有"进程级单例"：监听端口、Token、沙箱根目录、当前 cwd。
-# 其他模块通过 from server import config 然后 config.TOKEN / config.WORKSPACE_ROOT 访问。
+# 这里持有所有"进程级单例"：监听端口、沙箱根目录、当前 cwd。
+# 其他模块通过 from server import config 然后 config.WORKSPACE_ROOT 访问。
 #
 # 注意 current_cwd 是会被 cd 命令修改的可变状态，必须通过模块属性访问
 # （直接 from .config import current_cwd 会拿到导入瞬间的快照，会读到旧值）。
@@ -11,9 +11,9 @@
 import contextvars
 import os
 import re
-import secrets
 import sys
 import threading
+import time
 
 # ⭐ DPI 感知：必须在任何 GDI/窗口操作之前设置，否则 GetWindowRect / ImageGrab
 #   在高 DPI 显示器（125%/150%/200% 缩放）上坐标对不上，截图会错位或残缺。
@@ -38,40 +38,15 @@ if sys.platform == 'win32':
 PORT = 8765
 HOST = '127.0.0.1'
 
-# ---------- Token 自动生成/加载 ----------
-# 放在用户主目录，所有工作区共享一个 token
-TOKEN_FILE = os.path.join(os.path.expanduser('~'), '.aichat_terminal_token')
-
-
-def _load_or_create_token():
-    if os.path.exists(TOKEN_FILE):
-        try:
-            with open(TOKEN_FILE) as f:
-                tk = f.read().strip()
-                if tk:
-                    return tk
-        except Exception:
-            pass
-    tk = secrets.token_urlsafe(24)
-    try:
-        with open(TOKEN_FILE, 'w') as f:
-            f.write(tk)
-        try:
-            os.chmod(TOKEN_FILE, 0o600)  # Unix 设为仅用户可读
-        except Exception:
-            pass
-    except Exception as e:
-        print(f'⚠️  无法写入 token 文件: {e}')
-    return tk
-
-
-TOKEN = _load_or_create_token()
-
 # ---------- 沙箱根目录（启动后锁定） ----------
 # WORKSPACE_ROOT 在启动后不再变化，所有文件操作必须在此目录内。
 # 用 realpath 解析以防 symlink 越狱。
 # 默认值 = 启动时的 cwd，可通过 set_workspace() 在启动早期覆盖（CLI --workspace 参数）。
 WORKSPACE_ROOT = os.path.realpath(os.getcwd())
+
+# ---------- 远程 Agent 心跳 ----------
+REMOTE_HEARTBEAT_TIMEOUT = 0
+REMOTE_HEARTBEAT_LAST = time.time()
 
 # ---------- 可变状态 ----------
 # current_cwd 保留为默认会话的 cwd，兼容旧前端和公开状态接口。

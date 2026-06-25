@@ -8,7 +8,6 @@ import os
 import re
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import config
 
 
 MUSIC_EXTS = {
@@ -86,10 +85,6 @@ class MusicMixin:
 
     def handle_music_file_get(self):
         qs = parse_qs(urlparse(self.path).query)
-        token = (qs.get('token') or [''])[0] or self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
         rel = (qs.get('path') or [''])[0]
         path = _music_path(rel)
         if not path or not os.path.isfile(path) or not _is_audio(path):

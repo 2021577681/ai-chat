@@ -74,15 +74,8 @@ async function lmsApiGet(path, params = {}) {
     return { ok: false, error: 'NO_COOKIE', message: '⚠️ 尚未登录 LMS，请打开 🎓 学习面板使用统一认证登录或手动填写 Cookie。' };
   }
 
-  // 确保本地代理可用 + token 有效
-  if (typeof TERMINAL_CONFIG === 'undefined' || !TERMINAL_CONFIG.token) {
-    // 借用 terminal.js 的 fetchTerminalToken
-    if (typeof fetchTerminalToken === 'function') {
-      const tk = await fetchTerminalToken(false);
-      if (!tk) return { ok: false, error: '❌ 本地代理服务未就绪，请先启动 local_terminal_server.py' };
-    } else {
-      return { ok: false, error: '❌ 本地代理未连接' };
-    }
+  if (typeof TERMINAL_CONFIG === 'undefined' || !TERMINAL_CONFIG.serverUrl) {
+    return { ok: false, error: '❌ 本地代理未连接' };
   }
 
   const serverUrl = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl)
@@ -95,12 +88,11 @@ async function lmsApiGet(path, params = {}) {
     const resp = await fetch(url, {
       method: 'GET',
       headers: {
-        'X-Token': TERMINAL_CONFIG.token,
         'X-LMS-Cookie': cookie,
       }
     });
     if (resp.status === 403) {
-      return { ok: false, error: '❌ 本地代理 Token 失效，请到 ⚙️ 设置 重新获取。' };
+      return { ok: false, error: '❌ 本地代理拒绝了请求，请检查本地服务日志。' };
     }
     const json = await resp.json();
     // 后端把 LMS 的 200 response 包成 { ok:true, status, data }
@@ -269,11 +261,7 @@ function lmsGetProxyServerUrl() {
 }
 
 async function lmsEnsureProxyToken() {
-  if (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token) return true;
-  if (typeof fetchTerminalToken === 'function') {
-    return Boolean(await fetchTerminalToken(false));
-  }
-  return false;
+  return !!(typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl);
 }
 
 function lmsCanProxyDownload(url) {
@@ -295,13 +283,12 @@ async function lmsLoginRequest(payload) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
       },
       body: JSON.stringify(payload || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -327,13 +314,12 @@ async function lmsScoreQuery(options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
       },
       body: JSON.stringify(options || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -354,13 +340,12 @@ async function lmsScheduleQuery(options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
       },
       body: JSON.stringify(options || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -381,13 +366,12 @@ async function lmsEmptyRoomsQuery(options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
       },
       body: JSON.stringify(options || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -408,13 +392,12 @@ async function lmsAttendanceQuery(options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
       },
       body: JSON.stringify(options || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -435,13 +418,12 @@ async function lmsJudgeQuery(options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
-      },
+        },
       body: JSON.stringify(options || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -462,13 +444,12 @@ async function lmsTrainingPlanQuery(options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': TERMINAL_CONFIG.token,
       },
       body: JSON.stringify(options || {}),
     });
     const data = await resp.json().catch(() => null);
     if (resp.status === 403) {
-      return { ok: false, error: 'TOKEN_INVALID', message: '本地代理 Token 失效，请到设置重新获取。' };
+      return { ok: false, error: 'FORBIDDEN', message: '本地代理服务拒绝了请求，请检查服务状态。' };
     }
     if (!data) {
       return { ok: false, error: 'BAD_RESPONSE', message: `本地服务返回了无法解析的响应 (${resp.status})` };
@@ -1006,7 +987,6 @@ async function lmsDownloadViaProxy(url, fname) {
   const resp = await fetch(`${lmsGetProxyServerUrl()}/lms-proxy?${qs}`, {
     method: 'GET',
     headers: {
-      'X-Token': TERMINAL_CONFIG.token,
       'X-LMS-Cookie': cookie,
     }
   });

@@ -11,7 +11,6 @@ const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v10';  // v10：新增 ch
 const SECRET_REGISTRY = [
   { label: '🔑 大模型 API Key',   type: 'state',        scope: 'apiKey' },
   { label: '🎓 LMS Cookie',       type: 'localStorage', scope: 'lms_cookie_v1' },
-  { label: '🖥 本地终端 Token',    type: 'localStorage', scope: 'aichat_terminal_token_v1' },
   { label: '🔐 终端永久授权',      type: 'localStorage', scope: 'aichat_terminal_perms_v1' },
 ];
 

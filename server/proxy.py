@@ -6,7 +6,6 @@
 #   handle_lms_proxy_get   - GET  /lms-proxy   代理学校 LMS API
 #   handle_lms_login_post  - POST /lms-login   通过统一认证登录学校 LMS
 #   handle_static_file     - GET  /xxx.html|js|css   本地静态文件托管（白名单扩展名）
-#   handle_token_request   - GET  /token       浏览器自动拉取 Token
 #   handle_workspace_info  - GET  /workspace   公开沙箱信息（不含 token）
 #
 # 这些端点在 handler.py 的路由分发里被调用。
@@ -22,45 +21,6 @@ from . import config
 class ProxyMixin:
     """Handler mixin：所有代理/静态/公开端点"""
 
-    # ============ GET /token ============
-    def handle_token_request(self):
-        """本地项目：file:// 双击 / localhost 访问，直接发 Token，不再要求终端按 y。
-        非本机来源（理论上不会发生在本地项目）才弹终端二次确认。
-        """
-        origin = self.headers.get('Origin', '')
-        is_local_origin = (
-            not origin
-            or origin == 'null'
-            or origin.startswith('http://localhost')
-            or origin.startswith('http://127.0.0.1')
-            or origin.startswith('https://localhost')
-            or origin.startswith('https://127.0.0.1')
-        )
-        if is_local_origin:
-            print(f'🔑 [Token] 自动授权（来源={origin or "file://"}）')
-            self._send_json(200, {'ok': True, 'token': config.TOKEN,
-                                  'cwd': config.get_current_cwd(), 'workspace': config.WORKSPACE_ROOT})
-            return
-
-        # 非本机来源：保留终端确认
-        ua = self.headers.get('User-Agent', '(unknown)')
-        with config.INPUT_LOCK:
-            print('\n' + '=' * 60)
-            print('🔔 非本机来源在请求 Token')
-            print(f'   Origin    : {origin}')
-            print(f'   User-Agent: {ua[:80]}')
-            print(f'   Client IP : {self.client_address[0]}')
-            print('=' * 60)
-            try:
-                ans = input('是否授权？输入 y 同意 > ').strip().lower()
-            except EOFError:
-                ans = ''
-        if ans != 'y':
-            self._send_json(403, {'ok': False, 'error': '用户在终端拒绝授权'})
-            return
-        self._send_json(200, {'ok': True, 'token': config.TOKEN,
-                              'cwd': config.get_current_cwd(), 'workspace': config.WORKSPACE_ROOT})
-
     # ============ GET /workspace ============
     def handle_workspace_info(self):
         """公开端点，不含 Token"""
@@ -73,10 +33,6 @@ class ProxyMixin:
     # ============ POST /lms-login ============
     def handle_lms_login_post(self):
         """使用西交统一认证登录 LMS，并返回可供现有 LMS 代理复用的 Cookie 字符串。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -101,10 +57,6 @@ class ProxyMixin:
     # ============ POST /lms-scores ============
     def handle_lms_scores_post(self):
         """使用本机加密保存的统一认证凭据查询本科/研究生成绩。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -129,10 +81,6 @@ class ProxyMixin:
     # ============ POST /lms-schedule ============
     def handle_lms_schedule_post(self):
         """使用本机加密保存的统一认证凭据查询本科/研究生课表。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -157,10 +105,6 @@ class ProxyMixin:
     # ============ POST /lms-empty-rooms ============
     def handle_lms_empty_rooms_post(self):
         """使用本机加密保存的统一认证凭据查询本科教务空闲教室。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -186,10 +130,6 @@ class ProxyMixin:
     # ============ POST /lms-judge ============
     def handle_lms_judge_post(self):
         """使用本机加密保存的统一认证凭据执行本科/研究生一键评教。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -215,10 +155,6 @@ class ProxyMixin:
     # ============ POST /lms-attendance ============
     def handle_lms_attendance_post(self):
         """使用本机加密保存的统一认证凭据查询本科/研究生考勤。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -244,10 +180,6 @@ class ProxyMixin:
     # ============ POST /lms-training-plan ============
     def handle_lms_training_plan_post(self):
         """使用本机加密保存的统一认证凭据查询本科个人培养方案。"""
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -351,7 +283,6 @@ class ProxyMixin:
         """LLM 代理（支持流式）。
 
         Header（来自浏览器）:
-          X-Token          : 本地服务的鉴权 token
           X-Target-Url     : 目标完整 URL
           X-Target-Headers : JSON 字符串，要透传给目标的请求头（Authorization 等）
           X-Target-Method  : 可选，默认 POST；GET 用于拉取 /models
@@ -361,11 +292,6 @@ class ProxyMixin:
         import urllib.error
 
         origin = self.headers.get('Origin', '')
-
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         target_url = self.headers.get('X-Target-Url', '').strip()
         if not target_url or not (target_url.startswith('http://') or target_url.startswith('https://')):
@@ -507,7 +433,6 @@ class ProxyMixin:
         """LMS 代理。
 
         Header:
-          X-Token       : 后端鉴权 token（同其他接口）
           X-LMS-Cookie  : 用户的 LMS 会话 cookie 字符串
         Query:
           path  : LMS API 路径，如 /api/todos
@@ -517,11 +442,6 @@ class ProxyMixin:
         from urllib.parse import urlparse, parse_qs, urlencode
         import urllib.request
         import urllib.error
-
-        token = self.headers.get('X-Token', '')
-        if token != config.TOKEN:
-            self._send_json(403, {'ok': False, 'error': 'Token 错误'})
-            return
 
         cookie = self.headers.get('X-LMS-Cookie', '').strip()
         if not cookie:

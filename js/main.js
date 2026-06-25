@@ -18,8 +18,6 @@ async function init() {
   //       这里 IDB 就绪后强制刷一遍
   if (typeof TERMINAL_CONFIG !== 'undefined' && typeof storage !== 'undefined') {
     try {
-      const tk = storage.get('aichat_terminal_token_v1');
-      if (tk) TERMINAL_CONFIG.token = tk;
       const permsRaw = storage.get('aichat_terminal_perms_v1');
       if (permsRaw) {
         try { TERMINAL_CONFIG.permanentAllow = JSON.parse(permsRaw) || {}; } catch (e) {}
@@ -98,13 +96,8 @@ async function init() {
         if (typeof toast === 'function') toast('⚠️ 本地服务未启动，遇到 CORS 时无法绕过\n请运行 python local_terminal_server.py', 5000);
         return;
       }
-      // ② token 有没有
-      if (!tc.token && typeof fetchTerminalToken === 'function') {
-        console.log('[自检] 自动拉取 token…');
-        await fetchTerminalToken(true);
-      }
       // ③ 代理开关默认开启（state.js 里默认就是 true，但用户可能手动关过 → 不强改）
-      if (state.settings.useLocalProxy && tc.token) {
+      if (state.settings.useLocalProxy) {
         console.log('[自检] ✅ 本地代理已就绪');
       } else if (!state.settings.useLocalProxy) {
         console.log('[自检] ℹ️ 本地代理开关未开启（设置面板里可打开）');
@@ -243,7 +236,7 @@ window.debugLLM = async function() {
   const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
   if (!tc) { err('❌ TERMINAL_CONFIG 未定义'); return; }
   log('3️⃣ 本地服务 URL:', tc.serverUrl);
-  log('   Token:', tc.token ? '✅ 已有 (' + tc.token.length + ' 字符)' : '❌ 未拉取');
+  log('   本地服务: 已就绪');
   try {
     const r = await fetch(tc.serverUrl + '/workspace');
     if (r.ok) {
@@ -258,13 +251,6 @@ window.debugLLM = async function() {
     return;
   }
   
-  // 4. 自动拉 token（若没有）
-  if (!tc.token && typeof fetchTerminalToken === 'function') {
-    log('4️⃣ 正在自动拉取 Token…');
-    await fetchTerminalToken(true);
-    log('   Token 拉取结果:', tc.token ? '✅' : '❌');
-  }
-  
   // 5. 走代理实际发一条
   log('5️⃣ 尝试通过本地代理发送测试请求…');
   const url = buildFullUrl(s.baseUrl, s.apiPath);
@@ -275,7 +261,6 @@ window.debugLLM = async function() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Token': tc.token,
         'X-Target-Url': url,
         'X-Target-Headers': JSON.stringify(headers)
       },

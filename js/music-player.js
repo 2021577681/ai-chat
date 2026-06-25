@@ -131,33 +131,15 @@ function musicTrackUrl(track) {
   if (!track) return '';
   if (track.objectUrl) return track.objectUrl;
   const base = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl) ? TERMINAL_CONFIG.serverUrl : 'http://localhost:8765';
-  const token = (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token) ? TERMINAL_CONFIG.token : '';
-  const sep = String(track.url || '').includes('?') ? '&' : '?';
-  return base.replace(/\/+$/, '') + (track.url || '') + sep + 'token=' + encodeURIComponent(token);
+  return base.replace(/\/+$/, '') + (track.url || '');
 }
 
 function musicHasBackendToken() {
-  return !!(typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.token);
+  return true;
 }
 
 function musicEnsureTokenThen(fn) {
-  if (musicHasBackendToken() || typeof fetchTerminalToken !== 'function') return false;
-  if (typeof fn === 'function') musicPlayerState.tokenWaiters.push(fn);
-  if (musicPlayerState.tokenPending) return true;
-  musicPlayerState.tokenPending = true;
-  fetchTerminalToken(true)
-    .then(() => {
-      const waiters = musicPlayerState.tokenWaiters.splice(0);
-      waiters.forEach(cb => {
-        try { cb(); } catch (e) { console.warn('[music] token waiter failed', e); }
-      });
-    })
-    .catch(error => console.warn('[music] token fetch failed', error))
-    .finally(() => {
-      musicPlayerState.tokenPending = false;
-      musicPlayerState.tokenWaiters = [];
-    });
-  return true;
+  return false;
 }
 
 function musicLibraryTracks() {

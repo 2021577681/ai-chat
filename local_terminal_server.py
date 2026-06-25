@@ -22,6 +22,8 @@
 import argparse
 import os
 import sys
+import threading
+import time
 from http.server import ThreadingHTTPServer
 
 # Windows 控制台默认编码常为 GBK，输出 emoji 会 UnicodeEncodeError，
@@ -65,7 +67,37 @@ def _parse_args(argv):
         metavar='PORT',
         help=f'监听端口（默认 {config.PORT}）'
     )
+    p.add_argument(
+        '--remote-heartbeat-timeout',
+        type=int,
+        default=0,
+        metavar='SECONDS',
+        help='远程 Agent 心跳超时自动退出秒数；0 表示关闭（默认）。'
+    )
     return p.parse_args(argv)
+
+
+def _start_remote_heartbeat_watchdog(timeout_seconds):
+    timeout_seconds = int(timeout_seconds or 0)
+    if timeout_seconds <= 0:
+        return
+    config.REMOTE_HEARTBEAT_TIMEOUT = timeout_seconds
+    config.REMOTE_HEARTBEAT_LAST = time.time()
+
+    def _watchdog():
+        print(f'💓 远程心跳看门狗已启用：{timeout_seconds}s 无心跳自动退出')
+        while True:
+            time.sleep(max(2, min(10, timeout_seconds // 3 or 2)))
+            idle = time.time() - float(config.REMOTE_HEARTBEAT_LAST or 0)
+            if idle > config.REMOTE_HEARTBEAT_TIMEOUT > 0:
+                print(f'💔 远程 Agent 心跳超时 {idle:.1f}s，自动退出')
+                os._exit(0)
+
+    threading.Thread(
+        target=_watchdog,
+        name='remote-heartbeat-watchdog',
+        daemon=True
+    ).start()
 
 
 def _print_banner():
@@ -80,23 +112,21 @@ def _print_banner():
     print()
     print(f'🏠 沙箱根目录: {config.WORKSPACE_ROOT}')
     print(f'   工作目录 : {config.get_current_cwd()}')
-    print(f'Token 文件  : {config.TOKEN_FILE}')
-    print(f'\n🔑 Token: {config.TOKEN}\n')
+    print('本地访问    : 仅建议监听 localhost/127.0.0.1')
     print('🛡️  沙箱防护:')
     print('   L1 路径越界检测  - 所有文件操作必须在沙箱内')
     print('   L2 cd 越界拦截   - 不允许 cd 出沙箱')
     print('   L3 危险命令黑名单 - rm -rf / format / fork bomb / sudo 等')
     print('\n📦 支持的操作:')
-    print('   - GET  /token      浏览器自动拉取 Token（本机自动授权）')
     print('   - GET  /workspace  查询当前沙箱目录（公开，无需鉴权）')
-    print('   - GET  /lms-proxy  代理 LMS API 请求（需 X-Token + X-LMS-Cookie）')
-    print('   - POST /lms-login  西交统一认证登录 LMS（需 X-Token）')
-    print('   - POST /lms-scores 查询本科/研究生成绩（需 X-Token + 本机保存凭据）')
-    print('   - POST /lms-schedule 查询本科/研究生课表（需 X-Token + 本机保存凭据）')
-    print('   - POST /lms-empty-rooms 查询本科教务空闲教室（需 X-Token + 本机保存凭据）')
-    print('   - POST /lms-attendance 查询本科/研究生考勤（需 X-Token + 本机保存凭据）')
-    print('   - POST /lms-judge 一键评教（需 X-Token + 本机保存凭据）')
-    print('   - POST /lms-training-plan 查询本科个人培养方案（需 X-Token + 本机保存凭据）')
+    print('   - GET  /lms-proxy  代理 LMS API 请求（需 X-LMS-Cookie）')
+    print('   - POST /lms-login  西交统一认证登录 LMS')
+    print('   - POST /lms-scores 查询本科/研究生成绩（需本机保存凭据）')
+    print('   - POST /lms-schedule 查询本科/研究生课表（需本机保存凭据）')
+    print('   - POST /lms-empty-rooms 查询本科教务空闲教室（需本机保存凭据）')
+    print('   - POST /lms-attendance 查询本科/研究生考勤（需本机保存凭据）')
+    print('   - POST /lms-judge 一键评教（需本机保存凭据）')
+    print('   - POST /lms-training-plan 查询本科个人培养方案（需本机保存凭据）')
     print('   - POST /llm-proxy  代理 LLM 请求（绕过浏览器 CORS）')
     print('   - execute          执行 shell 命令')
     print('   - read_file        读取文本文件')
@@ -135,6 +165,8 @@ def main(argv=None):
         config.HOST = args.host
     if args.port:
         config.PORT = args.port
+
+    _start_remote_heartbeat_watchdog(args.remote_heartbeat_timeout)
 
     _print_banner()
     try:

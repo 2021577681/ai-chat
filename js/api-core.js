@@ -339,13 +339,8 @@ async function _apiFetchWithTimeout(url, init, externalSignal, timeoutMs) {
     const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(url);
     if (s && s.useLocalProxy && tc && tc.serverUrl && !isLocal) {
-      // ⭐ 没 token 就自动静默拉取（服务端已对本机来源免确认放行）
-      if (!tc.token && typeof fetchTerminalToken === 'function') {
-        try { await fetchTerminalToken(true); } catch (e) { /* 失败也继续，下面 fetch 会自然报错 */ }
-      }
       const proxyHeaders = {
         'Content-Type': 'application/json',
-        'X-Token': tc.token || '',
         'X-Target-Url': url,
         'X-Target-Headers': JSON.stringify(init && init.headers ? init.headers : {})
       };

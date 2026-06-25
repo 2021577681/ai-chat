@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -184,6 +184,7 @@
     
     <!-- 侧边栏底部：设置 + 主题 -->
     <div class="sidebar-footer">
+      <button class="icon-btn" onclick="openRemoteConnection()"><span class="icon-btn-img">🌐</span>远程连接</button>
       <button class="icon-btn" onclick="openSettings()"><img class="icon-btn-img" src="icon/配置_config.png" alt="">设置</button>
     </div>
   </aside>
@@ -471,7 +472,7 @@
       <div>
         <label style="margin:0;">通过本地服务代理（绕过 CORS）</label>
         <div class="form-hint" style="margin-top:2px;">
-          浏览器报 <code>Failed to fetch</code> / CORS 错误时开启。需先启动 <code>python local_terminal_server.py</code> 并拉取 Token。
+          浏览器报 <code>Failed to fetch</code> / CORS 错误时开启。需先启动 <code>python local_terminal_server.py</code>。
         </div>
       </div>
       <label class="switch"><input type="checkbox" id="useLocalProxy"><span class="switch-slider"></span></label>
@@ -534,32 +535,7 @@
         <span class="slider-val" id="beaconIntervalVal">5</span>
       </div>
       <div class="form-hint">值越小信标越密集（监测越精细，但额外 token 越多）。每个信标约消耗 30-50 tokens。</div>
-    </div>
-    
-    <!-- 本地终端 Token 设置 -->
-    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
-    <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">本地终端授权</h3>
-    
-    <div class="form-group">
-      <label>当前 Token</label>
-      <div class="key-wrap">
-        <input type="password" id="terminalTokenView" readonly placeholder="(未授权)">
-        <button class="key-toggle" onclick="toggleTerminalTokenView()" id="termTokenToggle">显示</button>
-      </div>
-      <div class="form-hint" id="terminalTokenStatus" style="margin-top:6px;">状态：—</div>
-    </div>
-    
-    <div class="form-group" style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn" type="button" onclick="onFetchTerminalToken()">重新获取 Token</button>
-      <button class="btn" type="button" onclick="onClearTerminalToken()">使 Token 失效</button>
-    </div>
-    <div class="form-hint">
-      Token 用于授权浏览器调用本机 <code>local_terminal_server.py</code>。<br>
-      点击「重新获取」会向本地服务请求一个新 Token，请到 Python 终端窗口按 <code>y</code> 确认。<br>
-      点击「使 Token 失效」只会清除浏览器端 —— 下次工具调用会自动重新拉取。
-    </div>
-    
-    <div id="testResult" class="test-result"></div>
+    </div>    <div id="testResult" class="test-result"></div>
     
     <div class="modal-footer">
       <button class="btn" onclick="closeSettings()">取消</button>
@@ -586,6 +562,122 @@
       <button class="btn" type="button" onclick="reloadFileEditor()">重新读取</button>
       <button class="btn" type="button" onclick="closeFileEditor()">关闭</button>
       <button class="btn btn-primary" type="button" onclick="saveFileEditor()">保存修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF 阅读器 -->
+<div class="modal-mask pdf-viewer-mask" id="pdfViewerModal">
+  <div class="modal wide pdf-viewer-modal">
+    <h2>
+      <span>PDF 阅读器</span>
+      <button class="modal-close" onclick="closePdfViewer()">×</button>
+    </h2>
+    <div class="file-editor-meta">
+      <code id="pdfViewerPath">-</code>
+      <span id="pdfViewerStatus">未加载</span>
+    </div>
+    <iframe id="pdfViewerFrame" title="PDF 阅读器"></iframe>
+    <div class="modal-footer file-editor-footer">
+      <button class="btn" type="button" onclick="reloadPdfViewer()">重新读取</button>
+      <button class="btn" type="button" onclick="openPdfViewerInNewTab()">新标签打开</button>
+      <button class="btn" type="button" onclick="closePdfViewer()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 图片预览器 -->
+<div class="modal-mask image-viewer-mask" id="imageViewerModal">
+  <div class="modal wide image-viewer-modal">
+    <h2>
+      <span>图片预览器</span>
+      <button class="modal-close" onclick="closeImageViewer()">×</button>
+    </h2>
+    <div class="file-editor-meta">
+      <code id="imageViewerPath">-</code>
+      <span id="imageViewerStatus">未加载</span>
+    </div>
+    <div class="image-viewer-stage">
+      <img id="imageViewerImg" alt="图片预览">
+    </div>
+    <div class="modal-footer file-editor-footer">
+      <button class="btn" type="button" onclick="reloadImageViewer()">重新读取</button>
+      <button class="btn" type="button" onclick="openImageViewerInNewTab()">新标签打开</button>
+      <button class="btn" type="button" onclick="closeImageViewer()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 音频/视频预览器 -->
+<div class="modal-mask media-viewer-mask" id="mediaViewerModal">
+  <div class="modal wide media-viewer-modal">
+    <h2>
+      <span id="mediaViewerTitle">媒体预览器</span>
+      <button class="modal-close" onclick="closeMediaViewer()">×</button>
+    </h2>
+    <div class="file-editor-meta">
+      <code id="mediaViewerPath">-</code>
+      <span id="mediaViewerStatus">未加载</span>
+    </div>
+    <div class="media-viewer-stage">
+      <audio id="audioViewerPlayer" controls preload="metadata"></audio>
+      <video id="videoViewerPlayer" controls preload="metadata"></video>
+    </div>
+    <div class="modal-footer file-editor-footer">
+      <button class="btn" type="button" onclick="reloadMediaViewer()">重新读取</button>
+      <button class="btn" type="button" onclick="openMediaViewerInNewTab()">新标签打开</button>
+      <button class="btn" type="button" onclick="closeMediaViewer()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 远程连接设置 -->
+<div class="modal-mask remote-connection-mask" id="remoteConnectionModal">
+  <div class="modal wide remote-connection-modal">
+    <h2>远程连接 <button class="modal-close" onclick="closeRemoteConnection()">×</button></h2>
+    <div class="remote-connection-grid">
+      <label>
+        <span>SSH 命令</span>
+        <input id="remoteSshCommand" type="text" placeholder="ssh user@example.com 或 ssh -p 22 alias">
+      </label>
+      <label>
+        <span>SSH 密码 / 口令（可留空使用密钥）</span>
+        <input id="remotePassword" type="password" placeholder="本地加密保存">
+      </label>
+      <label>
+        <span>远程工作区沙箱目录</span>
+        <input id="remoteWorkspace" type="text" placeholder="~/project">
+      </label>
+      <div class="remote-connection-row">
+        <label>
+          <span>远程 Agent 端口</span>
+          <input id="remoteAgentPort" type="number" min="1024" max="65535" value="8765">
+        </label>
+        <label>
+          <span>本地隧道端口</span>
+          <input id="remoteLocalPort" type="number" min="1024" max="65535" value="18765">
+        </label>
+        <label>
+          <span>心跳超时自动关闭（秒）</span>
+          <input id="remoteHeartbeatTimeout" type="number" min="20" max="3600" value="75">
+        </label>
+      </div>
+      <label class="remote-connection-check">
+        <input id="remoteInstallDeps" type="checkbox" checked>
+        <span>连接时尝试安装/更新远程 Python 依赖</span>
+      </label>
+      <label class="remote-connection-check">
+        <input id="remoteStopRemote" type="checkbox">
+        <span>断开时同时停止远程 Agent 进程</span>
+      </label>
+      <div class="remote-connection-hint">流程：打包最小后端 → scp 上传到 ~/.snake-agent/current → 远程 nohup 启动 127.0.0.1 → 本地 ssh -N -L 建立隧道 → 自动切换前端后端地址。远程 Agent 会依赖本地心跳，关闭本地后端/隧道后会在超时后自动退出。</div>
+      <div id="remoteConnectionStatus" class="remote-connection-status">未连接</div>
+    </div>
+    <div class="modal-footer file-editor-footer">
+      <button class="btn" type="button" onclick="checkRemoteStatus()">检查状态</button>
+      <button class="btn" type="button" onclick="saveRemoteConnectionFromUi()">保存配置</button>
+      <button class="btn" type="button" onclick="disconnectRemoteAgent()">断开/切回本地</button>
+      <button class="btn btn-primary" id="remoteConnectBtn" type="button" onclick="connectRemoteAgent()">连接远程</button>
     </div>
   </div>
 </div>
@@ -1400,7 +1492,7 @@
         <span>🚨 危险区：一键清除本地敏感凭证</span>
       </label>
       <div style="font-size:12px;color:var(--text-secondary);margin-top:4px;line-height:1.5;">
-        包括：API Key、LMS Cookie、本地终端 Token、终端永久授权。<br>
+        包括：API Key、LMS Cookie、终端永久授权。<br>
         共用电脑、归还设备、或怀疑凭证泄漏时使用。<strong>不会删除</strong>聊天记录和工具配置。
       </div>
     </div>
@@ -1784,6 +1876,7 @@
 <script src="js/shell-audit.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/file-explorer.js"></script>
+<script src="js/remote-connection.js"></script>
 <script src="js/git-panel.js"></script>
 <script src="js/reflection.js"></script>
 <script src="js/plan-core.js"></script>

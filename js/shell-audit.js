@@ -447,16 +447,12 @@ async function shellAuditFetch(url, init, apiSettings, signal) {
     const tc = typeof TERMINAL_CONFIG !== 'undefined' ? TERMINAL_CONFIG : null;
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(url);
     if (apiSettings && apiSettings.useLocalProxy !== false && tc && tc.serverUrl && !isLocal) {
-      if (!tc.token && typeof fetchTerminalToken === 'function') {
-        try { await fetchTerminalToken(true); } catch (e) {}
-      }
       realUrl = tc.serverUrl.replace(/\/+$/, '') + '/llm-proxy';
       realInit = {
         ...realInit,
         method: (init && init.method) || 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Token': tc.token || '',
           'X-Target-Url': url,
           'X-Target-Headers': JSON.stringify(init && init.headers ? init.headers : {})
         },
