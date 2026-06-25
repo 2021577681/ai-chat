@@ -182,6 +182,8 @@ class Handler(BaseHTTPRequestHandler,
         try:
             if action == 'execute':
                 self.handle_execute(body)
+            elif action == 'open_terminal':
+                self.handle_open_terminal(body)
             elif action == 'read_file':
                 self.handle_read_file(body)
             elif action == 'read_file_binary':

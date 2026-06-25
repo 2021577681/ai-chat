@@ -6,6 +6,7 @@
 # ============================================================
 
 import os
+import platform
 import re
 import locale
 import subprocess
@@ -84,6 +85,67 @@ def _decode_process_output(raw):
 
 class ExecMixin:
     """Handler mixin：handle_execute"""
+
+    def handle_open_terminal(self, body):
+        """打开系统终端窗口，工作目录为当前沙箱目录。"""
+        try:
+            cwd_abs = os.path.realpath(config.WORKSPACE_ROOT)
+            if not os.path.isdir(cwd_abs):
+                return self._send_json(200, {'ok': False, 'error': f'沙箱目录不存在: {cwd_abs}'})
+            if not is_inside_workspace(cwd_abs):
+                return self._send_json(200, {'ok': False, 'error': f'工作目录越界: {cwd_abs}'})
+
+            system = platform.system().lower()
+            proc = None
+
+            if system == 'windows':
+                commands = [
+                    ['wt.exe', '-d', cwd_abs],
+                    ['cmd.exe', '/k', 'title AI 终端'],
+                ]
+                last_error = None
+                for cmd in commands:
+                    try:
+                        proc = subprocess.Popen(
+                            cmd,
+                            cwd=cwd_abs,
+                            creationflags=subprocess.CREATE_NEW_CONSOLE
+                        )
+                        break
+                    except Exception as e:
+                        last_error = e
+                if proc is None:
+                    raise last_error or RuntimeError('无法启动 Windows 终端')
+            elif system == 'darwin':
+                safe_cwd = cwd_abs.replace('\\', '/').replace('"', '\\"')
+                script = f'tell application "Terminal" to do script "cd {safe_cwd}"'
+                proc = subprocess.Popen(['osascript', '-e', script], cwd=cwd_abs)
+            else:
+                commands = [
+                    ['x-terminal-emulator'],
+                    ['gnome-terminal'],
+                    ['konsole'],
+                    ['xfce4-terminal'],
+                    ['xterm'],
+                ]
+                last_error = None
+                for cmd in commands:
+                    try:
+                        proc = subprocess.Popen(cmd, cwd=cwd_abs)
+                        break
+                    except Exception as e:
+                        last_error = e
+                if proc is None:
+                    raise last_error or RuntimeError('无法启动系统终端')
+
+            return self._send_json(200, {
+                'ok': True,
+                'stdout': f'✅ 已打开终端: {cwd_abs}',
+                'pid': getattr(proc, 'pid', None),
+                'cwd': cwd_abs,
+            })
+        except Exception as e:
+            return self._send_json(200, {'ok': False, 'error': f'无法打开终端: {e}'})
 
     def handle_execute(self, body):
         command = body.get('command', '').strip()

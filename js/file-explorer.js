@@ -24,6 +24,11 @@ const FILE_EXPLORER_STATE = {
   inlineChatWidth: 50
 };
 
+const INLINE_FILE_MIN_WINDOW_WIDTH = 1100;
+const INLINE_FILE_MIN_MAIN_WIDTH = 920;
+const INLINE_FILE_MIN_CHAT_WIDTH = 460;
+const INLINE_FILE_MIN_FILE_WIDTH = 360;
+
 const FILE_EXPLORER_TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
   'css', 'scss', 'sass', 'less', 'html', 'htm', 'xml', 'svg',
@@ -278,9 +283,23 @@ function clearInlineFileContent() {
 }
 
 function inlineFileCanStayOpen() {
+  return inlineFileLayoutFits(Number(FILE_EXPLORER_STATE.inlineChatWidth || 50));
+}
+
+function inlineFileLayoutFits(chatPercent = 50) {
   const mainContent = document.getElementById('mainContent');
-  const width = mainContent ? mainContent.getBoundingClientRect().width : window.innerWidth;
-  return window.innerWidth >= 1100 && width >= 820;
+  const mainWidth = mainContent ? mainContent.getBoundingClientRect().width : window.innerWidth;
+  const safeChatPercent = Math.min(75, Math.max(35, Number(chatPercent) || 50));
+  const chatWidth = mainWidth * safeChatPercent / 100;
+  const fileWidth = mainWidth - chatWidth;
+  return window.innerWidth >= INLINE_FILE_MIN_WINDOW_WIDTH &&
+    mainWidth >= INLINE_FILE_MIN_MAIN_WIDTH &&
+    chatWidth >= INLINE_FILE_MIN_CHAT_WIDTH &&
+    fileWidth >= INLINE_FILE_MIN_FILE_WIDTH;
+}
+
+function inlineFileOpenBlockedMessage() {
+  return '窗口较窄，无法在主页面显示文件内容，请放大浏览器窗口后再试';
 }
 
 function enforceInlineFileResponsive() {
@@ -315,8 +334,11 @@ function setInlineChatWidth(percent) {
 }
 
 function showInlineFilePanel(kind, path) {
+  if (!inlineFileLayoutFits(FILE_EXPLORER_STATE.inlineChatWidth) && inlineFileLayoutFits(50)) {
+    FILE_EXPLORER_STATE.inlineChatWidth = 50;
+  }
   if (!inlineFileCanStayOpen()) {
-    if (typeof toast === 'function') toast('窗口较窄，暂不打开双列文件视图');
+    if (typeof toast === 'function') toast(inlineFileOpenBlockedMessage());
     return false;
   }
   const mainContent = document.getElementById('mainContent');
@@ -348,12 +370,12 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerTextFile(normalizedPath)) {
     if (typeof toast === 'function') toast('暂只支持文本类文件');
-    return;
+    return false;
   }
-  if (!showInlineFilePanel('text', normalizedPath)) return;
+  if (!showInlineFilePanel('text', normalizedPath)) return false;
   const body = document.getElementById('inlineFileBody');
   const footer = document.getElementById('inlineFileFooter');
-  if (!body || !footer) return;
+  if (!body || !footer) return false;
   clearInlineFileContent();
   const textarea = document.createElement('textarea');
   textarea.spellcheck = false;
@@ -367,7 +389,7 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
     textarea.value = String(initialContent);
     setInlineFileStatus(`${initialSize !== null && initialSize !== undefined ? formatSize(Number(initialSize || 0)) : `${textarea.value.length} 字符`} / 已显示`, 'ok');
     textarea.focus();
-    return;
+    return true;
   }
   textarea.disabled = true;
   setInlineFileStatus('正在读取...', 'loading');
@@ -380,22 +402,24 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
     textarea.disabled = false;
     setInlineFileStatus(`${formatSize(Number(r.size || 0))} / 已读取`, 'ok');
     textarea.focus();
+    return true;
   } catch (e) {
     textarea.disabled = true;
     setInlineFileStatus(e.message || String(e), 'error');
   }
+  return true;
 }
 
 async function openPdfInMainPanel(path, existingUrl = '') {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerPdfFile(normalizedPath)) {
     if (typeof toast === 'function') toast('仅支持 PDF 文件');
-    return;
+    return false;
   }
-  if (!showInlineFilePanel('pdf', normalizedPath)) return;
+  if (!showInlineFilePanel('pdf', normalizedPath)) return false;
   const body = document.getElementById('inlineFileBody');
   const footer = document.getElementById('inlineFileFooter');
-  if (!body || !footer) return;
+  if (!body || !footer) return false;
   clearInlineFileContent();
   const frame = document.createElement('iframe');
   frame.title = 'PDF 阅读器';
@@ -413,22 +437,23 @@ async function openPdfInMainPanel(path, existingUrl = '') {
     frame.removeAttribute('src');
     setInlineFileStatus(e.message || String(e), 'error');
   }
+  return true;
 }
 
-function openCurrentFileInMainPanel(kind) {
+async function openCurrentFileInMainPanel(kind) {
   if (kind === 'pdf') {
     const path = FILE_EXPLORER_STATE.pdfPath;
     const url = FILE_EXPLORER_STATE.pdfObjectUrl;
     if (!path) return;
-    openPdfInMainPanel(path, url);
-    closePdfViewer();
+    const opened = await openPdfInMainPanel(path, url);
+    if (opened) closePdfViewer();
     return;
   }
   const path = FILE_EXPLORER_STATE.editorPath;
   const textarea = fileEditorTextarea();
   if (!path) return;
-  openTextInMainPanel(path, textarea ? textarea.value : null);
-  closeFileEditor(true);
+  const opened = await openTextInMainPanel(path, textarea ? textarea.value : null);
+  if (opened) closeFileEditor(true);
 }
 
 function copyInlineFileContent() {

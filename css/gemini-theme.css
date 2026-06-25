@@ -855,6 +855,24 @@ body{
   z-index:5;
 }
 
+[data-theme="dark"][data-cool-mode] .inline-file-panel{
+  position:relative;
+  z-index:2;
+  background:var(--bg-chat);
+}
+
+[data-theme="dark"][data-cool-mode] .inline-file-body{
+  background:var(--bg-input);
+}
+
+[data-theme="dark"][data-cool-mode] .inline-file-body textarea{
+  background:var(--bg-input);
+}
+
+[data-theme="dark"][data-cool-mode] .inline-file-body iframe{
+  background:var(--bg-input);
+}
+
 [data-theme="dark"][data-cool-mode] .messages{
   background:transparent;
   overflow-x:hidden;
