@@ -5,7 +5,7 @@
 #  Copy this file to ANY folder you want as the sandbox root.
 #  Run with:    bash start_agent.sh
 #  Or chmod +x start_agent.sh and double-click.
-#  Sandbox root is auto-locked to this script's folder.
+#  Sandbox root restores the last used folder; if no record exists, uses the current launch directory.
 # ============================================================
 
 # ===== EDIT THIS: path to your agent repo =====
@@ -38,4 +38,4 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
-"$PYTHON_BIN" "$AGENT_HOME/local_terminal_server.py" --workspace "$WORKSPACE" "$@"
+"$PYTHON_BIN" "$AGENT_HOME/local_terminal_server.py" "$@"

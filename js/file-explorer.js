@@ -7,7 +7,12 @@ const FILE_EXPLORER_STATE = {
   entries: [],
   editorPath: '',
   editorOriginal: '',
+  editorMarkdownPreview: false,
+  editorCodePreview: false,
   editorLoading: false,
+  editorPythonMode: false,
+  editorFoldedLines: new Set(),
+  editorBracketMatch: null,
   pdfPath: '',
   pdfObjectUrl: '',
   imagePath: '',
@@ -84,6 +89,14 @@ function isFileExplorerTextFile(path) {
   return FILE_EXPLORER_TEXT_EXTENSIONS.has(fileExplorerExtension(path));
 }
 
+function isFileExplorerMarkdownFile(path) {
+  return /^(md|markdown)$/i.test(fileExplorerExtension(path));
+}
+
+function isFileExplorerPythonFile(path) {
+  return /^py$/i.test(fileExplorerExtension(path));
+}
+
 function isFileExplorerPdfFile(path) {
   return fileExplorerExtension(path) === 'pdf';
 }
@@ -119,6 +132,258 @@ function setFileEditorStatus(message, kind = '') {
 
 function fileEditorTextarea() {
   return document.getElementById('fileEditorContent');
+}
+
+function fileEditorCodeShell() {
+  return document.getElementById('fileEditorCodeShell');
+}
+
+function fileEditorCodeGutter() {
+  return document.getElementById('fileEditorCodeGutter');
+}
+
+function fileEditorCodeHighlight() {
+  return document.querySelector('#fileEditorCodeHighlight code');
+}
+
+function currentEditorLineIndex(textarea) {
+  return String(textarea.value || '').slice(0, textarea.selectionStart || 0).split('\n').length - 1;
+}
+
+function editorLineStartOffsets(text) {
+  const source = String(text || '');
+  const offsets = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === '\n') offsets.push(i + 1);
+  }
+  return offsets;
+}
+
+function editorLineAtOffset(offsets, offset) {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (offsets[mid] <= offset && (mid === offsets.length - 1 || offsets[mid + 1] > offset)) return mid;
+    if (offsets[mid] > offset) high = mid - 1;
+    else low = mid + 1;
+  }
+  return 0;
+}
+
+function findPythonFoldRanges(lines) {
+  const ranges = new Map();
+  const indentOf = line => {
+    const m = String(line || '').match(/^[ \t]*/);
+    return m ? m[0].replace(/\t/g, '    ').length : 0;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] || '';
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || !/:\s*(?:#.*)?$/.test(line)) continue;
+    const baseIndent = indentOf(line);
+    let end = i;
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = (lines[j] || '').trim();
+      if (!t) { end = j; continue; }
+      const ind = indentOf(lines[j]);
+      if (ind <= baseIndent) break;
+      end = j;
+    }
+    if (end > i) ranges.set(i, end);
+  }
+  return ranges;
+}
+
+function foldedLineSetFromRanges(ranges) {
+  const hidden = new Set();
+  FILE_EXPLORER_STATE.editorFoldedLines.forEach(start => {
+    const end = ranges.get(start);
+    if (!Number.isInteger(end)) return;
+    for (let i = start + 1; i <= end; i++) hidden.add(i);
+  });
+  return hidden;
+}
+
+function findBracketMatch(source, caret) {
+  const pairs = { '(': ')', '[': ']', '{': '}', ')': '(', ']': '[', '}': '{' };
+  const opens = new Set(['(', '[', '{']);
+  const closes = new Set([')', ']', '}']);
+  let pos = -1;
+  if (caret > 0 && pairs[source[caret - 1]]) pos = caret - 1;
+  else if (pairs[source[caret]]) pos = caret;
+  if (pos < 0) return null;
+  const ch = source[pos];
+  const target = pairs[ch];
+  const forward = opens.has(ch);
+  let depth = 0;
+  if (forward) {
+    for (let i = pos; i < source.length; i++) {
+      if (source[i] === ch) depth++;
+      else if (source[i] === target) {
+        depth--;
+        if (depth === 0) return { a: pos, b: i };
+      }
+    }
+  } else if (closes.has(ch)) {
+    for (let i = pos; i >= 0; i--) {
+      if (source[i] === ch) depth++;
+      else if (source[i] === target) {
+        depth--;
+        if (depth === 0) return { a: i, b: pos };
+      }
+    }
+  }
+  return null;
+}
+
+function highlightPythonLineWithBrackets(line, absoluteStart, match) {
+  const source = String(line || '');
+  const marked = new Set();
+  if (match) {
+    if (match.a >= absoluteStart && match.a < absoluteStart + source.length) marked.add(match.a - absoluteStart);
+    if (match.b >= absoluteStart && match.b < absoluteStart + source.length) marked.add(match.b - absoluteStart);
+  }
+  let html = highlightPythonCode(source);
+  if (!marked.size) return html || ' ';
+  let out = '';
+  let plainIndex = 0;
+  let inTag = false;
+  for (let i = 0; i < html.length; i++) {
+    const c = html[i];
+    if (c === '<') inTag = true;
+    if (!inTag && marked.has(plainIndex)) out += '<span class="code-bracket-match">';
+    out += c;
+    if (c === '>') { inTag = false; continue; }
+    if (!inTag) {
+      if (marked.has(plainIndex)) out += '</span>';
+      plainIndex++;
+    }
+  }
+  return out || ' ';
+}
+
+function renderPythonEditor() {
+  const textarea = fileEditorTextarea();
+  const gutter = fileEditorCodeGutter();
+  const highlight = fileEditorCodeHighlight();
+  if (!textarea || !gutter || !highlight || !FILE_EXPLORER_STATE.editorPythonMode) return;
+  const value = textarea.value || '';
+  const lines = value.split('\n');
+  const offsets = editorLineStartOffsets(value);
+  const currentLine = currentEditorLineIndex(textarea);
+  const foldRanges = findPythonFoldRanges(lines);
+  const hiddenLines = foldedLineSetFromRanges(foldRanges);
+  FILE_EXPLORER_STATE.editorBracketMatch = findBracketMatch(value, textarea.selectionStart || 0);
+  gutter.innerHTML = lines.map((_, i) => {
+    if (hiddenLines.has(i)) return '';
+    const folded = FILE_EXPLORER_STATE.editorFoldedLines.has(i) && foldRanges.has(i);
+    const fold = foldRanges.has(i) ? `<span class="code-fold-toggle" data-line="${i}" title="${folded ? '展开代码' : '折叠代码'}">${folded ? '›' : '⌄'}</span>` : '<span class="code-fold-toggle"></span>';
+    return `<div class="code-gutter-line${i === currentLine ? ' current' : ''}">${fold}${i + 1}</div>`;
+  }).join('');
+  highlight.innerHTML = lines.map((line, i) => {
+    if (hiddenLines.has(i)) return '';
+    const cls = ['code-line'];
+    if (i === currentLine) cls.push('current-line');
+    const match = FILE_EXPLORER_STATE.editorBracketMatch;
+    if (match && (editorLineAtOffset(offsets, match.a) === i || editorLineAtOffset(offsets, match.b) === i)) cls.push('bracket-line');
+    const code = highlightPythonLineWithBrackets(line, offsets[i] || 0, match);
+    const folded = FILE_EXPLORER_STATE.editorFoldedLines.has(i) && foldRanges.has(i);
+    return `<span class="${cls.join(' ')}">${code}${folded ? ' <span class="code-fold-placeholder">⋯</span>' : ''}</span>`;
+  }).join('') || '<span class="code-line"> </span>';
+}
+
+function syncPythonEditorScroll() {
+  const textarea = fileEditorTextarea();
+  const gutter = fileEditorCodeGutter();
+  const pre = document.getElementById('fileEditorCodeHighlight');
+  if (!textarea) return;
+  if (gutter) gutter.style.transform = `translateY(${-textarea.scrollTop}px)`;
+  if (pre) {
+    pre.style.transform = `translate(${-textarea.scrollLeft}px, ${-textarea.scrollTop}px)`;
+  }
+}
+
+function setPythonEditorMode(enabled) {
+  const shell = fileEditorCodeShell();
+  FILE_EXPLORER_STATE.editorPythonMode = !!enabled;
+  if (shell) shell.classList.toggle('python-editor', !!enabled);
+  if (enabled) {
+    renderPythonEditor();
+    syncPythonEditorScroll();
+  }
+}
+
+function replaceEditorSelection(textarea, text, selectStart = null, selectEnd = null) {
+  const start = textarea.selectionStart || 0;
+  const end = textarea.selectionEnd || 0;
+  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+  const nextStart = selectStart === null ? start + text.length : start + selectStart;
+  const nextEnd = selectEnd === null ? nextStart : start + selectEnd;
+  textarea.setSelectionRange(nextStart, nextEnd);
+  renderPythonEditor();
+}
+
+function handlePythonEditorKeydown(event) {
+  const textarea = event.currentTarget;
+  if (!FILE_EXPLORER_STATE.editorPythonMode || !isFileExplorerPythonFile(FILE_EXPLORER_STATE.editorPath)) return;
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    replaceEditorSelection(textarea, '    ');
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const value = textarea.value || '';
+    const before = value.slice(0, textarea.selectionStart || 0);
+    const line = before.slice(before.lastIndexOf('\n') + 1);
+    const indent = (line.match(/^[ \t]*/) || [''])[0];
+    const extra = /:\s*(?:#.*)?$/.test(line) ? '    ' : '';
+    replaceEditorSelection(textarea, `\n${indent}${extra}`);
+    return;
+  }
+  const pairs = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'" };
+  if (pairs[event.key] && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    replaceEditorSelection(textarea, event.key + pairs[event.key], 1, 1);
+  }
+}
+
+function bindPythonFileEditor() {
+  const textarea = fileEditorTextarea();
+  const gutter = fileEditorCodeGutter();
+  if (textarea && textarea.dataset.pythonEditorBound !== '1') {
+    textarea.dataset.pythonEditorBound = '1';
+    textarea.addEventListener('input', () => {
+      if (FILE_EXPLORER_STATE.editorPythonMode) renderPythonEditor();
+    });
+    textarea.addEventListener('scroll', () => {
+      if (FILE_EXPLORER_STATE.editorPythonMode) syncPythonEditorScroll();
+    });
+    textarea.addEventListener('keydown', handlePythonEditorKeydown);
+    textarea.addEventListener('keyup', () => {
+      if (FILE_EXPLORER_STATE.editorPythonMode) renderPythonEditor();
+    });
+    textarea.addEventListener('click', () => {
+      if (FILE_EXPLORER_STATE.editorPythonMode) renderPythonEditor();
+    });
+    textarea.addEventListener('select', () => {
+      if (FILE_EXPLORER_STATE.editorPythonMode) renderPythonEditor();
+    });
+  }
+  if (gutter && gutter.dataset.pythonEditorBound !== '1') {
+    gutter.dataset.pythonEditorBound = '1';
+    gutter.addEventListener('click', event => {
+      const toggle = event.target.closest('.code-fold-toggle[data-line]');
+      if (!toggle) return;
+      event.preventDefault();
+      const line = Number(toggle.dataset.line);
+      if (FILE_EXPLORER_STATE.editorFoldedLines.has(line)) FILE_EXPLORER_STATE.editorFoldedLines.delete(line);
+      else FILE_EXPLORER_STATE.editorFoldedLines.add(line);
+      renderPythonEditor();
+      syncPythonEditorScroll();
+    });
+  }
 }
 
 function fileExplorerSort(entries) {
@@ -366,6 +631,137 @@ function closeInlineFilePanel() {
   FILE_EXPLORER_STATE.inlineFileKind = '';
 }
 
+function highlightPythonCode(code) {
+  const source = String(code || '');
+  const keywords = new Set([
+    'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break',
+    'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally',
+    'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal',
+    'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield'
+  ]);
+  const builtins = new Set([
+    'abs', 'all', 'any', 'bool', 'bytes', 'callable', 'chr', 'dict', 'dir',
+    'enumerate', 'Exception', 'filter', 'float', 'format', 'frozenset', 'getattr',
+    'hasattr', 'help', 'id', 'input', 'int', 'isinstance', 'issubclass', 'iter',
+    'len', 'list', 'map', 'max', 'min', 'next', 'object', 'open', 'ord', 'print',
+    'property', 'range', 'repr', 'reversed', 'round', 'set', 'setattr', 'slice',
+    'sorted', 'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip'
+  ]);
+  const tokenRe = /(#[^\n]*)|((?:[rRuUbBfF]{0,2})(?:'''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"))|(@[A-Za-z_]\w*)|(\b(?:0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?j?)\b)|(\b[A-Za-z_]\w*\b)/g;
+  let out = '';
+  let last = 0;
+  const wrap = (cls, text) => `<span class="py-${cls}">${escapeHtml(text)}</span>`;
+  source.replace(tokenRe, (match, comment, string, decorator, number, word, offset) => {
+    out += escapeHtml(source.slice(last, offset));
+    if (comment) out += wrap('comment', comment);
+    else if (string) out += wrap('string', string);
+    else if (decorator) out += wrap('decorator', decorator);
+    else if (number) out += wrap('number', number);
+    else if (keywords.has(word)) out += wrap('keyword', word);
+    else if (builtins.has(word)) out += wrap('builtin', word);
+    else out += escapeHtml(word);
+    last = offset + match.length;
+    return match;
+  });
+  out += escapeHtml(source.slice(last));
+  return out;
+}
+
+function renderPythonPreviewInto(container, code) {
+  if (!container) return;
+  container.innerHTML = `<pre class="python-code-preview"><code>${highlightPythonCode(code)}</code></pre>`;
+}
+
+function renderMarkdownPreviewInto(container, markdown) {
+  if (!container) return;
+  if (typeof renderMarkdown === 'function') {
+    container.innerHTML = renderMarkdown(String(markdown || ''));
+    if (typeof postRender === 'function') postRender(container);
+  } else {
+    container.innerHTML = `<pre>${escapeHtml(String(markdown || ''))}</pre>`;
+  }
+}
+
+function updateFileEditorMarkdownPreview() {
+  const textarea = fileEditorTextarea();
+  const preview = document.getElementById('fileEditorMarkdownPreview');
+  if (!textarea || !preview) return;
+  renderMarkdownPreviewInto(preview, textarea.value);
+}
+
+function setFileEditorMarkdownPreview(enabled) {
+  const path = FILE_EXPLORER_STATE.editorPath;
+  const isMarkdown = isFileExplorerMarkdownFile(path);
+  const textarea = fileEditorTextarea();
+  const shell = fileEditorCodeShell();
+  const preview = document.getElementById('fileEditorMarkdownPreview');
+  const toggle = document.getElementById('fileEditorMarkdownToggle');
+  const saveBtn = document.getElementById('fileEditorSaveBtn');
+  const nextEnabled = !!enabled && isMarkdown;
+  FILE_EXPLORER_STATE.editorCodePreview = false;
+  FILE_EXPLORER_STATE.editorMarkdownPreview = nextEnabled;
+  setPythonEditorMode(isFileExplorerPythonFile(path) && !nextEnabled);
+  if (textarea) textarea.hidden = false;
+  if (shell) shell.hidden = nextEnabled;
+  if (preview) {
+    preview.classList.remove('file-editor-code-preview');
+    preview.classList.add('markdown-preview', 'file-editor-markdown-preview', 'msg-content');
+    preview.hidden = !nextEnabled;
+    if (nextEnabled) updateFileEditorMarkdownPreview();
+  }
+  if (toggle) {
+    toggle.hidden = !isMarkdown;
+    toggle.textContent = nextEnabled ? '编辑源码' : 'Markdown 预览';
+    toggle.classList.toggle('active', nextEnabled);
+  }
+  const codeToggle = document.getElementById('fileEditorCodeToggle');
+  if (codeToggle) {
+    codeToggle.hidden = !isFileExplorerPythonFile(path);
+    codeToggle.textContent = 'Python 高亮预览';
+    codeToggle.classList.remove('active');
+  }
+  if (saveBtn) saveBtn.hidden = nextEnabled;
+  if (!nextEnabled && textarea && !textarea.disabled) textarea.focus();
+}
+
+function updateFileEditorCodePreview() {
+  const textarea = fileEditorTextarea();
+  const preview = document.getElementById('fileEditorMarkdownPreview');
+  if (!textarea || !preview) return;
+  renderPythonPreviewInto(preview, textarea.value);
+}
+
+function setFileEditorCodePreview(enabled) {
+  const path = FILE_EXPLORER_STATE.editorPath;
+  const isPython = isFileExplorerPythonFile(path);
+  const textarea = fileEditorTextarea();
+  const shell = fileEditorCodeShell();
+  const preview = document.getElementById('fileEditorMarkdownPreview');
+  const toggle = document.getElementById('fileEditorCodeToggle');
+  const markdownToggle = document.getElementById('fileEditorMarkdownToggle');
+  const saveBtn = document.getElementById('fileEditorSaveBtn');
+  const nextEnabled = !!enabled && isPython;
+  FILE_EXPLORER_STATE.editorMarkdownPreview = false;
+  FILE_EXPLORER_STATE.editorCodePreview = nextEnabled;
+  if (shell) shell.hidden = nextEnabled;
+  if (preview) {
+    preview.classList.remove('markdown-preview', 'file-editor-markdown-preview', 'msg-content');
+    preview.classList.add('file-editor-code-preview');
+    preview.hidden = !nextEnabled;
+    if (nextEnabled) updateFileEditorCodePreview();
+  }
+  if (toggle) {
+    toggle.hidden = !isPython;
+    toggle.textContent = nextEnabled ? '编辑器' : 'Python 高亮预览';
+    toggle.classList.toggle('active', nextEnabled);
+  }
+  if (markdownToggle) markdownToggle.hidden = !isFileExplorerMarkdownFile(path);
+  if (saveBtn) saveBtn.hidden = nextEnabled;
+  if (textarea) textarea.hidden = false;
+  setPythonEditorMode(isPython && !nextEnabled);
+  if (!nextEnabled && textarea && !textarea.disabled) textarea.focus();
+}
+
 async function openTextInMainPanel(path, initialContent = null, initialSize = null) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerTextFile(normalizedPath)) {
@@ -378,15 +774,30 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
   if (!body || !footer) return false;
   clearInlineFileContent();
   const textarea = document.createElement('textarea');
+  const preview = document.createElement('div');
+  const isMarkdown = isFileExplorerMarkdownFile(normalizedPath);
+  const isPython = isFileExplorerPythonFile(normalizedPath);
   textarea.spellcheck = false;
   textarea.placeholder = '文件内容...';
+  textarea.id = 'inlineFileTextContent';
+  preview.className = 'markdown-preview inline-markdown-preview msg-content';
+  preview.hidden = true;
   body.appendChild(textarea);
+  body.appendChild(preview);
   footer.innerHTML = `
     <button class="btn" type="button" onclick="copyInlineFileContent()">复制内容</button>
+    ${isMarkdown ? '<button class="btn" type="button" id="inlineMarkdownToggle" onclick="toggleInlineMarkdownPreview()">Markdown 预览</button>' : ''}
+    ${isPython ? '<button class="btn" type="button" id="inlinePythonToggle" onclick="toggleInlinePythonPreview()">Python 高亮</button>' : ''}
     <button class="btn" type="button" onclick="reloadInlineFilePanel()">重新读取</button>
   `;
+  const setContent = (content, disabled = false) => {
+    textarea.value = String(content || '');
+    textarea.disabled = !!disabled;
+    if (isMarkdown && FILE_EXPLORER_STATE.inlineFileKind === 'markdown') renderMarkdownPreviewInto(preview, textarea.value);
+    if (isPython && FILE_EXPLORER_STATE.inlineFileKind === 'python') renderPythonPreviewInto(preview, textarea.value);
+  };
   if (initialContent !== null && initialContent !== undefined) {
-    textarea.value = String(initialContent);
+    setContent(initialContent, false);
     setInlineFileStatus(`${initialSize !== null && initialSize !== undefined ? formatSize(Number(initialSize || 0)) : `${textarea.value.length} 字符`} / 已显示`, 'ok');
     textarea.focus();
     return true;
@@ -398,8 +809,7 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
     const r = await callAgentBackend('read_file', { path: normalizedPath });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '读取文件失败');
-    textarea.value = r.content || '';
-    textarea.disabled = false;
+    setContent(r.content || '', false);
     setInlineFileStatus(`${formatSize(Number(r.size || 0))} / 已读取`, 'ok');
     textarea.focus();
     return true;
@@ -408,6 +818,47 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
     setInlineFileStatus(e.message || String(e), 'error');
   }
   return true;
+}
+
+function toggleInlineMarkdownPreview(force) {
+  const path = FILE_EXPLORER_STATE.inlineFilePath;
+  if (!isFileExplorerMarkdownFile(path)) return;
+  const textarea = document.querySelector('#inlineFileBody textarea');
+  const preview = document.querySelector('#inlineFileBody .inline-markdown-preview');
+  const toggle = document.getElementById('inlineMarkdownToggle');
+  if (!textarea || !preview) return;
+  const showPreview = typeof force === 'boolean' ? force : preview.hidden;
+  if (showPreview) renderMarkdownPreviewInto(preview, textarea.value);
+  preview.hidden = !showPreview;
+  textarea.hidden = showPreview;
+  FILE_EXPLORER_STATE.inlineFileKind = showPreview ? 'markdown' : 'text';
+  if (toggle) {
+    toggle.textContent = showPreview ? '查看源码' : 'Markdown 预览';
+    toggle.classList.toggle('active', showPreview);
+  }
+  if (!showPreview) textarea.focus();
+}
+
+function toggleInlinePythonPreview(force) {
+  const path = FILE_EXPLORER_STATE.inlineFilePath;
+  if (!isFileExplorerPythonFile(path)) return;
+  const textarea = document.querySelector('#inlineFileBody textarea');
+  const preview = document.querySelector('#inlineFileBody .inline-markdown-preview, #inlineFileBody .inline-code-preview');
+  const toggle = document.getElementById('inlinePythonToggle');
+  if (!textarea || !preview) return;
+  const showPreview = typeof force === 'boolean' ? force : preview.hidden;
+  if (showPreview) {
+    preview.className = 'inline-code-preview';
+    renderPythonPreviewInto(preview, textarea.value);
+  }
+  preview.hidden = !showPreview;
+  textarea.hidden = showPreview;
+  FILE_EXPLORER_STATE.inlineFileKind = showPreview ? 'python' : 'text';
+  if (toggle) {
+    toggle.textContent = showPreview ? '编辑源码' : 'Python 高亮';
+    toggle.classList.toggle('active', showPreview);
+  }
+  if (!showPreview) textarea.focus();
 }
 
 async function openPdfInMainPanel(path, existingUrl = '') {
@@ -469,7 +920,7 @@ async function reloadInlineFilePanel() {
   const kind = FILE_EXPLORER_STATE.inlineFileKind;
   if (!path) return;
   if (kind === 'pdf') await openPdfInMainPanel(path);
-  else if (kind === 'text') await openTextInMainPanel(path);
+  else if (kind === 'text' || kind === 'markdown') await openTextInMainPanel(path);
 }
 
 function openInlineFileInNewTab() {
@@ -518,6 +969,7 @@ function closeFileEditor(force = false) {
   if (!force && textarea && FILE_EXPLORER_STATE.editorPath && textarea.value !== FILE_EXPLORER_STATE.editorOriginal) {
     if (!confirm('文件有未保存修改，确定关闭？')) return;
   }
+  setPythonEditorMode(false);
   if (modal) modal.classList.remove('show');
 }
 
@@ -533,8 +985,13 @@ async function openFileEditor(path) {
   if (!modal || !textarea) return;
   FILE_EXPLORER_STATE.editorPath = normalizedPath;
   FILE_EXPLORER_STATE.editorOriginal = '';
+  FILE_EXPLORER_STATE.editorFoldedLines = new Set();
   if (pathEl) pathEl.textContent = normalizedPath;
   textarea.value = '';
+  textarea.hidden = false;
+  setFileEditorMarkdownPreview(false);
+  setFileEditorCodePreview(false);
+  setPythonEditorMode(isFileExplorerPythonFile(normalizedPath));
   textarea.disabled = true;
   modal.classList.add('show');
   setFileEditorStatus('正在读取...', 'loading');
@@ -546,6 +1003,9 @@ async function openFileEditor(path) {
     textarea.value = r.content || '';
     textarea.disabled = false;
     FILE_EXPLORER_STATE.editorOriginal = textarea.value;
+    setFileEditorMarkdownPreview(false);
+    setFileEditorCodePreview(false);
+    setPythonEditorMode(isFileExplorerPythonFile(normalizedPath));
     setFileEditorStatus(`${formatSize(Number(r.size || 0))} / 已读取`, 'ok');
     textarea.focus();
   } catch (e) {
@@ -589,6 +1049,9 @@ async function saveFileEditor() {
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '保存失败');
     FILE_EXPLORER_STATE.editorOriginal = content;
+    if (FILE_EXPLORER_STATE.editorMarkdownPreview) updateFileEditorMarkdownPreview();
+    if (FILE_EXPLORER_STATE.editorCodePreview) updateFileEditorCodePreview();
+    if (FILE_EXPLORER_STATE.editorPythonMode) renderPythonEditor();
     setFileEditorStatus(`已保存 ${formatSize(Number(r.bytes_written || 0))}`, 'ok');
     if (typeof toast === 'function') toast('文件已保存');
     if (FILE_EXPLORER_STATE.visible) refreshFileExplorer();
@@ -1045,6 +1508,7 @@ function handleFileExplorerContextMenuAction(event) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  bindPythonFileEditor();
   const list = document.getElementById('fileExplorerList');
   if (list) {
     list.addEventListener('click', handleFileExplorerClick);
@@ -1096,7 +1560,9 @@ window.openCurrentFileInMainPanel = openCurrentFileInMainPanel;
 window.openTextInMainPanel = openTextInMainPanel;
 window.openPdfInMainPanel = openPdfInMainPanel;
 window.closeInlineFilePanel = closeInlineFilePanel;
+window.setFileEditorMarkdownPreview = setFileEditorMarkdownPreview;
 window.reloadInlineFilePanel = reloadInlineFilePanel;
 window.copyInlineFileContent = copyInlineFileContent;
 window.openInlineFileInNewTab = openInlineFileInNewTab;
+window.toggleInlineMarkdownPreview = toggleInlineMarkdownPreview;
 window.toggleInlineFileSide = toggleInlineFileSide;

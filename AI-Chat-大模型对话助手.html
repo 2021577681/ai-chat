@@ -578,13 +578,20 @@
       <code id="fileEditorPath">-</code>
       <span id="fileEditorStatus">未加载</span>
     </div>
-    <textarea id="fileEditorContent" spellcheck="false" placeholder="文件内容..."></textarea>
+    <div id="fileEditorMarkdownPreview" class="markdown-preview file-editor-markdown-preview msg-content" hidden></div>
+    <div id="fileEditorCodeShell" class="file-editor-code-shell">
+      <div id="fileEditorCodeGutter" class="file-editor-code-gutter" aria-hidden="true"></div>
+      <pre id="fileEditorCodeHighlight" class="file-editor-code-highlight" aria-hidden="true"><code></code></pre>
+      <textarea id="fileEditorContent" spellcheck="false" placeholder="文件内容..."></textarea>
+    </div>
     <div class="modal-footer file-editor-footer">
       <button class="btn" type="button" onclick="copyFileEditorContent()">复制内容</button>
+      <button class="btn" type="button" id="fileEditorMarkdownToggle" onclick="setFileEditorMarkdownPreview(!FILE_EXPLORER_STATE.editorMarkdownPreview)" hidden>Markdown 预览</button>
+      <button class="btn" type="button" id="fileEditorCodeToggle" onclick="setFileEditorCodePreview(!FILE_EXPLORER_STATE.editorCodePreview)" hidden>Python 高亮预览</button>
       <button class="btn" type="button" onclick="reloadFileEditor()">重新读取</button>
       <button class="btn" type="button" onclick="openCurrentFileInMainPanel('text')">主页面显示</button>
       <button class="btn" type="button" onclick="closeFileEditor()">关闭</button>
-      <button class="btn btn-primary" type="button" onclick="saveFileEditor()">保存修改</button>
+      <button class="btn btn-primary" id="fileEditorSaveBtn" type="button" onclick="saveFileEditor()">保存修改</button>
     </div>
   </div>
 </div>

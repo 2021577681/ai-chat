@@ -4,7 +4,7 @@ REM  Agent Launcher for Windows
 REM ============================================================
 REM  Double-click to start the Agent backend and open the frontend.
 REM  You can switch the sandbox folder from the frontend workspace card.
-REM  The initial sandbox root is this .bat file's folder.
+REM  The initial sandbox root restores the last used folder; if no record exists, this .bat file's folder is used.
 REM  Optional: set AGENT_HOME to point to your agent repo if this
 REM  launcher is copied outside the repo.
 REM ============================================================
@@ -17,7 +17,7 @@ REM Agent code home. Defaults to this script's folder.
 if not defined AGENT_HOME set "AGENT_HOME=%~dp0"
 if "%AGENT_HOME:~-1%"=="\" set "AGENT_HOME=%AGENT_HOME:~0,-1%"
 
-REM Sandbox root = folder containing this .bat
+REM Fallback sandbox root = folder containing this .bat
 set "WORKSPACE=%~dp0"
 
 REM Strip trailing backslash (argparse can be picky)
@@ -51,7 +51,7 @@ if defined HTML_FILE (
     echo [WARN] Cannot find frontend HTML: %AGENT_HOME%\AI-Chat-*.html
 )
 
-python "%AGENT_HOME%\local_terminal_server.py" --workspace "%WORKSPACE%" %*
+python "%AGENT_HOME%\local_terminal_server.py" %*
 
 REM Keep window open after server exits so user can read errors
 pause

@@ -150,16 +150,24 @@ def _print_banner():
 def main(argv=None):
     args = _parse_args(argv if argv is not None else sys.argv[1:])
 
-    # --- 应用 CLI 参数（必须在启动 HTTP 服务前完成）---
-    if args.workspace:
+    # --- 应用沙箱目录（必须在启动 HTTP 服务前完成）---
+    # 优先级：命令行显式 --workspace > 上次保存的沙箱目录 > 启动时 cwd。
+    requested_workspace = args.workspace or config.load_last_workspace(os.getcwd())
+    if requested_workspace:
         try:
-            config.set_workspace(args.workspace)
+            config.set_workspace(requested_workspace)
         except FileNotFoundError as e:
-            print(f'❌ {e}', file=sys.stderr)
-            sys.exit(2)
+            if args.workspace:
+                print(f'❌ {e}', file=sys.stderr)
+                sys.exit(2)
+            print(f'⚠️ 上次沙箱目录不可用，改用当前目录: {e}', file=sys.stderr)
+            config.set_workspace(os.getcwd())
         except Exception as e:
-            print(f'❌ 设置 workspace 失败: {e}', file=sys.stderr)
-            sys.exit(2)
+            if args.workspace:
+                print(f'❌ 设置 workspace 失败: {e}', file=sys.stderr)
+                sys.exit(2)
+            print(f'⚠️ 恢复上次沙箱目录失败，改用当前目录: {e}', file=sys.stderr)
+            config.set_workspace(os.getcwd())
 
     if args.host:
         config.HOST = args.host
@@ -172,8 +180,10 @@ def main(argv=None):
     try:
         ThreadingHTTPServer((config.HOST, config.PORT), Handler).serve_forever()
     except KeyboardInterrupt:
+        config.save_last_workspace()
         print('\n👋 服务已停止')
     except OSError as e:
+        config.save_last_workspace()
         # 端口被占用的友好提示
         if 'Address already in use' in str(e) or getattr(e, 'errno', None) in (48, 98, 10048):
             print(f'\n❌ 端口 {config.PORT} 已被占用。请用 --port 指定其他端口，或停掉占用进程。', file=sys.stderr)
