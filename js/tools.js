@@ -17,6 +17,7 @@ function renderToolList() {
     el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;font-size:13px;">还没有工具<br><button class="btn btn-primary" style="margin-top:10px;" onclick="resetBuiltinTools()">🔄 加载内置工具</button></div>';
     updateLmsToggleBtn();
     updateGitToggleBtn();
+    updatePptToggleBtn();
     updatePaperToggleBtn();
     return;
   }
@@ -28,16 +29,19 @@ function renderToolList() {
     const isLms = isLmsTool(t.name);
     const isGit = isGitTool(t.name);
     const isPaper = isPaperTool(t.name);
+    const isPpt = isPptTool(t.name);
     const isMcp = (typeof isMcpTool === 'function') && isMcpTool(t);
     const badge = isLms
       ? '<span style="background:#9c27b0;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">🎓 LMS</span>'
       : (isGit
         ? '<span style="background:#2e7d32;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">💾 快照</span>'
-        : (isPaper
-          ? '<span style="background:#0277bd;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">📚 论文</span>'
-          : (isMcp
-            ? '<span style="background:#455a64;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">MCP</span>'
-            : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : ''))));
+        : (isPpt
+          ? '<span style="background:#ef6c00;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">📊 PPT</span>'
+          : (isPaper
+            ? '<span style="background:#0277bd;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">📚 论文</span>'
+            : (isMcp
+              ? '<span style="background:#455a64;color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">MCP</span>'
+              : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : '')))));
     return `
     <div class="tool-item">
       <div class="tool-item-header" onclick="this.parentElement.classList.toggle('expanded')">
@@ -54,6 +58,7 @@ function renderToolList() {
   }).join('');
   updateLmsToggleBtn();
   updateGitToggleBtn();
+  updatePptToggleBtn();
   updatePaperToggleBtn();
 }
 
@@ -177,6 +182,72 @@ function updateGitToggleBtn() {
     btn.textContent = `启用快照工具 (${total})`;
     btn.classList.add('btn-primary');
     btn.title = '当前未启用，点击一键加入全部版本快照工具';
+  }
+}
+
+// ============ 📊 PPT 工具批量启停 ============
+const PPT_TOOL_NAMES = ['generate_ppt'];
+
+function isPptTool(name) {
+  return typeof name === 'string' && PPT_TOOL_NAMES.includes(name);
+}
+
+function pptToolsEnabled() {
+  return state.tools.some(t => isPptTool(t.name));
+}
+
+function pptToolCount() {
+  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
+  return BUILTIN_TOOLS.filter(t => isPptTool(t.name)).length;
+}
+
+function togglePptTools() {
+  if (typeof BUILTIN_TOOLS === 'undefined') {
+    toast('未找到内置工具定义');
+    return;
+  }
+  const pptTools = BUILTIN_TOOLS.filter(t => isPptTool(t.name));
+  const enabledCount = state.tools.filter(t => isPptTool(t.name)).length;
+  if (enabledCount > 0 && enabledCount >= pptTools.length) {
+    const removed = enabledCount;
+    state.tools = state.tools.filter(t => !isPptTool(t.name));
+    persistTools();
+    renderToolList();
+    toast(`🔕 已禁用 ${removed} 个 PPT 工具`);
+  } else {
+    let added = 0;
+    for (const tool of pptTools) {
+      if (!state.tools.some(t => t.name === tool.name)) {
+        state.tools.push(JSON.parse(JSON.stringify(tool)));
+        added++;
+      }
+    }
+    persistTools();
+    renderToolList();
+    toast(added ? `📊 已启用 ${added} 个 PPT 工具` : '📊 PPT 工具已全部启用');
+  }
+}
+
+function updatePptToggleBtn() {
+  const btn = document.getElementById('pptToggleBtn');
+  if (!btn) return;
+  const enabled = pptToolsEnabled();
+  const total = pptToolCount();
+  if (enabled) {
+    const cur = state.tools.filter(t => isPptTool(t.name)).length;
+    if (cur < total) {
+      btn.textContent = `补全 PPT 工具 (${cur}/${total})`;
+      btn.classList.add('btn-primary');
+      btn.title = '当前只启用了部分 PPT 工具，点击补全';
+    } else {
+      btn.textContent = `禁用 PPT 工具 (${cur})`;
+      btn.classList.remove('btn-primary');
+      btn.title = '当前 PPT 工具已启用，点击全部移除';
+    }
+  } else {
+    btn.textContent = `启用 PPT 工具 (${total})`;
+    btn.classList.add('btn-primary');
+    btn.title = '当前未启用，点击一键加入 PPT 生成工具';
   }
 }
 
@@ -765,6 +836,7 @@ async function executeTool(name, args, context = {}) {
     const scopedNames = [
       'callAgentBackend',
       'executeTerminalCommand', 'readFile', 'writeFile', 'appendFile', 'editFile', 'applyPatch', 'deleteFile',
+      'generatePpt',
       'readToolArtifact',
       'listCheckpoints', 'restoreCheckpoint',
       'listDir', 'searchInFiles', 'webSearch', 'fetchUrl', 'aiScreenshot', 'attachFileForAI',

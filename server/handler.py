@@ -23,6 +23,7 @@ from .mcp_skills import McpSkillsMixin
 from .music import MusicMixin
 from .preview import PreviewMixin
 from .remote import RemoteMixin
+from .ppt import PptMixin
 from .proxy import ProxyMixin
 from .screenshot import ScreenshotMixin
 from .web import WebMixin
@@ -31,7 +32,7 @@ from .workspace import WorkspaceMixin
 
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
-              McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin):
+              McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin, PptMixin):
     """主 HTTP Handler，通过 mixin 组合所有功能。
     各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
@@ -220,6 +221,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_file_info(body)
             elif action == 'git':
                 self.handle_git(body)
+            elif action == 'generate_ppt':
+                self.handle_generate_ppt(body)
             elif action == 'screenshot':
                 self.handle_screenshot(body)
             elif action == 'list_windows':

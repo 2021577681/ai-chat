@@ -1055,6 +1055,24 @@ async function searchInFiles(path, pattern, fileGlob, context) {
   return output;
 }
 
+async function generatePpt(data, context) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const title = payload.title || (Array.isArray(payload.slides) && payload.slides[0] && payload.slides[0].title) || '未命名 PPT';
+  const slideCount = Array.isArray(payload.slides) ? payload.slides.length : 0;
+  const r = await callAgentBackend('generate_ppt', { data: payload },
+    'AI 想生成 PPT 文件',
+    `[生成 PPT]\n标题：${title}\n页数：${slideCount}\n文件名：${payload.filename || 'generated.pptx'}`,
+    context);
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `❌ ${r.error}`;
+  return {
+    ok: true,
+    path: r.path,
+    slides: r.slides || slideCount,
+    text: `✅ PPT 已生成：${r.path}（${r.slides || slideCount} 页）`
+  };
+}
+
 // ⭐ 网络搜索（通过本地后端 → DuckDuckGo/Bing）
 async function webSearch(query, maxResults, region, context) {
   const r = await callAgentBackend('web_search', {

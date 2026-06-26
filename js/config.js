@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v10';  // v10：新增 checkpoint 查看/恢复工具
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v13';  // v13：新增 PPT 学术版式 architecture/method_pipeline/table/chart/experiment_design/ablation
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -210,6 +210,210 @@ const BUILTIN_TOOLS = [
       required: ['patch']
     },
     code: 'return await applyPatch(args.patch, args.dry_run === true);'
+  },
+  {
+    name: 'generate_ppt',
+    description: '📊 根据结构化 JSON 生成 PPTX 文件。用户要求制作 PPT/演示文稿/汇报材料/课件/BP/方案/学术汇报时，优先调用本工具生成真实 .pptx，不要只在聊天里输出文字大纲。除封面、目录、总结外，内容页应优先使用原生 PPT 矢量版式。通用版式：three_cards / process / timeline / comparison / two_column / matrix / pyramid / cycle / funnel / quote；学术版式：architecture / method_pipeline / table / chart / experiment_design / ablation。后端会用 PPT 原生形状绘制，打开后可编辑。',
+    parameters: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string', description: '输出文件名，例如 ai_agent_demo.pptx；默认 generated.pptx' },
+        path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
+        title: { type: 'string', description: 'PPT 总标题' },
+        subtitle: { type: 'string', description: 'PPT 副标题，可用于封面' },
+        slides: {
+          type: 'array',
+          description: '幻灯片列表。强烈建议组合：cover + agenda + 多种矢量版式 + summary。学术/项目汇报优先使用 architecture/method_pipeline/table/chart/experiment_design/ablation；通用内容页使用 cards/process/timeline/comparison 等。尽量不要全用 bullets。每页标题不超过 20 字，要点 3-5 条。',
+          items: {
+            type: 'object',
+            properties: {
+              type: {
+                type: 'string',
+                description: '页面类型：cover、agenda、three_cards、process、timeline、comparison、two_column、matrix、pyramid、cycle、funnel、quote、architecture 项目架构、method_pipeline 研究流程、table 表格、chart 图表、experiment_design 实验设计、ablation 消融实验、summary、bullets。做 PPT 时内容页优先选矢量版式。'
+              },
+              title: { type: 'string', description: '页面标题' },
+              subtitle: { type: 'string', description: '封面或章节页副标题' },
+              bullets: {
+                type: 'array',
+                description: '要点列表。可传字符串，或 {text, level} 对象。',
+                items: {
+                  oneOf: [
+                    { type: 'string' },
+                    {
+                      type: 'object',
+                      properties: {
+                        text: { type: 'string', description: '要点文本' },
+                        level: { type: 'number', description: '缩进层级，0-4' }
+                      }
+                    }
+                  ]
+                }
+              },
+              items: {
+                type: 'array',
+                description: '目录页或总结页条目；等价于 bullets',
+                items: { type: 'string' }
+              },
+              content: { type: 'string', description: '可选正文；未提供 bullets 时使用' },
+              cards: {
+                type: 'array',
+                description: 'three_cards 卡片列表，建议 3-4 个。每项可含 title/icon/desc。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: '卡片标题' },
+                    icon: { type: 'string', description: '可选图标字符或序号，如 ①、🧭' },
+                    desc: { type: 'string', description: '卡片说明，建议不超过 30 字' }
+                  }
+                }
+              },
+              steps: {
+                type: 'array',
+                description: 'process 流程步骤，建议 3-5 个；也可用于 timeline。每项可含 title/desc。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: '步骤标题' },
+                    desc: { type: 'string', description: '步骤说明，建议不超过 24 字' }
+                  }
+                }
+              },
+              events: {
+                type: 'array',
+                description: 'timeline 时间轴事件，建议 3-5 个。每项可含 time/title/desc。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    time: { type: 'string', description: '阶段、时间或里程碑标签' },
+                    title: { type: 'string', description: '事件标题' },
+                    desc: { type: 'string', description: '事件说明，建议不超过 24 字' }
+                  }
+                }
+              },
+              left: {
+                type: 'object',
+                description: 'comparison 左侧对比项，格式 {title, items}',
+                properties: {
+                  title: { type: 'string', description: '左侧标题' },
+                  items: { type: 'array', items: { type: 'string' }, description: '左侧要点' }
+                }
+              },
+              right: {
+                type: 'object',
+                description: 'comparison 右侧对比项，格式 {title, items}',
+                properties: {
+                  title: { type: 'string', description: '右侧标题' },
+                  items: { type: 'array', items: { type: 'string' }, description: '右侧要点' }
+                }
+              },
+              quadrants: {
+                type: 'array',
+                description: 'matrix 四象限内容，建议 4 项。每项可含 title/desc。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: '象限标题' },
+                    desc: { type: 'string', description: '象限说明' }
+                  }
+                }
+              },
+              levels: {
+                type: 'array',
+                description: 'pyramid 金字塔层级，从底层到顶层或从基础到高级，建议 3-5 项。',
+                items: { type: 'string' }
+              },
+              stages: {
+                type: 'array',
+                description: 'funnel 漏斗阶段，建议 3-5 项。每项可为字符串或 {title, desc}。',
+                items: {
+                  oneOf: [
+                    { type: 'string' },
+                    {
+                      type: 'object',
+                      properties: {
+                        title: { type: 'string', description: '阶段标题' },
+                        desc: { type: 'string', description: '阶段说明' }
+                      }
+                    }
+                  ]
+                }
+              },
+              quote: { type: 'string', description: 'quote 金句页的核心引用文本' },
+              author: { type: 'string', description: 'quote 金句页引用来源或署名' },
+              layers: {
+                type: 'array',
+                description: 'architecture 项目/系统架构层，建议 3-5 层。每项 {title, desc, items}，items 是模块列表。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: '架构层标题，如 数据层、模型层、应用层' },
+                    desc: { type: 'string', description: '可选层说明' },
+                    items: { type: 'array', items: { type: 'string' }, description: '该层包含的模块/组件' }
+                  }
+                }
+              },
+              headers: {
+                type: 'array',
+                description: 'table/ablation 表头，建议 3-6 列。',
+                items: { type: 'string' }
+              },
+              rows: {
+                type: 'array',
+                description: 'table/ablation 表格行。每行是字符串数组，或对象数组。',
+                items: {
+                  oneOf: [
+                    { type: 'array', items: { type: 'string' } },
+                    { type: 'object' }
+                  ]
+                }
+              },
+              categories: {
+                type: 'array',
+                description: 'chart 图表分类标签，例如模型名、实验轮次。',
+                items: { type: 'string' }
+              },
+              values: {
+                type: 'array',
+                description: 'chart 图表数值，与 categories 对应。',
+                items: { type: 'number' }
+              },
+              chart_type: {
+                type: 'string',
+                description: 'chart 图表类型：bar 柱状图 或 line 折线图。默认 bar。'
+              },
+              groups: {
+                type: 'array',
+                description: 'experiment_design 实验组列表，建议 2-4 组。每项 {name, method, metrics}。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', description: '实验组名，如 Baseline、Ours' },
+                    method: { type: 'string', description: '实验方法说明' },
+                    metrics: { type: 'array', items: { type: 'string' }, description: '评价指标' }
+                  }
+                }
+              },
+              variants: {
+                type: 'array',
+                description: 'ablation 消融实验变体；可作为 rows 的别名。',
+                items: {
+                  oneOf: [
+                    { type: 'array', items: { type: 'string' } },
+                    { type: 'object' }
+                  ]
+                }
+              },
+              center: {
+                type: 'string',
+                description: 'cycle 循环闭环中心文字，例如 闭环、增长飞轮'
+              }
+            }
+          }
+        }
+      },
+      required: ['slides']
+    },
+    code: 'return await generatePpt(args);'
   },
   {
     name: 'append_note',

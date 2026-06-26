@@ -4,6 +4,9 @@
 requests>=2.31.0
 pycryptodome>=3.20.0
 
+# 📊 PPT 生成工具依赖（server/ppt.py）
+python-pptx>=0.6.23
+
 # 📸 截图功能依赖（server/screenshot.py）
 Pillow>=10.0.0
 pywin32>=306; sys_platform == 'win32'
