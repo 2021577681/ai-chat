@@ -11,6 +11,8 @@ const FILE_EXPLORER_STATE = {
   editorCodePreview: false,
   editorLoading: false,
   editorPythonMode: false,
+  editorCodeMirror: null,
+  inlineCodeMirror: null,
   editorFoldedLines: new Set(),
   editorBracketMatch: null,
   pdfPath: '',
@@ -144,6 +146,79 @@ function fileEditorCodeGutter() {
 
 function fileEditorCodeHighlight() {
   return document.querySelector('#fileEditorCodeHighlight code');
+}
+
+function hasFileEditorCodeMirror() {
+  return typeof window !== 'undefined' && typeof window.CodeMirror === 'function';
+}
+
+function fileEditorCurrentValue() {
+  const cm = FILE_EXPLORER_STATE.editorCodeMirror;
+  if (cm) return cm.getValue();
+  const textarea = fileEditorTextarea();
+  return textarea ? textarea.value : '';
+}
+
+function syncFileEditorTextareaFromCodeMirror() {
+  const cm = FILE_EXPLORER_STATE.editorCodeMirror;
+  const textarea = fileEditorTextarea();
+  if (cm && textarea) textarea.value = cm.getValue();
+}
+
+function refreshFileEditorCodeMirror() {
+  const cm = FILE_EXPLORER_STATE.editorCodeMirror;
+  if (!cm) return false;
+  syncFileEditorTextareaFromCodeMirror();
+  setTimeout(() => cm.refresh(), 0);
+  return true;
+}
+
+function ensureFileEditorCodeMirror() {
+  if (!hasFileEditorCodeMirror()) return null;
+  const textarea = fileEditorTextarea();
+  const shell = fileEditorCodeShell();
+  if (!textarea || !shell) return null;
+  if (FILE_EXPLORER_STATE.editorCodeMirror) return FILE_EXPLORER_STATE.editorCodeMirror;
+  const cm = window.CodeMirror.fromTextArea(textarea, {
+    mode: 'python',
+    theme: 'material-darker',
+    lineNumbers: true,
+    indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    lineWrapping: false,
+    autoCloseBrackets: true,
+    foldGutter: true,
+    gutters: ['CodeMirror-foldgutter', 'CodeMirror-linenumbers'],
+    foldOptions: {
+      rangeFinder: window.CodeMirror.fold && window.CodeMirror.fold.indent
+    },
+    extraKeys: {
+      Tab(editor) {
+        if (editor.somethingSelected()) editor.indentSelection('add');
+        else editor.replaceSelection('    ', 'end');
+      },
+      'Ctrl-Q'(editor) { editor.foldCode(editor.getCursor()); }
+    }
+  });
+  cm.on('change', () => {
+    syncFileEditorTextareaFromCodeMirror();
+    if (FILE_EXPLORER_STATE.editorMarkdownPreview) updateFileEditorMarkdownPreview();
+    if (FILE_EXPLORER_STATE.editorCodePreview) updateFileEditorCodePreview();
+  });
+  FILE_EXPLORER_STATE.editorCodeMirror = cm;
+  shell.classList.add('cm-active');
+  return cm;
+}
+
+function destroyFileEditorCodeMirror() {
+  const cm = FILE_EXPLORER_STATE.editorCodeMirror;
+  if (!cm) return;
+  syncFileEditorTextareaFromCodeMirror();
+  cm.toTextArea();
+  FILE_EXPLORER_STATE.editorCodeMirror = null;
+  const shell = fileEditorCodeShell();
+  if (shell) shell.classList.remove('cm-active');
 }
 
 function currentEditorLineIndex(textarea) {
@@ -308,6 +383,16 @@ function setPythonEditorMode(enabled) {
   const shell = fileEditorCodeShell();
   FILE_EXPLORER_STATE.editorPythonMode = !!enabled;
   if (shell) shell.classList.toggle('python-editor', !!enabled);
+  if (enabled && hasFileEditorCodeMirror()) {
+    const cm = ensureFileEditorCodeMirror();
+    if (cm) {
+      cm.setOption('readOnly', !!(fileEditorTextarea() && fileEditorTextarea().disabled));
+      refreshFileEditorCodeMirror();
+      cm.focus();
+      return;
+    }
+  }
+  if (!enabled) destroyFileEditorCodeMirror();
   if (enabled) {
     renderPythonEditor();
     syncPythonEditorScroll();
@@ -540,11 +625,93 @@ function setInlineFileChrome(path, title) {
 function clearInlineFileContent() {
   const body = document.getElementById('inlineFileBody');
   const footer = document.getElementById('inlineFileFooter');
+  destroyInlineCodeMirror();
   if (body) {
     body.querySelectorAll('iframe').forEach(frame => frame.removeAttribute('src'));
     body.innerHTML = '';
   }
   if (footer) footer.innerHTML = '';
+}
+
+function inlineFileTextarea() {
+  return document.getElementById('inlineFileTextContent');
+}
+
+function inlineFileCodeShell() {
+  return document.getElementById('inlineFileCodeShell');
+}
+
+function inlineFileCurrentValue() {
+  const cm = FILE_EXPLORER_STATE.inlineCodeMirror;
+  if (cm) return cm.getValue();
+  const textarea = inlineFileTextarea();
+  return textarea ? textarea.value : '';
+}
+
+function syncInlineTextareaFromCodeMirror() {
+  const cm = FILE_EXPLORER_STATE.inlineCodeMirror;
+  const textarea = inlineFileTextarea();
+  if (cm && textarea) textarea.value = cm.getValue();
+}
+
+function refreshInlineCodeMirror() {
+  const cm = FILE_EXPLORER_STATE.inlineCodeMirror;
+  if (!cm) return false;
+  syncInlineTextareaFromCodeMirror();
+  setTimeout(() => cm.refresh(), 0);
+  return true;
+}
+
+function ensureInlineCodeMirror(path) {
+  if (!hasFileEditorCodeMirror()) return null;
+  const textarea = inlineFileTextarea();
+  const shell = inlineFileCodeShell();
+  if (!textarea || !shell) return null;
+  if (FILE_EXPLORER_STATE.inlineCodeMirror) return FILE_EXPLORER_STATE.inlineCodeMirror;
+  const isPython = isFileExplorerPythonFile(path || FILE_EXPLORER_STATE.inlineFilePath);
+  const cm = window.CodeMirror.fromTextArea(textarea, {
+    mode: isPython ? 'python' : null,
+    theme: 'material-darker',
+    lineNumbers: true,
+    indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    lineWrapping: false,
+    readOnly: !!textarea.disabled,
+    autoCloseBrackets: isPython,
+    foldGutter: isPython,
+    gutters: isPython ? ['CodeMirror-foldgutter', 'CodeMirror-linenumbers'] : ['CodeMirror-linenumbers'],
+    foldOptions: isPython ? {
+      rangeFinder: window.CodeMirror.fold && window.CodeMirror.fold.indent
+    } : undefined,
+    extraKeys: isPython ? {
+      Tab(editor) {
+        if (editor.somethingSelected()) editor.indentSelection('add');
+        else editor.replaceSelection('    ', 'end');
+      },
+      'Ctrl-Q'(editor) { editor.foldCode(editor.getCursor()); }
+    } : undefined
+  });
+  cm.on('change', () => {
+    syncInlineTextareaFromCodeMirror();
+    const preview = document.querySelector('#inlineFileBody .inline-markdown-preview, #inlineFileBody .inline-code-preview');
+    if (preview && !preview.hidden && isFileExplorerMarkdownFile(FILE_EXPLORER_STATE.inlineFilePath)) renderMarkdownPreviewInto(preview, inlineFileCurrentValue());
+    if (preview && !preview.hidden && isFileExplorerPythonFile(FILE_EXPLORER_STATE.inlineFilePath)) renderPythonPreviewInto(preview, inlineFileCurrentValue());
+  });
+  FILE_EXPLORER_STATE.inlineCodeMirror = cm;
+  shell.classList.add('cm-active');
+  refreshInlineCodeMirror();
+  return cm;
+}
+
+function destroyInlineCodeMirror() {
+  const cm = FILE_EXPLORER_STATE.inlineCodeMirror;
+  if (!cm) return;
+  syncInlineTextareaFromCodeMirror();
+  cm.toTextArea();
+  FILE_EXPLORER_STATE.inlineCodeMirror = null;
+  const shell = inlineFileCodeShell();
+  if (shell) shell.classList.remove('cm-active');
 }
 
 function inlineFileCanStayOpen() {
@@ -686,7 +853,7 @@ function updateFileEditorMarkdownPreview() {
   const textarea = fileEditorTextarea();
   const preview = document.getElementById('fileEditorMarkdownPreview');
   if (!textarea || !preview) return;
-  renderMarkdownPreviewInto(preview, textarea.value);
+  renderMarkdownPreviewInto(preview, fileEditorCurrentValue());
 }
 
 function setFileEditorMarkdownPreview(enabled) {
@@ -728,7 +895,7 @@ function updateFileEditorCodePreview() {
   const textarea = fileEditorTextarea();
   const preview = document.getElementById('fileEditorMarkdownPreview');
   if (!textarea || !preview) return;
-  renderPythonPreviewInto(preview, textarea.value);
+  renderPythonPreviewInto(preview, fileEditorCurrentValue());
 }
 
 function setFileEditorCodePreview(enabled) {
@@ -757,6 +924,7 @@ function setFileEditorCodePreview(enabled) {
   }
   if (markdownToggle) markdownToggle.hidden = !isFileExplorerMarkdownFile(path);
   if (saveBtn) saveBtn.hidden = nextEnabled;
+  if (nextEnabled) syncFileEditorTextareaFromCodeMirror();
   if (textarea) textarea.hidden = false;
   setPythonEditorMode(isPython && !nextEnabled);
   if (!nextEnabled && textarea && !textarea.disabled) textarea.focus();
@@ -773,29 +941,40 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
   const footer = document.getElementById('inlineFileFooter');
   if (!body || !footer) return false;
   clearInlineFileContent();
+  const shell = document.createElement('div');
   const textarea = document.createElement('textarea');
   const preview = document.createElement('div');
   const isMarkdown = isFileExplorerMarkdownFile(normalizedPath);
   const isPython = isFileExplorerPythonFile(normalizedPath);
+  shell.id = 'inlineFileCodeShell';
+  shell.className = `file-editor-code-shell inline-file-code-shell${isPython ? ' python-editor' : ''}`;
   textarea.spellcheck = false;
   textarea.placeholder = '文件内容...';
   textarea.id = 'inlineFileTextContent';
   preview.className = 'markdown-preview inline-markdown-preview msg-content';
   preview.hidden = true;
-  body.appendChild(textarea);
+  shell.appendChild(textarea);
+  body.appendChild(shell);
   body.appendChild(preview);
   footer.innerHTML = `
     <button class="btn" type="button" onclick="copyInlineFileContent()">复制内容</button>
     ${isMarkdown ? '<button class="btn" type="button" id="inlineMarkdownToggle" onclick="toggleInlineMarkdownPreview()">Markdown 预览</button>' : ''}
-    ${isPython ? '<button class="btn" type="button" id="inlinePythonToggle" onclick="toggleInlinePythonPreview()">Python 高亮</button>' : ''}
+    ${isPython ? '<button class="btn" type="button" id="inlinePythonToggle" onclick="toggleInlinePythonPreview()">Python 高亮预览</button>' : ''}
     <button class="btn" type="button" onclick="reloadInlineFilePanel()">重新读取</button>
   `;
   const setContent = (content, disabled = false) => {
+    const cm = FILE_EXPLORER_STATE.inlineCodeMirror;
     textarea.value = String(content || '');
     textarea.disabled = !!disabled;
-    if (isMarkdown && FILE_EXPLORER_STATE.inlineFileKind === 'markdown') renderMarkdownPreviewInto(preview, textarea.value);
-    if (isPython && FILE_EXPLORER_STATE.inlineFileKind === 'python') renderPythonPreviewInto(preview, textarea.value);
+    if (cm) {
+      cm.setValue(textarea.value);
+      cm.setOption('readOnly', !!disabled);
+      refreshInlineCodeMirror();
+    }
+    if (isMarkdown && FILE_EXPLORER_STATE.inlineFileKind === 'markdown') renderMarkdownPreviewInto(preview, inlineFileCurrentValue());
+    if (isPython && FILE_EXPLORER_STATE.inlineFileKind === 'python') renderPythonPreviewInto(preview, inlineFileCurrentValue());
   };
+  ensureInlineCodeMirror(normalizedPath);
   if (initialContent !== null && initialContent !== undefined) {
     setContent(initialContent, false);
     setInlineFileStatus(`${initialSize !== null && initialSize !== undefined ? formatSize(Number(initialSize || 0)) : `${textarea.value.length} 字符`} / 已显示`, 'ok');
@@ -823,42 +1002,42 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
 function toggleInlineMarkdownPreview(force) {
   const path = FILE_EXPLORER_STATE.inlineFilePath;
   if (!isFileExplorerMarkdownFile(path)) return;
-  const textarea = document.querySelector('#inlineFileBody textarea');
+  const shell = inlineFileCodeShell();
   const preview = document.querySelector('#inlineFileBody .inline-markdown-preview');
   const toggle = document.getElementById('inlineMarkdownToggle');
-  if (!textarea || !preview) return;
+  if (!shell || !preview) return;
   const showPreview = typeof force === 'boolean' ? force : preview.hidden;
-  if (showPreview) renderMarkdownPreviewInto(preview, textarea.value);
+  if (showPreview) renderMarkdownPreviewInto(preview, inlineFileCurrentValue());
   preview.hidden = !showPreview;
-  textarea.hidden = showPreview;
+  shell.hidden = showPreview;
   FILE_EXPLORER_STATE.inlineFileKind = showPreview ? 'markdown' : 'text';
   if (toggle) {
     toggle.textContent = showPreview ? '查看源码' : 'Markdown 预览';
     toggle.classList.toggle('active', showPreview);
   }
-  if (!showPreview) textarea.focus();
+  if (!showPreview && !refreshInlineCodeMirror()) inlineFileTextarea()?.focus();
 }
 
 function toggleInlinePythonPreview(force) {
   const path = FILE_EXPLORER_STATE.inlineFilePath;
   if (!isFileExplorerPythonFile(path)) return;
-  const textarea = document.querySelector('#inlineFileBody textarea');
+  const shell = inlineFileCodeShell();
   const preview = document.querySelector('#inlineFileBody .inline-markdown-preview, #inlineFileBody .inline-code-preview');
   const toggle = document.getElementById('inlinePythonToggle');
-  if (!textarea || !preview) return;
+  if (!shell || !preview) return;
   const showPreview = typeof force === 'boolean' ? force : preview.hidden;
   if (showPreview) {
     preview.className = 'inline-code-preview';
-    renderPythonPreviewInto(preview, textarea.value);
+    renderPythonPreviewInto(preview, inlineFileCurrentValue());
   }
   preview.hidden = !showPreview;
-  textarea.hidden = showPreview;
+  shell.hidden = showPreview;
   FILE_EXPLORER_STATE.inlineFileKind = showPreview ? 'python' : 'text';
   if (toggle) {
-    toggle.textContent = showPreview ? '编辑源码' : 'Python 高亮';
+    toggle.textContent = showPreview ? '编辑器' : 'Python 高亮预览';
     toggle.classList.toggle('active', showPreview);
   }
-  if (!showPreview) textarea.focus();
+  if (!showPreview && !refreshInlineCodeMirror()) inlineFileTextarea()?.focus();
 }
 
 async function openPdfInMainPanel(path, existingUrl = '') {
@@ -903,14 +1082,14 @@ async function openCurrentFileInMainPanel(kind) {
   const path = FILE_EXPLORER_STATE.editorPath;
   const textarea = fileEditorTextarea();
   if (!path) return;
-  const opened = await openTextInMainPanel(path, textarea ? textarea.value : null);
+  const opened = await openTextInMainPanel(path, textarea ? fileEditorCurrentValue() : null);
   if (opened) closeFileEditor(true);
 }
 
 function copyInlineFileContent() {
-  const textarea = document.querySelector('#inlineFileBody textarea');
-  if (!textarea) return;
-  navigator.clipboard.writeText(textarea.value).then(() => {
+  const value = inlineFileCurrentValue();
+  if (value === null || value === undefined) return;
+  navigator.clipboard.writeText(value).then(() => {
     if (typeof toast === 'function') toast('内容已复制');
   });
 }
@@ -966,7 +1145,9 @@ function bindInlineFileResizer() {
 function closeFileEditor(force = false) {
   const modal = document.getElementById('fileEditorModal');
   const textarea = fileEditorTextarea();
+  syncFileEditorTextareaFromCodeMirror();
   if (!force && textarea && FILE_EXPLORER_STATE.editorPath && textarea.value !== FILE_EXPLORER_STATE.editorOriginal) {
+    refreshFileEditorCodeMirror();
     if (!confirm('文件有未保存修改，确定关闭？')) return;
   }
   setPythonEditorMode(false);
@@ -988,11 +1169,11 @@ async function openFileEditor(path) {
   FILE_EXPLORER_STATE.editorFoldedLines = new Set();
   if (pathEl) pathEl.textContent = normalizedPath;
   textarea.value = '';
+  textarea.disabled = true;
   textarea.hidden = false;
   setFileEditorMarkdownPreview(false);
   setFileEditorCodePreview(false);
   setPythonEditorMode(isFileExplorerPythonFile(normalizedPath));
-  textarea.disabled = true;
   modal.classList.add('show');
   setFileEditorStatus('正在读取...', 'loading');
   try {
@@ -1002,10 +1183,16 @@ async function openFileEditor(path) {
     if (!r || !r.ok) throw new Error((r && r.error) || '读取文件失败');
     textarea.value = r.content || '';
     textarea.disabled = false;
+    if (FILE_EXPLORER_STATE.editorCodeMirror) {
+      FILE_EXPLORER_STATE.editorCodeMirror.setValue(textarea.value);
+    }
     FILE_EXPLORER_STATE.editorOriginal = textarea.value;
     setFileEditorMarkdownPreview(false);
     setFileEditorCodePreview(false);
     setPythonEditorMode(isFileExplorerPythonFile(normalizedPath));
+    if (FILE_EXPLORER_STATE.editorCodeMirror) {
+      FILE_EXPLORER_STATE.editorCodeMirror.setOption('readOnly', false);
+    }
     setFileEditorStatus(`${formatSize(Number(r.size || 0))} / 已读取`, 'ok');
     textarea.focus();
   } catch (e) {
@@ -1036,6 +1223,7 @@ async function saveFileEditor() {
   const path = FILE_EXPLORER_STATE.editorPath;
   const textarea = fileEditorTextarea();
   if (!path || !textarea) return;
+  syncFileEditorTextareaFromCodeMirror();
   const content = textarea.value;
   setFileEditorStatus('等待保存确认...', 'loading');
   const preview = content.slice(0, 500) + (content.length > 500 ? '\n...' : '');
@@ -1051,7 +1239,7 @@ async function saveFileEditor() {
     FILE_EXPLORER_STATE.editorOriginal = content;
     if (FILE_EXPLORER_STATE.editorMarkdownPreview) updateFileEditorMarkdownPreview();
     if (FILE_EXPLORER_STATE.editorCodePreview) updateFileEditorCodePreview();
-    if (FILE_EXPLORER_STATE.editorPythonMode) renderPythonEditor();
+    if (FILE_EXPLORER_STATE.editorPythonMode) refreshFileEditorCodeMirror() || renderPythonEditor();
     setFileEditorStatus(`已保存 ${formatSize(Number(r.bytes_written || 0))}`, 'ok');
     if (typeof toast === 'function') toast('文件已保存');
     if (FILE_EXPLORER_STATE.visible) refreshFileExplorer();
@@ -1061,6 +1249,7 @@ async function saveFileEditor() {
 }
 
 function copyFileEditorContent() {
+  syncFileEditorTextareaFromCodeMirror();
   const textarea = fileEditorTextarea();
   if (!textarea) return;
   navigator.clipboard.writeText(textarea.value).then(() => {
