@@ -186,7 +186,7 @@ function updateGitToggleBtn() {
 }
 
 // ============ 📊 PPT 工具批量启停 ============
-const PPT_TOOL_NAMES = ['generate_ppt', 'preview_ppt', 'validate_ppt'];
+const PPT_TOOL_NAMES = ['generate_ppt', 'analyze_ppt_template', 'preview_ppt', 'validate_ppt'];
 
 function isPptTool(name) {
   return typeof name === 'string' && PPT_TOOL_NAMES.includes(name);

@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v14';  // v14：新增 preview_ppt / validate_ppt
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v18';  // v18：模板填充页数默认对齐请求 slides
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -219,6 +219,11 @@ const BUILTIN_TOOLS = [
       properties: {
         filename: { type: 'string', description: '输出文件名，例如 ai_agent_demo.pptx；默认 generated.pptx' },
         path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
+        template_path: { type: 'string', description: '可选模板 PPTX 路径。默认会复制该模板，并优先替换模板内已有标题/正文/示例文字框；支持占位符，也支持普通模板里的“单击此处添加文字”等示例文本。会保留母版、背景、Logo、页眉页脚和固定装饰。' },
+        template_mode: { type: 'string', description: '模板使用方式：fill 默认复制模板并直接改模板里的文字；style 仅提取模板 profile 后重新生成矢量版式。' },
+        replacements: { type: 'object', description: '可选的模板占位符替换映射，如 {title, subtitle, body, footer, 自定义占位符名}。支持 {{title}}、{title}、[title]、<title>、《title》。未提供时也会按标题/正文槽位自动填充。' },
+        trim_extra_template_slides: { type: 'boolean', description: '模板页数多于 slides 时是否裁掉多余模板页，默认 true；模板页数少于 slides 时会追加按模板风格生成的页面，避免静默丢内容。' },
+        profile_path: { type: 'string', description: '可选模板分析缓存 JSON 输出路径；传 template_path 时默认写入 output/ppt_templates/<模板名>_<hash>.profile.json。' },
         title: { type: 'string', description: 'PPT 总标题' },
         subtitle: { type: 'string', description: 'PPT 副标题，可用于封面' },
         style: {
@@ -473,6 +478,21 @@ const BUILTIN_TOOLS = [
     code: 'return await generatePpt(args);'
   },
   {
+    name: 'analyze_ppt_template',
+    description: '🎨 分析用户提供的 PPTX 模板并缓存 profile JSON。会读取模板尺寸、主题色、字体、标题区/内容区/页脚区、可复用固定元素，并返回 profile_path。适合在用模板生成 PPT 前先检查模板是否被正确识别。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '模板 .pptx 路径，必须在沙箱内，例如 templates/ppt/company.pptx' },
+        template_path: { type: 'string', description: '模板 .pptx 路径；等价于 path' },
+        save_profile: { type: 'boolean', description: '是否保存 profile JSON，默认 true' },
+        profile_path: { type: 'string', description: '可选 profile JSON 输出路径；默认 output/ppt_templates/<模板名>_<hash>.profile.json' }
+      },
+      required: ['path']
+    },
+    code: 'return await analyzePptTemplate(args);'
+  },
+  {
     name: 'preview_ppt',
     description: '🖼️ 为已有 PPTX 生成可检查的预览文件，并同时返回 validate_ppt 校验结果。适合在 generate_ppt 之后立刻调用，检查页面是否非空、中文是否变问号、是否有疑似文字溢出。默认输出到 output/ppt_preview/<文件名>/index.html，并生成每页 PNG 预览；优先尝试 PowerPoint 原生导出，失败后用 Pillow 结构化渲染兜底。',
     parameters: {
@@ -486,7 +506,7 @@ const BUILTIN_TOOLS = [
         prefer_native: { type: 'boolean', description: '是否优先尝试 PowerPoint 原生 PNG 导出；默认 true，失败会自动降级' },
         rules: {
           type: 'object',
-          description: '可选校验规则，会透传给 validate_ppt。支持 min_slides/max_slides/expected_text/require_chinese/max_question_marks/fail_on_warnings。',
+          description: '可选校验规则，会透传给 validate_ppt。支持 min_slides/max_slides/expected_text/require_chinese/max_question_marks/fail_on_warnings；文本框明显重叠会默认判定为错误。',
           properties: {
             min_slides: { type: 'number', description: '最少页数' },
             max_slides: { type: 'number', description: '最多页数' },
@@ -503,7 +523,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'validate_ppt',
-    description: '✅ 校验已有 PPTX 的结构和可见文本质量。用于生成 PPT 后自动质检，检查能否打开、页数、空页、缺标题、疑似文字溢出、中文是否变成 ???、可见乱码、字体/字号/颜色统计、预期文本是否存在。返回 ok 表示工具执行成功，passed 表示 PPT 本身通过校验。',
+    description: '✅ 校验已有 PPTX 的结构和可见文本质量。用于生成 PPT 后自动质检，检查能否打开、页数、空页、缺标题、文本框明显重叠、疑似文字溢出、中文是否变成 ???、可见乱码、字体/字号/颜色统计、预期文本是否存在。返回 ok 表示工具执行成功，passed 表示 PPT 本身通过校验。',
     parameters: {
       type: 'object',
       properties: {
@@ -516,7 +536,7 @@ const BUILTIN_TOOLS = [
         fail_on_warnings: { type: 'boolean', description: '有 warning 时也判定为不通过' },
         rules: {
           type: 'object',
-          description: '可选校验规则对象。字段同上：min_slides/max_slides/expected_text/require_chinese/max_question_marks/fail_on_warnings。'
+          description: '可选校验规则对象。字段同上：min_slides/max_slides/expected_text/require_chinese/max_question_marks/fail_on_warnings。文本框明显重叠会默认作为 error 使 passed=false。'
         }
       },
       required: ['path']

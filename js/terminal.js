@@ -1073,6 +1073,34 @@ async function generatePpt(data, context) {
   };
 }
 
+async function analyzePptTemplate(data, context) {
+  const payload = data && typeof data === 'object' ? { ...data } : {};
+  const templatePath = payload.path || payload.template_path || payload.pptx || payload.file || '';
+  const r = await callAgentBackend('analyze_ppt_template', payload,
+    'AI 想分析 PPT 模板',
+    `[分析 PPT 模板]\n路径：${templatePath}\n保存 profile：${payload.save_profile !== false}`,
+    context);
+  if (typeof r === 'string') return r;
+  if (!r.ok) return `❌ PPT 模板分析失败：${r.error}`;
+  const profile = r.profile || {};
+  const size = profile.size || {};
+  const theme = profile.theme || {};
+  const font = profile.font || {};
+  return {
+    ok: true,
+    profile,
+    profile_path: r.profile_path,
+    text: [
+      `✅ PPT 模板分析完成${r.profile_path ? `：${r.profile_path}` : ''}`,
+      `尺寸：${size.width_in || '-'} x ${size.height_in || '-'} in，比例：${size.aspect_ratio || '-'}`,
+      `主题色：primary=${theme.primary_color || '-'}，accent=${theme.accent_color || '-'}，background=${theme.background_color || '-'}`,
+      `字体：${font.font_family || '-'}，标题 ${font.title_font_size || '-'}，正文 ${font.body_font_size || '-'}`,
+      `固定元素：${Array.isArray(profile.decorations) ? profile.decorations.length : 0} 个`,
+      profile.warnings && profile.warnings.length ? `警告：${profile.warnings.join('；')}` : '警告：无'
+    ].join('\n')
+  };
+}
+
 function formatPptValidationSummary(r) {
   const issues = Array.isArray(r.issues) ? r.issues : [];
   const warnings = Array.isArray(r.warnings) ? r.warnings : [];

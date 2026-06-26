@@ -12,11 +12,17 @@
 
 import math
 import html
+import json
 import os
 import re
+import shutil
 import time
+import zipfile
+import hashlib
+from collections import Counter
 from io import BytesIO
 from urllib.parse import quote
+from xml.etree import ElementTree as ET
 
 from . import config
 from .sandbox import check_path_or_error
@@ -32,6 +38,22 @@ _STYLE_KEYS = {
     'primary_color', 'accent_color', 'background_color', 'bg_color',
     'text_color', 'muted_color', 'card_color', 'line_color'
 }
+
+_EMU_PER_INCH = 914400.0
+
+
+def _emu_to_in(value):
+    try:
+        return round(int(value) / _EMU_PER_INCH, 3)
+    except Exception:
+        return 0
+
+
+def _in_to_emu(value):
+    try:
+        return int(float(value) * _EMU_PER_INCH)
+    except Exception:
+        return 0
 
 
 def _as_text(value, default=''):
@@ -89,7 +111,18 @@ class PptMixin:
                     'error': '缺少依赖 python-pptx，请先运行：pip install -r requirements.txt'
                 })
 
+            template_path_value = data.get('template_path') or data.get('template')
+            template_mode = _as_text(data.get('template_mode') or data.get('template_strategy') or '', '').strip().lower()
+            # 用户传入模板 PPT 时，默认复制模板并替换占位文字，保留母版、背景、Logo、页眉页脚和固定装饰。
+            # 如只想抽取颜色/字体后重新生成矢量版式，可显式传 template_mode='style'。
+            if template_path_value and template_mode not in ('style', 'profile', 'extract'):
+                return self._generate_ppt_from_template(data, Presentation)
+
+            template_profile = self._load_ppt_template_profile(data)
+            self._ppt_template_profile = template_profile if isinstance(template_profile, dict) else {}
             self._ppt_global_style = {}
+            if template_profile:
+                self._ppt_global_style.update(self._template_profile_style(template_profile))
             self._ppt_global_style.update(self._style_dict(data.get('theme')))
             self._ppt_global_style.update(self._style_dict(data.get('style')))
             filename = _safe_filename(data.get('filename') or data.get('file_name'))
@@ -114,10 +147,14 @@ class PptMixin:
             slides = self._auto_visualize_slides(slides)
 
             prs = Presentation()
-            # python-pptx 默认是 10x7.5（4:3），而矢量版式按 16:9 设计。
-            # 不显式设置会导致所有 12.x 英寸坐标横向越界。
-            prs.slide_width = Inches(13.333333)
-            prs.slide_height = Inches(7.5)
+            if template_profile and template_profile.get('slide_width') and template_profile.get('slide_height'):
+                prs.slide_width = int(template_profile.get('slide_width'))
+                prs.slide_height = int(template_profile.get('slide_height'))
+            else:
+                # python-pptx 默认是 10x7.5（4:3），而矢量版式按 16:9 设计。
+                # 不显式设置会导致所有 12.x 英寸坐标横向越界。
+                prs.slide_width = Inches(13.333333)
+                prs.slide_height = Inches(7.5)
             for slide_data in slides:
                 if not isinstance(slide_data, dict):
                     slide_data = {'type': 'bullets', 'title': _as_text(slide_data)}
@@ -185,6 +222,7 @@ class PptMixin:
                 'ok': True,
                 'path': rel_path,
                 'slides': len(slides),
+                'template_profile': (template_profile.get('profile_path') or template_profile.get('source')) if template_profile else '',
                 'message': f'PPT 已生成：{rel_path}'
             })
         except Exception as e:
@@ -292,6 +330,520 @@ class PptMixin:
         except Exception as e:
             self._send_json(200, {'ok': False, 'error': str(e)})
 
+    def handle_analyze_ppt_template(self, body):
+        try:
+            data = self._ppt_request_data(body)
+            path_value = data.get('path') or data.get('template_path') or data.get('pptx') or data.get('file')
+            if not path_value:
+                return self._send_json(200, {'ok': False, 'error': 'path is required'})
+
+            ppt_path, err = check_path_or_error(path_value, must_exist=True)
+            if err:
+                return self._send_json(200, {'ok': False, 'error': err})
+            if not os.path.isfile(ppt_path):
+                return self._send_json(200, {'ok': False, 'error': f'not a file: {path_value}'})
+
+            profile = self._analyze_ppt_template_file(ppt_path)
+            save_profile = self._ppt_bool(data.get('save_profile'), True)
+            profile_path = ''
+            if save_profile:
+                profile_path = data.get('profile_path') or data.get('output_path') or self._ppt_default_profile_path(ppt_path)
+                profile_path, err = check_path_or_error(profile_path, must_exist=False)
+                if err:
+                    return self._send_json(200, {'ok': False, 'error': err})
+                os.makedirs(os.path.dirname(profile_path), exist_ok=True)
+                with open(profile_path, 'w', encoding='utf-8') as f:
+                    json.dump(profile, f, ensure_ascii=False, indent=2)
+
+            out = {'ok': True, 'profile': profile}
+            if profile_path:
+                out['profile_path'] = self._ppt_rel_path(profile_path)
+            self._send_json(200, out)
+        except Exception as e:
+            self._send_json(200, {'ok': False, 'error': str(e)})
+
+    def _generate_ppt_from_template(self, data, Presentation):
+        template_value = data.get('template_path') or data.get('template')
+        template_path, err = check_path_or_error(template_value, must_exist=True)
+        if err:
+            return self._send_json(200, {'ok': False, 'error': err})
+        if not os.path.isfile(template_path) or os.path.splitext(template_path)[1].lower() != '.pptx':
+            return self._send_json(200, {'ok': False, 'error': f'template_path must be a .pptx file: {template_value}'})
+
+        filename = _safe_filename(data.get('filename') or data.get('file_name') or ('generated_from_' + os.path.basename(template_path)))
+        output_path = data.get('path') or data.get('output_path') or os.path.join('output', filename)
+        if str(output_path).lower().endswith(os.sep) or str(output_path).endswith('/'):
+            output_path = os.path.join(output_path, filename)
+        if not str(output_path).lower().endswith('.pptx'):
+            output_path = os.path.join(str(output_path), filename)
+        out_path, err = check_path_or_error(output_path, must_exist=False)
+        if err:
+            return self._send_json(200, {'ok': False, 'error': err})
+        parent = os.path.dirname(out_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        shutil.copyfile(template_path, out_path)
+        prs = Presentation(out_path)
+        slides = _as_list(data.get('slides'))
+        if not slides:
+            slides = [{'title': data.get('title') or '', 'subtitle': data.get('subtitle') or '', 'content': data.get('content') or ''}]
+
+        replacements = data.get('replacements') or data.get('placeholder_values') or data.get('placeholders') or {}
+        if not isinstance(replacements, dict):
+            replacements = {}
+        profile = self._analyze_ppt_template_file(template_path)
+        self._ppt_template_profile = profile if isinstance(profile, dict) else {}
+        self._ppt_global_style = {}
+        if self._ppt_template_profile:
+            self._ppt_global_style.update(self._template_profile_style(self._ppt_template_profile))
+        self._ppt_global_style.update(self._style_dict(data.get('theme')))
+        self._ppt_global_style.update(self._style_dict(data.get('style')))
+
+        trimmed = 0
+        target_slide_count = max(1, len(slides))
+        if len(prs.slides) > target_slide_count and self._ppt_bool(data.get('trim_extra_template_slides'), True):
+            trimmed = self._trim_template_slides(prs, target_slide_count)
+
+        summary = self._fill_template_presentation(prs, slides, data, replacements)
+        if trimmed:
+            summary['trimmed_template_slides'] = trimmed
+        if len(slides) > len(prs.slides):
+            extra_slides = slides[len(prs.slides):]
+            summary['generated_extra_slides'] = self._append_generated_template_slides(prs, extra_slides)
+        prs.save(out_path)
+
+        profile_path = ''
+        if self._ppt_bool(data.get('save_profile'), True):
+            cache_path = data.get('profile_path') or self._ppt_default_profile_path(template_path)
+            abs_cache, cache_err = check_path_or_error(cache_path, must_exist=False)
+            if not cache_err:
+                os.makedirs(os.path.dirname(abs_cache), exist_ok=True)
+                with open(abs_cache, 'w', encoding='utf-8') as f:
+                    json.dump(profile, f, ensure_ascii=False, indent=2)
+                profile_path = self._ppt_rel_path(abs_cache)
+
+        rel_path = self._ppt_rel_path(out_path)
+        return self._send_json(200, {
+            'ok': True,
+            'path': rel_path,
+            'slides': len(prs.slides),
+            'template_mode': 'fill',
+            'template_path': self._ppt_rel_path(template_path),
+            'profile_path': profile_path,
+            'filled': summary,
+            'message': f'PPT 已基于模板生成：{rel_path}'
+        })
+
+    def _trim_template_slides(self, prs, target_count):
+        target_count = max(1, int(target_count or 1))
+        removed = 0
+        while len(prs.slides) > target_count:
+            try:
+                slide_id = list(prs.slides._sldIdLst)[-1]
+                r_id = slide_id.rId
+                prs.part.drop_rel(r_id)
+                prs.slides._sldIdLst.remove(slide_id)
+                removed += 1
+            except Exception:
+                break
+        return removed
+
+    def _append_generated_template_slides(self, prs, slides):
+        from pptx.util import Pt
+        added = 0
+        for slide_data in self._auto_visualize_slides(_as_list(slides)):
+            if not isinstance(slide_data, dict):
+                slide_data = {'type': 'bullets', 'title': _as_text(slide_data)}
+            slide_type = _as_text(slide_data.get('type') or slide_data.get('layout'), 'bullets').lower()
+            if slide_type == 'cover':
+                self._ppt_add_cover(prs, slide_data)
+            elif slide_type in ('agenda', 'toc'):
+                bullet_data = dict(slide_data)
+                bullet_data.update({
+                    'title': slide_data.get('title') or '目录',
+                    'bullets': slide_data.get('items') or slide_data.get('bullets') or []
+                })
+                self._ppt_add_bullets(prs, bullet_data, Pt)
+            elif slide_type in ('section', 'divider'):
+                self._ppt_add_section(prs, slide_data)
+            elif slide_type == 'summary':
+                bullet_data = dict(slide_data)
+                bullet_data.update({
+                    'title': slide_data.get('title') or '总结',
+                    'bullets': slide_data.get('bullets') or slide_data.get('items') or []
+                })
+                self._ppt_add_bullets(prs, bullet_data, Pt)
+            elif slide_type in ('three_cards', 'cards'):
+                self._ppt_add_three_cards(prs, slide_data)
+            elif slide_type in ('process', 'flow', 'workflow'):
+                self._ppt_add_process(prs, slide_data)
+            elif slide_type == 'timeline':
+                self._ppt_add_timeline(prs, slide_data)
+            elif slide_type in ('comparison', 'compare', 'vs'):
+                self._ppt_add_comparison(prs, slide_data)
+            elif slide_type in ('two_column', 'two_columns', 'columns'):
+                self._ppt_add_two_column(prs, slide_data)
+            elif slide_type in ('matrix', 'quadrant', 'four_quadrant'):
+                self._ppt_add_matrix(prs, slide_data)
+            elif slide_type == 'pyramid':
+                self._ppt_add_pyramid(prs, slide_data)
+            elif slide_type in ('cycle', 'loop'):
+                self._ppt_add_cycle(prs, slide_data)
+            elif slide_type == 'funnel':
+                self._ppt_add_funnel(prs, slide_data)
+            elif slide_type in ('quote', 'quotation'):
+                self._ppt_add_quote(prs, slide_data)
+            elif slide_type in ('architecture', 'system_architecture', 'tech_architecture'):
+                self._ppt_add_architecture(prs, slide_data)
+            elif slide_type in ('method_pipeline', 'research_pipeline', 'pipeline'):
+                self._ppt_add_method_pipeline(prs, slide_data)
+            elif slide_type in ('table', 'data_table'):
+                self._ppt_add_table(prs, slide_data)
+            elif slide_type in ('chart', 'bar_chart', 'line_chart'):
+                self._ppt_add_chart(prs, slide_data)
+            elif slide_type in ('experiment_design', 'experiment', 'experimental_design'):
+                self._ppt_add_experiment_design(prs, slide_data)
+            elif slide_type in ('ablation', 'ablation_study'):
+                self._ppt_add_ablation(prs, slide_data)
+            else:
+                self._ppt_add_bullets(prs, slide_data, Pt)
+            added += 1
+        return added
+
+    def _fill_template_presentation(self, prs, slides, data, replacements):
+        stats = {
+            'slides_used': 0,
+            'text_replaced': 0,
+            'placeholders_replaced': 0,
+            'template_text_replaced': 0,
+            'fallback_textboxes_added': 0,
+        }
+        count = min(len(prs.slides), max(1, len(slides)))
+        for idx in range(count):
+            slide_data = slides[idx] if isinstance(slides[idx], dict) else {'title': _as_text(slides[idx])}
+            slide = prs.slides[idx]
+            mapping = self._template_slide_mapping(slide_data, data, idx, replacements)
+            used_shapes = set()
+            for shape in self._iter_ppt_shapes(slide.shapes):
+                if self._replace_template_shape_text(shape, mapping, used_shapes):
+                    stats['text_replaced'] += 1
+                    if getattr(shape, 'is_placeholder', False):
+                        stats['placeholders_replaced'] += 1
+            slot_replaced = self._replace_template_text_slots(slide, prs, slide_data, data, used_shapes)
+            stats['template_text_replaced'] += slot_replaced
+            stats['text_replaced'] += slot_replaced
+            stats['fallback_textboxes_added'] += self._fill_unmatched_template_content(slide, prs, slide_data, used_shapes)
+            cleanup_replaced = self._clear_unused_template_sample_text(slide, prs, used_shapes)
+            stats['template_text_replaced'] += cleanup_replaced
+            stats['text_replaced'] += cleanup_replaced
+            stats['slides_used'] += 1
+        return stats
+
+    def _template_slide_mapping(self, slide_data, deck_data, idx, replacements):
+        title = _as_text(slide_data.get('title') or (deck_data.get('title') if idx == 0 else '') or '')
+        subtitle = _as_text(slide_data.get('subtitle') or slide_data.get('desc') or (deck_data.get('subtitle') if idx == 0 else '') or '')
+        body_items = slide_data.get('bullets') or slide_data.get('items') or slide_data.get('content') or slide_data.get('cards') or slide_data.get('steps') or ''
+        body = self._template_body_text(body_items)
+        mapping = {
+            'title': title,
+            'subtitle': subtitle,
+            'sub_title': subtitle,
+            'body': body,
+            'content': body,
+            'text': body,
+            'date': _as_text(deck_data.get('date') or ''),
+            'author': _as_text(deck_data.get('author') or ''),
+            'footer': _as_text(deck_data.get('footer') or ''),
+        }
+        for k, v in replacements.items():
+            mapping[_as_text(k).strip().lower()] = self._template_body_text(v)
+        return mapping
+
+    def _template_body_text(self, value):
+        if isinstance(value, list):
+            lines = []
+            for item in value:
+                if isinstance(item, dict):
+                    title = _as_text(item.get('title') or item.get('name') or item.get('text') or '')
+                    desc = _as_text(item.get('desc') or item.get('description') or item.get('content') or '')
+                    lines.append((title + ('：' + desc if desc and title else desc)).strip())
+                else:
+                    lines.append(_as_text(item))
+            return '\n'.join(x for x in lines if x)
+        if isinstance(value, dict):
+            return '\n'.join(f'{k}: {v}' for k, v in value.items())
+        return _as_text(value)
+
+    def _replace_template_shape_text(self, shape, mapping, used_shapes):
+        if not self._ppt_has(shape, 'has_text_frame'):
+            return False
+        original = self._ppt_text_frame_text(shape.text_frame)
+        if not original:
+            return False
+        key = self._placeholder_key(shape, original)
+        replacement = None
+        if key and key in mapping and mapping[key]:
+            replacement = mapping[key]
+        else:
+            replaced = original
+            for name, value in mapping.items():
+                if value is None:
+                    continue
+                for token in (f'{{{{{name}}}}}', f'{{{name}}}', f'《{name}》', f'[{name}]', f'<{name}>'):
+                    replaced = replaced.replace(token, _as_text(value))
+            if replaced != original:
+                replacement = replaced
+        if replacement is None:
+            return False
+        try:
+            tf = shape.text_frame
+            tf.clear()
+            lines = _as_text(replacement).splitlines() or ['']
+            for i, line in enumerate(lines):
+                p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+                p.text = line
+                if i > 0:
+                    p.level = 0
+            used_shapes.add(id(shape))
+            return True
+        except Exception:
+            return False
+
+    def _placeholder_key(self, shape, text):
+        lower = _as_text(text).strip().lower()
+        m = re.fullmatch(r'[\[{<《【（(]*\s*([a-zA-Z_][\w\- ]{0,30})\s*[\]}>》】）)]*', lower)
+        if m:
+            token = m.group(1).strip().replace(' ', '_')
+            aliases = {'heading': 'title', 'subject': 'title', 'subheading': 'subtitle', 'subtitle': 'subtitle', '正文': 'body'}
+            return aliases.get(token, token)
+        try:
+            if getattr(shape, 'is_placeholder', False):
+                ph = str(shape.placeholder_format.type).lower()
+                if 'title' in ph or 'center_title' in ph:
+                    return 'title'
+                if 'subtitle' in ph or 'sub_title' in ph:
+                    return 'subtitle'
+                if any(x in ph for x in ('body', 'object', 'content', 'text')):
+                    return 'body'
+        except Exception:
+            pass
+        if lower in ('click to add title', '单击此处添加标题'):
+            return 'title'
+        if lower in ('click to add subtitle', '单击此处添加副标题'):
+            return 'subtitle'
+        if lower in ('click to add text', '单击此处添加文本'):
+            return 'body'
+        return ''
+
+    def _replace_template_text_slots(self, slide, prs, slide_data, deck_data, used_shapes):
+        title = _as_text(slide_data.get('title') or '')
+        subtitle = _as_text(slide_data.get('subtitle') or slide_data.get('desc') or '')
+        body = self._template_body_text(
+            slide_data.get('bullets') or slide_data.get('items') or slide_data.get('content') or
+            slide_data.get('cards') or slide_data.get('steps') or ''
+        )
+        if not title and slide == prs.slides[0]:
+            title = _as_text(deck_data.get('title') or '')
+        if not subtitle and slide == prs.slides[0]:
+            subtitle = _as_text(deck_data.get('subtitle') or '')
+
+        body_lines = [x.strip() for x in _as_text(body).splitlines() if x.strip()]
+        if not (title or subtitle or body_lines):
+            return 0
+
+        existing_text = '\n'.join(self._ppt_shape_text(s) for s in self._iter_ppt_shapes(slide.shapes))
+        candidates = {'title': [], 'subtitle': [], 'body': []}
+        for shape in self._iter_ppt_shapes(slide.shapes):
+            if id(shape) in used_shapes or not self._ppt_has(shape, 'has_text_frame'):
+                continue
+            text = self._ppt_text_frame_text(shape.text_frame)
+            if not text:
+                continue
+            role, score = self._template_text_slot_role(shape, text, prs)
+            if role in candidates:
+                candidates[role].append((score, self._template_shape_order(shape), shape))
+
+        replaced = 0
+        title_shape = self._pop_template_slot(candidates['title'])
+        if title and title not in existing_text and title_shape is not None:
+            if self._write_template_shape_text(title_shape, title, used_shapes):
+                replaced += 1
+
+        subtitle_shape = self._pop_template_slot(candidates['subtitle'])
+        if subtitle and subtitle not in existing_text and subtitle_shape is not None:
+            if self._write_template_shape_text(subtitle_shape, subtitle, used_shapes):
+                replaced += 1
+
+        if body_lines and body not in existing_text:
+            body_shapes = [self._pop_template_slot(candidates['body']) for _ in range(len(candidates['body']))]
+            body_shapes = [shape for shape in body_shapes if shape is not None and id(shape) not in used_shapes]
+            if not body_shapes:
+                body_shape = self._pop_template_slot(candidates['title'])
+                if body_shape is not None and id(body_shape) not in used_shapes:
+                    body_shapes = [body_shape]
+            if body_shapes:
+                if len(body_shapes) == 1 or len(body_lines) == 1:
+                    if self._write_template_shape_text(body_shapes[0], body, used_shapes):
+                        replaced += 1
+                else:
+                    for idx, shape in enumerate(body_shapes):
+                        if idx >= len(body_lines):
+                            break
+                        value = body_lines[idx] if idx < len(body_shapes) - 1 else '\n'.join(body_lines[idx:])
+                        if self._write_template_shape_text(shape, value, used_shapes):
+                            replaced += 1
+        replaced += self._clear_unused_template_sample_text(slide, prs, used_shapes)
+        return replaced
+
+    def _template_text_slot_role(self, shape, text, prs):
+        lower = re.sub(r'\s+', ' ', _as_text(text).strip().lower())
+        if not lower or self._template_text_is_decorative(shape, text, prs):
+            return '', 0
+
+        key = self._placeholder_key(shape, text)
+        if key in ('title', 'subtitle'):
+            return key, 100
+        if key in ('body', 'content', 'text'):
+            return 'body', 100
+
+        try:
+            top = int(getattr(shape, 'top', 0) or 0)
+            height = int(getattr(shape, 'height', 0) or 0)
+            slide_h = max(1, int(prs.slide_height))
+        except Exception:
+            top = 0
+            height = 0
+            slide_h = 1
+
+        promptish = self._template_text_is_promptish(lower)
+        looks_title = self._ppt_shape_looks_like_title(shape, text, slide_h)
+        if promptish:
+            if looks_title or top <= slide_h * 0.24:
+                return 'title', 90
+            return 'body', 85
+
+        if lower in ('contents', 'content', 'agenda', '目录', '目 录'):
+            return 'title', 80
+        if re.fullmatch(r'(part|chapter|section)\s*\d{1,2}', lower):
+            return 'title', 70
+        if re.search(r'(标题|title|heading|topic)$', lower) and len(lower) <= 40:
+            return ('title', 70) if top <= slide_h * 0.4 else ('body', 55)
+
+        if looks_title and len(lower) <= 120:
+            return 'title', 45
+        if self._ppt_shape_area_sq_in(shape) >= 0.5 and top >= slide_h * 0.18 and height >= slide_h * 0.04:
+            return 'body', 35
+        return '', 0
+
+    def _template_text_is_promptish(self, lower):
+        compact = re.sub(r'\s+', '', lower)
+        prompt_tokens = (
+            'clicktoaddtext', 'clicktoaddtitle', 'clicktoaddsubtitle',
+            'addtext', 'addtitle', 'placeholder', 'loremipsum',
+            '单击此处添加文字', '单击此处添加文本', '单击此处添加标题', '单击此处添加副标题',
+            '点击此处添加文字', '点击此处添加文本', '点击此处添加标题', '请在此处输入',
+            '请输入文字', '请输入文本', '输入标题', '输入文字', '输入文本',
+        )
+        return any(token in compact for token in prompt_tokens)
+
+    def _template_text_is_sample_label(self, text):
+        lower = re.sub(r'\s+', ' ', _as_text(text).strip().lower())
+        compact = re.sub(r'\s+', '', lower)
+        if self._template_text_is_promptish(lower):
+            return True
+        sample_labels = {
+            '图标标题', '标题', '小标题', '文本标题', '正文', '正文内容',
+            '示例标题', '示例文本', '样例标题', '样例文本',
+            'sampletitle', 'sampletext', 'textplaceholder', 'titleplaceholder',
+        }
+        return compact in sample_labels
+
+    def _template_text_is_decorative(self, shape, text, prs):
+        try:
+            left = int(getattr(shape, 'left', 0) or 0)
+            top = int(getattr(shape, 'top', 0) or 0)
+            width = int(getattr(shape, 'width', 0) or 0)
+            height = int(getattr(shape, 'height', 0) or 0)
+            slide_w = max(1, int(prs.slide_width))
+            slide_h = max(1, int(prs.slide_height))
+        except Exception:
+            return False
+        lower = re.sub(r'\s+', ' ', _as_text(text).strip().lower())
+        if not lower:
+            return True
+        if self._template_text_is_promptish(lower):
+            return False
+        if top >= slide_h * 0.84:
+            return True
+        if left >= slide_w * 0.68 and top >= slide_h * 0.55 and len(lower) <= 80:
+            return True
+        if width <= slide_w * 0.08 or height <= slide_h * 0.025:
+            return True
+        if re.search(r'(copyright|confidential|footer|\b\d{4}[/-]\d{1,2}\b|\b20\d{2}\b|页脚|保密|版权所有)', lower):
+            if top >= slide_h * 0.55 or len(lower) <= 80:
+                return True
+        return False
+
+    def _template_shape_order(self, shape):
+        try:
+            return (int(getattr(shape, 'top', 0) or 0), int(getattr(shape, 'left', 0) or 0))
+        except Exception:
+            return (0, 0)
+
+    def _pop_template_slot(self, candidates):
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (-item[0], item[1][0], item[1][1]))
+        return candidates.pop(0)[2]
+
+    def _write_template_shape_text(self, shape, text, used_shapes):
+        try:
+            tf = shape.text_frame
+            tf.clear()
+            lines = _as_text(text).splitlines() or ['']
+            for i, line in enumerate(lines):
+                p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+                p.text = line
+                if i > 0:
+                    p.level = 0
+            used_shapes.add(id(shape))
+            return True
+        except Exception:
+            return False
+
+    def _clear_unused_template_sample_text(self, slide, prs, used_shapes):
+        cleared = 0
+        for shape in self._iter_ppt_shapes(slide.shapes):
+            if id(shape) in used_shapes or not self._ppt_has(shape, 'has_text_frame'):
+                continue
+            text = self._ppt_text_frame_text(shape.text_frame)
+            if not text or not self._template_text_is_sample_label(text):
+                continue
+            if self._template_text_is_decorative(shape, text, prs):
+                continue
+            if self._write_template_shape_text(shape, '', used_shapes):
+                cleared += 1
+        return cleared
+
+    def _fill_unmatched_template_content(self, slide, prs, slide_data, used_shapes):
+        added = 0
+        existing_text = '\n'.join(self._ppt_shape_text(s) for s in self._iter_ppt_shapes(slide.shapes))
+        title = _as_text(slide_data.get('title') or '')
+        body = self._template_body_text(slide_data.get('bullets') or slide_data.get('items') or slide_data.get('content') or '')
+        body_lines = [x.strip() for x in _as_text(body).splitlines() if x.strip()]
+        from pptx.enum.text import PP_ALIGN
+        if title and title not in existing_text:
+            box = self._template_box('title_box') or (_in_to_emu(0.6), _in_to_emu(0.35), int(prs.slide_width) - _in_to_emu(1.2), _in_to_emu(0.6))
+            self._add_textbox(slide, title, *box, size=28, bold=True, color=self._theme()['text'], align=PP_ALIGN.LEFT, style=self._style_for(slide_data, 'title'))
+            added += 1
+        body_present = bool(body) and (body in existing_text or (body_lines and all(line in existing_text for line in body_lines)))
+        if body and not body_present:
+            box = self._template_box('content_box') or (_in_to_emu(0.8), _in_to_emu(1.3), int(prs.slide_width) - _in_to_emu(1.6), int(prs.slide_height) - _in_to_emu(2.0))
+            self._add_textbox(slide, body, *box, size=16, color=self._theme()['text'], align=PP_ALIGN.LEFT, style=self._style_for(slide_data, 'body'))
+            added += 1
+        return added
+
     def _ppt_request_data(self, body):
         if not isinstance(body, dict):
             return {}
@@ -355,6 +907,7 @@ class PptMixin:
         total_pictures = 0
         total_tables = 0
         total_charts = 0
+        total_text_overlaps = 0
 
         slide_count = len(prs.slides)
         if slide_count <= 0:
@@ -374,6 +927,7 @@ class PptMixin:
             total_pictures += summary['picture_count']
             total_tables += summary['table_count']
             total_charts += summary['chart_count']
+            total_text_overlaps += len(summary.get('text_overlaps', []))
             if summary['text']:
                 all_text.append(summary['text'])
             if not summary['title'] and idx > 1:
@@ -401,6 +955,16 @@ class PptMixin:
                     'slide': idx,
                     'message': f'possible text box overflow: estimated {item["estimated_lines"]} lines > capacity {item["capacity_lines"]}',
                     'text': item.get('text', ''),
+                })
+            for item in summary.get('text_overlaps', [])[:5]:
+                issues.append({
+                    'severity': 'error',
+                    'slide': idx,
+                    'message': f'overlapping text boxes: {item["overlap_pct"]}% of smaller text area overlaps',
+                    'text_a': item.get('text_a', ''),
+                    'text_b': item.get('text_b', ''),
+                    'bounds_a': item.get('bounds_a', {}),
+                    'bounds_b': item.get('bounds_b', {}),
                 })
 
         visible_text = '\n'.join(all_text)
@@ -439,6 +1003,7 @@ class PptMixin:
                 'picture_count': total_pictures,
                 'table_count': total_tables,
                 'chart_count': total_charts,
+                'text_overlap_count': total_text_overlaps,
                 'visible_question_marks': question_marks,
                 'cjk_char_count': cjk_chars,
                 'mojibake_hit_count': mojibake_hits,
@@ -468,6 +1033,7 @@ class PptMixin:
         bullet_like = 0
         off_slide = []
         text_overflow = []
+        text_overlap_candidates = []
 
         for shape in self._iter_ppt_shapes(slide.shapes):
             shape_count += 1
@@ -494,6 +1060,9 @@ class PptMixin:
             bullet_like += len(re.findall(r'(^|\n)\s*([•\-\*\u2022]|\d+[.)])\s+', text))
             if not title and self._ppt_shape_looks_like_title(shape, text, slide_h):
                 title = text.splitlines()[0][:120]
+            overlap_candidate = self._ppt_text_overlap_candidate(shape, text, bounds, slide_w, slide_h)
+            if overlap_candidate:
+                text_overlap_candidates.append(overlap_candidate)
 
             self._ppt_collect_text_styles(shape, font_counts, font_size_counts, color_counts)
             area = self._ppt_shape_area_sq_in(shape)
@@ -519,6 +1088,7 @@ class PptMixin:
             title = texts[0].splitlines()[0][:120]
 
         full_text = '\n'.join(texts)
+        text_overlaps = self._ppt_find_text_overlaps(text_overlap_candidates)
         return {
             'slide': idx,
             'title': title,
@@ -533,6 +1103,7 @@ class PptMixin:
             'overcrowded': overcrowded,
             'off_slide': off_slide,
             'text_overflow': text_overflow,
+            'text_overlaps': text_overlaps,
             'text': full_text,
         }
 
@@ -549,6 +1120,125 @@ class PptMixin:
     def _ppt_bounds_outside_slide(self, bounds, slide_w, slide_h, tolerance=91440):
         left, top, right, bottom = bounds
         return left < -tolerance or top < -tolerance or right > slide_w + tolerance or bottom > slide_h + tolerance
+
+    def _ppt_text_overlap_candidate(self, shape, text, bounds, slide_w, slide_h):
+        if not bounds or not self._ppt_has(shape, 'has_text_frame'):
+            return None
+        stripped = _as_text(text).strip()
+        if not stripped:
+            return None
+        if len(stripped) <= 2 and not re.search(r'[A-Za-z\u4e00-\u9fff]', stripped):
+            return None
+        left, top, right, bottom = bounds
+        width = max(0, right - left)
+        height = max(0, bottom - top)
+        if width < slide_w * 0.035 or height < slide_h * 0.025:
+            return None
+        lower = re.sub(r'\s+', ' ', stripped.lower())
+        if top >= slide_h * 0.86 and len(lower) <= 80:
+            return None
+        if re.search(r'(copyright|footer|\b20\d{2}\b|页脚|版权所有)', lower) and len(lower) <= 100:
+            return None
+
+        occupied = self._ppt_text_occupied_bounds(shape, stripped, bounds)
+        if not occupied:
+            return None
+        if self._ppt_bounds_area(occupied) <= 0:
+            return None
+        return {
+            'bounds': occupied,
+            'shape_bounds': bounds,
+            'text': stripped.replace('\n', ' ')[:120],
+        }
+
+    def _ppt_text_occupied_bounds(self, shape, text, bounds):
+        left, top, right, bottom = bounds
+        try:
+            tf = shape.text_frame
+            ml = int(getattr(tf, 'margin_left', 0) or 0)
+            mr = int(getattr(tf, 'margin_right', 0) or 0)
+            mt = int(getattr(tf, 'margin_top', 0) or 0)
+            mb = int(getattr(tf, 'margin_bottom', 0) or 0)
+        except Exception:
+            ml = mr = mt = mb = 0
+
+        inner_left = min(right, left + max(0, ml))
+        inner_right = max(inner_left, right - max(0, mr))
+        inner_top = min(bottom, top + max(0, mt))
+        inner_bottom = max(inner_top, bottom - max(0, mb))
+        inner_width = max(1, inner_right - inner_left)
+        inner_height = max(1, inner_bottom - inner_top)
+
+        font_size = self._ppt_shape_font_size(shape) or 14
+        width_in = max(0.05, inner_width / _EMU_PER_INCH)
+        avg_char_width_in = max(0.045, font_size * 0.0062)
+        chars_per_line = max(1, int(width_in / avg_char_width_in))
+        estimated_lines = 0
+        for raw in _as_text(text).splitlines() or ['']:
+            raw = raw.strip()
+            estimated_lines += max(1, math.ceil(max(1, len(raw)) / chars_per_line))
+        line_height = int(max(0.12, font_size * 1.25 / 72.0) * _EMU_PER_INCH)
+        text_height = min(inner_height, max(line_height, estimated_lines * line_height))
+
+        y = inner_top
+        try:
+            anchor = str(getattr(shape.text_frame, 'vertical_anchor', '')).lower()
+            if 'middle' in anchor or 'mid' in anchor:
+                y = inner_top + max(0, (inner_height - text_height) // 2)
+            elif 'bottom' in anchor:
+                y = inner_bottom - text_height
+        except Exception:
+            pass
+        return (inner_left, y, inner_right, min(inner_bottom, y + text_height))
+
+    def _ppt_find_text_overlaps(self, candidates):
+        overlaps = []
+        for i, first in enumerate(candidates):
+            for second in candidates[i + 1:]:
+                inter = self._ppt_bounds_intersection(first['bounds'], second['bounds'])
+                if not inter:
+                    continue
+                inter_area = self._ppt_bounds_area(inter)
+                if inter_area <= 0:
+                    continue
+                first_area = self._ppt_bounds_area(first['bounds'])
+                second_area = self._ppt_bounds_area(second['bounds'])
+                smaller = max(1, min(first_area, second_area))
+                overlap_ratio = inter_area / smaller
+                left, top, right, bottom = inter
+                overlap_w_in = (right - left) / _EMU_PER_INCH
+                overlap_h_in = (bottom - top) / _EMU_PER_INCH
+                overlap_area_in = inter_area / (_EMU_PER_INCH * _EMU_PER_INCH)
+                if overlap_ratio < 0.22 or overlap_area_in < 0.035:
+                    continue
+                if overlap_w_in < 0.12 or overlap_h_in < 0.08:
+                    continue
+                overlaps.append({
+                    'overlap_pct': int(round(overlap_ratio * 100)),
+                    'overlap_area_sq_in': round(overlap_area_in, 3),
+                    'bounds_a': self._ppt_format_bounds(first['shape_bounds']),
+                    'bounds_b': self._ppt_format_bounds(second['shape_bounds']),
+                    'overlap_bounds': self._ppt_format_bounds(inter),
+                    'text_a': first.get('text', ''),
+                    'text_b': second.get('text', ''),
+                })
+        overlaps.sort(key=lambda item: (-item['overlap_pct'], -item['overlap_area_sq_in']))
+        return overlaps[:10]
+
+    def _ppt_bounds_intersection(self, a, b):
+        left = max(a[0], b[0])
+        top = max(a[1], b[1])
+        right = min(a[2], b[2])
+        bottom = min(a[3], b[3])
+        if right <= left or bottom <= top:
+            return None
+        return (left, top, right, bottom)
+
+    def _ppt_bounds_area(self, bounds):
+        try:
+            return max(0, bounds[2] - bounds[0]) * max(0, bounds[3] - bounds[1])
+        except Exception:
+            return 0
 
     def _ppt_format_bounds(self, bounds):
         try:
@@ -674,6 +1364,241 @@ class PptMixin:
                 color_counts[color] = color_counts.get(color, 0) + 1
         except Exception:
             pass
+
+    def _ppt_default_profile_path(self, ppt_path):
+        base = os.path.splitext(os.path.basename(ppt_path))[0] or 'template'
+        base = _SAFE_FILENAME_RE.sub('_', base).strip('._ ') or 'template'
+        digest = hashlib.sha1(os.path.abspath(ppt_path).encode('utf-8', 'ignore')).hexdigest()[:8]
+        return os.path.join('output', 'ppt_templates', f'{base}_{digest}.profile.json')
+
+    def _analyze_ppt_template_file(self, ppt_path):
+        from pptx import Presentation
+        prs = Presentation(ppt_path)
+        slide_w = int(prs.slide_width)
+        slide_h = int(prs.slide_height)
+        color_counts = Counter()
+        fill_counts = Counter()
+        font_color_counts = Counter()
+        font_counts = Counter()
+        font_size_counts = Counter()
+        title_boxes = []
+        content_boxes = []
+        footer_boxes = []
+        repeated = {}
+        decorations = []
+        warnings = []
+
+        theme_colors = self._extract_ppt_theme_colors(ppt_path)
+        for c in theme_colors.values():
+            if c:
+                color_counts[c] += 3
+
+        for slide in prs.slides:
+            for shape in self._iter_ppt_shapes(slide.shapes):
+                bounds = self._ppt_shape_bounds(shape)
+                if not bounds:
+                    continue
+                left, top, right, bottom = bounds
+                width, height = right - left, bottom - top
+                text = self._ppt_shape_text(shape).strip()
+                font_size = self._ppt_shape_font_size(shape)
+                if font_size:
+                    font_size_counts[str(int(round(font_size)))] += 1
+                self._collect_template_shape_colors(shape, color_counts, fill_counts, font_color_counts)
+                self._collect_template_shape_fonts(shape, font_counts)
+
+                rel = {'left': _emu_to_in(left), 'top': _emu_to_in(top), 'width': _emu_to_in(width), 'height': _emu_to_in(height)}
+                if text and (top < slide_h * 0.24 or (font_size and font_size >= 22)):
+                    title_boxes.append(rel)
+                elif top > slide_h * 0.82:
+                    footer_boxes.append(rel)
+                elif width > slide_w * 0.12 and height > slide_h * 0.04:
+                    content_boxes.append(rel)
+
+                sig = self._template_shape_signature(shape, bounds, text)
+                if sig:
+                    repeated.setdefault(sig, {'count': 0, 'shape': shape, 'bounds': bounds, 'text': text})['count'] += 1
+
+        slide_count = max(1, len(prs.slides))
+        for item in repeated.values():
+            if item['count'] >= max(2, min(slide_count, 3)) or (slide_count == 1 and self._is_template_decoration(item['shape'], item['bounds'], slide_w, slide_h, item['text'])):
+                deco = self._extract_template_decoration(item['shape'], item['bounds'], item['text'])
+                if deco:
+                    decorations.append(deco)
+
+        primary = self._pick_color(color_counts, exclude_light=True) or theme_colors.get('accent1') or '#2563eb'
+        bg = self._pick_color(fill_counts, prefer_light=True) or theme_colors.get('lt1') or '#f8fafc'
+        text_color = self._pick_color(font_color_counts, exclude_light=True) or theme_colors.get('dk1') or '#0f172a'
+        accent = self._pick_color(color_counts, exclude=[primary, bg, text_color], exclude_light=True) or theme_colors.get('accent2') or '#f97316'
+        font_family = font_counts.most_common(1)[0][0] if font_counts else 'Microsoft YaHei'
+        title_size = self._pick_font_size(font_size_counts, default=28, high=True)
+        body_size = self._pick_font_size(font_size_counts, default=16, high=False)
+        layout = {
+            'title_box': self._median_box(title_boxes) or {'left': 0.55, 'top': 0.3, 'width': max(1, _emu_to_in(slide_w) - 1.1), 'height': 0.6},
+            'content_box': self._median_box(content_boxes) or {'left': 0.8, 'top': 1.35, 'width': max(1, _emu_to_in(slide_w) - 1.6), 'height': max(1, _emu_to_in(slide_h) - 2.0)},
+            'footer_box': self._median_box(footer_boxes) or {'left': 0.8, 'top': max(0, _emu_to_in(slide_h) - 0.45), 'width': max(1, _emu_to_in(slide_w) - 1.6), 'height': 0.25},
+        }
+        if not decorations:
+            warnings.append('no repeated header/footer/logo decorations detected; style colors and layout will still be applied')
+        return {
+            'version': 1,
+            'source': self._ppt_rel_path(ppt_path),
+            'slide_width': slide_w,
+            'slide_height': slide_h,
+            'size': {'width_in': _emu_to_in(slide_w), 'height_in': _emu_to_in(slide_h), 'aspect_ratio': round(slide_w / float(slide_h), 4) if slide_h else 0},
+            'theme': {'primary_color': primary, 'accent_color': accent, 'background_color': bg, 'text_color': text_color, 'muted_color': text_color, 'line_color': self._pick_color(color_counts, exclude=[primary, bg, text_color, accent]) or '#cbd5e1'},
+            'font': {'font_family': font_family, 'title_font_size': title_size, 'body_font_size': body_size},
+            'layout': layout,
+            'decorations': decorations[:24],
+            'stats': {'colors': self._counter_top(color_counts), 'fonts': self._counter_top(font_counts), 'font_sizes': self._counter_top(font_size_counts)},
+            'warnings': warnings,
+        }
+
+    def _extract_ppt_theme_colors(self, ppt_path):
+        out = {}
+        ns = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
+        try:
+            with zipfile.ZipFile(ppt_path) as zf:
+                names = [n for n in zf.namelist() if n.startswith('ppt/theme/theme') and n.endswith('.xml')]
+                if not names:
+                    return out
+                root = ET.fromstring(zf.read(names[0]))
+            for node in root.findall('.//a:clrScheme/*', ns):
+                srgb = node.find('.//a:srgbClr', ns)
+                if srgb is not None and srgb.get('val'):
+                    out[node.tag.split('}')[-1]] = '#' + srgb.get('val').lower()
+        except Exception:
+            pass
+        return out
+
+    def _collect_template_shape_colors(self, shape, all_counts, fill_counts, font_color_counts):
+        for getter, counts in ((lambda s: s.fill.fore_color.rgb, fill_counts), (lambda s: s.line.color.rgb, all_counts)):
+            try:
+                color = self._ppt_rgb_hex(getter(shape))
+                if color:
+                    counts[color] += 1
+                    all_counts[color] += 1
+            except Exception:
+                pass
+        try:
+            if self._ppt_has(shape, 'has_text_frame'):
+                for p in shape.text_frame.paragraphs:
+                    for font in [p.font] + [r.font for r in p.runs]:
+                        try:
+                            color = self._ppt_rgb_hex(font.color.rgb)
+                            if color:
+                                font_color_counts[color] += 1
+                                all_counts[color] += 1
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    def _collect_template_shape_fonts(self, shape, font_counts):
+        try:
+            if not self._ppt_has(shape, 'has_text_frame'):
+                return
+            for p in shape.text_frame.paragraphs:
+                for font in [p.font] + [r.font for r in p.runs]:
+                    name = getattr(font, 'name', None)
+                    if name:
+                        font_counts[_as_text(name)] += 1
+        except Exception:
+            pass
+
+    def _counter_top(self, counter, limit=8):
+        return [{'value': k, 'count': v} for k, v in counter.most_common(limit)]
+
+    def _color_luma(self, color):
+        rgb = self._ppt_rgb_tuple(color)
+        if not rgb:
+            return 128
+        r, g, b = rgb
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    def _pick_color(self, counter, exclude=None, exclude_light=False, prefer_light=False):
+        exclude = {x.lower() for x in _as_list(exclude) if x}
+        for color, _ in counter.most_common(20):
+            if color.lower() in exclude:
+                continue
+            luma = self._color_luma(color)
+            if exclude_light and luma > 238:
+                continue
+            if prefer_light and luma < 210:
+                continue
+            return color
+        return ''
+
+    def _pick_font_size(self, counter, default=16, high=False):
+        vals = []
+        for k, count in counter.items():
+            try:
+                vals.extend([int(k)] * min(8, count))
+            except Exception:
+                pass
+        if not vals:
+            return default
+        vals.sort()
+        idx = int(len(vals) * (0.8 if high else 0.45))
+        return max(8, min(48, vals[min(len(vals) - 1, idx)]))
+
+    def _median_box(self, boxes):
+        if not boxes:
+            return None
+        out = {}
+        for key in ('left', 'top', 'width', 'height'):
+            vals = sorted(float(b.get(key, 0)) for b in boxes)
+            out[key] = round(vals[len(vals) // 2], 3)
+        return out
+
+    def _template_shape_signature(self, shape, bounds, text):
+        left, top, right, bottom = bounds
+        kind = 'pic' if self._ppt_shape_has_image(shape) else ('text' if text else 'shape')
+        fill = ''
+        try:
+            fill = self._ppt_rgb_hex(shape.fill.fore_color.rgb)
+        except Exception:
+            pass
+        return '|'.join([kind, str(round(left / 20000)), str(round(top / 20000)), str(round((right-left) / 20000)), str(round((bottom-top) / 20000)), text[:40], fill])
+
+    def _is_template_decoration(self, shape, bounds, slide_w, slide_h, text):
+        left, top, right, bottom = bounds
+        width, height = right - left, bottom - top
+        edge = top < slide_h * 0.18 or bottom > slide_h * 0.82 or left < slide_w * 0.08 or right > slide_w * 0.92
+        small_text = bool(text) and len(text) <= 80
+        return self._ppt_shape_has_image(shape) or edge or small_text or height < slide_h * 0.08 or width < slide_w * 0.08
+
+    def _extract_template_decoration(self, shape, bounds, text):
+        left, top, right, bottom = bounds
+        item = {'kind': 'text' if text else 'shape', 'bounds': {'left': _emu_to_in(left), 'top': _emu_to_in(top), 'width': _emu_to_in(right-left), 'height': _emu_to_in(bottom-top)}}
+        if self._ppt_shape_has_image(shape):
+            try:
+                digest = hashlib.sha1(shape.image.blob).hexdigest()[:12]
+                ext = shape.image.ext or 'png'
+                img_dir = os.path.join(config.WORKSPACE_ROOT, 'output', 'ppt_templates', 'assets')
+                os.makedirs(img_dir, exist_ok=True)
+                img_path = os.path.join(img_dir, f'{digest}.{ext}')
+                if not os.path.exists(img_path):
+                    with open(img_path, 'wb') as f:
+                        f.write(shape.image.blob)
+                item.update({'kind': 'image', 'path': self._ppt_rel_path(img_path)})
+                return item
+            except Exception:
+                return None
+        item['text'] = text
+        try:
+            item['fill'] = self._ppt_rgb_hex(shape.fill.fore_color.rgb)
+        except Exception:
+            pass
+        try:
+            item['line'] = self._ppt_rgb_hex(shape.line.color.rgb)
+        except Exception:
+            pass
+        try:
+            item['font_size'] = self._ppt_shape_font_size(shape)
+        except Exception:
+            pass
+        return item if (item.get('text') or item.get('fill') or item.get('line')) else None
 
     def _render_ppt_preview_powerpoint(self, ppt_path, out_dir, width, height, max_slides=None):
         if os.name != 'nt':
@@ -1157,9 +2082,113 @@ class PptMixin:
     def _ppt_preview_url(self, rel_path):
         return '/preview-file?path=' + quote(_as_text(rel_path).replace('\\', '/'))
 
+    def _load_ppt_template_profile(self, data):
+        if not isinstance(data, dict):
+            return {}
+        profile = data.get('template_profile')
+        if isinstance(profile, dict):
+            return dict(profile)
+        profile_path = data.get('template_profile_path') or (profile if isinstance(profile, str) else '')
+        if profile_path:
+            path, err = check_path_or_error(profile_path, must_exist=True)
+            if err:
+                raise ValueError(err)
+            with open(path, 'r', encoding='utf-8') as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                loaded['profile_path'] = self._ppt_rel_path(path)
+                return loaded
+        template_path = data.get('template_path') or data.get('template')
+        if template_path:
+            path, err = check_path_or_error(template_path, must_exist=True)
+            if err:
+                raise ValueError(err)
+            cache_path = self._ppt_default_profile_path(path)
+            abs_cache, cache_err = check_path_or_error(cache_path, must_exist=False)
+            if not cache_err and os.path.exists(abs_cache):
+                try:
+                    with open(abs_cache, 'r', encoding='utf-8') as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        loaded['profile_path'] = self._ppt_rel_path(abs_cache)
+                        return loaded
+                except Exception:
+                    pass
+            loaded = self._analyze_ppt_template_file(path)
+            if not cache_err:
+                os.makedirs(os.path.dirname(abs_cache), exist_ok=True)
+                with open(abs_cache, 'w', encoding='utf-8') as f:
+                    json.dump(loaded, f, ensure_ascii=False, indent=2)
+                loaded['profile_path'] = self._ppt_rel_path(abs_cache)
+            return loaded
+        return {}
+
+    def _template_profile_style(self, profile):
+        out = {}
+        if not isinstance(profile, dict):
+            return out
+        out.update(self._style_dict(profile.get('theme')))
+        font = self._style_dict(profile.get('font'))
+        if font.get('font_family'):
+            out['font_family'] = font.get('font_family')
+        if font.get('body_font_size'):
+            out['font_size'] = font.get('body_font_size')
+        return out
+
+    def _template_box(self, name):
+        profile = getattr(self, '_ppt_template_profile', {})
+        if not isinstance(profile, dict):
+            return None
+        box = self._style_dict(self._style_dict(profile.get('layout')).get(name))
+        if not box:
+            return None
+        return (_in_to_emu(box.get('left')), _in_to_emu(box.get('top')), _in_to_emu(box.get('width')), _in_to_emu(box.get('height')))
+
+    def _apply_template_decorations(self, slide, prs, include_title=False):
+        profile = getattr(self, '_ppt_template_profile', {})
+        if not isinstance(profile, dict):
+            return
+        for item in _as_list(profile.get('decorations')):
+            if not isinstance(item, dict):
+                continue
+            bounds = self._style_dict(item.get('bounds'))
+            left, top, width, height = _in_to_emu(bounds.get('left')), _in_to_emu(bounds.get('top')), _in_to_emu(bounds.get('width')), _in_to_emu(bounds.get('height'))
+            if width <= 0 or height <= 0:
+                continue
+            if not include_title and top < int(prs.slide_height * 0.18) and item.get('text'):
+                continue
+            kind = item.get('kind')
+            try:
+                if kind == 'image' and item.get('path'):
+                    img_path, err = check_path_or_error(item.get('path'), must_exist=True)
+                    if not err and os.path.exists(img_path):
+                        slide.shapes.add_picture(img_path, left, top, width, height)
+                elif item.get('text'):
+                    box = self._add_textbox(slide, item.get('text'), left, top, width, height, size=item.get('font_size') or 9, color=self._parse_color(item.get('line') or item.get('fill'), self._theme()['muted']), style={'font_size': item.get('font_size') or 9})
+                    try:
+                        box.fill.background(); box.line.fill.background()
+                    except Exception:
+                        pass
+                else:
+                    from pptx.enum.shapes import MSO_SHAPE
+                    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+                    fill = self._parse_color(item.get('fill'), None)
+                    line = self._parse_color(item.get('line'), None)
+                    if fill:
+                        shape.fill.solid(); shape.fill.fore_color.rgb = fill
+                    else:
+                        shape.fill.background()
+                    if line:
+                        shape.line.color.rgb = line
+                    else:
+                        shape.line.fill.background()
+            except Exception:
+                continue
+
     def _ppt_add_cover(self, prs, data):
         self._ppt_current_slide = data if isinstance(data, dict) else {}
         slide = prs.slides.add_slide(prs.slide_layouts[0])
+        self._apply_template_decorations(slide, prs, include_title=True)
         slide.shapes.title.text = _as_text(data.get('title'), '未命名 PPT')
         self._apply_text_style(slide.shapes.title.text_frame.paragraphs[0], self._style_for(data, 'title'))
         if len(slide.placeholders) > 1:
@@ -1170,6 +2199,7 @@ class PptMixin:
         self._ppt_current_slide = data if isinstance(data, dict) else {}
         layout = prs.slide_layouts[2] if len(prs.slide_layouts) > 2 else prs.slide_layouts[0]
         slide = prs.slides.add_slide(layout)
+        self._apply_template_decorations(slide, prs)
         slide.shapes.title.text = _as_text(data.get('title'), '章节')
         self._apply_text_style(slide.shapes.title.text_frame.paragraphs[0], self._style_for(data, 'title'))
         if len(slide.placeholders) > 1:
@@ -1179,6 +2209,7 @@ class PptMixin:
     def _ppt_add_bullets(self, prs, data, Pt):
         self._ppt_current_slide = data if isinstance(data, dict) else {}
         slide = prs.slides.add_slide(prs.slide_layouts[1])
+        self._apply_template_decorations(slide, prs)
         slide.shapes.title.text = _as_text(data.get('title'), '未命名页面')
         self._apply_text_style(slide.shapes.title.text_frame.paragraphs[0], self._style_for(data, 'title'))
 
@@ -1236,6 +2267,8 @@ class PptMixin:
         color_source = {}
         color_source.update(colors)
         color_source.update(style)
+        profile_theme = self._style_dict(getattr(self, '_ppt_template_profile', {}).get('theme') if isinstance(getattr(self, '_ppt_template_profile', {}), dict) else {})
+        color_source.update(profile_theme)
         aliases = {
             'primary': ('primary', 'primary_color'),
             'primary_dark': ('primary_dark', 'primary_dark_color'),
@@ -1297,6 +2330,14 @@ class PptMixin:
 
     def _style_for(self, slide_data=None, role=None, item=None):
         out = {}
+        profile = getattr(self, '_ppt_template_profile', {})
+        if isinstance(profile, dict):
+            out.update(self._template_profile_style(profile))
+            font = self._style_dict(profile.get('font'))
+            if role == 'title' and font.get('title_font_size'):
+                out['font_size'] = font.get('title_font_size')
+            elif role in ('body', 'subtitle') and font.get('body_font_size'):
+                out['font_size'] = font.get('body_font_size')
         global_style = self._style_dict(getattr(self, '_ppt_global_style', {}))
         out.update(self._direct_style(global_style))
         out.update(self._role_style(global_style, role))
@@ -1432,7 +2473,11 @@ class PptMixin:
         self._ppt_current_slide = data if isinstance(data, dict) else {}
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         self._add_background(slide, prs)
-        box = slide.shapes.add_textbox(Inches(0.55), Inches(0.3), Inches(12.2), Inches(0.55))
+        title_box = self._template_box('title_box')
+        if title_box:
+            box = slide.shapes.add_textbox(*title_box)
+        else:
+            box = slide.shapes.add_textbox(Inches(0.55), Inches(0.3), Inches(12.2), Inches(0.55))
         p = box.text_frame.paragraphs[0]
         p.text = _as_text(title, '未命名页面')
         self._apply_text_style(
@@ -1452,6 +2497,9 @@ class PptMixin:
         bg.fill.solid()
         bg.fill.fore_color.rgb = theme['bg']
         bg.line.fill.background()
+        if getattr(self, '_ppt_template_profile', None):
+            self._apply_template_decorations(slide, prs)
+            return
         bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(0.11), prs.slide_height)
         bar.fill.solid()
         bar.fill.fore_color.rgb = theme['primary']

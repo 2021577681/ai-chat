@@ -227,6 +227,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_preview_ppt(body)
             elif action == 'validate_ppt':
                 self.handle_validate_ppt(body)
+            elif action == 'analyze_ppt_template':
+                self.handle_analyze_ppt_template(body)
             elif action == 'screenshot':
                 self.handle_screenshot(body)
             elif action == 'list_windows':
