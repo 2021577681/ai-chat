@@ -223,6 +223,10 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_git(body)
             elif action == 'generate_ppt':
                 self.handle_generate_ppt(body)
+            elif action == 'preview_ppt':
+                self.handle_preview_ppt(body)
+            elif action == 'validate_ppt':
+                self.handle_validate_ppt(body)
             elif action == 'screenshot':
                 self.handle_screenshot(body)
             elif action == 'list_windows':

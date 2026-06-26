@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v13';  // v13：新增 PPT 学术版式 architecture/method_pipeline/table/chart/experiment_design/ablation
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v14';  // v14：新增 preview_ppt / validate_ppt
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -213,7 +213,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'generate_ppt',
-    description: '📊 根据结构化 JSON 生成 PPTX 文件。用户要求制作 PPT/演示文稿/汇报材料/课件/BP/方案/学术汇报时，优先调用本工具生成真实 .pptx，不要只在聊天里输出文字大纲。除封面、目录、总结外，内容页应优先使用原生 PPT 矢量版式。通用版式：three_cards / process / timeline / comparison / two_column / matrix / pyramid / cycle / funnel / quote；学术版式：architecture / method_pipeline / table / chart / experiment_design / ablation。后端会用 PPT 原生形状绘制，打开后可编辑。',
+    description: '📊 根据结构化 JSON 生成 PPTX 文件。用户要求制作 PPT/演示文稿/汇报材料/课件/BP/方案/学术汇报时，优先调用本工具生成真实 .pptx，不要只在聊天里输出文字大纲。除封面、目录、总结外，内容页应优先使用原生 PPT 矢量版式。通用版式：three_cards / process / timeline / comparison / two_column / matrix / pyramid / cycle / funnel / quote；学术版式：architecture / method_pipeline / table / chart / experiment_design / ablation。可用 style/theme 指定字体、字号、颜色、粗斜体、对齐和主题色。后端会用 PPT 原生形状绘制，打开后可编辑。',
     parameters: {
       type: 'object',
       properties: {
@@ -221,9 +221,31 @@ const BUILTIN_TOOLS = [
         path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
         title: { type: 'string', description: 'PPT 总标题' },
         subtitle: { type: 'string', description: 'PPT 副标题，可用于封面' },
+        style: {
+          type: 'object',
+          description: '全局文字和主题样式。可含 font_family/font_size/title_font_size/body_font_size/color/text_color/primary_color/accent_color/background_color/muted_color/bold/italic/align。颜色支持 #RRGGBB、rgb(37,99,235)、primary/text/muted/accent/white/black 等。页面和具体文本对象的 style 会覆盖全局样式。',
+          properties: {
+            font_family: { type: 'string', description: '全局字体，例如 Microsoft YaHei、SimSun、Arial' },
+            font_size: { type: 'number', description: '全局默认字号，建议 10-32' },
+            title_font_size: { type: 'number', description: '页面标题默认字号' },
+            body_font_size: { type: 'number', description: '正文默认字号' },
+            color: { type: 'string', description: '全局默认文字颜色，例如 #0f172a' },
+            primary_color: { type: 'string', description: '主题主色，例如 #2563eb' },
+            accent_color: { type: 'string', description: '强调色，例如 #f97316' },
+            background_color: { type: 'string', description: '页面背景色，例如 #f8fafc' },
+            muted_color: { type: 'string', description: '弱化文字颜色' },
+            bold: { type: 'boolean', description: '全局默认是否加粗' },
+            italic: { type: 'boolean', description: '全局默认是否斜体' },
+            align: { type: 'string', description: '默认对齐：left/center/right/justify' }
+          }
+        },
+        theme: {
+          type: 'object',
+          description: '全局主题色别名，等价于 style 中的主题色设置；如果同时提供 style 和 theme，style 优先生效。'
+        },
         slides: {
           type: 'array',
-          description: '幻灯片列表。强烈建议组合：cover + agenda + 多种矢量版式 + summary。学术/项目汇报优先使用 architecture/method_pipeline/table/chart/experiment_design/ablation；通用内容页使用 cards/process/timeline/comparison 等。尽量不要全用 bullets。每页标题不超过 20 字，要点 3-5 条。',
+          description: '幻灯片列表。强烈建议组合：cover + agenda + 多种矢量版式 + summary。学术/项目汇报优先使用 architecture/method_pipeline/table/chart/experiment_design/ablation；通用内容页使用 cards/process/timeline/comparison 等。尽量不要全用 bullets。每页标题不超过 20 字，要点 3-5 条。每页和每个文本对象可带 style，例如 {font_family,font_size,color,bold,italic,align}。',
           items: {
             type: 'object',
             properties: {
@@ -233,9 +255,21 @@ const BUILTIN_TOOLS = [
               },
               title: { type: 'string', description: '页面标题' },
               subtitle: { type: 'string', description: '封面或章节页副标题' },
+              style: {
+                type: 'object',
+                description: '本页默认样式，覆盖全局 style。可含 font_family/font_size/color/bold/italic/align/title_font_size/body_font_size 等。'
+              },
+              title_style: {
+                type: 'object',
+                description: '本页标题样式，覆盖全局标题样式。可含 font_family/font_size/color/bold/italic/align。'
+              },
+              body_style: {
+                type: 'object',
+                description: '本页正文/说明文字样式，覆盖全局正文样式。可含 font_family/font_size/color/bold/italic/align。'
+              },
               bullets: {
                 type: 'array',
-                description: '要点列表。可传字符串，或 {text, level} 对象。',
+                description: '要点列表。可传字符串，或 {text, level, style} 对象；style 可指定该条文字的字体、字号、颜色等。',
                 items: {
                   oneOf: [
                     { type: 'string' },
@@ -243,7 +277,8 @@ const BUILTIN_TOOLS = [
                       type: 'object',
                       properties: {
                         text: { type: 'string', description: '要点文本' },
-                        level: { type: 'number', description: '缩进层级，0-4' }
+                        level: { type: 'number', description: '缩进层级，0-4' },
+                        style: { type: 'object', description: '该条要点样式，例如 {font_size:18,color:"#dc2626",bold:true}' }
                       }
                     }
                   ]
@@ -263,7 +298,11 @@ const BUILTIN_TOOLS = [
                   properties: {
                     title: { type: 'string', description: '卡片标题' },
                     icon: { type: 'string', description: '可选图标字符或序号，如 ①、🧭' },
-                    desc: { type: 'string', description: '卡片说明，建议不超过 30 字' }
+                    desc: { type: 'string', description: '卡片说明，建议不超过 30 字' },
+                    style: { type: 'object', description: '整张卡片文字默认样式' },
+                    title_style: { type: 'object', description: '卡片标题样式' },
+                    desc_style: { type: 'object', description: '卡片说明样式' },
+                    icon_style: { type: 'object', description: '卡片图标/序号样式' }
                   }
                 }
               },
@@ -274,7 +313,10 @@ const BUILTIN_TOOLS = [
                   type: 'object',
                   properties: {
                     title: { type: 'string', description: '步骤标题' },
-                    desc: { type: 'string', description: '步骤说明，建议不超过 24 字' }
+                    desc: { type: 'string', description: '步骤说明，建议不超过 24 字' },
+                    style: { type: 'object', description: '该步骤默认文字样式' },
+                    title_style: { type: 'object', description: '步骤标题样式' },
+                    desc_style: { type: 'object', description: '步骤说明样式' }
                   }
                 }
               },
@@ -286,7 +328,11 @@ const BUILTIN_TOOLS = [
                   properties: {
                     time: { type: 'string', description: '阶段、时间或里程碑标签' },
                     title: { type: 'string', description: '事件标题' },
-                    desc: { type: 'string', description: '事件说明，建议不超过 24 字' }
+                    desc: { type: 'string', description: '事件说明，建议不超过 24 字' },
+                    style: { type: 'object', description: '该事件默认文字样式' },
+                    title_style: { type: 'object', description: '事件标题样式' },
+                    desc_style: { type: 'object', description: '事件说明样式' },
+                    label_style: { type: 'object', description: '时间/阶段标签样式' }
                   }
                 }
               },
@@ -313,7 +359,10 @@ const BUILTIN_TOOLS = [
                   type: 'object',
                   properties: {
                     title: { type: 'string', description: '象限标题' },
-                    desc: { type: 'string', description: '象限说明' }
+                    desc: { type: 'string', description: '象限说明' },
+                    style: { type: 'object', description: '该象限默认文字样式' },
+                    title_style: { type: 'object', description: '象限标题样式' },
+                    desc_style: { type: 'object', description: '象限说明样式' }
                   }
                 }
               },
@@ -340,6 +389,8 @@ const BUILTIN_TOOLS = [
               },
               quote: { type: 'string', description: 'quote 金句页的核心引用文本' },
               author: { type: 'string', description: 'quote 金句页引用来源或署名' },
+              quote_style: { type: 'object', description: 'quote 金句正文样式，可含 font_family/font_size/color/bold/italic/align' },
+              author_style: { type: 'object', description: 'quote 署名样式' },
               layers: {
                 type: 'array',
                 description: 'architecture 项目/系统架构层，建议 3-5 层。每项 {title, desc, items}，items 是模块列表。',
@@ -348,7 +399,10 @@ const BUILTIN_TOOLS = [
                   properties: {
                     title: { type: 'string', description: '架构层标题，如 数据层、模型层、应用层' },
                     desc: { type: 'string', description: '可选层说明' },
-                    items: { type: 'array', items: { type: 'string' }, description: '该层包含的模块/组件' }
+                    items: { type: 'array', items: { type: 'string' }, description: '该层包含的模块/组件；如需单项样式，可传 {text, style}' },
+                    style: { type: 'object', description: '该架构层默认文字样式' },
+                    title_style: { type: 'object', description: '架构层标题样式' },
+                    desc_style: { type: 'object', description: '架构层说明样式' }
                   }
                 }
               },
@@ -389,7 +443,10 @@ const BUILTIN_TOOLS = [
                   properties: {
                     name: { type: 'string', description: '实验组名，如 Baseline、Ours' },
                     method: { type: 'string', description: '实验方法说明' },
-                    metrics: { type: 'array', items: { type: 'string' }, description: '评价指标' }
+                    metrics: { type: 'array', items: { type: 'string' }, description: '评价指标；如需单项样式，可传 {text, style}' },
+                    style: { type: 'object', description: '该实验组默认文字样式' },
+                    title_style: { type: 'object', description: '实验组标题样式' },
+                    desc_style: { type: 'object', description: '实验方法说明样式' }
                   }
                 }
               },
@@ -414,6 +471,57 @@ const BUILTIN_TOOLS = [
       required: ['slides']
     },
     code: 'return await generatePpt(args);'
+  },
+  {
+    name: 'preview_ppt',
+    description: '🖼️ 为已有 PPTX 生成可检查的预览文件，并同时返回 validate_ppt 校验结果。适合在 generate_ppt 之后立刻调用，检查页面是否非空、中文是否变问号、是否有疑似文字溢出。默认输出到 output/ppt_preview/<文件名>/index.html，并生成每页 PNG 预览；优先尝试 PowerPoint 原生导出，失败后用 Pillow 结构化渲染兜底。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '要预览的 .pptx 路径，必须在沙箱内，例如 output/demo.pptx' },
+        output_dir: { type: 'string', description: '可选预览输出目录，默认 output/ppt_preview/<文件名>' },
+        max_slides: { type: 'number', description: '最多预览多少页；不传则预览全部页面' },
+        width: { type: 'number', description: '预览图宽度，默认 1280' },
+        height: { type: 'number', description: '预览图高度，默认 720' },
+        prefer_native: { type: 'boolean', description: '是否优先尝试 PowerPoint 原生 PNG 导出；默认 true，失败会自动降级' },
+        rules: {
+          type: 'object',
+          description: '可选校验规则，会透传给 validate_ppt。支持 min_slides/max_slides/expected_text/require_chinese/max_question_marks/fail_on_warnings。',
+          properties: {
+            min_slides: { type: 'number', description: '最少页数' },
+            max_slides: { type: 'number', description: '最多页数' },
+            expected_text: { type: 'array', items: { type: 'string' }, description: '必须出现在 PPT 可见文本里的片段' },
+            require_chinese: { type: 'boolean', description: '要求 PPT 中必须包含中文字符' },
+            max_question_marks: { type: 'number', description: '允许出现的最多问号数量；检查中文变问号时可设为 0' },
+            fail_on_warnings: { type: 'boolean', description: '有 warning 时也判定为不通过' }
+          }
+        }
+      },
+      required: ['path']
+    },
+    code: 'return await previewPpt(args);'
+  },
+  {
+    name: 'validate_ppt',
+    description: '✅ 校验已有 PPTX 的结构和可见文本质量。用于生成 PPT 后自动质检，检查能否打开、页数、空页、缺标题、疑似文字溢出、中文是否变成 ???、可见乱码、字体/字号/颜色统计、预期文本是否存在。返回 ok 表示工具执行成功，passed 表示 PPT 本身通过校验。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '要校验的 .pptx 路径，必须在沙箱内，例如 output/demo.pptx' },
+        min_slides: { type: 'number', description: '最少页数；也可放在 rules.min_slides' },
+        max_slides: { type: 'number', description: '最多页数；也可放在 rules.max_slides' },
+        expected_text: { type: 'array', items: { type: 'string' }, description: '必须存在的可见文本片段；适合检查标题、中文关键词、关键结论是否落盘' },
+        require_chinese: { type: 'boolean', description: '要求 PPT 中必须包含中文字符' },
+        max_question_marks: { type: 'number', description: '允许出现的最多问号数量；检查中文变问号时建议设为 0' },
+        fail_on_warnings: { type: 'boolean', description: '有 warning 时也判定为不通过' },
+        rules: {
+          type: 'object',
+          description: '可选校验规则对象。字段同上：min_slides/max_slides/expected_text/require_chinese/max_question_marks/fail_on_warnings。'
+        }
+      },
+      required: ['path']
+    },
+    code: 'return await validatePpt(args);'
   },
   {
     name: 'append_note',

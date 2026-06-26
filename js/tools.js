@@ -186,7 +186,7 @@ function updateGitToggleBtn() {
 }
 
 // ============ 📊 PPT 工具批量启停 ============
-const PPT_TOOL_NAMES = ['generate_ppt'];
+const PPT_TOOL_NAMES = ['generate_ppt', 'preview_ppt', 'validate_ppt'];
 
 function isPptTool(name) {
   return typeof name === 'string' && PPT_TOOL_NAMES.includes(name);
@@ -836,7 +836,7 @@ async function executeTool(name, args, context = {}) {
     const scopedNames = [
       'callAgentBackend',
       'executeTerminalCommand', 'readFile', 'writeFile', 'appendFile', 'editFile', 'applyPatch', 'deleteFile',
-      'generatePpt',
+      'generatePpt', 'previewPpt', 'validatePpt',
       'readToolArtifact',
       'listCheckpoints', 'restoreCheckpoint',
       'listDir', 'searchInFiles', 'webSearch', 'fetchUrl', 'aiScreenshot', 'attachFileForAI',
