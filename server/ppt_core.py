@@ -230,25 +230,14 @@ class PptMixin:
 
             repair_info = None
             validation = None
-            if self._ppt_bool(data.get('auto_repair_text_layout'), True):
-                repair_rules = self._ppt_validation_rules(data)
-                repair_rules.setdefault('use_powerpoint_com_text_bounds', True)
-                repair_info = self._ppt_auto_repair_text_layout(out_path, repair_rules)
-
             if self._ppt_bool(data.get('validate_after_generate'), True):
                 validation_rules = self._ppt_validation_rules(data)
                 validation_rules.setdefault('use_powerpoint_com_text_bounds', True)
-                validation = self._validate_pptx_file(out_path, validation_rules)
-                if (not validation.get('passed')) and self._ppt_bool(data.get('auto_repair_text_layout'), True):
-                    retry_rules = dict(validation_rules)
-                    retry_rules['auto_repair_passes'] = max(self._ppt_int(retry_rules.get('auto_repair_passes'), 3, 1, 8), 6)
-                    retry_rules['auto_repair_min_font_size'] = min(self._ppt_int(retry_rules.get('auto_repair_min_font_size'), 8, 5, 18), 6)
-                    retry_info = self._ppt_auto_repair_text_layout(out_path, retry_rules)
-                    if repair_info:
-                        repair_info['retry'] = retry_info
-                    else:
-                        repair_info = retry_info
-                    validation = self._validate_pptx_file(out_path, validation_rules)
+                validation, repair_info = self._ppt_validate_repair_until_pass(out_path, data, validation_rules)
+            elif self._ppt_bool(data.get('auto_repair_text_layout'), True):
+                repair_rules = self._ppt_validation_rules(data)
+                repair_rules.setdefault('use_powerpoint_com_text_bounds', True)
+                repair_info = self._ppt_auto_repair_text_layout(out_path, repair_rules)
 
             rel_path = os.path.relpath(out_path, config.WORKSPACE_ROOT).replace(os.sep, '/')
             validation_failed = bool(validation and not validation.get('passed'))
@@ -257,13 +246,13 @@ class PptMixin:
                 'path': rel_path,
                 'slides': len(slides),
                 'template_profile': (template_profile.get('profile_path') or template_profile.get('source')) if template_profile else '',
-                'pipeline': self._ppt_pipeline_spec.get('pipeline', {}),
+                'pipeline': self._ppt_response_pipeline(slides, data),
                 'message': f'PPT 已生成：{rel_path}'
             }
             if repair_info:
                 response['auto_repair'] = repair_info
                 if repair_info.get('repaired'):
-                    response['message'] = f'PPT 已生成并自动修复文本排版：{rel_path}'
+                    response['message'] = f'PPT 已生成并自动修复排版：{rel_path}'
             if validation:
                 response['validation'] = {
                     'passed': bool(validation.get('passed')),
@@ -278,6 +267,98 @@ class PptMixin:
             self._send_json(200, response)
         except Exception as e:
             self._send_json(200, {'ok': False, 'error': str(e)})
+
+    def _ppt_validation_issue_signature(self, validation):
+        issues = validation.get('issues') if isinstance(validation, dict) else []
+        parts = []
+        for item in issues or []:
+            parts.append('|'.join([
+                _as_text(item.get('slide')),
+                _as_text(item.get('kind') or ''),
+                _as_text(item.get('message') or '')[:120],
+                json.dumps(item.get('bounds') or item.get('bounds_a') or item.get('text_bounds') or {}, sort_keys=True),
+                json.dumps(item.get('bounds_b') or item.get('graphic_bounds') or {}, sort_keys=True),
+            ]))
+        return hashlib.sha1('\n'.join(parts).encode('utf-8', errors='ignore')).hexdigest()
+
+    def _ppt_validation_brief(self, validation):
+        validation = validation or {}
+        stats = validation.get('stats') or {}
+        return {
+            'passed': bool(validation.get('passed')),
+            'score': validation.get('score'),
+            'issue_count': len(validation.get('issues') or []),
+            'warning_count': len(validation.get('warnings') or []),
+            'text_overlap_count': stats.get('text_overlap_count', 0),
+            'text_overflow_count': stats.get('text_overflow_count', 0),
+            'text_graphic_overlap_count': stats.get('text_graphic_overlap_count', 0),
+            'graphic_overlap_count': stats.get('graphic_overlap_count', 0),
+        }
+
+    def _ppt_validate_repair_until_pass(self, ppt_path, data, validation_rules):
+        validation_rules = dict(validation_rules or {})
+        repair_enabled = self._ppt_bool(data.get('auto_repair_text_layout'), True)
+        until_pass = self._ppt_bool(data.get('auto_repair_until_pass', validation_rules.get('auto_repair_until_pass', True)), True)
+        max_allowed_cycles = self._ppt_int(data.get('auto_repair_max_allowed_cycles', validation_rules.get('auto_repair_max_allowed_cycles')), 20, 1, 100)
+        default_max_cycles = self._ppt_int(data.get('auto_repair_default_max_cycles', validation_rules.get('auto_repair_default_max_cycles')), 8, 1, max_allowed_cycles)
+        max_cycles = self._ppt_int(data.get('auto_repair_max_cycles', validation_rules.get('auto_repair_max_cycles')), default_max_cycles, 1, max_allowed_cycles)
+
+        validation = self._validate_pptx_file(ppt_path, validation_rules)
+        loop_info = {
+            'enabled': bool(repair_enabled),
+            'until_pass': bool(until_pass),
+            'max_cycles': int(max_cycles),
+            'max_allowed_cycles': int(max_allowed_cycles),
+            'cycles': [],
+            'initial_validation': self._ppt_validation_brief(validation),
+            'final_validation': self._ppt_validation_brief(validation),
+            'repaired': False,
+            'stopped_reason': 'already_passed' if validation.get('passed') else 'not_started',
+        }
+        if validation.get('passed') or not repair_enabled:
+            return validation, loop_info
+
+        last_signature = self._ppt_validation_issue_signature(validation)
+        cycles_to_run = max_cycles if until_pass else 1
+        for cycle_idx in range(1, cycles_to_run + 1):
+            repair_rules = dict(validation_rules)
+            base_passes = self._ppt_int(repair_rules.get('auto_repair_passes'), 3, 1, 8)
+            repair_rules['auto_repair_passes'] = min(8, max(base_passes, 3 + cycle_idx))
+            base_min_font = self._ppt_int(repair_rules.get('auto_repair_min_font_size'), 8, 5, 18)
+            repair_rules['auto_repair_min_font_size'] = max(5, min(base_min_font, 8 - min(cycle_idx - 1, 3)))
+
+            before = self._ppt_validation_brief(validation)
+            repair_info = self._ppt_auto_repair_text_layout(ppt_path, repair_rules)
+            validation = self._validate_pptx_file(ppt_path, validation_rules)
+            after = self._ppt_validation_brief(validation)
+            signature = self._ppt_validation_issue_signature(validation)
+            loop_info['cycles'].append({
+                'cycle': cycle_idx,
+                'before': before,
+                'repair': repair_info,
+                'after': after,
+            })
+            if repair_info.get('repaired'):
+                loop_info['repaired'] = True
+            loop_info['final_validation'] = after
+
+            if validation.get('passed'):
+                loop_info['stopped_reason'] = 'passed'
+                break
+            if not repair_info.get('enabled'):
+                loop_info['stopped_reason'] = 'repair_unavailable'
+                break
+            if not repair_info.get('repaired'):
+                loop_info['stopped_reason'] = 'no_more_repair_actions'
+                break
+            if signature == last_signature and cycle_idx >= 2:
+                loop_info['stopped_reason'] = 'issues_not_changing'
+                break
+            last_signature = signature
+        else:
+            loop_info['stopped_reason'] = 'max_cycles_reached'
+
+        return validation, loop_info
 
     def handle_validate_ppt(self, body):
         try:
@@ -905,6 +986,28 @@ class PptMixin:
             return data
         return body
 
+    def _ppt_response_pipeline(self, slides, data=None):
+        pipeline = dict(self._ppt_pipeline_spec.get('pipeline') or {})
+        if not pipeline:
+            pipeline = {}
+        if 'outline' not in pipeline:
+            outline = []
+            for slide in _as_list(slides):
+                if not isinstance(slide, dict):
+                    continue
+                outline.append({
+                    'title': _as_text(slide.get('title') or slide.get('name') or '')[:80],
+                    'intent': _as_text(slide.get('intent') or slide.get('desc') or '')[:160],
+                    'content_type': _as_text(slide.get('content_type') or slide.get('type') or 'bullets')[:40],
+                })
+            pipeline['outline'] = outline
+        if 'validation_rules' not in pipeline and isinstance(data, dict):
+            pipeline['validation_rules'] = self._ppt_validation_rules(data)
+        pipeline['stages'] = [
+            'intent', 'outline', 'slides', 'layout', 'render', 'validate_repair'
+        ]
+        return pipeline
+
     def _ppt_validation_rules(self, data, include_top_level=True):
         rules = data.get('rules') if isinstance(data, dict) else {}
         rules = dict(rules) if isinstance(rules, dict) else {}
@@ -912,7 +1015,11 @@ class PptMixin:
             return rules
         for key in (
             'min_slides', 'max_slides', 'expected_text', 'require_chinese',
-            'max_question_marks', 'fail_on_warnings'
+            'max_question_marks', 'fail_on_warnings',
+            'auto_repair_until_pass', 'auto_repair_max_cycles',
+            'auto_repair_default_max_cycles', 'auto_repair_max_allowed_cycles',
+            'auto_repair_passes', 'auto_repair_min_font_size',
+            'detect_graphic_overlaps'
         ):
             if isinstance(data, dict) and key in data and key not in rules:
                 rules[key] = data.get(key)
@@ -963,6 +1070,7 @@ class PptMixin:
         total_text_overlaps = 0
         total_text_overflows = 0
         total_text_graphic_overlaps = 0
+        total_graphic_overlaps = 0
 
         slide_count = len(prs.slides)
         if slide_count <= 0:
@@ -987,6 +1095,7 @@ class PptMixin:
                 })
 
         com_layout_issues_by_slide = {}
+        com_layout_scan_available = False
         if use_com_text_bounds and not com_warning:
             com_layout_issues_by_slide, com_layout_warning = self._ppt_powerpoint_com_layout_issues(ppt_path)
             if com_layout_warning:
@@ -994,6 +1103,9 @@ class PptMixin:
                     'severity': 'warning',
                     'message': f'PowerPoint COM layout issue scan unavailable: {com_layout_warning}',
                 })
+            else:
+                com_layout_scan_available = True
+        detect_graphic_overlaps = self._ppt_bool(rules.get('detect_graphic_overlaps'), True)
 
         for idx, slide in enumerate(prs.slides, start=1):
             summary = self._ppt_slide_summary(slide, idx, prs, font_counts, font_size_counts, color_counts, com_text_bounds_by_slide.get(idx))
@@ -1004,6 +1116,8 @@ class PptMixin:
             total_charts += summary['chart_count']
             total_text_overlaps += len(summary.get('text_overlaps', []))
             total_text_overflows += len(summary.get('text_overflow', []))
+            if detect_graphic_overlaps and not com_layout_scan_available:
+                total_graphic_overlaps += len(summary.get('graphic_overlaps', []))
             if summary['text']:
                 all_text.append(summary['text'])
             if not summary['title'] and idx > 1:
@@ -1046,17 +1160,45 @@ class PptMixin:
                     'text_bounds_b': item.get('text_bounds_b', {}),
                 })
             for item in com_layout_issues_by_slide.get(idx, [])[:8]:
-                total_text_graphic_overlaps += 1
-                issues.append({
-                    'severity': 'error',
+                if item.get('kind') == 'graphic_graphic_overlap':
+                    if not detect_graphic_overlaps:
+                        continue
+                    total_graphic_overlaps += 1
+                else:
+                    total_text_graphic_overlaps += 1
+                severity = item.get('severity', 'error')
+                target = warnings if severity == 'warning' else issues
+                target.append({
+                    'severity': severity,
                     'slide': idx,
                     'message': item.get('message', 'text/graphic layout conflict'),
                     'kind': item.get('kind', 'text_graphic_overlap'),
                     'text': item.get('text', ''),
                     'text_bounds': item.get('text_bounds', {}),
                     'graphic_bounds': item.get('graphic_bounds', {}),
+                    'graphic_bounds_a': item.get('graphic_bounds_a', {}),
+                    'graphic_bounds_b': item.get('graphic_bounds_b', {}),
                     'overlap_pct': item.get('overlap_pct'),
+                    'classification': item.get('classification'),
+                    'confidence': item.get('confidence'),
+                    'reason': item.get('reason'),
                 })
+            if detect_graphic_overlaps and not com_layout_scan_available:
+                for item in summary.get('graphic_overlaps', [])[:5]:
+                    target = warnings if item.get('severity') == 'warning' else issues
+                    target.append({
+                        'severity': item.get('severity', 'error'),
+                        'slide': idx,
+                        'message': f'overlapping graphic shapes: {item["overlap_pct"]}% of smaller graphic area overlaps',
+                        'kind': 'graphic_graphic_overlap',
+                        'bounds_a': item.get('bounds_a', {}),
+                        'bounds_b': item.get('bounds_b', {}),
+                        'overlap_bounds': item.get('overlap_bounds', {}),
+                        'overlap_pct': item.get('overlap_pct'),
+                        'classification': item.get('classification'),
+                        'confidence': item.get('confidence'),
+                        'reason': item.get('reason'),
+                    })
 
         visible_text = '\n'.join(all_text)
         question_marks = visible_text.count('?')
@@ -1097,6 +1239,7 @@ class PptMixin:
                 'text_overlap_count': total_text_overlaps,
                 'text_overflow_count': total_text_overflows,
                 'text_graphic_overlap_count': total_text_graphic_overlaps,
+                'graphic_overlap_count': total_graphic_overlaps,
                 'visible_question_marks': question_marks,
                 'cjk_char_count': cjk_chars,
                 'mojibake_hit_count': mojibake_hits,
@@ -1127,6 +1270,7 @@ class PptMixin:
         off_slide = []
         text_overflow = []
         text_overlap_candidates = []
+        graphic_overlap_candidates = []
 
         for shape in self._iter_ppt_shapes(slide.shapes):
             shape_count += 1
@@ -1143,6 +1287,9 @@ class PptMixin:
                     'slide_size': self._ppt_format_bounds((0, 0, slide_w, slide_h)),
                     'text': self._ppt_shape_text(shape).strip().replace('\n', ' ')[:120],
                 })
+            graphic_candidate = self._ppt_graphic_overlap_candidate(shape, bounds, slide_w, slide_h)
+            if graphic_candidate:
+                graphic_overlap_candidates.append(graphic_candidate)
 
             text = self._ppt_shape_text(shape).strip()
             if not text:
@@ -1183,6 +1330,7 @@ class PptMixin:
 
         full_text = '\n'.join(texts)
         text_overlaps = self._ppt_find_text_overlaps(text_overlap_candidates)
+        graphic_overlaps = self._ppt_find_graphic_overlaps(graphic_overlap_candidates)
         return {
             'slide': idx,
             'title': title,
@@ -1198,6 +1346,7 @@ class PptMixin:
             'off_slide': off_slide,
             'text_overflow': text_overflow,
             'text_overlaps': text_overlaps,
+            'graphic_overlaps': graphic_overlaps,
             'text': full_text,
         }
 
@@ -1210,6 +1359,136 @@ class PptMixin:
             return (left, top, left + width, top + height)
         except Exception:
             return None
+
+    def _ppt_shape_metadata_payload(self, role=None, group=None, allow_overlap=False):
+        payload = {'ai_ppt': True}
+        if role:
+            payload['role'] = _as_text(role)[:80]
+        if group:
+            payload['composition_group'] = _as_text(group)[:120]
+        if allow_overlap:
+            payload['allow_graphic_overlap'] = True
+        return payload
+
+    def _ppt_mark_shape(self, shape, role=None, group=None, allow_overlap=False):
+        """Tag generated shapes so validation can distinguish composed artwork."""
+        if shape is None:
+            return shape
+        payload = self._ppt_shape_metadata_payload(role=role, group=group, allow_overlap=allow_overlap)
+        try:
+            bits = ['ai-ppt']
+            if role:
+                bits.append('role=' + re.sub(r'[^A-Za-z0-9_.-]+', '_', _as_text(role))[:40])
+            if group:
+                bits.append('group=' + re.sub(r'[^A-Za-z0-9_.-]+', '_', _as_text(group))[:60])
+            if allow_overlap:
+                bits.append('allow-overlap')
+            shape.name = ':'.join(bits)
+        except Exception:
+            pass
+        try:
+            cNvPr = shape._element.xpath('.//*[local-name()="cNvPr"]')[0]
+            cNvPr.set('descr', json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
+        except Exception:
+            pass
+        return shape
+
+    def _ppt_shape_metadata(self, shape):
+        meta = {}
+        try:
+            name = _as_text(getattr(shape, 'name', '') or getattr(shape, 'Name', ''))
+            meta['name'] = name
+            if 'ai-ppt' in name:
+                if 'allow-overlap' in name:
+                    meta['allow_graphic_overlap'] = True
+                m = re.search(r'(?:^|:)group=([^:]+)', name)
+                if m:
+                    meta['composition_group'] = m.group(1)
+                m = re.search(r'(?:^|:)role=([^:]+)', name)
+                if m:
+                    meta['role'] = m.group(1)
+        except Exception:
+            pass
+        try:
+            cNvPr = shape._element.xpath('.//*[local-name()="cNvPr"]')[0]
+            descr = _as_text(cNvPr.get('descr') or '')
+            if descr:
+                data = json.loads(descr)
+                if isinstance(data, dict) and data.get('ai_ppt'):
+                    meta.update(data)
+        except Exception:
+            pass
+        return meta
+
+    def _ppt_com_shape_metadata(self, shape, group_path=None):
+        meta = {}
+        try:
+            name = _as_text(getattr(shape, 'Name', '') or '')
+            meta['name'] = name
+            if 'ai-ppt' in name:
+                if 'allow-overlap' in name:
+                    meta['allow_graphic_overlap'] = True
+                m = re.search(r'(?:^|:)group=([^:]+)', name)
+                if m:
+                    meta['composition_group'] = m.group(1)
+                m = re.search(r'(?:^|:)role=([^:]+)', name)
+                if m:
+                    meta['role'] = m.group(1)
+        except Exception:
+            pass
+        try:
+            alt = _as_text(getattr(shape, 'AlternativeText', '') or '')
+            if alt:
+                data = json.loads(alt)
+                if isinstance(data, dict) and data.get('ai_ppt'):
+                    meta.update(data)
+        except Exception:
+            pass
+        if group_path:
+            meta['native_group_path'] = group_path
+        return meta
+
+    def _ppt_bounds_center_inside(self, inner, outer):
+        try:
+            cx = (inner[0] + inner[2]) / 2.0
+            cy = (inner[1] + inner[3]) / 2.0
+            return outer[0] <= cx <= outer[2] and outer[1] <= cy <= outer[3]
+        except Exception:
+            return False
+
+    def _ppt_classify_graphic_overlap(self, first, second, inter):
+        first = first or {}; second = second or {}
+        inter_area = self._ppt_bounds_area(inter)
+        first_bounds = first.get('bounds'); second_bounds = second.get('bounds')
+        first_area = max(1, first.get('area') or self._ppt_bounds_area(first_bounds))
+        second_area = max(1, second.get('area') or self._ppt_bounds_area(second_bounds))
+        smaller = min(first_area, second_area); larger = max(first_area, second_area)
+        ratio = inter_area / max(1, smaller)
+        size_ratio = larger / max(1, smaller)
+        first_meta = first.get('meta') or {}; second_meta = second.get('meta') or {}
+        first_group = _as_text(first_meta.get('composition_group'))
+        second_group = _as_text(second_meta.get('composition_group'))
+        first_native_group = _as_text(first_meta.get('native_group_path'))
+        second_native_group = _as_text(second_meta.get('native_group_path'))
+        if first_group and first_group == second_group:
+            return {'classification': 'intentional_composition', 'severity': 'info', 'confidence': 0.98, 'reason': 'same explicit composition_group'}
+        if first_native_group and first_native_group == second_native_group:
+            return {'classification': 'intentional_composition', 'severity': 'info', 'confidence': 0.95, 'reason': 'same native PowerPoint group'}
+        if first_meta.get('allow_graphic_overlap') and second_meta.get('allow_graphic_overlap'):
+            return {'classification': 'intentional_composition', 'severity': 'info', 'confidence': 0.92, 'reason': 'both shapes allow graphic overlap'}
+        first_is_smaller = first_area <= second_area
+        small = first if first_is_smaller else second; large = second if first_is_smaller else first
+        small_z = int(small.get('z_order') or 0); large_z = int(large.get('z_order') or 0)
+        small_center_inside = self._ppt_bounds_center_inside(small.get('bounds'), large.get('bounds'))
+        if size_ratio > 2.4 and ratio > 0.70 and small_center_inside and (not small_z or not large_z or small_z >= large_z):
+            return {'classification': 'possible_composition', 'severity': 'warning', 'confidence': 0.82, 'reason': 'small shape sits on/in larger shape like icon/badge artwork'}
+        if ratio > 0.86 and size_ratio > 2.4:
+            return {'classification': 'possible_composition', 'severity': 'warning', 'confidence': 0.78, 'reason': 'small shape mostly contained by larger shape'}
+        if size_ratio < 2.0 and ratio >= 0.35:
+            return {'classification': 'probable_collision', 'severity': 'error', 'confidence': 0.86, 'reason': 'similarly sized graphic shapes overlap substantially'}
+        if size_ratio > 2.4 and large_z > small_z and ratio >= 0.35:
+            return {'classification': 'probable_collision', 'severity': 'error', 'confidence': 0.84, 'reason': 'larger higher z-order shape appears to cover smaller shape'}
+        return {'classification': 'possible_collision', 'severity': 'warning', 'confidence': 0.58, 'reason': 'ambiguous graphic overlap; not auto-repaired without stronger evidence'}
 
     def _ppt_bounds_outside_slide(self, bounds, slide_w, slide_h, tolerance=91440):
         left, top, right, bottom = bounds
@@ -1244,6 +1523,7 @@ class PptMixin:
         layout_repairs = 0
         shrink_repairs = 0
         last_problem_count = 0
+        repair_graphic_overlaps = self._ppt_bool(rules.get('detect_graphic_overlaps'), True)
         pythoncom.CoInitialize()
         try:
             app = win32com.client.DispatchEx('PowerPoint.Application')
@@ -1260,7 +1540,7 @@ class PptMixin:
                     graphics = []
                     self._ppt_collect_com_text_shape_items(slide.Shapes, items)
                     self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphics)
-                    problem_shapes.update(self._ppt_com_problem_shape_map_with_graphics(items, graphics))
+                    problem_shapes.update(self._ppt_com_problem_shape_map_with_graphics(items, graphics, include_graphic_graphic=repair_graphic_overlaps))
 
                 last_problem_count = len(problem_shapes)
                 if not problem_shapes:
@@ -1273,6 +1553,8 @@ class PptMixin:
                     self._ppt_collect_com_text_shape_items(slide.Shapes, items)
                     self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphics)
                     changed_this_pass += self._ppt_com_reflow_text_slide(slide, items, graphics=graphics, pass_idx=pass_idx)
+                    if repair_graphic_overlaps:
+                        changed_this_pass += self._ppt_com_reflow_graphics_slide(slide, graphics, pass_idx=pass_idx)
                 if changed_this_pass > 0:
                     layout_repairs += changed_this_pass
                 else:
@@ -1297,7 +1579,7 @@ class PptMixin:
                 graphics = []
                 self._ppt_collect_com_text_shape_items(slide.Shapes, items)
                 self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphics)
-                remaining_problem_count += len(self._ppt_com_problem_shape_map_with_graphics(items, graphics))
+                remaining_problem_count += len(self._ppt_com_problem_shape_map_with_graphics(items, graphics, include_graphic_graphic=repair_graphic_overlaps))
             return {
                 'enabled': True,
                 'repaired': bool(repaired),
@@ -1362,7 +1644,7 @@ class PptMixin:
             except Exception:
                 continue
 
-    def _ppt_collect_com_graphic_shape_items(self, shapes, out):
+    def _ppt_collect_com_graphic_shape_items(self, shapes, out, group_path=None):
         """Collect non-text visual shapes that may collide with text."""
         try:
             count = int(shapes.Count)
@@ -1375,7 +1657,11 @@ class PptMixin:
                 continue
             try:
                 if int(getattr(shape, 'Type', 0)) == 6:  # msoGroup
-                    self._ppt_collect_com_graphic_shape_items(shape.GroupItems, out)
+                    try:
+                        child_group = (group_path + '/' if group_path else '') + str(getattr(shape, 'Id', id(shape)))
+                    except Exception:
+                        child_group = (group_path + '/' if group_path else '') + str(id(shape))
+                    self._ppt_collect_com_graphic_shape_items(shape.GroupItems, out, child_group)
                     continue
             except Exception:
                 pass
@@ -1405,8 +1691,10 @@ class PptMixin:
                     'shape': shape,
                     'shape_key': shape_key,
                     'bounds': bounds,
+                    'area': self._ppt_bounds_area(bounds),
                     'z_order': self._ppt_com_z_order(shape),
                     'type': int(getattr(shape, 'Type', 0) or 0),
+                    'meta': self._ppt_com_shape_metadata(shape, group_path),
                 })
             except Exception:
                 continue
@@ -1429,12 +1717,19 @@ class PptMixin:
                     problem_shapes[second.get('shape_key') or id(second.get('shape'))] = second.get('shape')
         return {k: v for k, v in problem_shapes.items() if v is not None}
 
-    def _ppt_com_problem_shape_map_with_graphics(self, text_items, graphic_items):
+    def _ppt_com_problem_shape_map_with_graphics(self, text_items, graphic_items, include_graphic_graphic=True):
         problem_shapes = self._ppt_com_problem_shape_map(text_items)
         for issue in self._ppt_com_text_graphic_issues(text_items, graphic_items):
             shape = issue.get('text_shape')
             if shape is not None:
                 problem_shapes[issue.get('text_key') or id(shape)] = shape
+        if include_graphic_graphic:
+            for issue in self._ppt_com_graphic_graphic_issues(graphic_items):
+                if issue.get('classification') != 'probable_collision':
+                    continue
+                shape = issue.get('move_shape') or issue.get('graphic_shape_b') or issue.get('graphic_shape_a')
+                if shape is not None:
+                    problem_shapes[issue.get('move_key') or id(shape)] = shape
         return {k: v for k, v in problem_shapes.items() if v is not None}
 
     def _ppt_com_text_item_overflows(self, item):
@@ -1503,6 +1798,61 @@ class PptMixin:
                     'graphic_bounds': graphic_bounds,
                     'graphic_shape': graphic.get('shape'),
                     'overlap_pct': int(round(max(text_ratio, graphic_ratio) * 100)),
+                })
+        issues.sort(key=lambda item: int(item.get('overlap_pct') or 0), reverse=True)
+        return issues[:20]
+
+    def _ppt_com_graphic_graphic_issues(self, graphic_items):
+        issues = []
+        items = graphic_items or []
+        for i, first in enumerate(items):
+            for second in items[i + 1:]:
+                first_bounds = first.get('bounds')
+                second_bounds = second.get('bounds')
+                inter = self._ppt_bounds_intersection(first_bounds, second_bounds)
+                if not inter:
+                    continue
+                inter_area = self._ppt_bounds_area(inter)
+                if inter_area <= 0:
+                    continue
+                first_area = max(1, self._ppt_bounds_area(first_bounds))
+                second_area = max(1, self._ppt_bounds_area(second_bounds))
+                smaller = min(first_area, second_area)
+                larger = max(first_area, second_area)
+                overlap_ratio = inter_area / max(1, smaller)
+                left, top, right, bottom = inter
+                overlap_w_in = (right - left) / _EMU_PER_INCH
+                overlap_h_in = (bottom - top) / _EMU_PER_INCH
+                overlap_area_in = inter_area / (_EMU_PER_INCH * _EMU_PER_INCH)
+                if overlap_ratio < 0.35 or overlap_area_in < 0.04:
+                    continue
+                if overlap_w_in < 0.12 or overlap_h_in < 0.08:
+                    continue
+                classification = self._ppt_classify_graphic_overlap(first, second, inter)
+                if classification.get('classification') == 'intentional_composition':
+                    continue
+                first_z = int(first.get('z_order') or 0)
+                second_z = int(second.get('z_order') or 0)
+                move_item = first if first_z >= second_z else second
+                if classification.get('classification') in ('possible_composition', 'possible_collision'):
+                    move_item = None
+                issues.append({
+                    'kind': 'graphic_graphic_overlap',
+                    'message': 'non-text graphic shapes overlap',
+                    'graphic_shape_a': first.get('shape'),
+                    'graphic_shape_b': second.get('shape'),
+                    'graphic_key_a': first.get('shape_key'),
+                    'graphic_key_b': second.get('shape_key'),
+                    'graphic_bounds_a': first_bounds,
+                    'graphic_bounds_b': second_bounds,
+                    'overlap_bounds': inter,
+                    'overlap_pct': int(round(overlap_ratio * 100)),
+                    'move_shape': move_item.get('shape') if move_item else None,
+                    'move_key': move_item.get('shape_key') if move_item else None,
+                    'classification': classification.get('classification'),
+                    'severity': classification.get('severity', 'error'),
+                    'confidence': classification.get('confidence'),
+                    'reason': classification.get('reason'),
                 })
         issues.sort(key=lambda item: int(item.get('overlap_pct') or 0), reverse=True)
         return issues[:20]
@@ -1616,6 +1966,60 @@ class PptMixin:
                 pass
         return changed
 
+    def _ppt_com_reflow_graphics_slide(self, slide, graphics, pass_idx=0):
+        issues = self._ppt_com_graphic_graphic_issues(graphics)
+        if not issues:
+            return 0
+        try:
+            slide_w_pt = float(slide.Parent.PageSetup.SlideWidth)
+            slide_h_pt = float(slide.Parent.PageSetup.SlideHeight)
+        except Exception:
+            slide_w_pt, slide_h_pt = 960.0, 540.0
+        slide_w_emu = int(round(slide_w_pt / 72.0 * _EMU_PER_INCH))
+        slide_h_emu = int(round(slide_h_pt / 72.0 * _EMU_PER_INCH))
+        margin_emu = int(_EMU_PER_INCH * 0.18)
+        gap_emu = int(_EMU_PER_INCH * (0.08 + min(max(pass_idx, 0), 3) * 0.02))
+        changed = 0
+        moved_keys = set()
+        for issue in issues:
+            if issue.get('classification') != 'probable_collision':
+                continue
+            shape = issue.get('move_shape')
+            key = issue.get('move_key') or id(shape)
+            if shape is None or key in moved_keys:
+                continue
+            try:
+                bounds = self._ppt_com_rect_to_emu(shape.Left, shape.Top, shape.Width, shape.Height)
+            except Exception:
+                bounds = None
+            inter = issue.get('overlap_bounds')
+            if not bounds or not inter:
+                continue
+            dx_emu = max(0, inter[2] - inter[0] + gap_emu)
+            dy_emu = max(0, inter[3] - inter[1] + gap_emu)
+            try:
+                if slide_w_emu - margin_emu - bounds[2] >= dx_emu and dx_emu > int(_EMU_PER_INCH * 0.03):
+                    shape.Left = float(shape.Left) + (dx_emu / _EMU_PER_INCH * 72.0)
+                    changed += 1
+                    moved_keys.add(key)
+                    continue
+                if slide_h_emu - margin_emu - bounds[3] >= dy_emu and dy_emu > int(_EMU_PER_INCH * 0.03):
+                    shape.Top = float(shape.Top) + (dy_emu / _EMU_PER_INCH * 72.0)
+                    changed += 1
+                    moved_keys.add(key)
+                    continue
+                width_pt = float(shape.Width)
+                height_pt = float(shape.Height)
+                if width_pt > 36 and height_pt > 24:
+                    factor = 0.92 if pass_idx == 0 else 0.86
+                    shape.Width = max(24.0, width_pt * factor)
+                    shape.Height = max(18.0, height_pt * factor)
+                    changed += 1
+                    moved_keys.add(key)
+            except Exception:
+                pass
+        return changed
+
     def _ppt_com_shrink_text_shape(self, shape, min_font_size=8, pass_idx=0):
         changed = False
         try:
@@ -1653,7 +2057,7 @@ class PptMixin:
         return changed
 
     def _ppt_powerpoint_com_layout_issues(self, ppt_path):
-        """Return rendered text-vs-graphic conflicts by slide using PowerPoint COM."""
+        """Return rendered layout conflicts by slide using PowerPoint COM."""
         if os.name != 'nt':
             return {}, 'not running on Windows'
         try:
@@ -1687,6 +2091,15 @@ class PptMixin:
                         'text_bounds': self._ppt_format_bounds(issue.get('text_bounds')),
                         'shape_bounds': self._ppt_format_bounds(issue.get('shape_bounds')),
                         'graphic_bounds': self._ppt_format_bounds(issue.get('graphic_bounds')),
+                        'overlap_pct': issue.get('overlap_pct'),
+                    })
+                for issue in self._ppt_com_graphic_graphic_issues(graphic_items):
+                    slide_issues.append({
+                        'kind': issue.get('kind'),
+                        'message': issue.get('message'),
+                        'graphic_bounds_a': self._ppt_format_bounds(issue.get('graphic_bounds_a')),
+                        'graphic_bounds_b': self._ppt_format_bounds(issue.get('graphic_bounds_b')),
+                        'overlap_bounds': self._ppt_format_bounds(issue.get('overlap_bounds')),
                         'overlap_pct': issue.get('overlap_pct'),
                     })
                 if slide_issues:
@@ -1973,6 +2386,89 @@ class PptMixin:
                     'bounds_source_b': second.get('bounds_source', 'estimated'),
                 })
         overlaps.sort(key=lambda item: (-item['overlap_pct'], -item['overlap_area_sq_in']))
+        return overlaps[:10]
+
+    def _ppt_graphic_overlap_candidate(self, shape, bounds, slide_w, slide_h):
+        if not bounds:
+            return None
+        try:
+            if self._ppt_shape_text(shape).strip():
+                return None
+        except Exception:
+            pass
+        left, top, right, bottom = bounds
+        width = max(0, right - left)
+        height = max(0, bottom - top)
+        if width <= 0 or height <= 0:
+            return None
+        slide_area = max(1, slide_w * slide_h)
+        area = self._ppt_bounds_area(bounds)
+        area_sq_in = area / (_EMU_PER_INCH * _EMU_PER_INCH)
+        if area / slide_area > 0.65:
+            return None
+        if area_sq_in < 0.025:
+            return None
+        if width < int(_EMU_PER_INCH * 0.10) or height < int(_EMU_PER_INCH * 0.08):
+            return None
+        meta = self._ppt_shape_metadata(shape)
+        # Ignore hairlines, separators and edge decorations.
+        if width > slide_w * 0.60 and height < slide_h * 0.035:
+            return None
+        if height > slide_h * 0.60 and width < slide_w * 0.035:
+            return None
+        edge = left < slide_w * 0.025 or top < slide_h * 0.025 or right > slide_w * 0.975 or bottom > slide_h * 0.975
+        if edge and (width < slide_w * 0.08 or height < slide_h * 0.08):
+            return None
+        return {
+            'bounds': bounds,
+            'area': area,
+            'kind': 'image' if self._ppt_shape_has_image(shape) else 'shape',
+            'z_order': 0,
+            'meta': meta,
+        }
+
+    def _ppt_find_graphic_overlaps(self, candidates):
+        overlaps = []
+        for i, first in enumerate(candidates or []):
+            for second in (candidates or [])[i + 1:]:
+                inter = self._ppt_bounds_intersection(first.get('bounds'), second.get('bounds'))
+                if not inter:
+                    continue
+                inter_area = self._ppt_bounds_area(inter)
+                if inter_area <= 0:
+                    continue
+                first_area = max(1, first.get('area') or self._ppt_bounds_area(first.get('bounds')))
+                second_area = max(1, second.get('area') or self._ppt_bounds_area(second.get('bounds')))
+                smaller = min(first_area, second_area)
+                larger = max(first_area, second_area)
+                overlap_ratio = inter_area / max(1, smaller)
+                left, top, right, bottom = inter
+                overlap_w_in = (right - left) / _EMU_PER_INCH
+                overlap_h_in = (bottom - top) / _EMU_PER_INCH
+                overlap_area_in = inter_area / (_EMU_PER_INCH * _EMU_PER_INCH)
+                if overlap_ratio < 0.35 or overlap_area_in < 0.04:
+                    continue
+                if overlap_w_in < 0.12 or overlap_h_in < 0.08:
+                    continue
+                classification = self._ppt_classify_graphic_overlap(first, second, inter)
+                if classification.get('classification') == 'intentional_composition':
+                    continue
+                overlaps.append({
+                    'overlap_pct': int(round(overlap_ratio * 100)),
+                    'overlap_area_sq_in': round(overlap_area_in, 3),
+                    'bounds_a': self._ppt_format_bounds(first.get('bounds')),
+                    'bounds_b': self._ppt_format_bounds(second.get('bounds')),
+                    'overlap_bounds': self._ppt_format_bounds(inter),
+                    'classification': classification.get('classification'),
+                    'severity': classification.get('severity', 'error'),
+                    'confidence': classification.get('confidence'),
+                    'reason': classification.get('reason'),
+                })
+        overlaps.sort(key=lambda item: (
+            0 if item.get('severity') == 'error' else 1,
+            -item['overlap_pct'],
+            -item['overlap_area_sq_in']
+        ))
         return overlaps[:10]
 
     def _ppt_bounds_extends_outside(self, outer, inner, tolerance=9144):
@@ -3704,6 +4200,7 @@ class PptMixin:
             icon = icon or icons[i]
             left = left0 + i * (card_w + gap)
             card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, card_w, card_h)
+            self._ppt_mark_shape(card, role='card_container', group=f'three_card_{i}', allow_overlap=True)
             self._set_shape_fill(card, colors[i % len(colors)], theme['line'])
             self._add_textbox(slide, icon, left + Inches(0.2), top + Inches(0.28), card_w - Inches(0.4), Inches(0.62), 30, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'icon', item), 'icon')
             self._add_textbox(slide, title, left + Inches(0.22), top + Inches(1.15), card_w - Inches(0.44), Inches(0.55), 20, True, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title')
@@ -3731,9 +4228,11 @@ class PptMixin:
                 x1 = left0 + (i - 1) * (node + step_gap) + node
                 y = top + node / 2
                 arrow = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, x1 + Inches(0.14), y - Inches(0.08), max(Inches(0.2), x - x1 - Inches(0.28)), Inches(0.16))
+                self._ppt_mark_shape(arrow, role='process_connector', group='process_flow', allow_overlap=True)
                 arrow.fill.solid(); arrow.fill.fore_color.rgb = theme['line']
                 arrow.line.fill.background()
             circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, top, node, node)
+            self._ppt_mark_shape(circle, role='process_node', group=f'process_node_{i}', allow_overlap=True)
             self._set_shape_fill(circle, theme['primary'], theme['primary_dark'])
             self._add_textbox(slide, str(i + 1), x, top + Inches(0.28), node, Inches(0.42), 22, True, theme['card'], PP_ALIGN.CENTER, self._style_for(data, 'label', item), 'label')
             self._add_textbox(slide, title, x - Inches(0.28), top + Inches(1.45), node + Inches(0.56), Inches(0.48), 17, True, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title')
@@ -3753,6 +4252,7 @@ class PptMixin:
         right = Inches(12.1)
         y = Inches(3.05)
         line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left0, y - Inches(0.015), right - left0, Inches(0.03))
+        self._ppt_mark_shape(line, role='timeline_axis', group='timeline', allow_overlap=True)
         line.fill.solid(); line.fill.fore_color.rgb = theme['line']
         line.line.fill.background()
         span = int((right - left0) / max(1, n - 1)) if n > 1 else 0
@@ -3760,6 +4260,7 @@ class PptMixin:
             title, desc, _, time = self._item_title_desc(item, i + 1)
             x = left0 + i * span
             dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, x - Inches(0.16), y - Inches(0.16), Inches(0.32), Inches(0.32))
+            self._ppt_mark_shape(dot, role='timeline_marker', group='timeline', allow_overlap=True)
             self._set_shape_fill(dot, theme['accent'] if i % 2 else theme['primary'], theme['card'])
             top = Inches(1.45) if i % 2 == 0 else Inches(3.45)
             self._add_textbox(slide, time or f'阶段 {i + 1}', x - Inches(0.75), top, Inches(1.5), Inches(0.35), 13, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'label', item), 'label')
@@ -3893,6 +4394,7 @@ class PptMixin:
         node_w, node_h = Inches(1.55), Inches(0.82)
         colors = [theme['primary'], theme['accent'], theme['green'], theme['purple'], theme['primary_dark'], theme['muted']]
         center = slide.shapes.add_shape(MSO_SHAPE.OVAL, cx - Inches(0.72), cy - Inches(0.72), Inches(1.44), Inches(1.44))
+        self._ppt_mark_shape(center, role='cycle_center', group='cycle_diagram', allow_overlap=True)
         self._set_shape_fill(center, theme['card'], theme['line'])
         self._add_textbox(slide, data.get('center') or '闭环', cx - Inches(0.62), cy - Inches(0.18), Inches(1.24), Inches(0.36), 17, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'label'), 'label')
         for i, item in enumerate(steps):
@@ -3901,6 +4403,7 @@ class PptMixin:
             y = cy + int(r * sin(angle)) - node_h / 2
             title, desc, _, _ = self._item_title_desc(item, i + 1)
             node = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, node_w, node_h)
+            self._ppt_mark_shape(node, role='cycle_node', group='cycle_diagram', allow_overlap=True)
             self._set_shape_fill(node, colors[i % len(colors)], theme['card'])
             self._add_textbox(slide, title, x + Inches(0.08), y + Inches(0.2), node_w - Inches(0.16), Inches(0.28), 13, True, theme['card'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title')
             # Tangential arrow between nodes; use non-zero arrow shape to avoid corrupt connector XML.
@@ -3908,6 +4411,7 @@ class PptMixin:
             ax = cx + int((r + Inches(0.02)) * cos(next_angle)) - Inches(0.28)
             ay = cy + int((r + Inches(0.02)) * sin(next_angle)) - Inches(0.12)
             arrow = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, ax, ay, Inches(0.56), Inches(0.24))
+            self._ppt_mark_shape(arrow, role='cycle_connector', group='cycle_diagram', allow_overlap=True)
             self._set_shape_fill(arrow, theme['line'])
             arrow.rotation = int((next_angle + pi / 2) * 180 / pi)
 

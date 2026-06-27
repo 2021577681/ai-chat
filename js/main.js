@@ -64,6 +64,11 @@ async function init() {
     const btn = document.getElementById('outlineBtn');
     if (btn) btn.classList.add('outline-active');
   }
+  if (state.settings.usePpt) {
+    const btn = document.getElementById('pptModeBtn');
+    if (btn) btn.classList.add('ppt-active');
+    if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(true, { render: false });
+  }
   if (typeof updatePrivacyGuardButton === 'function') updatePrivacyGuardButton();
   
   // 6. 更新底部状态信息

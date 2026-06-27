@@ -526,10 +526,15 @@ function saveReflectionSettings() {
   if (s.useReflection) {
     s.usePlan = false;
     s.useOutline = false;
+    s.usePpt = false;
     const planBtn = document.getElementById('planBtn');
     const outlineBtn = document.getElementById('outlineBtn');
+    const pptBtn = document.getElementById('pptModeBtn');
     if (planBtn) planBtn.classList.remove('plan-active');
     if (outlineBtn) outlineBtn.classList.remove('outline-active');
+    if (pptBtn) pptBtn.classList.remove('ppt-active');
+    if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
+    if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   }
   persistSettings();
   // 师生模式没有独立的工具栏按钮（通过"更多菜单"打开），不需要切换按钮态
@@ -551,10 +556,15 @@ function toggleReflection() {
   if (s.useReflection) {
     s.usePlan = false;
     s.useOutline = false;
+    s.usePpt = false;
     const planBtn = document.getElementById('planBtn');
     const outlineBtn = document.getElementById('outlineBtn');
+    const pptBtn = document.getElementById('pptModeBtn');
     if (planBtn) planBtn.classList.remove('plan-active');
     if (outlineBtn) outlineBtn.classList.remove('outline-active');
+    if (pptBtn) pptBtn.classList.remove('ppt-active');
+    if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
+    if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   }
   const btn = document.getElementById('reflectBtn');
   if (btn) {

@@ -133,6 +133,7 @@ function stopGenerate() {
 function updateSendBtn() {
   const btn = document.getElementById('sendBtn');
   if (!btn) return;
+  if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   const privacySuffix = typeof getPrivacyGuardInputInfoSuffix === 'function' ? getPrivacyGuardInputInfoSuffix() : '';
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
   const c = (typeof currentChat === 'function') ? currentChat() : null;
@@ -181,6 +182,7 @@ function updateSendBtn() {
     if (state.settings.usePlan) info += ` · 📋 计划模式(${state.settings.planMaxSteps}步)`;
     if (state.settings.useReflection) info += ` · 🎭 师生(评审${state.settings.refRounds}轮)`;
     if (state.settings.useOutline) info += ` · 📑 大纲(${state.settings.outlineMaxRounds || 30}轮)`;
+    if (state.settings.usePpt) info += ' · PPT';
     if (state.settings.useTools && state.tools.length) info += ` · 🛠 ${state.tools.length}工具`;
     if (state.settings.compressAutoEnabled) info += ` · 🗜️ 自动压缩`;
     if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';

@@ -522,10 +522,15 @@ function saveOutlineSettings() {
   if (s.useOutline) {
     s.usePlan = false;
     s.useReflection = false;
+    s.usePpt = false;
     const planBtn = document.getElementById('planBtn');
     const reflectBtn = document.getElementById('reflectBtn');
+    const pptBtn = document.getElementById('pptModeBtn');
     if (planBtn) planBtn.classList.remove('plan-active');
     if (reflectBtn) reflectBtn.classList.remove('reflect-active');
+    if (pptBtn) pptBtn.classList.remove('ppt-active');
+    if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
+    if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   }
   
   if (typeof persistSettings === 'function') persistSettings();
@@ -829,10 +834,15 @@ function toggleOutline() {
   if (s.useOutline) {
     s.usePlan = false;
     s.useReflection = false;
+    s.usePpt = false;
     const planBtn = document.getElementById('planBtn');
     const reflectBtn = document.getElementById('reflectBtn');
+    const pptBtn = document.getElementById('pptModeBtn');
     if (planBtn) planBtn.classList.remove('plan-active');
     if (reflectBtn) reflectBtn.classList.remove('reflect-active');
+    if (pptBtn) pptBtn.classList.remove('ppt-active');
+    if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
+    if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   }
   
   const btn = document.getElementById('outlineBtn');

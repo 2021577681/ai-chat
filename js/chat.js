@@ -1157,10 +1157,14 @@ function renderMsg(m, idx) {
   if (m.outline && typeof renderOutlinePanel === 'function') outlineHtml = renderOutlinePanel(m, idx);
   let outlineDiffHtml = '';
   if (m.outline && typeof renderOutlineDiffSummary === 'function') outlineDiffHtml = renderOutlineDiffSummary(m, idx);
+
+  let pptHtml = '';
+  if (m.pptMode && typeof renderPptPanel === 'function') pptHtml = renderPptPanel(m, idx);
   
   const hasRefBadge = m.reflection && m.reflection.turns && m.reflection.turns.length > 0;
   const hasPlanBadge = m.plan && m.plan.steps && m.plan.steps.length > 0;
   const hasOutlineBadge = m.outline && m.outline.items && m.outline.items.length > 0;
+  const hasPptBadge = !!m.pptMode;
   
   return `
     <div class="message" data-idx="${idx}">
@@ -1170,17 +1174,20 @@ function renderMsg(m, idx) {
           ${hasPlanBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,var(--primary),var(--success));">📋 计划</span>' : ''}
           ${hasOutlineBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6);">📑 大纲</span>' : ''}
           ${hasRefBadge ? '<span class="msg-badge">🎭 师生</span>' : ''}
+          ${hasPptBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,#2563eb,#f97316);">PPT</span>' : ''}
           ${!isUser ? `<span class="msg-timer" data-msg-idx="${idx}">${formatMsgTimer(m)}</span>` : ''}
         </div>
         ${attsHtml}
         ${toolCallsHtml}
-        ${(m.plan || m.outline || m.reflection) ? '' : `<div class="msg-content">${renderMarkdown(m.content || '')}</div>`}
+        ${(m.plan || m.outline || m.reflection || m.pptMode) ? '' : `<div class="msg-content">${renderMarkdown(m.content || '')}</div>`}
         ${planHtml}
         ${outlineHtml}
+        ${pptHtml}
         ${reflectionHtml}
         ${m.plan ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${m.outline ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${outlineDiffHtml}
+        ${m.pptMode && m.content ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${m.reflection ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${!isUser ? `
         <div class="msg-actions">

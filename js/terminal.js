@@ -1065,12 +1065,31 @@ async function generatePpt(data, context) {
     `[生成 PPT]\n标题：${title}\n页数：${slideCount || payload.slide_count || payload.pages || '自动规划'}\n文件名：${payload.filename || 'generated.pptx'}`,
     context);
   if (typeof r === 'string') return r;
-  if (!r.ok) return `❌ ${r.error}`;
+  const repair = r.auto_repair || {};
+  const validation = r.validation || {};
+  const cycles = Array.isArray(repair.cycles) ? repair.cycles.length : 0;
+  const repairText = cycles
+    ? `；修复闭环 ${cycles}/${repair.max_cycles || cycles} 轮，${validation.passed ? '验证通过' : '仍未通过'}`
+    : (validation.passed === false ? '；验证未通过' : '');
+  if (!r.ok) {
+    return {
+      ok: false,
+      path: r.path,
+      slides: r.slides || slideCount,
+      validation,
+      auto_repair: repair,
+      pipeline: r.pipeline || {},
+      text: `❌ ${r.error || r.message || 'PPT 生成失败'}${r.path ? `：${r.path}` : ''}${repairText}`
+    };
+  }
   return {
     ok: true,
     path: r.path,
     slides: r.slides || slideCount,
-    text: `✅ PPT 已生成：${r.path}（${r.slides || slideCount} 页）`
+    validation,
+    auto_repair: repair,
+    pipeline: r.pipeline || {},
+    text: `✅ PPT 已生成：${r.path}（${r.slides || slideCount} 页）${repairText}`
   };
 }
 

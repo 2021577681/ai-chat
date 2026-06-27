@@ -80,6 +80,8 @@ let state = {
     pptSlidePrompt: '',
     pptModel: '',
     pptTemperature: 0.3,
+    pptAutoRepairMaxCycles: 8,
+    pptAutoRepairMaxAllowedCycles: 20,
     contextLimitMode: 'auto',
     contextLimitOverride: 0,
     compressAutoEnabled: false,
