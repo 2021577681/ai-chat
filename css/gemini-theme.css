@@ -351,6 +351,7 @@ body{
 .topbar-btn.reflect-active,
 .topbar-btn.plan-active,
 .topbar-btn.outline-active,
+.topbar-btn.ppt-active,
 .topbar-btn.temporary-active,
 .topbar-btn.privacy-active{
   border-color:transparent;
@@ -368,6 +369,11 @@ body{
 }
 
 .topbar-btn.plan-active{
+  background:#e6f4ea;
+  color:#137333;
+}
+
+.topbar-btn.ppt-active{
   background:#e6f4ea;
   color:#137333;
 }
@@ -2553,6 +2559,11 @@ body.settings-page-open .settings-docked-mask.show{
   color:#81c995;
 }
 
+[data-theme="dark"] .topbar-btn.ppt-active{
+  background:rgba(129,201,149,.18);
+  color:#81c995;
+}
+
 [data-theme="dark"] .topbar-btn.outline-active{
   background:linear-gradient(135deg,rgba(138,180,248,.18),rgba(198,140,255,.14));
   color:#aecbfa;
@@ -2955,6 +2966,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"][data-security-mode] .topbar-btn.tool-active,
 [data-theme="dark"][data-security-mode] .topbar-btn.plan-active,
 [data-theme="dark"][data-security-mode] .topbar-btn.outline-active,
+[data-theme="dark"][data-security-mode] .topbar-btn.ppt-active,
 [data-theme="dark"][data-security-mode] .topbar-btn.temporary-active{
   color:#140c04;
   border-color:rgba(255,226,158,.56);
@@ -2969,6 +2981,10 @@ body.settings-page-open .settings-docked-mask.show{
   background:linear-gradient(135deg,#fff0bf,#c99a3d 52%,#755018);
 }
 
+[data-theme="dark"][data-security-mode] .topbar-btn.ppt-active{
+  background:linear-gradient(135deg,#fff0bf,#c99a3d 52%,#755018);
+}
+
 [data-theme="dark"][data-security-mode] .topbar-btn.outline-active{
   background:linear-gradient(135deg,#fff5d6,#e0b85c 50%,#8f641f);
 }
@@ -2980,6 +2996,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"][data-security-mode] .topbar-btn.tool-active:hover,
 [data-theme="dark"][data-security-mode] .topbar-btn.plan-active:hover,
 [data-theme="dark"][data-security-mode] .topbar-btn.outline-active:hover,
+[data-theme="dark"][data-security-mode] .topbar-btn.ppt-active:hover,
 [data-theme="dark"][data-security-mode] .topbar-btn.temporary-active:hover{
   color:#0f0802;
   border-color:rgba(255,238,190,.72);

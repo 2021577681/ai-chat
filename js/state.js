@@ -70,6 +70,16 @@ let state = {
     outlineToolRejectStopPrompt: '',
     outlineToolRejectOncePrompt: '',
     outlineStalledPrompt: '',
+    // 📊 PPT 独立模式
+    usePpt: false,
+    pptSlideCount: 8,
+    pptTheme: 'business_blue',
+    pptFilename: 'generated.pptx',
+    pptAutoPreview: true,
+    pptOutlinePrompt: '',
+    pptSlidePrompt: '',
+    pptModel: '',
+    pptTemperature: 0.3,
     contextLimitMode: 'auto',
     contextLimitOverride: 0,
     compressAutoEnabled: false,
@@ -440,6 +450,8 @@ function injectBuiltinTools() {
     // 💾 Git 快照工具（5 个）
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
     'restore_checkpoint',
+    // 📊 PPT 工具（仅由顶栏 PPT 模式临时启用）
+    'generate_ppt', 'analyze_ppt_template', 'preview_ppt', 'validate_ppt',
     // 📚 论文工具（6 个）
     'arxiv_search', 'semantic_scholar_search', 'dblp_search', 'openalex_search', 'crossref_search', 'fetch_pdf_text'
   ]);
@@ -919,6 +931,7 @@ function resetBuiltinTools() {
   const OPTIONAL_TOOL_NAMES = new Set([
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
     'restore_checkpoint',
+    'generate_ppt', 'analyze_ppt_template', 'preview_ppt', 'validate_ppt',
     'arxiv_search', 'semantic_scholar_search', 'dblp_search', 'openalex_search', 'crossref_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 

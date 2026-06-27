@@ -226,6 +226,7 @@
       <button class="stats-toggle-btn" id="statsToggleBtn" type="button" onclick="toggleStatsBar()" title="收起 Token / 请求速度统计栏">统计</button>
       <div class="topbar-spacer"></div>
       <button class="topbar-btn" id="temporaryChatBtn" onclick="startTemporaryChat()" title="临时会话：刷新保留，切换或新建对话后删除"><img class="topbar-btn-icon" src="icon/时间_time.png" alt=""><span>临时</span></button>
+      <button class="topbar-btn" id="pptModeBtn" onclick="togglePptMode()" oncontextmenu="event.preventDefault();openPptSettings()" title="PPT 模式：下一条消息直接生成演示文稿，右键打开设置"><img class="topbar-btn-icon" src="icon/pdf文件_file-pdf-one.png" alt=""><span>PPT</span></button>
       <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
       <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
       <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
@@ -1308,7 +1309,6 @@
     <div class="modal-footer">
       <button class="btn" id="lmsToggleBtn" onclick="toggleLmsTools()">启用 LMS 工具</button>
       <button class="btn" id="gitToggleBtn" onclick="toggleGitTools()">启用快照工具</button>
-      <button class="btn" id="pptToggleBtn" onclick="togglePptTools()">启用 PPT 工具</button>
       <button class="btn" id="paperToggleBtn" onclick="togglePaperTools()">启用论文工具</button>
       <button class="btn" onclick="resetBuiltinTools()">恢复内置工具</button>
       <button class="btn btn-warning" onclick="clearAllTools()">清空全部</button>
@@ -1652,6 +1652,7 @@
     <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、代理和本地授权。" onclick="openSettingsSection('main')"><span><img class="settings-nav-icon" src="icon/设置_setting-one.png" alt=""></span><span>主设置</span></button>
     <button class="settings-nav-item" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。" onclick="openSettingsSection('plan')"><span><img class="settings-nav-icon" src="icon/计划_plan.png" alt=""></span><span>计划模式</span></button>
     <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span><img class="settings-nav-icon" src="icon/大纲视图_mindmap-list.png" alt=""></span><span>大纲模式</span></button>
+    <button class="settings-nav-item" data-settings-section="ppt" data-desc="配置独立 PPT 生成模式、页数主题和可编辑规划 Prompt。" onclick="openSettingsSection('ppt')"><span><img class="settings-nav-icon" src="icon/pdf文件_file-pdf-one.png" alt=""></span><span>PPT 模式</span></button>
     <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span><img class="settings-nav-icon" src="icon/家庭_family.png" alt=""></span><span>师生讨论</span></button>
     <button class="settings-nav-item" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。" onclick="openSettingsSection('tools')"><span><img class="settings-nav-icon" src="icon/工具_tool.png" alt=""></span><span>工具管理</span></button>
     <button class="settings-nav-item" data-settings-section="privacy" data-desc="配置本地脱敏、Shell 审核、附件策略和响应防尾注。" onclick="openSettingsSection('privacy')"><span><img class="settings-nav-icon" src="icon/人身安全_people-safe.png" alt=""></span><span>隐私模式</span></button>
@@ -1953,6 +1954,7 @@
 <script src="js/paper_tools.js"></script>
 <script src="js/beacon.js"></script>
 <script src="js/chat.js"></script>
+<script src="js/ppt-mode.js"></script>
 <script src="js/task-queue.js"></script>
 <script src="js/concurrent-requests.js"></script>
 <script src="js/debate-mode.js"></script>

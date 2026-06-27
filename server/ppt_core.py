@@ -25,6 +25,7 @@ from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 from . import config
+from .ppt_pipeline import build_deck_spec
 from .sandbox import check_path_or_error
 
 
@@ -97,10 +98,20 @@ class PptMixin:
     def handle_generate_ppt(self, body):
         self._ppt_global_style = {}
         self._ppt_current_slide = {}
+        self._ppt_pipeline_spec = {}
         try:
             data = body.get('data') or {}
             if not isinstance(data, dict):
                 return self._send_json(200, {'ok': False, 'error': 'data 必须是对象'})
+
+            # High-level pipeline mode: allow callers to pass a user request and
+            # let the planner produce the structured slides consumed below.
+            # Existing structured JSON remains fully supported.
+            if (data.get('user_request') or data.get('request') or data.get('prompt')) and not data.get('slides'):
+                request_text = data.get('user_request') or data.get('request') or data.get('prompt')
+                deck_spec = build_deck_spec(request_text, data)
+                data = deck_spec
+                self._ppt_pipeline_spec = deck_spec
 
             try:
                 from pptx import Presentation
@@ -223,6 +234,7 @@ class PptMixin:
                 'path': rel_path,
                 'slides': len(slides),
                 'template_profile': (template_profile.get('profile_path') or template_profile.get('source')) if template_profile else '',
+                'pipeline': self._ppt_pipeline_spec.get('pipeline', {}),
                 'message': f'PPT 已生成：{rel_path}'
             })
         except Exception as e:

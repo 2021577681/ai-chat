@@ -17,7 +17,6 @@ function renderToolList() {
     el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;font-size:13px;">还没有工具<br><button class="btn btn-primary" style="margin-top:10px;" onclick="resetBuiltinTools()">🔄 加载内置工具</button></div>';
     updateLmsToggleBtn();
     updateGitToggleBtn();
-    updatePptToggleBtn();
     updatePaperToggleBtn();
     return;
   }
@@ -58,7 +57,6 @@ function renderToolList() {
   }).join('');
   updateLmsToggleBtn();
   updateGitToggleBtn();
-  updatePptToggleBtn();
   updatePaperToggleBtn();
 }
 
@@ -201,55 +199,40 @@ function pptToolCount() {
   return BUILTIN_TOOLS.filter(t => isPptTool(t.name)).length;
 }
 
-function togglePptTools() {
-  if (typeof BUILTIN_TOOLS === 'undefined') {
-    toast('未找到内置工具定义');
-    return;
-  }
-  const pptTools = BUILTIN_TOOLS.filter(t => isPptTool(t.name));
-  const enabledCount = state.tools.filter(t => isPptTool(t.name)).length;
-  if (enabledCount > 0 && enabledCount >= pptTools.length) {
-    const removed = enabledCount;
-    state.tools = state.tools.filter(t => !isPptTool(t.name));
-    persistTools();
-    renderToolList();
-    toast(`🔕 已禁用 ${removed} 个 PPT 工具`);
-  } else {
-    let added = 0;
-    for (const tool of pptTools) {
-      if (!state.tools.some(t => t.name === tool.name)) {
-        state.tools.push(JSON.parse(JSON.stringify(tool)));
-        added++;
-      }
+function ensurePptToolsEnabled() {
+  if (typeof BUILTIN_TOOLS === 'undefined' || !Array.isArray(BUILTIN_TOOLS)) return 0;
+  let added = 0;
+  for (const tool of BUILTIN_TOOLS.filter(t => isPptTool(t.name))) {
+    if (!state.tools.some(t => t.name === tool.name)) {
+      state.tools.push(JSON.parse(JSON.stringify(tool)));
+      added++;
     }
+  }
+  return added;
+}
+
+function ensurePptToolsDisabled() {
+  const before = state.tools.length;
+  state.tools = state.tools.filter(t => !isPptTool(t.name));
+  return before - state.tools.length;
+}
+
+function syncPptToolsWithMode(enabled = !!(state.settings && state.settings.usePpt), options = {}) {
+  const before = state.tools.length;
+  if (enabled) ensurePptToolsEnabled();
+  else ensurePptToolsDisabled();
+  if (state.tools.length !== before) {
     persistTools();
-    renderToolList();
-    toast(added ? `📊 已启用 ${added} 个 PPT 工具` : '📊 PPT 工具已全部启用');
+    if (options.render !== false && typeof renderToolList === 'function') renderToolList();
   }
 }
 
-function updatePptToggleBtn() {
-  const btn = document.getElementById('pptToggleBtn');
-  if (!btn) return;
-  const enabled = pptToolsEnabled();
-  const total = pptToolCount();
-  if (enabled) {
-    const cur = state.tools.filter(t => isPptTool(t.name)).length;
-    if (cur < total) {
-      btn.textContent = `补全 PPT 工具 (${cur}/${total})`;
-      btn.classList.add('btn-primary');
-      btn.title = '当前只启用了部分 PPT 工具，点击补全';
-    } else {
-      btn.textContent = `禁用 PPT 工具 (${cur})`;
-      btn.classList.remove('btn-primary');
-      btn.title = '当前 PPT 工具已启用，点击全部移除';
-    }
-  } else {
-    btn.textContent = `启用 PPT 工具 (${total})`;
-    btn.classList.add('btn-primary');
-    btn.title = '当前未启用，点击一键加入 PPT 生成工具';
-  }
+function togglePptTools() {
+  if (typeof togglePptMode === 'function') togglePptMode();
+  else toast('请使用顶栏 PPT 按钮开启 PPT 模式');
 }
+
+function updatePptToggleBtn() {}
 
 // ============ 📚 论文工具批量启停 ============
 const PAPER_TOOL_NAMES = [
@@ -420,22 +403,24 @@ function toggleTools() {
 function buildToolsArray(options = {}) {
   const force = !!(options && options.force);
   if ((!force && !state.settings.useTools) || !state.tools.length) return null;
+  const availableTools = state.tools.filter(t => !isPptTool(t.name) || !!state.settings.usePpt);
+  if (!availableTools.length) return null;
   
   if (state.settings.apiFormat === 'anthropic') {
-    return state.tools.map(t => ({
+    return availableTools.map(t => ({
       name: t.name,
       description: t.description,
       input_schema: t.parameters
     }));
   } else if (state.settings.apiFormat === 'responses') {
-    return state.tools.map(t => ({
+    return availableTools.map(t => ({
       type: 'function',
       name: t.name,
       description: t.description,
       parameters: t.parameters
     }));
   } else {
-    return state.tools.map(t => ({
+    return availableTools.map(t => ({
       type: 'function',
       function: {
         name: t.name,
@@ -827,6 +812,9 @@ function _ctxToolFn(name, context) {
 async function executeTool(name, args, context = {}) {
   const tool = state.tools.find(t => t.name === name);
   if (!tool) return { ok: false, value: `未找到工具：${name}` };
+  if (isPptTool(name) && !(state.settings && state.settings.usePpt)) {
+    return { ok: false, value: 'PPT 工具只能在顶栏 PPT 模式开启时使用。' };
+  }
   const toolContext = {
     ...(context && typeof context === 'object' ? context : {}),
     chatId: _toolContextChatId(context)

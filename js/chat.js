@@ -49,6 +49,9 @@ function _consumeOneShotMode() {
     s.useReflection = false;
     const btn = document.getElementById('reflectBtn');
     if (btn) btn.classList.remove('reflect-active');
+  } else if (s.usePpt) {
+    mode = 'ppt';
+    // PPT 模式需要在生成期间保持开启，以便 PPT 工具可用；生成结束后由 callAPIWithPptMode 关闭并同步工具。
   }
   if (mode !== 'normal') {
     if (typeof persistSettings === 'function') persistSettings();
@@ -177,7 +180,7 @@ function _inferReplyModeAfterUser(chat, idx) {
 
 function _consumeOneShotModeWithFallback(fallbackMode) {
   const s = state.settings || {};
-  if (s.useOutline || s.usePlan || s.useReflection) {
+  if (s.useOutline || s.usePlan || s.useReflection || s.usePpt) {
     return (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
   }
   return fallbackMode || 'normal';
@@ -305,6 +308,7 @@ async function submitEditResend(input) {
     const mode = _consumeOneShotModeWithFallback(fallbackMode);
     if (mode === 'outline') await callAPIWithOutline();
     else if (mode === 'plan') await callAPIWithPlan();
+    else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });
     else if (mode === 'reflection') await callAPIWithReflection();
     else await callAPI(undefined, { contextChecked: true });
   } catch (e) {
@@ -1538,6 +1542,7 @@ async function onSend() {
     const mode = (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
     if (mode === 'outline') await callAPIWithOutline();
     else if (mode === 'plan') await callAPIWithPlan();
+    else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });
     else if (mode === 'reflection') await callAPIWithReflection();
     else await callAPI(undefined, { contextChecked: true });
   } catch (e) {
@@ -1601,6 +1606,7 @@ async function regenerate(idx) {
   const mode = (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
   if (mode === 'outline') await callAPIWithOutline();
   else if (mode === 'plan') await callAPIWithPlan();
+  else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });
   else if (mode === 'reflection') await callAPIWithReflection();
   else await callAPI(undefined, { contextChecked: true });
 }

@@ -217,6 +217,9 @@ const BUILTIN_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        user_request: { type: 'string', description: '高层自然语言需求。未提供 slides 时，后端会走 Intent Parser → Outline Planner → Slide Planner → Layout Selector → Content Compressor → Theme Resolver 自动生成结构化 slides。' },
+        request: { type: 'string', description: 'user_request 的别名。' },
+        prompt: { type: 'string', description: 'user_request 的别名。' },
         filename: { type: 'string', description: '输出文件名，例如 ai_agent_demo.pptx；默认 generated.pptx' },
         path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
         template_path: { type: 'string', description: '可选模板 PPTX 路径。默认会复制该模板，并优先替换模板内已有标题/正文/示例文字框；支持占位符，也支持普通模板里的“单击此处添加文字”等示例文本。会保留母版、背景、Logo、页眉页脚和固定装饰。' },
@@ -473,7 +476,7 @@ const BUILTIN_TOOLS = [
           }
         }
       },
-      required: ['slides']
+      required: []
     },
     code: 'return await generatePpt(args);'
   },
