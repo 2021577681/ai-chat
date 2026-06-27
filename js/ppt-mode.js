@@ -14,6 +14,19 @@ const DEFAULT_PPT_SLIDE_PROMPT = [
   '内容要自然、具体、可落地；每页信息密度适中，避免长句。'
 ].join('\n');
 
+function normalizePptSlideCount(value) {
+  const count = parseInt(value, 10);
+  return Number.isFinite(count) ? Math.max(3, Math.min(30, count)) : 8;
+}
+
+function normalizePptTheme(value) {
+  const theme = String(value || '').trim();
+  if (theme === 'vibrant_orange') return 'vivid_orange';
+  return ['business_blue', 'tech_dark', 'minimal_white', 'vivid_orange'].includes(theme)
+    ? theme
+    : 'business_blue';
+}
+
 function ensurePptSettingsModal() {
   let modal = document.getElementById('pptSettingsModal');
   if (modal) return modal;
@@ -37,7 +50,7 @@ function ensurePptSettingsModal() {
 
       <div class="form-group">
         <label>默认页数</label>
-        <input type="number" id="pptSlideCount" min="1" max="60" step="1">
+        <input type="number" id="pptSlideCount" min="3" max="30" step="1">
       </div>
 
       <div class="form-group">
@@ -46,7 +59,7 @@ function ensurePptSettingsModal() {
           <option value="business_blue">商务蓝</option>
           <option value="tech_dark">科技黑</option>
           <option value="minimal_white">极简白</option>
-          <option value="vibrant_orange">活力橙</option>
+          <option value="vivid_orange">活力橙</option>
         </select>
       </div>
 
@@ -98,8 +111,8 @@ function openPptSettings() {
   const modal = ensurePptSettingsModal();
   const s = state.settings || {};
   document.getElementById('pptAutoPreview').checked = s.pptAutoPreview !== false;
-  document.getElementById('pptSlideCount').value = s.pptSlideCount || 8;
-  document.getElementById('pptTheme').value = s.pptTheme || 'business_blue';
+  document.getElementById('pptSlideCount').value = normalizePptSlideCount(s.pptSlideCount || 8);
+  document.getElementById('pptTheme').value = normalizePptTheme(s.pptTheme);
   document.getElementById('pptFilename').value = s.pptFilename || 'generated.pptx';
   document.getElementById('pptModel').value = s.pptModel || '';
   const temp = s.pptTemperature === undefined ? 0.3 : Number(s.pptTemperature);
@@ -118,9 +131,8 @@ function closePptSettings() {
 
 function savePptSettings() {
   const s = state.settings;
-  const count = parseInt(document.getElementById('pptSlideCount').value, 10);
-  s.pptSlideCount = Number.isFinite(count) ? Math.max(1, Math.min(60, count)) : 8;
-  s.pptTheme = document.getElementById('pptTheme').value || 'business_blue';
+  s.pptSlideCount = normalizePptSlideCount(document.getElementById('pptSlideCount').value);
+  s.pptTheme = normalizePptTheme(document.getElementById('pptTheme').value);
   s.pptFilename = document.getElementById('pptFilename').value.trim() || 'generated.pptx';
   s.pptAutoPreview = !!document.getElementById('pptAutoPreview').checked;
   s.pptModel = document.getElementById('pptModel').value.trim();
@@ -168,8 +180,8 @@ function buildPptModePayload(userRequest) {
   const model = (s.pptModel || s.currentModel || '').trim();
   return {
     user_request: userRequest,
-    slide_count: parseInt(s.pptSlideCount, 10) || 8,
-    theme: s.pptTheme || 'business_blue',
+    slide_count: normalizePptSlideCount(s.pptSlideCount),
+    theme: normalizePptTheme(s.pptTheme),
     filename: s.pptFilename || 'generated.pptx',
     llm_api_key: s.apiKey || '',
     llm_base_url: s.baseUrl || '',

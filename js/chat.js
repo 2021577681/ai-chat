@@ -172,6 +172,7 @@ function _inferReplyModeAfterUser(chat, idx) {
     if (m.role === 'user') break;
     if (m.outline) return 'outline';
     if (m.plan) return 'plan';
+    if (m.pptMode) return 'ppt';
     if (m.reflection) return 'reflection';
     if (m.role === 'assistant') return 'normal';
   }
@@ -1568,6 +1569,10 @@ async function regenerate(idx) {
   const c = currentChat();
   if (!c) return;
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
+  const reply = c.messages[idx] || {};
+  const fallbackMode = reply.pptMode
+    ? 'ppt'
+    : (reply.outline ? 'outline' : (reply.plan ? 'plan' : (reply.reflection ? 'reflection' : 'normal')));
   
   // ⭐ 关键修复：必须先中止任何正在跑的旧请求，否则会出现：
   //   1) 旧 SSE 流继续往新插入的占位消息写字符 → 内容错乱
@@ -1602,8 +1607,10 @@ async function regenerate(idx) {
   }
   renderMessages();
   saveData();
-  // ⭐ 与 onSend 行为一致：消费"一次性模式"
-  const mode = (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
+  // ⭐ 与 onSend 行为一致：消费"一次性模式"；没有新模式时沿用原回复模式。
+  const mode = (typeof _consumeOneShotModeWithFallback === 'function')
+    ? _consumeOneShotModeWithFallback(fallbackMode)
+    : ((typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : fallbackMode);
   if (mode === 'outline') await callAPIWithOutline();
   else if (mode === 'plan') await callAPIWithPlan();
   else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });

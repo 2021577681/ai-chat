@@ -228,15 +228,54 @@ class PptMixin:
                 os.makedirs(parent, exist_ok=True)
             prs.save(out_path)
 
+            repair_info = None
+            validation = None
+            if self._ppt_bool(data.get('auto_repair_text_layout'), True):
+                repair_rules = self._ppt_validation_rules(data)
+                repair_rules.setdefault('use_powerpoint_com_text_bounds', True)
+                repair_info = self._ppt_auto_repair_text_layout(out_path, repair_rules)
+
+            if self._ppt_bool(data.get('validate_after_generate'), True):
+                validation_rules = self._ppt_validation_rules(data)
+                validation_rules.setdefault('use_powerpoint_com_text_bounds', True)
+                validation = self._validate_pptx_file(out_path, validation_rules)
+                if (not validation.get('passed')) and self._ppt_bool(data.get('auto_repair_text_layout'), True):
+                    retry_rules = dict(validation_rules)
+                    retry_rules['auto_repair_passes'] = max(self._ppt_int(retry_rules.get('auto_repair_passes'), 3, 1, 8), 6)
+                    retry_rules['auto_repair_min_font_size'] = min(self._ppt_int(retry_rules.get('auto_repair_min_font_size'), 8, 5, 18), 6)
+                    retry_info = self._ppt_auto_repair_text_layout(out_path, retry_rules)
+                    if repair_info:
+                        repair_info['retry'] = retry_info
+                    else:
+                        repair_info = retry_info
+                    validation = self._validate_pptx_file(out_path, validation_rules)
+
             rel_path = os.path.relpath(out_path, config.WORKSPACE_ROOT).replace(os.sep, '/')
-            self._send_json(200, {
-                'ok': True,
+            validation_failed = bool(validation and not validation.get('passed'))
+            response = {
+                'ok': not validation_failed,
                 'path': rel_path,
                 'slides': len(slides),
                 'template_profile': (template_profile.get('profile_path') or template_profile.get('source')) if template_profile else '',
                 'pipeline': self._ppt_pipeline_spec.get('pipeline', {}),
                 'message': f'PPT 已生成：{rel_path}'
-            })
+            }
+            if repair_info:
+                response['auto_repair'] = repair_info
+                if repair_info.get('repaired'):
+                    response['message'] = f'PPT 已生成并自动修复文本排版：{rel_path}'
+            if validation:
+                response['validation'] = {
+                    'passed': bool(validation.get('passed')),
+                    'score': validation.get('score'),
+                    'stats': validation.get('stats', {}),
+                    'issues': validation.get('issues', [])[:10],
+                    'warnings': validation.get('warnings', [])[:10],
+                }
+                if validation_failed:
+                    response['error'] = 'PPT 生成后验证未通过，请减少内容或更换更宽松版式'
+                    response['message'] = f'PPT 已生成但验证未通过：{rel_path}'
+            self._send_json(200, response)
         except Exception as e:
             self._send_json(200, {'ok': False, 'error': str(e)})
 
@@ -610,6 +649,7 @@ class PptMixin:
             return False
         try:
             tf = shape.text_frame
+            self._configure_text_frame(tf, normalize_margins=False)
             tf.clear()
             lines = _as_text(replacement).splitlines() or ['']
             for i, line in enumerate(lines):
@@ -812,6 +852,7 @@ class PptMixin:
     def _write_template_shape_text(self, shape, text, used_shapes):
         try:
             tf = shape.text_frame
+            self._configure_text_frame(tf, normalize_margins=False)
             tf.clear()
             lines = _as_text(text).splitlines() or ['']
             for i, line in enumerate(lines):
@@ -920,6 +961,8 @@ class PptMixin:
         total_tables = 0
         total_charts = 0
         total_text_overlaps = 0
+        total_text_overflows = 0
+        total_text_graphic_overlaps = 0
 
         slide_count = len(prs.slides)
         if slide_count <= 0:
@@ -932,14 +975,35 @@ class PptMixin:
         if max_slides and slide_count > max_slides:
             issues.append({'severity': 'error', 'message': f'slide count {slide_count} is above max_slides {max_slides}'})
 
+        com_text_bounds_by_slide = {}
+        com_warning = None
+        use_com_text_bounds = self._ppt_bool(rules.get('use_powerpoint_com_text_bounds'), True)
+        if use_com_text_bounds:
+            com_text_bounds_by_slide, com_warning = self._ppt_powerpoint_com_text_bounds(ppt_path)
+            if com_warning:
+                warnings.append({
+                    'severity': 'warning',
+                    'message': f'PowerPoint COM text bounds unavailable: {com_warning}; falling back to estimated text bounds',
+                })
+
+        com_layout_issues_by_slide = {}
+        if use_com_text_bounds and not com_warning:
+            com_layout_issues_by_slide, com_layout_warning = self._ppt_powerpoint_com_layout_issues(ppt_path)
+            if com_layout_warning:
+                warnings.append({
+                    'severity': 'warning',
+                    'message': f'PowerPoint COM layout issue scan unavailable: {com_layout_warning}',
+                })
+
         for idx, slide in enumerate(prs.slides, start=1):
-            summary = self._ppt_slide_summary(slide, idx, prs, font_counts, font_size_counts, color_counts)
+            summary = self._ppt_slide_summary(slide, idx, prs, font_counts, font_size_counts, color_counts, com_text_bounds_by_slide.get(idx))
             slide_summaries.append(summary)
             total_shapes += summary['shape_count']
             total_pictures += summary['picture_count']
             total_tables += summary['table_count']
             total_charts += summary['chart_count']
             total_text_overlaps += len(summary.get('text_overlaps', []))
+            total_text_overflows += len(summary.get('text_overflow', []))
             if summary['text']:
                 all_text.append(summary['text'])
             if not summary['title'] and idx > 1:
@@ -962,11 +1026,12 @@ class PptMixin:
                     'message': f'shape may be outside slide bounds: {item["bounds"]}',
                 })
             for item in summary.get('text_overflow', [])[:5]:
-                warnings.append({
-                    'severity': 'warning',
+                issues.append({
+                    'severity': 'error',
                     'slide': idx,
                     'message': f'possible text box overflow: estimated {item["estimated_lines"]} lines > capacity {item["capacity_lines"]}',
                     'text': item.get('text', ''),
+                    'bounds': item.get('bounds', {}),
                 })
             for item in summary.get('text_overlaps', [])[:5]:
                 issues.append({
@@ -977,6 +1042,20 @@ class PptMixin:
                     'text_b': item.get('text_b', ''),
                     'bounds_a': item.get('bounds_a', {}),
                     'bounds_b': item.get('bounds_b', {}),
+                    'text_bounds_a': item.get('text_bounds_a', {}),
+                    'text_bounds_b': item.get('text_bounds_b', {}),
+                })
+            for item in com_layout_issues_by_slide.get(idx, [])[:8]:
+                total_text_graphic_overlaps += 1
+                issues.append({
+                    'severity': 'error',
+                    'slide': idx,
+                    'message': item.get('message', 'text/graphic layout conflict'),
+                    'kind': item.get('kind', 'text_graphic_overlap'),
+                    'text': item.get('text', ''),
+                    'text_bounds': item.get('text_bounds', {}),
+                    'graphic_bounds': item.get('graphic_bounds', {}),
+                    'overlap_pct': item.get('overlap_pct'),
                 })
 
         visible_text = '\n'.join(all_text)
@@ -1016,6 +1095,8 @@ class PptMixin:
                 'table_count': total_tables,
                 'chart_count': total_charts,
                 'text_overlap_count': total_text_overlaps,
+                'text_overflow_count': total_text_overflows,
+                'text_graphic_overlap_count': total_text_graphic_overlaps,
                 'visible_question_marks': question_marks,
                 'cjk_char_count': cjk_chars,
                 'mojibake_hit_count': mojibake_hits,
@@ -1028,7 +1109,7 @@ class PptMixin:
             'slides': slide_summaries,
         }
 
-    def _ppt_slide_summary(self, slide, idx, prs, font_counts=None, font_size_counts=None, color_counts=None):
+    def _ppt_slide_summary(self, slide, idx, prs, font_counts=None, font_size_counts=None, color_counts=None, com_text_bounds=None):
         font_counts = font_counts if isinstance(font_counts, dict) else {}
         font_size_counts = font_size_counts if isinstance(font_size_counts, dict) else {}
         color_counts = color_counts if isinstance(color_counts, dict) else {}
@@ -1072,7 +1153,7 @@ class PptMixin:
             bullet_like += len(re.findall(r'(^|\n)\s*([•\-\*\u2022]|\d+[.)])\s+', text))
             if not title and self._ppt_shape_looks_like_title(shape, text, slide_h):
                 title = text.splitlines()[0][:120]
-            overlap_candidate = self._ppt_text_overlap_candidate(shape, text, bounds, slide_w, slide_h)
+            overlap_candidate = self._ppt_text_overlap_candidate(shape, text, bounds, slide_w, slide_h, com_text_bounds)
             if overlap_candidate:
                 text_overlap_candidates.append(overlap_candidate)
 
@@ -1093,6 +1174,7 @@ class PptMixin:
                     'estimated_lines': overflow['estimated_lines'],
                     'capacity_lines': overflow['capacity_lines'],
                     'font_size': overflow['font_size'],
+                    'bounds': self._ppt_format_bounds(bounds) if bounds else {},
                     'text': preview,
                 })
 
@@ -1133,7 +1215,600 @@ class PptMixin:
         left, top, right, bottom = bounds
         return left < -tolerance or top < -tolerance or right > slide_w + tolerance or bottom > slide_h + tolerance
 
-    def _ppt_text_overlap_candidate(self, shape, text, bounds, slide_w, slide_h):
+    def _ppt_auto_repair_text_layout(self, ppt_path, rules=None):
+        """Use PowerPoint's renderer to repair overflowing/overlapping text.
+
+        python-pptx can set text frame metadata, but it cannot perform the final
+        layout pass. On Windows with PowerPoint installed, use COM after saving
+        the deck so generated files are not merely diagnosed as invalid. Prefer
+        spatial repairs first: enlarge overflowing text boxes when there is room
+        and move lower colliding text boxes downward to open whitespace. Only
+        when the slide has insufficient room for a safe spatial repair do we fall
+        back to PowerPoint's text-fit / font-size reduction behavior.
+        """
+        if os.name != 'nt':
+            return {'enabled': False, 'repaired': False, 'reason': 'not running on Windows'}
+        rules = rules or {}
+        max_passes = self._ppt_int(rules.get('auto_repair_passes'), 3, 1, 8)
+        min_font_size = self._ppt_int(rules.get('auto_repair_min_font_size'), 8, 5, 18)
+        try:
+            import pythoncom
+            import win32com.client
+        except Exception as e:
+            return {'enabled': False, 'repaired': False, 'reason': f'pywin32 is not available ({e})'}
+
+        app = None
+        pres = None
+        repaired = False
+        repaired_shapes = 0
+        layout_repairs = 0
+        shrink_repairs = 0
+        last_problem_count = 0
+        pythoncom.CoInitialize()
+        try:
+            app = win32com.client.DispatchEx('PowerPoint.Application')
+            try:
+                app.DisplayAlerts = 0
+            except Exception:
+                pass
+            pres = app.Presentations.Open(os.path.abspath(ppt_path), ReadOnly=False, Untitled=False, WithWindow=False)
+
+            for pass_idx in range(max_passes):
+                problem_shapes = {}
+                for slide in pres.Slides:
+                    items = []
+                    graphics = []
+                    self._ppt_collect_com_text_shape_items(slide.Shapes, items)
+                    self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphics)
+                    problem_shapes.update(self._ppt_com_problem_shape_map_with_graphics(items, graphics))
+
+                last_problem_count = len(problem_shapes)
+                if not problem_shapes:
+                    break
+
+                changed_this_pass = 0
+                for slide in pres.Slides:
+                    items = []
+                    graphics = []
+                    self._ppt_collect_com_text_shape_items(slide.Shapes, items)
+                    self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphics)
+                    changed_this_pass += self._ppt_com_reflow_text_slide(slide, items, graphics=graphics, pass_idx=pass_idx)
+                if changed_this_pass > 0:
+                    layout_repairs += changed_this_pass
+                else:
+                    for shape in list(problem_shapes.values()):
+                        if self._ppt_com_shrink_text_shape(shape, min_font_size=min_font_size, pass_idx=pass_idx):
+                            changed_this_pass += 1
+                    shrink_repairs += changed_this_pass
+                if changed_this_pass <= 0:
+                    break
+                repaired = True
+                repaired_shapes += changed_this_pass
+                try:
+                    pres.Save()
+                except Exception:
+                    pass
+
+            if repaired:
+                pres.Save()
+            remaining_problem_count = 0
+            for slide in pres.Slides:
+                items = []
+                graphics = []
+                self._ppt_collect_com_text_shape_items(slide.Shapes, items)
+                self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphics)
+                remaining_problem_count += len(self._ppt_com_problem_shape_map_with_graphics(items, graphics))
+            return {
+                'enabled': True,
+                'repaired': bool(repaired),
+                'repaired_shapes': int(repaired_shapes),
+                'remaining_problem_shapes': int(remaining_problem_count),
+                'layout_repairs': int(layout_repairs),
+                'shrink_repairs': int(shrink_repairs),
+                'method': 'powerpoint_com_layout_first_then_autofit',
+            }
+        except Exception as e:
+            return {'enabled': False, 'repaired': False, 'reason': str(e)}
+        finally:
+            try:
+                if pres is not None:
+                    pres.Close()
+            except Exception:
+                pass
+            try:
+                if app is not None:
+                    app.Quit()
+            except Exception:
+                pass
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+    def _ppt_collect_com_text_shape_items(self, shapes, out):
+        try:
+            count = int(shapes.Count)
+        except Exception:
+            return
+        for i in range(1, count + 1):
+            try:
+                shape = shapes.Item(i)
+            except Exception:
+                continue
+            try:
+                if int(getattr(shape, 'Type', 0)) == 6:  # msoGroup
+                    self._ppt_collect_com_text_shape_items(shape.GroupItems, out)
+                    continue
+            except Exception:
+                pass
+            try:
+                if not bool(shape.HasTextFrame) or not bool(shape.TextFrame.HasText):
+                    continue
+                text = _as_text(shape.TextFrame2.TextRange.Text).strip()
+                if not text:
+                    continue
+                tr = shape.TextFrame2.TextRange
+                text_bounds = self._ppt_com_rect_to_emu(tr.BoundLeft, tr.BoundTop, tr.BoundWidth, tr.BoundHeight)
+                shape_bounds = self._ppt_com_rect_to_emu(shape.Left, shape.Top, shape.Width, shape.Height)
+                if not text_bounds or not shape_bounds or self._ppt_bounds_area(text_bounds) <= 0:
+                    continue
+                try:
+                    shape_key = f'{int(shape.Parent.SlideIndex)}:{int(shape.Id)}'
+                except Exception:
+                    shape_key = str(id(shape))
+                out.append({
+                    'shape': shape, 'shape_key': shape_key, 'text': text, 'text_bounds': text_bounds, 'shape_bounds': shape_bounds
+                })
+            except Exception:
+                continue
+
+    def _ppt_collect_com_graphic_shape_items(self, shapes, out):
+        """Collect non-text visual shapes that may collide with text."""
+        try:
+            count = int(shapes.Count)
+        except Exception:
+            return
+        for i in range(1, count + 1):
+            try:
+                shape = shapes.Item(i)
+            except Exception:
+                continue
+            try:
+                if int(getattr(shape, 'Type', 0)) == 6:  # msoGroup
+                    self._ppt_collect_com_graphic_shape_items(shape.GroupItems, out)
+                    continue
+            except Exception:
+                pass
+            try:
+                has_text = bool(shape.HasTextFrame) and bool(shape.TextFrame.HasText)
+            except Exception:
+                has_text = False
+            if has_text:
+                continue
+            try:
+                bounds = self._ppt_com_rect_to_emu(shape.Left, shape.Top, shape.Width, shape.Height)
+                if not bounds or self._ppt_bounds_area(bounds) <= 0:
+                    continue
+                try:
+                    slide_w_pt = float(shape.Parent.Parent.PageSetup.SlideWidth)
+                    slide_h_pt = float(shape.Parent.Parent.PageSetup.SlideHeight)
+                    slide_area = max(1.0, slide_w_pt * slide_h_pt)
+                    if (float(shape.Width) * float(shape.Height)) / slide_area > 0.70:
+                        continue
+                except Exception:
+                    pass
+                try:
+                    shape_key = f'{int(shape.Parent.SlideIndex)}:{int(shape.Id)}'
+                except Exception:
+                    shape_key = str(id(shape))
+                out.append({
+                    'shape': shape,
+                    'shape_key': shape_key,
+                    'bounds': bounds,
+                    'z_order': self._ppt_com_z_order(shape),
+                    'type': int(getattr(shape, 'Type', 0) or 0),
+                })
+            except Exception:
+                continue
+
+    def _ppt_com_z_order(self, shape):
+        try:
+            return int(shape.ZOrderPosition)
+        except Exception:
+            return 0
+
+    def _ppt_com_problem_shape_map(self, items):
+        problem_shapes = {}
+        for item in items:
+            if self._ppt_com_text_item_overflows(item):
+                problem_shapes[item.get('shape_key') or id(item.get('shape'))] = item.get('shape')
+        for a_idx, first in enumerate(items):
+            for second in items[a_idx + 1:]:
+                if self._ppt_com_text_items_overlap(first, second):
+                    problem_shapes[first.get('shape_key') or id(first.get('shape'))] = first.get('shape')
+                    problem_shapes[second.get('shape_key') or id(second.get('shape'))] = second.get('shape')
+        return {k: v for k, v in problem_shapes.items() if v is not None}
+
+    def _ppt_com_problem_shape_map_with_graphics(self, text_items, graphic_items):
+        problem_shapes = self._ppt_com_problem_shape_map(text_items)
+        for issue in self._ppt_com_text_graphic_issues(text_items, graphic_items):
+            shape = issue.get('text_shape')
+            if shape is not None:
+                problem_shapes[issue.get('text_key') or id(shape)] = shape
+        return {k: v for k, v in problem_shapes.items() if v is not None}
+
+    def _ppt_com_text_item_overflows(self, item):
+        return self._ppt_bounds_extends_outside(item.get('text_bounds'), item.get('shape_bounds'), tolerance=int(_EMU_PER_INCH * 0.02))
+
+    def _ppt_com_text_items_overlap(self, first, second):
+        inter = self._ppt_bounds_intersection(first.get('text_bounds'), second.get('text_bounds'))
+        if not inter:
+            return False
+        inter_area = self._ppt_bounds_area(inter)
+        smaller = max(1, min(self._ppt_bounds_area(first.get('text_bounds')), self._ppt_bounds_area(second.get('text_bounds'))))
+        overlap_ratio = inter_area / smaller
+        left, top, right, bottom = inter
+        overlap_w_in = (right - left) / _EMU_PER_INCH
+        overlap_h_in = (bottom - top) / _EMU_PER_INCH
+        overlap_area_in = inter_area / (_EMU_PER_INCH * _EMU_PER_INCH)
+        return overlap_ratio >= 0.08 and overlap_area_in >= 0.01 and overlap_w_in >= 0.06 and overlap_h_in >= 0.03
+
+    def _ppt_com_text_graphic_issues(self, text_items, graphic_items):
+        issues = []
+        for text_item in text_items or []:
+            text_bounds = text_item.get('text_bounds')
+            shape_bounds = text_item.get('shape_bounds')
+            if not text_bounds or not shape_bounds:
+                continue
+            if self._ppt_com_text_item_overflows(text_item):
+                issues.append({
+                    'kind': 'text_outside_container',
+                    'message': 'text extends outside its containing shape',
+                    'text': text_item.get('text', ''),
+                    'text_shape': text_item.get('shape'),
+                    'text_key': text_item.get('shape_key'),
+                    'text_bounds': text_bounds,
+                    'shape_bounds': shape_bounds,
+                    'graphic_bounds': shape_bounds,
+                    'overlap_pct': 100,
+                })
+            for graphic in graphic_items or []:
+                graphic_bounds = graphic.get('bounds')
+                inter = self._ppt_bounds_intersection(text_bounds, graphic_bounds)
+                if not inter:
+                    continue
+                inter_area = self._ppt_bounds_area(inter)
+                text_area = max(1, self._ppt_bounds_area(text_bounds))
+                graphic_area = max(1, self._ppt_bounds_area(graphic_bounds))
+                text_ratio = inter_area / text_area
+                graphic_ratio = inter_area / graphic_area
+                left, top, right, bottom = inter
+                overlap_w_in = (right - left) / _EMU_PER_INCH
+                overlap_h_in = (bottom - top) / _EMU_PER_INCH
+                overlap_area_in = inter_area / (_EMU_PER_INCH * _EMU_PER_INCH)
+                if overlap_area_in < 0.015 or overlap_w_in < 0.05 or overlap_h_in < 0.04:
+                    continue
+                if text_ratio < 0.08 and graphic_ratio < 0.08:
+                    continue
+                text_above = self._ppt_com_z_order(text_item.get('shape')) >= int(graphic.get('z_order') or 0)
+                kind = 'text_covers_graphic' if text_above else 'graphic_covers_text'
+                issues.append({
+                    'kind': kind,
+                    'message': 'text overlaps a non-text graphic shape' if text_above else 'non-text graphic shape overlaps text',
+                    'text': text_item.get('text', '')[:160],
+                    'text_shape': text_item.get('shape'),
+                    'text_key': text_item.get('shape_key'),
+                    'text_bounds': text_bounds,
+                    'shape_bounds': shape_bounds,
+                    'graphic_bounds': graphic_bounds,
+                    'graphic_shape': graphic.get('shape'),
+                    'overlap_pct': int(round(max(text_ratio, graphic_ratio) * 100)),
+                })
+        issues.sort(key=lambda item: int(item.get('overlap_pct') or 0), reverse=True)
+        return issues[:20]
+
+    def _ppt_com_reflow_text_slide(self, slide, items, graphics=None, pass_idx=0):
+        """Repair a slide by changing geometry before changing font size."""
+        if not items:
+            return 0
+        graphics = graphics or []
+        try:
+            slide_h_pt = float(slide.Parent.PageSetup.SlideHeight)
+        except Exception:
+            slide_h_pt = 540.0
+        slide_h_emu = int(round(slide_h_pt / 72.0 * _EMU_PER_INCH))
+        bottom_margin_emu = int(_EMU_PER_INCH * 0.25)
+        gap_emu = int(_EMU_PER_INCH * (0.08 + min(max(pass_idx, 0), 3) * 0.02))
+        changed = 0
+
+        for item in sorted(items, key=lambda it: (it.get('shape_bounds') or (0, 0, 0, 0))[1]):
+            if not self._ppt_com_text_item_overflows(item):
+                continue
+            text_bounds = item.get('text_bounds')
+            shape_bounds = item.get('shape_bounds')
+            shape = item.get('shape')
+            if not text_bounds or not shape_bounds or shape is None:
+                continue
+            needed_emu = max(0, text_bounds[3] - shape_bounds[3] + gap_emu)
+            if needed_emu <= 0:
+                continue
+            max_growth = max(0, slide_h_emu - bottom_margin_emu - shape_bounds[3])
+            grow_emu = min(needed_emu, max_growth)
+            if grow_emu < int(_EMU_PER_INCH * 0.03):
+                continue
+            try:
+                shape.Height = max(float(shape.Height), float(shape.Height) + (grow_emu / _EMU_PER_INCH * 72.0))
+                changed += 1
+            except Exception:
+                pass
+
+        if changed:
+            return changed
+
+        moves = {}
+        for a_idx, first in enumerate(items):
+            for second in items[a_idx + 1:]:
+                if not self._ppt_com_text_items_overlap(first, second):
+                    continue
+                first_tb = first.get('text_bounds')
+                second_tb = second.get('text_bounds')
+                if not first_tb or not second_tb:
+                    continue
+                upper, lower = (first, second) if first_tb[1] <= second_tb[1] else (second, first)
+                upper_tb = upper.get('text_bounds')
+                lower_tb = lower.get('text_bounds')
+                lower_shape_bounds = lower.get('shape_bounds')
+                if not upper_tb or not lower_tb or not lower_shape_bounds:
+                    continue
+                delta_emu = max(0, upper_tb[3] - lower_tb[1] + gap_emu)
+                if delta_emu < int(_EMU_PER_INCH * 0.03):
+                    continue
+                available_emu = slide_h_emu - bottom_margin_emu - lower_shape_bounds[3]
+                if available_emu < delta_emu:
+                    continue
+                key = lower.get('shape_key') or id(lower.get('shape'))
+                previous = moves.get(key)
+                if previous is None or delta_emu > previous[0]:
+                    moves[key] = (delta_emu, lower.get('shape'))
+
+        for delta_emu, shape in moves.values():
+            if shape is None:
+                continue
+            try:
+                shape.Top = float(shape.Top) + (delta_emu / _EMU_PER_INCH * 72.0)
+                changed += 1
+            except Exception:
+                pass
+        if changed:
+            return changed
+
+        for issue in self._ppt_com_text_graphic_issues(items, graphics):
+            text_shape = issue.get('text_shape')
+            text_bounds = issue.get('text_bounds')
+            graphic_bounds = issue.get('graphic_bounds')
+            shape_bounds = issue.get('shape_bounds')
+            if text_shape is None or not text_bounds or not shape_bounds or not graphic_bounds:
+                continue
+            if issue.get('kind') == 'text_outside_container':
+                # Horizontal text overflow is usually caused by an over-wide line
+                # or missing wrap. Growing the box to fit the rendered text can
+                # make it cover neighboring icons/diagrams, so leave this case to
+                # the shrink/autofit fallback. Vertical growth is already handled
+                # above by _ppt_com_text_item_overflows.
+                needed_h = max(0, text_bounds[3] - shape_bounds[3] + gap_emu)
+                if needed_h <= int(_EMU_PER_INCH * 0.03):
+                    continue
+                continue
+            try:
+                if text_bounds[0] < graphic_bounds[0] and shape_bounds[2] > graphic_bounds[0]:
+                    new_w_emu = max(int(_EMU_PER_INCH * 0.35), graphic_bounds[0] - shape_bounds[0] - gap_emu)
+                    if new_w_emu < shape_bounds[2] - shape_bounds[0] - int(_EMU_PER_INCH * 0.03):
+                        text_shape.Width = new_w_emu / _EMU_PER_INCH * 72.0
+                        changed += 1
+                elif text_bounds[2] > graphic_bounds[2] and shape_bounds[0] < graphic_bounds[2]:
+                    shift_emu = graphic_bounds[2] - shape_bounds[0] + gap_emu
+                    available = shape_bounds[2] - shape_bounds[0] - shift_emu
+                    if available > int(_EMU_PER_INCH * 0.35):
+                        text_shape.Left = float(text_shape.Left) + (shift_emu / _EMU_PER_INCH * 72.0)
+                        text_shape.Width = available / _EMU_PER_INCH * 72.0
+                        changed += 1
+            except Exception:
+                pass
+        return changed
+
+    def _ppt_com_shrink_text_shape(self, shape, min_font_size=8, pass_idx=0):
+        changed = False
+        try:
+            shape.TextFrame.WordWrap = True
+        except Exception:
+            pass
+        try:
+            shape.TextFrame2.WordWrap = -1  # msoTrue
+        except Exception:
+            pass
+        try:
+            shape.TextFrame2.AutoSize = 2  # msoAutoSizeTextToFitShape
+            changed = True
+        except Exception:
+            pass
+        try:
+            tf2 = shape.TextFrame2
+            tf2.MarginLeft = min(float(getattr(tf2, 'MarginLeft', 0) or 0), 2.0)
+            tf2.MarginRight = min(float(getattr(tf2, 'MarginRight', 0) or 0), 2.0)
+            tf2.MarginTop = min(float(getattr(tf2, 'MarginTop', 0) or 0), 1.0)
+            tf2.MarginBottom = min(float(getattr(tf2, 'MarginBottom', 0) or 0), 1.0)
+            changed = True
+        except Exception:
+            pass
+        try:
+            font = shape.TextFrame2.TextRange.Font
+            current = float(font.Size)
+            factor = 0.88 if pass_idx == 0 else 0.82
+            target = max(float(min_font_size), current * factor)
+            if target < current - 0.2:
+                font.Size = target
+                changed = True
+        except Exception:
+            pass
+        return changed
+
+    def _ppt_powerpoint_com_layout_issues(self, ppt_path):
+        """Return rendered text-vs-graphic conflicts by slide using PowerPoint COM."""
+        if os.name != 'nt':
+            return {}, 'not running on Windows'
+        try:
+            import pythoncom
+            import win32com.client
+        except Exception as e:
+            return {}, f'pywin32 is not available ({e})'
+
+        app = None
+        pres = None
+        pythoncom.CoInitialize()
+        try:
+            app = win32com.client.DispatchEx('PowerPoint.Application')
+            try:
+                app.DisplayAlerts = 0
+            except Exception:
+                pass
+            pres = app.Presentations.Open(os.path.abspath(ppt_path), ReadOnly=True, Untitled=False, WithWindow=False)
+            by_slide = {}
+            for slide in pres.Slides:
+                text_items = []
+                graphic_items = []
+                self._ppt_collect_com_text_shape_items(slide.Shapes, text_items)
+                self._ppt_collect_com_graphic_shape_items(slide.Shapes, graphic_items)
+                slide_issues = []
+                for issue in self._ppt_com_text_graphic_issues(text_items, graphic_items):
+                    slide_issues.append({
+                        'kind': issue.get('kind'),
+                        'message': issue.get('message'),
+                        'text': issue.get('text', ''),
+                        'text_bounds': self._ppt_format_bounds(issue.get('text_bounds')),
+                        'shape_bounds': self._ppt_format_bounds(issue.get('shape_bounds')),
+                        'graphic_bounds': self._ppt_format_bounds(issue.get('graphic_bounds')),
+                        'overlap_pct': issue.get('overlap_pct'),
+                    })
+                if slide_issues:
+                    by_slide[int(slide.SlideIndex)] = slide_issues
+            return by_slide, None
+        except Exception as e:
+            return {}, str(e)
+        finally:
+            try:
+                if pres is not None:
+                    pres.Close()
+            except Exception:
+                pass
+            try:
+                if app is not None:
+                    app.Quit()
+            except Exception:
+                pass
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+    def _ppt_powerpoint_com_text_bounds(self, ppt_path):
+        """Return rendered PowerPoint text bounds by slide, in EMU units."""
+        if os.name != 'nt':
+            return {}, 'not running on Windows'
+        try:
+            import pythoncom
+            import win32com.client
+        except Exception as e:
+            return {}, f'pywin32 is not available ({e})'
+
+        app = None
+        pres = None
+        pythoncom.CoInitialize()
+        try:
+            app = win32com.client.DispatchEx('PowerPoint.Application')
+            try:
+                app.DisplayAlerts = 0
+            except Exception:
+                pass
+            pres = app.Presentations.Open(os.path.abspath(ppt_path), ReadOnly=True, Untitled=False, WithWindow=False)
+            by_slide = {}
+            for slide in pres.Slides:
+                slide_items = []
+                self._ppt_collect_com_text_bounds(slide.Shapes, slide_items)
+                if slide_items:
+                    by_slide[int(slide.SlideIndex)] = slide_items
+            return by_slide, None
+        except Exception as e:
+            return {}, str(e)
+        finally:
+            try:
+                if pres is not None:
+                    pres.Close()
+            except Exception:
+                pass
+            try:
+                if app is not None:
+                    app.Quit()
+            except Exception:
+                pass
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+    def _ppt_collect_com_text_bounds(self, shapes, out):
+        try:
+            count = int(shapes.Count)
+        except Exception:
+            return
+        for i in range(1, count + 1):
+            try:
+                shape = shapes.Item(i)
+            except Exception:
+                continue
+            try:
+                if int(getattr(shape, 'Type', 0)) == 6:  # msoGroup
+                    self._ppt_collect_com_text_bounds(shape.GroupItems, out)
+                    continue
+            except Exception:
+                pass
+            try:
+                if not bool(shape.HasTextFrame) or not bool(shape.TextFrame.HasText):
+                    continue
+            except Exception:
+                continue
+            try:
+                text = _as_text(shape.TextFrame2.TextRange.Text).strip()
+                if not text:
+                    continue
+                rendered = shape.TextFrame2.TextRange
+                text_bounds = self._ppt_com_rect_to_emu(rendered.BoundLeft, rendered.BoundTop, rendered.BoundWidth, rendered.BoundHeight)
+                shape_bounds = self._ppt_com_rect_to_emu(shape.Left, shape.Top, shape.Width, shape.Height)
+                if not text_bounds or self._ppt_bounds_area(text_bounds) <= 0:
+                    continue
+                out.append({
+                    'text': text,
+                    'text_norm': self._ppt_normalize_text_for_match(text),
+                    'text_bounds': text_bounds,
+                    'shape_bounds': shape_bounds,
+                    'matched': False,
+                })
+            except Exception:
+                continue
+
+    def _ppt_com_rect_to_emu(self, left, top, width, height):
+        try:
+            l = int(round(float(left) / 72.0 * _EMU_PER_INCH))
+            t = int(round(float(top) / 72.0 * _EMU_PER_INCH))
+            r = int(round((float(left) + float(width)) / 72.0 * _EMU_PER_INCH))
+            b = int(round((float(top) + float(height)) / 72.0 * _EMU_PER_INCH))
+            return (l, t, r, b)
+        except Exception:
+            return None
+
+    def _ppt_normalize_text_for_match(self, text):
+        return re.sub(r'\s+', '', _as_text(text)).lower()
+
+    def _ppt_text_overlap_candidate(self, shape, text, bounds, slide_w, slide_h, com_text_bounds=None):
         if not bounds or not self._ppt_has(shape, 'has_text_frame'):
             return None
         stripped = _as_text(text).strip()
@@ -1152,45 +1827,103 @@ class PptMixin:
         if re.search(r'(copyright|footer|\b20\d{2}\b|页脚|版权所有)', lower) and len(lower) <= 100:
             return None
 
+        source = 'estimated'
+        com_item = self._ppt_match_com_text_bounds(stripped, bounds, com_text_bounds)
         occupied = self._ppt_text_occupied_bounds(shape, stripped, bounds)
+        if com_item:
+            occupied = com_item.get('text_bounds') or occupied
+            source = 'powerpoint_com'
+            if com_item.get('shape_bounds'):
+                bounds = com_item['shape_bounds']
         if not occupied:
             return None
         if self._ppt_bounds_area(occupied) <= 0:
             return None
+        # Keep both the text's estimated visual footprint and the original
+        # textbox bounds.  Some decks use very small textboxes with autofit off;
+        # the rendered glyphs then extend outside the shape even though the
+        # shape rectangles themselves do not overlap.
         return {
             'bounds': occupied,
             'shape_bounds': bounds,
             'text': stripped.replace('\n', ' ')[:120],
+            'bounds_source': source,
         }
+
+    def _ppt_match_com_text_bounds(self, text, shape_bounds, com_text_bounds):
+        if not com_text_bounds:
+            return None
+        norm = self._ppt_normalize_text_for_match(text)
+        best = None
+        best_score = -1.0
+        for item in com_text_bounds:
+            if item.get('matched'):
+                continue
+            item_norm = item.get('text_norm') or ''
+            if not item_norm:
+                continue
+            if not (norm == item_norm or norm in item_norm or item_norm in norm):
+                continue
+            inter = self._ppt_bounds_intersection(shape_bounds, item.get('shape_bounds'))
+            shape_score = 0.0
+            if inter:
+                shape_score = self._ppt_bounds_area(inter) / max(1, min(self._ppt_bounds_area(shape_bounds), self._ppt_bounds_area(item.get('shape_bounds'))))
+            if shape_score < 0.20:
+                continue
+            score = (1.0 if norm == item_norm else 0.7) + shape_score
+            if score > best_score:
+                best = item
+                best_score = score
+        if best:
+            best['matched'] = True
+        return best
 
     def _ppt_text_occupied_bounds(self, shape, text, bounds):
         left, top, right, bottom = bounds
-        try:
-            tf = shape.text_frame
-            ml = int(getattr(tf, 'margin_left', 0) or 0)
-            mr = int(getattr(tf, 'margin_right', 0) or 0)
-            mt = int(getattr(tf, 'margin_top', 0) or 0)
-            mb = int(getattr(tf, 'margin_bottom', 0) or 0)
-        except Exception:
-            ml = mr = mt = mb = 0
-
-        inner_left = min(right, left + max(0, ml))
-        inner_right = max(inner_left, right - max(0, mr))
-        inner_top = min(bottom, top + max(0, mt))
-        inner_bottom = max(inner_top, bottom - max(0, mb))
+        inner_left, inner_top, inner_right, inner_bottom = self._ppt_inner_text_bounds(shape, bounds)
         inner_width = max(1, inner_right - inner_left)
         inner_height = max(1, inner_bottom - inner_top)
 
-        font_size = self._ppt_shape_font_size(shape) or 14
-        width_in = max(0.05, inner_width / _EMU_PER_INCH)
-        avg_char_width_in = max(0.045, font_size * 0.0062)
-        chars_per_line = max(1, int(width_in / avg_char_width_in))
-        estimated_lines = 0
-        for raw in _as_text(text).splitlines() or ['']:
-            raw = raw.strip()
-            estimated_lines += max(1, math.ceil(max(1, len(raw)) / chars_per_line))
-        line_height = int(max(0.12, font_size * 1.25 / 72.0) * _EMU_PER_INCH)
-        text_height = min(inner_height, max(line_height, estimated_lines * line_height))
+        layout = self._ppt_estimate_text_layout(shape, text, bounds)
+        font_size = layout['font_size'] if layout else (self._ppt_shape_font_size(shape) or 14)
+        estimated_lines = layout['estimated_lines'] if layout else 1
+        line_height_in = (layout.get('line_height_in') if layout else None) or max(0.12, font_size * 1.34 / 72.0)
+        line_height = int(line_height_in * _EMU_PER_INCH)
+        # Add a small leading/descent safety margin.  Rendering engines reserve
+        # glyph ascent/descent differently; without this, a visibly touching or
+        # overlapping pair may be underestimated as separated by a few pixels.
+        text_height = max(line_height, int((estimated_lines * line_height) + (font_size * 0.10 / 72.0 * _EMU_PER_INCH)))
+        # When the estimate already says the text does not fit, include the
+        # clipped textbox height as part of the occupied region.  PowerPoint
+        # paints the first line inside the shape and the remaining lines below
+        # it, so the visual footprint is closer to shape-height + overflow.
+        if layout and not self._ppt_text_frame_autofit_enabled(shape) and layout.get('estimated_lines', 0) > layout.get('capacity_lines', 0):
+            text_height = max(text_height, inner_height + max(1, estimated_lines - layout['capacity_lines']) * line_height + int(line_height * 0.35))
+        if self._ppt_text_frame_autofit_enabled(shape):
+            text_height = min(inner_height, text_height)
+
+        text_width = inner_width
+        if layout:
+            estimated_width = int(max(0.05, layout.get('max_line_width_in', 0.0)) * _EMU_PER_INCH)
+            # If wrapping is disabled (or the XML explicitly allows overflow),
+            # glyphs can extend horizontally beyond the textbox.  Even with wrap
+            # enabled, keep a modest overhang tolerance for long CJK/Latin runs
+            # because python-pptx cannot provide exact rendered glyph metrics.
+            if not self._ppt_text_frame_word_wrap_enabled(shape):
+                text_width = max(text_width, estimated_width)
+            else:
+                text_width = max(text_width, min(estimated_width, int(inner_width * 1.18)))
+
+        x = inner_left
+        try:
+            paragraph = shape.text_frame.paragraphs[0] if shape.text_frame.paragraphs else None
+            alignment = str(getattr(paragraph, 'alignment', '') or '').lower()
+            if 'center' in alignment or 'centre' in alignment:
+                x = inner_left + (inner_width - text_width) // 2
+            elif 'right' in alignment:
+                x = inner_right - text_width
+        except Exception:
+            pass
 
         y = inner_top
         try:
@@ -1201,7 +1934,7 @@ class PptMixin:
                 y = inner_bottom - text_height
         except Exception:
             pass
-        return (inner_left, y, inner_right, min(inner_bottom, y + text_height))
+        return (x, y, x + text_width, y + text_height)
 
     def _ppt_find_text_overlaps(self, candidates):
         overlaps = []
@@ -1217,13 +1950,14 @@ class PptMixin:
                 second_area = self._ppt_bounds_area(second['bounds'])
                 smaller = max(1, min(first_area, second_area))
                 overlap_ratio = inter_area / smaller
+                overflow_related = self._ppt_bounds_extends_outside(first['bounds'], first['shape_bounds']) or self._ppt_bounds_extends_outside(second['bounds'], second['shape_bounds'])
                 left, top, right, bottom = inter
                 overlap_w_in = (right - left) / _EMU_PER_INCH
                 overlap_h_in = (bottom - top) / _EMU_PER_INCH
                 overlap_area_in = inter_area / (_EMU_PER_INCH * _EMU_PER_INCH)
-                if overlap_ratio < 0.22 or overlap_area_in < 0.035:
+                if overlap_ratio < (0.12 if overflow_related else 0.22) or overlap_area_in < (0.015 if overflow_related else 0.035):
                     continue
-                if overlap_w_in < 0.12 or overlap_h_in < 0.08:
+                if overlap_w_in < (0.08 if overflow_related else 0.12) or overlap_h_in < (0.035 if overflow_related else 0.08):
                     continue
                 overlaps.append({
                     'overlap_pct': int(round(overlap_ratio * 100)),
@@ -1231,11 +1965,26 @@ class PptMixin:
                     'bounds_a': self._ppt_format_bounds(first['shape_bounds']),
                     'bounds_b': self._ppt_format_bounds(second['shape_bounds']),
                     'overlap_bounds': self._ppt_format_bounds(inter),
+                    'text_bounds_a': self._ppt_format_bounds(first['bounds']),
+                    'text_bounds_b': self._ppt_format_bounds(second['bounds']),
                     'text_a': first.get('text', ''),
                     'text_b': second.get('text', ''),
+                    'bounds_source_a': first.get('bounds_source', 'estimated'),
+                    'bounds_source_b': second.get('bounds_source', 'estimated'),
                 })
         overlaps.sort(key=lambda item: (-item['overlap_pct'], -item['overlap_area_sq_in']))
         return overlaps[:10]
+
+    def _ppt_bounds_extends_outside(self, outer, inner, tolerance=9144):
+        try:
+            if not outer or not inner:
+                return False
+            return (
+                outer[0] < inner[0] - tolerance or outer[1] < inner[1] - tolerance or
+                outer[2] > inner[2] + tolerance or outer[3] > inner[3] + tolerance
+            )
+        except Exception:
+            return False
 
     def _ppt_bounds_intersection(self, a, b):
         left = max(a[0], b[0])
@@ -1264,29 +2013,104 @@ class PptMixin:
         except Exception:
             return {}
 
+    def _ppt_text_frame_autofit_enabled(self, shape):
+        try:
+            auto_size = getattr(shape.text_frame, 'auto_size', None)
+            return 'TEXT_TO_FIT_SHAPE' in str(auto_size).upper()
+        except Exception:
+            return False
+
+    def _ppt_text_frame_word_wrap_enabled(self, shape):
+        try:
+            word_wrap = getattr(shape.text_frame, 'word_wrap', None)
+            return word_wrap is not False
+        except Exception:
+            return True
+
+    def _ppt_inner_text_bounds(self, shape, bounds):
+        left, top, right, bottom = bounds
+        try:
+            tf = shape.text_frame
+            ml = int(getattr(tf, 'margin_left', 0) or 0)
+            mr = int(getattr(tf, 'margin_right', 0) or 0)
+            mt = int(getattr(tf, 'margin_top', 0) or 0)
+            mb = int(getattr(tf, 'margin_bottom', 0) or 0)
+        except Exception:
+            ml = mr = mt = mb = 0
+
+        inner_left = min(right, left + max(0, ml))
+        inner_right = max(inner_left, right - max(0, mr))
+        inner_top = min(bottom, top + max(0, mt))
+        inner_bottom = max(inner_top, bottom - max(0, mb))
+        return inner_left, inner_top, inner_right, inner_bottom
+
+    def _ppt_text_visual_units(self, text):
+        units = 0.0
+        for ch in _as_text(text):
+            if ch in '\r\n':
+                continue
+            if ch.isspace():
+                units += 0.35
+            elif '\u2e80' <= ch <= '\u9fff' or '\uff00' <= ch <= '\uffef':
+                units += 1.85
+            elif ch in '.,;:!?，。；：！？、()[]{}<>《》“”‘’"\'`':
+                units += 0.6
+            elif ch.isupper():
+                units += 1.08
+            else:
+                units += 1.0
+        return max(1.0, units)
+
+    def _ppt_estimate_text_layout(self, shape, text, bounds=None):
+        if not text or not self._ppt_has(shape, 'has_text_frame'):
+            return None
+        bounds = bounds or self._ppt_shape_bounds(shape)
+        if not bounds:
+            return None
+        inner_left, inner_top, inner_right, inner_bottom = self._ppt_inner_text_bounds(shape, bounds)
+        width_in = max(0.05, (inner_right - inner_left) / _EMU_PER_INCH)
+        height_in = max(0.05, (inner_bottom - inner_top) / _EMU_PER_INCH)
+        font_size = self._ppt_shape_font_size(shape) or 14
+        base_char_width_in = max(0.045, font_size * 0.0062)
+        units_per_line = max(1.0, width_in / base_char_width_in)
+        estimated_lines = 0
+        max_line_units = 1.0
+        wrap_enabled = self._ppt_text_frame_word_wrap_enabled(shape)
+        for raw in _as_text(text).splitlines() or ['']:
+            raw = raw.strip()
+            visual_units = self._ppt_text_visual_units(raw)
+            max_line_units = max(max_line_units, visual_units if not wrap_enabled else min(visual_units, units_per_line))
+            estimated_lines += max(1, math.ceil(visual_units / units_per_line)) if wrap_enabled else 1
+        # Use a slightly conservative line-height estimate.  The validator must
+        # catch visual collisions; underestimating by a few points can hide the
+        # common case where glyphs spill below a too-short textbox.
+        line_height_in = max(0.12, font_size * 1.34 / 72.0)
+        capacity_lines = max(1, int(height_in / line_height_in))
+        return {
+            'estimated_lines': int(estimated_lines),
+            'capacity_lines': int(capacity_lines),
+            'font_size': float(font_size),
+            'line_height_in': line_height_in,
+            'height_in': height_in,
+            'max_line_width_in': max_line_units * base_char_width_in,
+        }
+
     def _ppt_estimate_text_overflow(self, shape, text):
         if not text or not self._ppt_has(shape, 'has_text_frame'):
             return None
-        try:
-            width = max(1, int(getattr(shape, 'width', 0) or 0)) / 914400.0
-            height = max(1, int(getattr(shape, 'height', 0) or 0)) / 914400.0
-        except Exception:
+        if self._ppt_text_frame_autofit_enabled(shape):
             return None
-        if width <= 0.05 or height <= 0.05:
+        layout = self._ppt_estimate_text_layout(shape, text)
+        if not layout:
             return None
-        font_size = self._ppt_shape_font_size(shape) or 14
-        avg_char_width_in = max(0.045, font_size * 0.0062)
-        chars_per_line = max(1, int(width / avg_char_width_in))
-        estimated_lines = 0
-        for raw in _as_text(text).splitlines() or ['']:
-            estimated_lines += max(1, math.ceil(len(raw) / chars_per_line))
-        line_height_in = max(0.12, font_size * 1.25 / 72.0)
-        capacity_lines = max(1, int(height / line_height_in))
-        if estimated_lines > capacity_lines + 1 and len(text) > 30:
+        estimated_lines = layout['estimated_lines']
+        capacity_lines = layout['capacity_lines']
+        estimated_height = estimated_lines * layout['line_height_in']
+        if len(_as_text(text).strip()) > 4 and estimated_lines > capacity_lines and estimated_height > layout['height_in'] * 1.08:
             return {
                 'estimated_lines': estimated_lines,
                 'capacity_lines': capacity_lines,
-                'font_size': font_size,
+                'font_size': layout['font_size'],
             }
         return None
 
@@ -2202,9 +3026,11 @@ class PptMixin:
         slide = prs.slides.add_slide(prs.slide_layouts[0])
         self._apply_template_decorations(slide, prs, include_title=True)
         slide.shapes.title.text = _as_text(data.get('title'), '未命名 PPT')
+        self._configure_text_frame(slide.shapes.title.text_frame)
         self._apply_text_style(slide.shapes.title.text_frame.paragraphs[0], self._style_for(data, 'title'))
         if len(slide.placeholders) > 1:
             slide.placeholders[1].text = _as_text(data.get('subtitle') or data.get('desc'))
+            self._configure_text_frame(slide.placeholders[1].text_frame)
             self._apply_text_style(slide.placeholders[1].text_frame.paragraphs[0], self._style_for(data, 'subtitle'))
 
     def _ppt_add_section(self, prs, data):
@@ -2213,9 +3039,11 @@ class PptMixin:
         slide = prs.slides.add_slide(layout)
         self._apply_template_decorations(slide, prs)
         slide.shapes.title.text = _as_text(data.get('title'), '章节')
+        self._configure_text_frame(slide.shapes.title.text_frame)
         self._apply_text_style(slide.shapes.title.text_frame.paragraphs[0], self._style_for(data, 'title'))
         if len(slide.placeholders) > 1:
             slide.placeholders[1].text = _as_text(data.get('subtitle') or data.get('desc'))
+            self._configure_text_frame(slide.placeholders[1].text_frame)
             self._apply_text_style(slide.placeholders[1].text_frame.paragraphs[0], self._style_for(data, 'subtitle'))
 
     def _ppt_add_bullets(self, prs, data, Pt):
@@ -2223,10 +3051,12 @@ class PptMixin:
         slide = prs.slides.add_slide(prs.slide_layouts[1])
         self._apply_template_decorations(slide, prs)
         slide.shapes.title.text = _as_text(data.get('title'), '未命名页面')
+        self._configure_text_frame(slide.shapes.title.text_frame)
         self._apply_text_style(slide.shapes.title.text_frame.paragraphs[0], self._style_for(data, 'title'))
 
         body = slide.placeholders[1]
         tf = body.text_frame
+        self._configure_text_frame(tf)
         tf.clear()
 
         bullets = data.get('bullets') or data.get('items') or []
@@ -2490,6 +3320,7 @@ class PptMixin:
             box = slide.shapes.add_textbox(*title_box)
         else:
             box = slide.shapes.add_textbox(Inches(0.55), Inches(0.3), Inches(12.2), Inches(0.55))
+        self._configure_text_frame(box.text_frame)
         p = box.text_frame.paragraphs[0]
         p.text = _as_text(title, '未命名页面')
         self._apply_text_style(
@@ -2525,16 +3356,29 @@ class PptMixin:
         else:
             shape.line.color.rgb = line_color
 
+    def _configure_text_frame(self, text_frame, *, margin_left=2, margin_right=2, margin_top=1, margin_bottom=1, auto_fit=True, normalize_margins=True):
+        try:
+            from pptx.enum.text import MSO_AUTO_SIZE
+            from pptx.util import Pt
+            text_frame.word_wrap = True
+            if normalize_margins:
+                text_frame.margin_left = Pt(margin_left)
+                text_frame.margin_right = Pt(margin_right)
+                text_frame.margin_top = Pt(margin_top)
+                text_frame.margin_bottom = Pt(margin_bottom)
+            if auto_fit:
+                text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        except Exception:
+            try:
+                text_frame.word_wrap = True
+            except Exception:
+                pass
+
     def _add_textbox(self, slide, text, left, top, width, height, size=16, bold=False, color=None, align=None, style=None, role=None):
-        from pptx.util import Pt
         theme = self._theme()
         box = slide.shapes.add_textbox(left, top, width, height)
         tf = box.text_frame
-        tf.word_wrap = True
-        tf.margin_left = Pt(2)
-        tf.margin_right = Pt(2)
-        tf.margin_top = Pt(1)
-        tf.margin_bottom = Pt(1)
+        self._configure_text_frame(tf)
         p = tf.paragraphs[0]
         p.text = _as_text(text)
         if style is None:
@@ -2938,6 +3782,7 @@ class PptMixin:
             items = _as_list(panel.get('items') or panel.get('bullets') or panel.get('points'))[:6]
             tf_box = slide.shapes.add_textbox(left + Inches(0.52), Inches(2.65), Inches(4.25), Inches(2.9))
             tf = tf_box.text_frame
+            self._configure_text_frame(tf)
             tf.clear()
             for i, item in enumerate(items or ['']):
                 p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -2968,6 +3813,7 @@ class PptMixin:
             items = _as_list(panel.get('items') or panel.get('bullets') or panel.get('points') or panel.get('content'))[:7]
             tf_box = slide.shapes.add_textbox(left + Inches(0.55), Inches(2.65), Inches(4.5), Inches(3.15))
             tf = tf_box.text_frame
+            self._configure_text_frame(tf)
             tf.clear()
             for i, item in enumerate(items or ['']) :
                 p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
@@ -3141,7 +3987,9 @@ class PptMixin:
             if desc:
                 self._add_textbox(slide, desc, left + Inches(0.2), top + Inches(0.78), box_w - Inches(0.4), Inches(0.38), 11, False, theme['muted'], PP_ALIGN.CENTER, self._style_for(data, 'body', layer), 'body')
             tf_box = slide.shapes.add_textbox(left + Inches(0.22), top + Inches(1.3), box_w - Inches(0.44), Inches(2.85))
-            tf = tf_box.text_frame; tf.clear(); tf.word_wrap = True
+            tf = tf_box.text_frame
+            self._configure_text_frame(tf)
+            tf.clear()
             for j, item in enumerate(items or ['模块说明']):
                 p = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
                 p.text = '• ' + _item_text(item)
@@ -3180,7 +4028,9 @@ class PptMixin:
             if desc:
                 self._add_textbox(slide, desc, left + Inches(0.2), top + Inches(1.28), card_w - Inches(0.4), Inches(0.45), 11, False, theme['muted'], PP_ALIGN.CENTER, self._style_for(data, 'body', stage), 'body')
             tf_box = slide.shapes.add_textbox(left + Inches(0.22), top + Inches(1.85), card_w - Inches(0.44), Inches(2.4))
-            tf = tf_box.text_frame; tf.clear(); tf.word_wrap = True
+            tf = tf_box.text_frame
+            self._configure_text_frame(tf)
+            tf.clear()
             for j, item in enumerate(items or ['关键步骤']):
                 p = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
                 p.text = '• ' + _item_text(item)
@@ -3204,6 +4054,7 @@ class PptMixin:
         for c, h in enumerate(headers):
             cell = table.cell(0, c)
             cell.text = _as_text(h)
+            self._configure_text_frame(cell.text_frame)
             cell.fill.solid(); cell.fill.fore_color.rgb = theme['primary']
             p = cell.text_frame.paragraphs[0]
             self._apply_text_style(p, self._style_for(data, 'header'), default_size=12, default_bold=True, default_color=theme['card'], default_align=PP_ALIGN.CENTER)
@@ -3212,6 +4063,7 @@ class PptMixin:
             for c in range(len(headers)):
                 cell = table.cell(r, c)
                 cell.text = _as_text(vals[c] if c < len(vals) else '')
+                self._configure_text_frame(cell.text_frame)
                 cell.fill.solid(); cell.fill.fore_color.rgb = theme['soft_blue'] if r % 2 else theme['card']
                 p = cell.text_frame.paragraphs[0]
                 self._apply_text_style(p, self._style_for(data, 'body'), default_size=11, default_color=theme['text'], default_align=PP_ALIGN.CENTER)
@@ -3318,7 +4170,9 @@ class PptMixin:
             self._add_textbox(slide, name, left + Inches(0.18), top + Inches(0.28), card_w - Inches(0.36), Inches(0.45), 18, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'title', g), 'title')
             self._add_textbox(slide, method or '实验方法', left + Inches(0.25), top + Inches(0.95), card_w - Inches(0.5), Inches(0.65), 13, False, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'body', g), 'body')
             tf_box = slide.shapes.add_textbox(left + Inches(0.35), top + Inches(1.95), card_w - Inches(0.7), Inches(2.1))
-            tf = tf_box.text_frame; tf.clear(); tf.word_wrap = True
+            tf = tf_box.text_frame
+            self._configure_text_frame(tf)
+            tf.clear()
             for j, m in enumerate(metrics or ['评价指标']):
                 p = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
                 p.text = '✓ ' + _item_text(m)

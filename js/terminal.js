@@ -71,6 +71,7 @@ function agentBackendRequestTimeoutMs(action, params) {
     const commandTimeoutSec = Math.max(1, parseInt(params && params.timeout, 10) || 60);
     return Math.min(315 * 1000, (commandTimeoutSec * 1000) + AGENT_BACKEND_EXECUTE_GRACE_MS);
   }
+  if (action === 'generate_ppt') return 300 * 1000;
   if (action === 'web_search' || action === 'fetch_url') return 120 * 1000;
   if (action === 'read_file_binary' || action === 'screenshot' || action === 'list_windows') return 90 * 1000;
   return AGENT_BACKEND_DEFAULT_TIMEOUT_MS;

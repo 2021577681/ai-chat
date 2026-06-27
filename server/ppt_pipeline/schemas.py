@@ -84,6 +84,7 @@ def theme_by_name(name):
         "white": "minimal_white",
         "活力橙": "vivid_orange",
         "orange": "vivid_orange",
+        "vibrant_orange": "vivid_orange",
     }
     key = aliases.get(key, key)
     return deepcopy(THEMES.get(key, THEMES[DEFAULT_THEME_NAME]))
