@@ -184,10 +184,11 @@ function updateGitToggleBtn() {
 }
 
 // ============ 📊 PPT 工具批量启停 ============
-const PPT_TOOL_NAMES = ['generate_ppt', 'analyze_ppt_template', 'preview_ppt', 'validate_ppt'];
+const PPT_TOOL_NAMES = ['generate_ppt'];
+const PPT_LEGACY_TOOL_NAMES = ['analyze_ppt_template', 'preview_ppt', 'validate_ppt'];
 
 function isPptTool(name) {
-  return typeof name === 'string' && PPT_TOOL_NAMES.includes(name);
+  return typeof name === 'string' && (PPT_TOOL_NAMES.includes(name) || PPT_LEGACY_TOOL_NAMES.includes(name));
 }
 
 function pptToolsEnabled() {
@@ -196,13 +197,13 @@ function pptToolsEnabled() {
 
 function pptToolCount() {
   if (typeof BUILTIN_TOOLS === 'undefined') return 0;
-  return BUILTIN_TOOLS.filter(t => isPptTool(t.name)).length;
+  return BUILTIN_TOOLS.filter(t => PPT_TOOL_NAMES.includes(t.name)).length;
 }
 
 function ensurePptToolsEnabled() {
   if (typeof BUILTIN_TOOLS === 'undefined' || !Array.isArray(BUILTIN_TOOLS)) return 0;
   let added = 0;
-  for (const tool of BUILTIN_TOOLS.filter(t => isPptTool(t.name))) {
+  for (const tool of BUILTIN_TOOLS.filter(t => PPT_TOOL_NAMES.includes(t.name))) {
     if (!state.tools.some(t => t.name === tool.name)) {
       state.tools.push(JSON.parse(JSON.stringify(tool)));
       added++;

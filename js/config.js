@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v18';  // v18：模板填充页数默认对齐请求 slides
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v19';  // v19：PPT 高层生成改为 HTML 图片页流程
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -213,17 +213,24 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'generate_ppt',
-    description: '📊 根据结构化 JSON 生成 PPTX 文件。用户要求制作 PPT/演示文稿/汇报材料/课件/BP/方案/学术汇报时，优先调用本工具生成真实 .pptx，不要只在聊天里输出文字大纲。除封面、目录、总结外，内容页应优先使用原生 PPT 矢量版式。通用版式：three_cards / process / timeline / comparison / two_column / matrix / pyramid / cycle / funnel / quote；学术版式：architecture / method_pipeline / table / chart / experiment_design / ablation。可用 style/theme 指定字体、字号、颜色、粗斜体、对齐和主题色。后端会用 PPT 原生形状绘制，打开后可编辑。',
+    description: '📊 生成真实 .pptx。新 PPT 模式使用固定流程：Step 1 理解用户主题和内容 → Step 2 生成 PPT 大纲 → Step 3 为每一页确定页面类型 → Step 5 为每页生成自包含 16:9 HTML 设计稿 → Step 6 使用浏览器渲染为 16:9 图片 → Step 7 将图片铺满插入 PPT → Step 9 导出 PPT。当前阶段不使用模板限制、不做校验/修复闭环；AI 自己命名 PPT，最终 PPT 的每一页都是一张完整图片。',
     parameters: {
       type: 'object',
       properties: {
-        user_request: { type: 'string', description: '高层自然语言需求。未提供 slides 时，后端会走 Intent Parser → Outline Planner → Slide Planner → Layout Selector → Content Compressor → Theme Resolver 自动生成结构化 slides。' },
+        user_request: { type: 'string', description: '高层自然语言需求。未提供 slides 时，后端会走新的图片页流程：理解主题、生成大纲、确定页面类型、生成 HTML、浏览器截图、图片铺入 PPT、导出。' },
         request: { type: 'string', description: 'user_request 的别名。' },
         prompt: { type: 'string', description: 'user_request 的别名。' },
-        filename: { type: 'string', description: '输出文件名，例如 ai_agent_demo.pptx；默认 generated.pptx' },
+        slide_count: { type: 'number', description: '目标页数，1-50。未提供时后端会从用户需求中提取，仍没有则默认 8 页。' },
+        render_mode: { type: 'string', description: '渲染模式。新模式使用 html_image：每页 HTML 设计稿渲染成一张 16:9 图片再铺入 PPT。' },
+        render_style: { type: 'string', description: '可选视觉风格偏好，不是模板限制；留空由 AI 根据主题自由设计。' },
+        ppt_understand_prompt: { type: 'string', description: '可选：Step 1 理解主题和 AI 命名的自定义 Prompt。' },
+        ppt_outline_prompt: { type: 'string', description: '可选：Step 2 生成 PPT 大纲的自定义 Prompt。' },
+        ppt_page_type_prompt: { type: 'string', description: '可选：Step 3 确定每页页面类型的自定义 Prompt。' },
+        ppt_html_prompt: { type: 'string', description: '可选：Step 5 生成每页 HTML 设计稿的自定义 Prompt。' },
+        filename: { type: 'string', description: '兼容旧参数；新图片页流程默认由 AI 自动命名 PPT，不需要传文件名。' },
         path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
-        template_path: { type: 'string', description: '可选模板 PPTX 路径。默认会复制该模板，并优先替换模板内已有标题/正文/示例文字框；支持占位符，也支持普通模板里的“单击此处添加文字”等示例文本。会保留母版、背景、Logo、页眉页脚和固定装饰。' },
-        template_mode: { type: 'string', description: '模板使用方式：fill 默认复制模板并直接改模板里的文字；style 仅提取模板 profile 后重新生成矢量版式。' },
+        template_path: { type: 'string', description: '兼容旧参数；新图片页流程不使用 PPT 模板限制。' },
+        template_mode: { type: 'string', description: '兼容旧参数；新图片页流程不使用模板模式。' },
         replacements: { type: 'object', description: '可选的模板占位符替换映射，如 {title, subtitle, body, footer, 自定义占位符名}。支持 {{title}}、{title}、[title]、<title>、《title》。未提供时也会按标题/正文槽位自动填充。' },
         trim_extra_template_slides: { type: 'boolean', description: '模板页数多于 slides 时是否裁掉多余模板页，默认 true；模板页数少于 slides 时会追加按模板风格生成的页面，避免静默丢内容。' },
         profile_path: { type: 'string', description: '可选模板分析缓存 JSON 输出路径；传 template_path 时默认写入 output/ppt_templates/<模板名>_<hash>.profile.json。' },
@@ -274,6 +281,26 @@ const BUILTIN_TOOLS = [
               body_style: {
                 type: 'object',
                 description: '本页正文/说明文字样式，覆盖全局正文样式。可含 font_family/font_size/color/bold/italic/align。'
+              },
+              layout_contract: {
+                type: 'object',
+                description: '本页生成前布局约束。用于让 AI 在生成阶段明确元素搭配，而不是生成后靠缩字号修。可含 max_density、safe_zones、composition_groups、avoid_font_shrink。'
+              },
+              composition_groups: {
+                type: 'array',
+                description: '显式声明本页有意组合的图形组。多个图形叠加构成一个图标、流程节点、徽章、卡片装饰或复杂图案时必须填写，验证和自动修复会据此避免误拆。',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', description: '组合图形组 ID，例如 cycle_diagram、process_flow、card_grid' },
+                    purpose: { type: 'string', description: '组合意图说明' },
+                    allow_overlap: { type: 'boolean', description: '该组内图形是否允许有意重叠，通常为 true' }
+                  }
+                }
+              },
+              avoid_font_shrink: {
+                type: 'boolean',
+                description: '是否避免自动修复阶段靠缩小字号兜底；默认建议 true，内容放不下时应优先压缩内容、拆页或换宽松版式。'
               },
               bullets: {
                 type: 'array',

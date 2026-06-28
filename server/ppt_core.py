@@ -10,6 +10,7 @@
 #     / table / chart / experiment_design / ablation 原生 PPT 矢量版式
 # ============================================================
 
+import base64
 import math
 import html
 import json
@@ -25,7 +26,13 @@ from urllib.parse import quote
 from xml.etree import ElementTree as ET
 
 from . import config
+from .ppt_image_pipeline import generate_html_image_ppt
 from .ppt_pipeline import build_deck_spec
+from .ppt_pipeline.llm_client import (
+    generate_json as _ppt_llm_generate_json,
+    generate_json_with_images as _ppt_llm_generate_json_with_images,
+    llm_enabled as _ppt_llm_enabled,
+)
 from .sandbox import check_path_or_error
 
 
@@ -39,6 +46,26 @@ _STYLE_KEYS = {
     'primary_color', 'accent_color', 'background_color', 'bg_color',
     'text_color', 'muted_color', 'card_color', 'line_color'
 }
+
+_PIPELINE_RUNTIME_OPTION_KEYS = {
+    'validate_after_generate',
+    'auto_repair_text_layout',
+    'trim_extra_template_slides',
+    'min_slides',
+    'max_slides',
+    'expected_text',
+    'require_chinese',
+    'max_question_marks',
+    'fail_on_warnings',
+    'detect_graphic_overlaps',
+    'rules',
+}
+
+_PIPELINE_RUNTIME_OPTION_PREFIXES = (
+    'llm_',
+    'ai_',
+    'auto_repair_',
+)
 
 _EMU_PER_INCH = 914400.0
 
@@ -92,6 +119,18 @@ def _safe_filename(name):
     return name
 
 
+def _preserve_pipeline_runtime_options(deck_spec, options):
+    """Keep rendering/validation options after high-level planning builds slides."""
+    if not isinstance(deck_spec, dict) or not isinstance(options, dict):
+        return deck_spec
+    for key, value in options.items():
+        if key in deck_spec:
+            continue
+        if key in _PIPELINE_RUNTIME_OPTION_KEYS or key.startswith(_PIPELINE_RUNTIME_OPTION_PREFIXES):
+            deck_spec[key] = value
+    return deck_spec
+
+
 class PptMixin:
     """Handler mixin：生成 PPTX 文件。"""
 
@@ -105,11 +144,15 @@ class PptMixin:
                 return self._send_json(200, {'ok': False, 'error': 'data 必须是对象'})
 
             # High-level pipeline mode: allow callers to pass a user request and
-            # let the planner produce the structured slides consumed below.
-            # Existing structured JSON remains fully supported.
+            # let the new HTML-image pipeline produce one rendered image per slide.
+            # Existing structured JSON remains supported below for compatibility.
             if (data.get('user_request') or data.get('request') or data.get('prompt')) and not data.get('slides'):
                 request_text = data.get('user_request') or data.get('request') or data.get('prompt')
+                render_mode = _as_text(data.get('render_mode') or 'html_image', 'html_image').strip().lower()
+                if render_mode not in ('native', 'vector', 'structured'):
+                    return self._send_json(200, generate_html_image_ppt(data))
                 deck_spec = build_deck_spec(request_text, data)
+                deck_spec = _preserve_pipeline_runtime_options(deck_spec, data)
                 data = deck_spec
                 self._ppt_pipeline_spec = deck_spec
 
@@ -242,7 +285,8 @@ class PptMixin:
             rel_path = os.path.relpath(out_path, config.WORKSPACE_ROOT).replace(os.sep, '/')
             validation_failed = bool(validation and not validation.get('passed'))
             response = {
-                'ok': not validation_failed,
+                # A generated PPTX with quality issues is still a usable artifact.
+                'ok': True,
                 'path': rel_path,
                 'slides': len(slides),
                 'template_profile': (template_profile.get('profile_path') or template_profile.get('source')) if template_profile else '',
@@ -260,9 +304,10 @@ class PptMixin:
                     'stats': validation.get('stats', {}),
                     'issues': validation.get('issues', [])[:10],
                     'warnings': validation.get('warnings', [])[:10],
+                    'visual_validation': validation.get('visual_validation'),
                 }
                 if validation_failed:
-                    response['error'] = 'PPT 生成后验证未通过，请减少内容或更换更宽松版式'
+                    response['warning'] = 'PPT 生成后验证未通过，请减少内容或更换更宽松版式'
                     response['message'] = f'PPT 已生成但验证未通过：{rel_path}'
             self._send_json(200, response)
         except Exception as e:
@@ -284,6 +329,7 @@ class PptMixin:
     def _ppt_validation_brief(self, validation):
         validation = validation or {}
         stats = validation.get('stats') or {}
+        visual = validation.get('visual_validation') if isinstance(validation.get('visual_validation'), dict) else {}
         return {
             'passed': bool(validation.get('passed')),
             'score': validation.get('score'),
@@ -293,7 +339,42 @@ class PptMixin:
             'text_overflow_count': stats.get('text_overflow_count', 0),
             'text_graphic_overlap_count': stats.get('text_graphic_overlap_count', 0),
             'graphic_overlap_count': stats.get('graphic_overlap_count', 0),
+            'visual_checked': bool(visual.get('checked')),
+            'visual_available': bool(visual.get('available')),
+            'visual_passed': visual.get('passed'),
+            'visual_issue_count': len(visual.get('issues') or []),
+            'visual_summary': _as_text(visual.get('summary') or visual.get('reason') or '')[:160],
         }
+
+    def _ppt_validate_with_visual_gate(self, ppt_path, data, rules, base_validation=None, phase='validation', cycle_idx=0):
+        validation = base_validation if isinstance(base_validation, dict) else self._validate_pptx_file(ppt_path, rules)
+        # 结构验证未通过时，先交给原有规则/AI修复；避免每一轮都额外消耗视觉模型。
+        if not validation.get('passed'):
+            return validation
+        visual = self._ppt_run_visual_final_validation(ppt_path, data, validation, rules, phase=phase, cycle_idx=cycle_idx)
+        validation['visual_validation'] = visual
+        if visual.get('checked'):
+            stats = dict(validation.get('stats') or {})
+            stats['visual_checked'] = True
+            stats['visual_available'] = bool(visual.get('available'))
+            stats['visual_issue_count'] = len(visual.get('issues') or [])
+            validation['stats'] = stats
+        if visual.get('available') and visual.get('passed') is False:
+            issues = list(validation.get('issues') or [])
+            for item in (visual.get('issues') or [])[:12]:
+                if not isinstance(item, dict):
+                    item = {'description': _as_text(item)}
+                issues.append({
+                    'severity': item.get('severity') or 'error',
+                    'slide': item.get('slide') or item.get('page'),
+                    'message': item.get('description') or item.get('message') or item.get('summary') or 'visual quality check failed',
+                    'kind': item.get('type') or item.get('kind') or 'visual_quality',
+                    'source': 'ai_visual_final_validation',
+                })
+            validation['issues'] = issues
+            validation['passed'] = False
+            validation['score'] = min(int(validation.get('score') or 100), max(0, 100 - len(issues) * 25))
+        return validation
 
     def _ppt_validate_repair_until_pass(self, ppt_path, data, validation_rules):
         validation_rules = dict(validation_rules or {})
@@ -315,10 +396,16 @@ class PptMixin:
             'repaired': False,
             'stopped_reason': 'already_passed' if validation.get('passed') else 'not_started',
         }
+        validation = self._ppt_validate_with_visual_gate(ppt_path, data, validation_rules, validation, phase='initial', cycle_idx=0)
+        loop_info['initial_validation'] = self._ppt_validation_brief(validation)
+        loop_info['final_validation'] = self._ppt_validation_brief(validation)
+        loop_info['stopped_reason'] = 'already_passed' if validation.get('passed') else 'not_started'
         if validation.get('passed') or not repair_enabled:
             return validation, loop_info
 
         last_signature = self._ppt_validation_issue_signature(validation)
+        stagnant_cycles = 0
+        ai_repair_attempted = False
         cycles_to_run = max_cycles if until_pass else 1
         for cycle_idx in range(1, cycles_to_run + 1):
             repair_rules = dict(validation_rules)
@@ -326,10 +413,18 @@ class PptMixin:
             repair_rules['auto_repair_passes'] = min(8, max(base_passes, 3 + cycle_idx))
             base_min_font = self._ppt_int(repair_rules.get('auto_repair_min_font_size'), 8, 5, 18)
             repair_rules['auto_repair_min_font_size'] = max(5, min(base_min_font, 8 - min(cycle_idx - 1, 3)))
+            if cycle_idx >= self._ppt_int(repair_rules.get('auto_repair_font_shrink_after_passes'), 3, 0, 8):
+                repair_rules['auto_repair_allow_font_shrink'] = True
+            if stagnant_cycles or cycle_idx >= 3:
+                repair_rules['auto_repair_aggressive'] = True
+                repair_rules['auto_repair_allow_text_compact'] = True
+                repair_rules['auto_repair_allow_font_shrink'] = True
+            if cycle_idx >= 4:
+                repair_rules['auto_repair_font_shrink_after_passes'] = 0
 
             before = self._ppt_validation_brief(validation)
             repair_info = self._ppt_auto_repair_text_layout(ppt_path, repair_rules)
-            validation = self._validate_pptx_file(ppt_path, validation_rules)
+            validation = self._ppt_validate_with_visual_gate(ppt_path, data, validation_rules, None, phase='after_rule_repair', cycle_idx=cycle_idx)
             after = self._ppt_validation_brief(validation)
             signature = self._ppt_validation_issue_signature(validation)
             loop_info['cycles'].append({
@@ -349,16 +444,377 @@ class PptMixin:
                 loop_info['stopped_reason'] = 'repair_unavailable'
                 break
             if not repair_info.get('repaired'):
-                loop_info['stopped_reason'] = 'no_more_repair_actions'
-                break
-            if signature == last_signature and cycle_idx >= 2:
-                loop_info['stopped_reason'] = 'issues_not_changing'
-                break
+                stagnant_cycles += 1
+                ai_info = self._ppt_try_ai_text_repair(ppt_path, data, validation, repair_rules, cycle_idx, reason='no_rule_action', attempted=ai_repair_attempted)
+                if ai_info.get('attempted'):
+                    ai_repair_attempted = True
+                    validation = self._ppt_validate_with_visual_gate(ppt_path, data, validation_rules, None, phase='after_ai_repair', cycle_idx=cycle_idx)
+                    after_ai = self._ppt_validation_brief(validation)
+                    signature = self._ppt_validation_issue_signature(validation)
+                    loop_info['cycles'][-1]['ai_repair'] = ai_info
+                    loop_info['cycles'][-1]['after_ai'] = after_ai
+                    loop_info['final_validation'] = after_ai
+                    if ai_info.get('repaired'):
+                        loop_info['repaired'] = True
+                        if validation.get('passed'):
+                            loop_info['stopped_reason'] = 'passed_after_ai_repair'
+                            break
+                        last_signature = signature
+                        continue
+                if stagnant_cycles >= 2 or cycle_idx >= cycles_to_run:
+                    loop_info['stopped_reason'] = 'no_more_repair_actions'
+                    break
+                last_signature = signature
+                continue
+            if signature == last_signature:
+                stagnant_cycles += 1
+                ai_info = self._ppt_try_ai_text_repair(ppt_path, data, validation, repair_rules, cycle_idx, reason='issues_not_changing', attempted=ai_repair_attempted)
+                if ai_info.get('attempted'):
+                    ai_repair_attempted = True
+                    validation = self._ppt_validate_with_visual_gate(ppt_path, data, validation_rules, None, phase='after_ai_repair', cycle_idx=cycle_idx)
+                    after_ai = self._ppt_validation_brief(validation)
+                    signature = self._ppt_validation_issue_signature(validation)
+                    loop_info['cycles'][-1]['ai_repair'] = ai_info
+                    loop_info['cycles'][-1]['after_ai'] = after_ai
+                    loop_info['final_validation'] = after_ai
+                    if ai_info.get('repaired'):
+                        loop_info['repaired'] = True
+                        if validation.get('passed'):
+                            loop_info['stopped_reason'] = 'passed_after_ai_repair'
+                            break
+                        stagnant_cycles = 0
+                        last_signature = signature
+                        continue
+                if stagnant_cycles >= 2 and cycle_idx >= 3:
+                    loop_info['stopped_reason'] = 'issues_not_changing'
+                    break
+            else:
+                stagnant_cycles = 0
             last_signature = signature
         else:
             loop_info['stopped_reason'] = 'max_cycles_reached'
 
         return validation, loop_info
+
+    def _ppt_try_ai_text_repair(self, ppt_path, data, validation, rules, cycle_idx, reason='', attempted=False):
+        rules = rules or {}
+        enabled = self._ppt_bool(rules.get('ai_repair_enabled'), self._ppt_bool((data or {}).get('ai_repair_enabled'), False))
+        if not enabled or not self._ppt_bool(rules.get('ai_repair_on_stagnation'), True):
+            return {'enabled': bool(enabled), 'attempted': False, 'repaired': False, 'reason': 'disabled'}
+        if attempted:
+            return {'enabled': True, 'attempted': False, 'repaired': False, 'reason': 'already_attempted'}
+        llm_options = data if isinstance(data, dict) else {}
+        if not _ppt_llm_enabled(llm_options):
+            return {'enabled': True, 'attempted': False, 'repaired': False, 'reason': 'llm_not_configured'}
+        context = self._ppt_ai_repair_context(data, validation, rules, cycle_idx, reason)
+        visual_plan = self._ppt_ai_generate_visual_repair_plan(ppt_path, context, llm_options, rules)
+        if isinstance(visual_plan, dict):
+            result = self._ppt_apply_ai_repair_plan(ppt_path, visual_plan, rules)
+            result.update({'enabled': True, 'attempted': True, 'visual': True, 'reason': reason, 'plan_summary': visual_plan.get('summary') or visual_plan.get('diagnosis') or ''})
+            return result
+        plan = self._ppt_ai_generate_repair_plan(context, llm_options)
+        if not isinstance(plan, dict):
+            return {'enabled': True, 'attempted': True, 'repaired': False, 'reason': 'llm_returned_no_plan'}
+        result = self._ppt_apply_ai_repair_plan(ppt_path, plan, rules)
+        result.update({'enabled': True, 'attempted': True, 'reason': reason, 'plan_summary': plan.get('summary') or plan.get('diagnosis') or ''})
+        return result
+
+    def _ppt_ai_repair_context(self, data, validation, rules, cycle_idx, reason):
+        data = data if isinstance(data, dict) else {}
+        validation = validation if isinstance(validation, dict) else {}
+        slides = []
+        for idx, slide in enumerate(_as_list(data.get('slides')), start=1):
+            if isinstance(slide, dict):
+                slides.append({
+                    'slide': idx,
+                    'type': _as_text(slide.get('type') or slide.get('layout') or 'bullets')[:40],
+                    'title': _as_text(slide.get('title') or '')[:120],
+                    'content_keys': [k for k in ('bullets', 'items', 'cards', 'steps', 'events', 'rows', 'left', 'right') if slide.get(k)],
+                    'char_count': len(json.dumps(slide, ensure_ascii=False)),
+                })
+        return {
+            'repair_mode': 'non_visual_text_structured',
+            'cycle': cycle_idx,
+            'stagnation_reason': reason,
+            'deck': {'title': _as_text(data.get('title') or '')[:120], 'slide_count': len(_as_list(data.get('slides'))), 'slides': slides[:30]},
+            'validation': {
+                'passed': bool(validation.get('passed')),
+                'score': validation.get('score'),
+                'stats': validation.get('stats') or {},
+                'issues': (validation.get('issues') or [])[:20],
+                'warnings': (validation.get('warnings') or [])[:20],
+                'slides': [self._ppt_ai_slide_validation_digest(s) for s in (validation.get('slides') or [])[:30]],
+            },
+            'allowed_actions': self._ppt_ai_allowed_actions(rules),
+        }
+
+    def _ppt_ai_slide_validation_digest(self, summary):
+        summary = summary if isinstance(summary, dict) else {}
+        return {
+            'slide': summary.get('slide'),
+            'title': _as_text(summary.get('title') or '')[:120],
+            'char_count': summary.get('char_count'),
+            'text_count': summary.get('text_count'),
+            'text_preview': summary.get('text_preview', [])[:8],
+            'overcrowded': summary.get('overcrowded', [])[:5],
+            'text_overflow': summary.get('text_overflow', [])[:8],
+            'text_overlaps': summary.get('text_overlaps', [])[:8],
+            'graphic_overlaps': summary.get('graphic_overlaps', [])[:5],
+            'off_slide': summary.get('off_slide', [])[:5],
+        }
+
+    def _ppt_ai_allowed_actions(self, rules):
+        allow_rewrite = self._ppt_bool((rules or {}).get('ai_repair_allow_text_rewrite'), True)
+        allow_resize = self._ppt_bool((rules or {}).get('ai_repair_allow_resize'), True)
+        actions = ['set_font_size', 'scale_font', 'compact_text']
+        if allow_rewrite:
+            actions.append('replace_text')
+        if allow_resize:
+            actions.extend(['resize_shape', 'move_shape'])
+        return actions
+
+    def _ppt_ai_generate_repair_plan(self, context, llm_options):
+        system_prompt = (
+            '你是PPT自动排版修复器。你不能看截图，只能读取结构化PPT数据、文本、形状边界和验证报告。'
+            '请像设计师一样诊断根因，并输出严格JSON对象。不要输出Markdown。'
+            'JSON格式：{"diagnosis":"...","summary":"...","actions":[...]}. '
+            'actions只允许使用给定allowed_actions。每个action包含 type, slide, text_contains 可选, '
+            'font_size 可选, scale 可选, max_chars 可选, replacement_text 可选, left/top/width/height 可选。'
+            '优先选择低风险动作：缩小字号、压缩长文本、扩大文本框；当内容明显太多时用replace_text总结。'
+        )
+        return _ppt_llm_generate_json(system_prompt, json.dumps(context, ensure_ascii=False, default=str), llm_options, fallback=None)
+
+    def _ppt_run_visual_final_validation(self, ppt_path, data, validation, rules, phase='validation', cycle_idx=0):
+        rules = rules or {}
+        enabled = self._ppt_bool(rules.get('ai_visual_final_validation_enabled'), self._ppt_bool((data or {}).get('ai_visual_final_validation_enabled'), True))
+        result = {
+            'checked': bool(enabled),
+            'available': False,
+            'passed': None,
+            'phase': phase,
+            'cycle': cycle_idx,
+            'summary': '',
+            'issues': [],
+        }
+        if not enabled:
+            result['reason'] = 'disabled'
+            return result
+        llm_options = data if isinstance(data, dict) else {}
+        if not _ppt_llm_enabled(llm_options):
+            result['reason'] = 'llm_not_configured'
+            return result
+        images, meta = self._ppt_prepare_visual_repair_images(ppt_path, rules)
+        if not images:
+            result['reason'] = 'no_rendered_images'
+            return result
+        context = {
+            'mode': 'visual_final_quality_gate',
+            'phase': phase,
+            'cycle': cycle_idx,
+            'visual_images': meta,
+            'validation': {
+                'passed': bool((validation or {}).get('passed')),
+                'score': (validation or {}).get('score'),
+                'stats': (validation or {}).get('stats') or {},
+                'issues': ((validation or {}).get('issues') or [])[:12],
+                'warnings': ((validation or {}).get('warnings') or [])[:12],
+            },
+        }
+        system_prompt = (
+            '你是PPT最终视觉质量门禁。你会看到压缩后的幻灯片截图和结构化验证摘要。'
+            '请像人工审稿一样判断最终画面是否可交付。必须检查：文字/图形/图片重叠或遮挡、标题/正文被截断或省略号、'
+            '中文被挤成逐字竖排、文本贴线或压到时间线节点、内容明显越界、字号过小、布局拥挤不可读。'
+            '只输出严格JSON对象，不要Markdown。格式：{"passed":true/false,"summary":"...","issues":[{"slide":1,"type":"...","severity":"error|warning","description":"..."}],"actions":[...]}。'
+            '只要存在影响阅读或交付质量的明显视觉问题，passed必须为false。'
+        )
+        plan = _ppt_llm_generate_json_with_images(system_prompt, json.dumps(context, ensure_ascii=False, default=str), images, llm_options, fallback=None)
+        if not isinstance(plan, dict):
+            result['reason'] = 'llm_returned_no_result'
+            return result
+        result.update({
+            'available': True,
+            'passed': bool(plan.get('passed')),
+            'summary': _as_text(plan.get('summary') or plan.get('diagnosis') or ''),
+            'issues': plan.get('issues') or plan.get('visual_issues') or [],
+            'actions': plan.get('actions') or [],
+        })
+        return result
+
+    def _ppt_ai_generate_visual_repair_plan(self, ppt_path, context, llm_options, rules):
+        rules = rules or {}
+        enabled = self._ppt_bool(rules.get('ai_visual_repair_enabled'), self._ppt_bool((llm_options or {}).get('ai_visual_repair_enabled'), True))
+        if not enabled:
+            return None
+        images, meta = self._ppt_prepare_visual_repair_images(ppt_path, rules)
+        if not images:
+            return None
+        visual_context = dict(context or {})
+        visual_context['repair_mode'] = 'visual_screenshot_and_structured'
+        visual_context['visual_images'] = meta
+        system_prompt = (
+            '你是有视觉能力的PPT自动排版质检与修复器。你会看到压缩后的幻灯片截图，'
+            '同时收到结构化验证报告。请判断是否存在文字/图片/图形重叠、遮挡、溢出画布、'
+            '文字过小或明显布局错误，并输出严格JSON对象，不要Markdown。'
+            'JSON格式：{"diagnosis":"...","summary":"...","visual_issues":[...],"actions":[...]}。'
+            'actions只能使用allowed_actions，每个action包含type, slide, text_contains可选, '
+            'font_size/scale/max_chars/replacement_text/left/top/width/height可选。'
+            '坐标如用left/top/width/height请使用英寸，优先低风险动作：缩小字号、精简文本、扩大或移动文本框。'
+        )
+        return _ppt_llm_generate_json_with_images(
+            system_prompt,
+            json.dumps(visual_context, ensure_ascii=False, default=str),
+            images,
+            llm_options,
+            fallback=None,
+        )
+
+    def _ppt_prepare_visual_repair_images(self, ppt_path, rules):
+        try:
+            from PIL import Image
+        except ImportError:
+            return [], []
+        rules = rules or {}
+        max_slides = self._ppt_int(rules.get('ai_visual_max_slides'), 6, 1, 30)
+        width = self._ppt_int(rules.get('ai_visual_render_width'), 960, 320, 1920)
+        height = self._ppt_int(rules.get('ai_visual_render_height'), 540, 180, 1080)
+        quality = self._ppt_int(rules.get('ai_visual_jpeg_quality'), 55, 25, 90)
+        max_side = self._ppt_int(rules.get('ai_visual_max_side'), 768, 256, 1600)
+        max_bytes = self._ppt_int(rules.get('ai_visual_max_image_bytes'), 180000, 30000, 1000000)
+        base = os.path.splitext(os.path.basename(ppt_path))[0] or 'deck'
+        out_dir = os.path.join(config.WORKSPACE_ROOT, 'output', 'ppt_visual_ai', _SAFE_FILENAME_RE.sub('_', base))
+        os.makedirs(out_dir, exist_ok=True)
+        image_paths, _note = self._render_ppt_preview_powerpoint(ppt_path, out_dir, width, height, max_slides)
+        if not image_paths:
+            image_paths, _note = self._render_ppt_preview_pillow(ppt_path, out_dir, width, height, max_slides)
+        images = []
+        meta = []
+        for idx, path in enumerate(image_paths[:max_slides], start=1):
+            packed = self._ppt_compress_image_for_ai(path, idx, max_side, quality, max_bytes)
+            if packed:
+                images.append(packed['image'])
+                meta.append(packed['meta'])
+        return images, meta
+
+    def _ppt_compress_image_for_ai(self, image_path, slide_idx, max_side, quality, max_bytes):
+        try:
+            from PIL import Image
+            with Image.open(image_path) as im:
+                im = im.convert('RGB')
+                orig = im.size
+                scale = min(1.0, float(max_side) / max(orig)) if max(orig) else 1.0
+                if scale < 1.0:
+                    im = im.resize((max(1, int(orig[0] * scale)), max(1, int(orig[1] * scale))))
+                q = int(quality)
+                blob = b''
+                while q >= 25:
+                    buf = BytesIO()
+                    im.save(buf, format='JPEG', quality=q, optimize=True)
+                    blob = buf.getvalue()
+                    if len(blob) <= max_bytes:
+                        break
+                    q -= 10
+                data = base64.b64encode(blob).decode('ascii')
+                return {
+                    'image': {'mime_type': 'image/jpeg', 'data': data, 'detail': 'low'},
+                    'meta': {'slide': slide_idx, 'source': self._ppt_rel_path(image_path), 'original_size': orig, 'sent_size': im.size, 'bytes': len(blob), 'quality': q},
+                }
+        except Exception:
+            return None
+
+    def _ppt_apply_ai_repair_plan(self, ppt_path, plan, rules=None):
+        rules = rules or {}
+        actions = plan.get('actions') if isinstance(plan, dict) else []
+        if not isinstance(actions, list) or not actions:
+            return {'repaired': False, 'applied_actions': 0, 'reason': 'empty_actions'}
+        max_actions = self._ppt_int(rules.get('ai_repair_max_actions'), 8, 1, 30)
+        allowed = set(self._ppt_ai_allowed_actions(rules))
+        try:
+            from pptx import Presentation
+            from pptx.util import Pt
+            prs = Presentation(ppt_path)
+        except Exception as e:
+            return {'repaired': False, 'applied_actions': 0, 'reason': f'pptx unavailable: {e}'}
+        applied = 0
+        details = []
+        for action in actions[:max_actions]:
+            if not isinstance(action, dict):
+                continue
+            action_type = _as_text(action.get('type')).strip()
+            if action_type not in allowed:
+                continue
+            slide_no = self._ppt_int(action.get('slide'), 0, 1, len(prs.slides))
+            if not slide_no:
+                continue
+            changed = 0
+            for shape in self._ppt_ai_find_target_text_shapes(prs.slides[slide_no - 1], action.get('text_contains'))[:5]:
+                if action_type in ('set_font_size', 'scale_font'):
+                    changed += 1 if self._ppt_ai_apply_font_action(shape, action, Pt) else 0
+                elif action_type in ('compact_text', 'replace_text'):
+                    changed += 1 if self._ppt_ai_apply_text_action(shape, action, action_type) else 0
+                elif action_type in ('resize_shape', 'move_shape'):
+                    changed += 1 if self._ppt_ai_apply_geometry_action(shape, action) else 0
+            if changed:
+                applied += changed
+                details.append({'type': action_type, 'slide': slide_no, 'changed_shapes': changed})
+        if applied:
+            prs.save(ppt_path)
+        return {'repaired': applied > 0, 'applied_actions': applied, 'details': details[:20]}
+
+    def _ppt_ai_find_target_text_shapes(self, slide, text_contains=None):
+        needle = _as_text(text_contains or '').strip()
+        matches = []
+        fallback = []
+        for shape in self._iter_ppt_shapes(slide.shapes):
+            text = self._ppt_shape_text(shape).strip()
+            if text:
+                fallback.append(shape)
+                if not needle or needle in text:
+                    matches.append(shape)
+        return matches or fallback
+
+    def _ppt_ai_apply_font_action(self, shape, action, Pt):
+        try:
+            paragraphs = shape.text_frame.paragraphs
+        except Exception:
+            return False
+        changed = False
+        for para in paragraphs:
+            for run in para.runs or []:
+                try:
+                    current = run.font.size.pt if run.font.size else None
+                    new_size = float(action.get('font_size')) if action.get('font_size') else max(6.0, (current or 16.0) * float(action.get('scale') or 0.88))
+                    run.font.size = Pt(new_size)
+                    changed = True
+                except Exception:
+                    pass
+        return changed
+
+    def _ppt_ai_apply_text_action(self, shape, action, action_type):
+        try:
+            old = self._ppt_shape_text(shape)
+            replacement = _as_text(action.get('replacement_text') or '').strip()
+            if not replacement:
+                max_chars = self._ppt_int(action.get('max_chars'), 80, 20, 500)
+                compact = re.sub(r'\s+', ' ', old).strip()
+                replacement = compact if len(compact) <= max_chars else compact[:max_chars - 1].rstrip('，。；;,. ') + '…'
+            if action_type == 'compact_text' and len(replacement) >= len(old):
+                return False
+            shape.text = replacement
+            return True
+        except Exception:
+            return False
+
+    def _ppt_ai_apply_geometry_action(self, shape, action):
+        changed = False
+        for key in ('left', 'top', 'width', 'height'):
+            if key in action:
+                try:
+                    value = float(action.get(key))
+                    setattr(shape, key, _in_to_emu(value) if abs(value) <= 20 else int(value))
+                    changed = True
+                except Exception:
+                    pass
+        return changed
 
     def handle_validate_ppt(self, body):
         try:
@@ -1003,8 +1459,16 @@ class PptMixin:
             pipeline['outline'] = outline
         if 'validation_rules' not in pipeline and isinstance(data, dict):
             pipeline['validation_rules'] = self._ppt_validation_rules(data)
+        pipeline.setdefault('layout_policy', {
+            'ai_controls': 'content_structure_only',
+            'layout_engine': 'template_slots_capacity_guard',
+            'capacity_guard': True,
+            'reflow_first': True,
+            'repair_role': 'fallback_after_deterministic_layout',
+        })
         pipeline['stages'] = [
-            'intent', 'outline', 'slides', 'layout', 'render', 'validate_repair'
+            'intent', 'outline', 'structured_slides', 'layout_select',
+            'capacity_guard_reflow', 'render', 'validate_repair'
         ]
         return pipeline
 
@@ -1019,6 +1483,14 @@ class PptMixin:
             'auto_repair_until_pass', 'auto_repair_max_cycles',
             'auto_repair_default_max_cycles', 'auto_repair_max_allowed_cycles',
             'auto_repair_passes', 'auto_repair_min_font_size',
+            'auto_repair_allow_font_shrink', 'auto_repair_font_shrink_after_passes',
+            'auto_repair_allow_text_compact', 'auto_repair_aggressive',
+            'ai_repair_enabled', 'ai_repair_on_stagnation', 'ai_repair_max_actions',
+            'ai_repair_allow_text_rewrite', 'ai_repair_allow_resize',
+            'ai_visual_final_validation_enabled',
+            'ai_visual_repair_enabled', 'ai_visual_max_slides', 'ai_visual_render_width',
+            'ai_visual_render_height', 'ai_visual_jpeg_quality', 'ai_visual_max_side',
+            'ai_visual_max_image_bytes',
             'detect_graphic_overlaps'
         ):
             if isinstance(data, dict) and key in data and key not in rules:
@@ -1360,7 +1832,7 @@ class PptMixin:
         except Exception:
             return None
 
-    def _ppt_shape_metadata_payload(self, role=None, group=None, allow_overlap=False):
+    def _ppt_shape_metadata_payload(self, role=None, group=None, allow_overlap=False, text_on_container=False):
         payload = {'ai_ppt': True}
         if role:
             payload['role'] = _as_text(role)[:80]
@@ -1368,13 +1840,15 @@ class PptMixin:
             payload['composition_group'] = _as_text(group)[:120]
         if allow_overlap:
             payload['allow_graphic_overlap'] = True
+        if text_on_container:
+            payload['allow_text_on_container'] = True
         return payload
 
-    def _ppt_mark_shape(self, shape, role=None, group=None, allow_overlap=False):
+    def _ppt_mark_shape(self, shape, role=None, group=None, allow_overlap=False, text_on_container=False):
         """Tag generated shapes so validation can distinguish composed artwork."""
         if shape is None:
             return shape
-        payload = self._ppt_shape_metadata_payload(role=role, group=group, allow_overlap=allow_overlap)
+        payload = self._ppt_shape_metadata_payload(role=role, group=group, allow_overlap=allow_overlap, text_on_container=text_on_container)
         try:
             bits = ['ai-ppt']
             if role:
@@ -1383,6 +1857,8 @@ class PptMixin:
                 bits.append('group=' + re.sub(r'[^A-Za-z0-9_.-]+', '_', _as_text(group))[:60])
             if allow_overlap:
                 bits.append('allow-overlap')
+            if text_on_container:
+                bits.append('text-container')
             shape.name = ':'.join(bits)
         except Exception:
             pass
@@ -1401,6 +1877,8 @@ class PptMixin:
             if 'ai-ppt' in name:
                 if 'allow-overlap' in name:
                     meta['allow_graphic_overlap'] = True
+                if 'text-container' in name:
+                    meta['allow_text_on_container'] = True
                 m = re.search(r'(?:^|:)group=([^:]+)', name)
                 if m:
                     meta['composition_group'] = m.group(1)
@@ -1428,6 +1906,8 @@ class PptMixin:
             if 'ai-ppt' in name:
                 if 'allow-overlap' in name:
                     meta['allow_graphic_overlap'] = True
+                if 'text-container' in name:
+                    meta['allow_text_on_container'] = True
                 m = re.search(r'(?:^|:)group=([^:]+)', name)
                 if m:
                     meta['composition_group'] = m.group(1)
@@ -1490,6 +1970,30 @@ class PptMixin:
             return {'classification': 'probable_collision', 'severity': 'error', 'confidence': 0.84, 'reason': 'larger higher z-order shape appears to cover smaller shape'}
         return {'classification': 'possible_collision', 'severity': 'warning', 'confidence': 0.58, 'reason': 'ambiguous graphic overlap; not auto-repaired without stronger evidence'}
 
+    def _ppt_classify_text_graphic_overlap(self, text_item, graphic, inter):
+        text_item = text_item or {}; graphic = graphic or {}
+        text_bounds = text_item.get('text_bounds')
+        graphic_bounds = graphic.get('bounds')
+        if not text_bounds or not graphic_bounds:
+            return {'classification': 'probable_collision', 'severity': 'error', 'confidence': 0.7, 'reason': 'missing bounds'}
+        text_meta = text_item.get('meta') or {}
+        graphic_meta = graphic.get('meta') or {}
+        text_group = _as_text(text_meta.get('composition_group'))
+        graphic_group = _as_text(graphic_meta.get('composition_group'))
+        text_above = self._ppt_com_z_order(text_item.get('shape')) >= int(graphic.get('z_order') or 0)
+        role = _as_text(graphic_meta.get('role')).lower()
+        container_roles = ('card_container', 'panel', 'background', 'container', 'timeline_node', 'process_node', 'badge_container')
+        if text_group and text_group == graphic_group:
+            return {'classification': 'intentional_text_on_container', 'severity': 'info', 'confidence': 0.98, 'reason': 'text and graphic share explicit composition_group'}
+        if text_above and (graphic_meta.get('allow_text_on_container') or role in container_roles) and self._ppt_bounds_center_inside(text_bounds, graphic_bounds):
+            return {'classification': 'intentional_text_on_container', 'severity': 'info', 'confidence': 0.95, 'reason': 'text is intentionally placed on a generated container/background'}
+        text_area = max(1, self._ppt_bounds_area(text_bounds))
+        graphic_area = max(1, self._ppt_bounds_area(graphic_bounds))
+        size_ratio = graphic_area / text_area
+        if text_above and size_ratio > 2.2 and self._ppt_bounds_center_inside(text_bounds, graphic_bounds):
+            return {'classification': 'possible_text_on_container', 'severity': 'warning', 'confidence': 0.74, 'reason': 'text sits inside a larger graphic; likely a card/container'}
+        return {'classification': 'probable_collision', 'severity': 'error', 'confidence': 0.82, 'reason': 'text/graphic overlap is not marked as container composition'}
+
     def _ppt_bounds_outside_slide(self, bounds, slide_w, slide_h, tolerance=91440):
         left, top, right, bottom = bounds
         return left < -tolerance or top < -tolerance or right > slide_w + tolerance or bottom > slide_h + tolerance
@@ -1510,6 +2014,10 @@ class PptMixin:
         rules = rules or {}
         max_passes = self._ppt_int(rules.get('auto_repair_passes'), 3, 1, 8)
         min_font_size = self._ppt_int(rules.get('auto_repair_min_font_size'), 8, 5, 18)
+        allow_font_shrink = self._ppt_bool(rules.get('auto_repair_allow_font_shrink'), True)
+        allow_text_compact = self._ppt_bool(rules.get('auto_repair_allow_text_compact'), True)
+        aggressive = self._ppt_bool(rules.get('auto_repair_aggressive'), False)
+        shrink_after_passes = self._ppt_int(rules.get('auto_repair_font_shrink_after_passes'), 3, 0, 8)
         try:
             import pythoncom
             import win32com.client
@@ -1558,10 +2066,20 @@ class PptMixin:
                 if changed_this_pass > 0:
                     layout_repairs += changed_this_pass
                 else:
+                    if not allow_font_shrink or pass_idx < shrink_after_passes:
+                        # Delay destructive edits until later passes unless aggressive repair is requested.
+                        # The caller will surface remaining validation issues so generation rules can improve upstream.
+                        if not aggressive:
+                            break
                     for shape in list(problem_shapes.values()):
                         if self._ppt_com_shrink_text_shape(shape, min_font_size=min_font_size, pass_idx=pass_idx):
                             changed_this_pass += 1
                     shrink_repairs += changed_this_pass
+                    if changed_this_pass <= 0 and allow_text_compact:
+                        for shape in list(problem_shapes.values()):
+                            if self._ppt_com_compact_text_shape(shape, min_font_size=min_font_size, pass_idx=pass_idx, aggressive=aggressive):
+                                changed_this_pass += 1
+                        shrink_repairs += changed_this_pass
                 if changed_this_pass <= 0:
                     break
                 repaired = True
@@ -1587,7 +2105,12 @@ class PptMixin:
                 'remaining_problem_shapes': int(remaining_problem_count),
                 'layout_repairs': int(layout_repairs),
                 'shrink_repairs': int(shrink_repairs),
-                'method': 'powerpoint_com_layout_first_then_autofit',
+                'font_shrink_allowed': bool(allow_font_shrink),
+                'font_shrink_after_passes': int(shrink_after_passes),
+                'min_font_size': int(min_font_size),
+                'text_compact_allowed': bool(allow_text_compact),
+                'aggressive': bool(aggressive),
+                'method': 'powerpoint_com_layout_first_then_autofit_then_compact',
             }
         except Exception as e:
             return {'enabled': False, 'repaired': False, 'reason': str(e)}
@@ -1639,7 +2162,12 @@ class PptMixin:
                 except Exception:
                     shape_key = str(id(shape))
                 out.append({
-                    'shape': shape, 'shape_key': shape_key, 'text': text, 'text_bounds': text_bounds, 'shape_bounds': shape_bounds
+                    'shape': shape,
+                    'shape_key': shape_key,
+                    'text': text,
+                    'text_bounds': text_bounds,
+                    'shape_bounds': shape_bounds,
+                    'meta': self._ppt_com_shape_metadata(shape),
                 })
             except Exception:
                 continue
@@ -1786,6 +2314,9 @@ class PptMixin:
                 if text_ratio < 0.08 and graphic_ratio < 0.08:
                     continue
                 text_above = self._ppt_com_z_order(text_item.get('shape')) >= int(graphic.get('z_order') or 0)
+                classification = self._ppt_classify_text_graphic_overlap(text_item, graphic, inter)
+                if classification.get('classification') == 'intentional_text_on_container':
+                    continue
                 kind = 'text_covers_graphic' if text_above else 'graphic_covers_text'
                 issues.append({
                     'kind': kind,
@@ -1798,6 +2329,10 @@ class PptMixin:
                     'graphic_bounds': graphic_bounds,
                     'graphic_shape': graphic.get('shape'),
                     'overlap_pct': int(round(max(text_ratio, graphic_ratio) * 100)),
+                    'classification': classification.get('classification'),
+                    'severity': classification.get('severity', 'error'),
+                    'confidence': classification.get('confidence'),
+                    'reason': classification.get('reason'),
                 })
         issues.sort(key=lambda item: int(item.get('overlap_pct') or 0), reverse=True)
         return issues[:20]
@@ -1940,13 +2475,20 @@ class PptMixin:
             if text_shape is None or not text_bounds or not shape_bounds or not graphic_bounds:
                 continue
             if issue.get('kind') == 'text_outside_container':
-                # Horizontal text overflow is usually caused by an over-wide line
-                # or missing wrap. Growing the box to fit the rendered text can
-                # make it cover neighboring icons/diagrams, so leave this case to
-                # the shrink/autofit fallback. Vertical growth is already handled
-                # above by _ppt_com_text_item_overflows.
+                # Keep this branch as an explicit repair action for text that only
+                # slightly exceeds its own box. It prevents the outer validation
+                # loop from stopping at ``no_more_repair_actions`` before the
+                # later shrink/autofit fallback has a chance to run.
                 needed_h = max(0, text_bounds[3] - shape_bounds[3] + gap_emu)
-                if needed_h <= int(_EMU_PER_INCH * 0.03):
+                if needed_h > int(_EMU_PER_INCH * 0.03):
+                    try:
+                        max_growth = max(0, slide_h_emu - bottom_margin_emu - shape_bounds[3])
+                        grow_emu = min(needed_h, max_growth)
+                        if grow_emu > int(_EMU_PER_INCH * 0.02):
+                            text_shape.Height = float(text_shape.Height) + (grow_emu / _EMU_PER_INCH * 72.0)
+                            changed += 1
+                    except Exception:
+                        pass
                     continue
                 continue
             try:
@@ -2052,6 +2594,61 @@ class PptMixin:
             if target < current - 0.2:
                 font.Size = target
                 changed = True
+        except Exception:
+            pass
+        return changed
+
+    def _ppt_com_compact_text_shape(self, shape, min_font_size=8, pass_idx=0, aggressive=False):
+        """Last-resort text repair: make a text box denser and, if needed, shorten long prose.
+
+        This is intentionally used after geometry and normal autofit fail. It gives
+        the repair loop a design-level action instead of reporting
+        ``no_more_repair_actions`` while long generated text still overflows.
+        """
+        changed = False
+        try:
+            tf2 = shape.TextFrame2
+            tf2.WordWrap = -1  # msoTrue
+            tf2.AutoSize = 2   # msoAutoSizeTextToFitShape
+            tf2.MarginLeft = 0
+            tf2.MarginRight = 0
+            tf2.MarginTop = 0
+            tf2.MarginBottom = 0
+            changed = True
+        except Exception:
+            pass
+        try:
+            tr = shape.TextFrame2.TextRange
+            font = tr.Font
+            current = float(font.Size)
+            factor = 0.80 if aggressive else 0.86
+            target = max(float(min_font_size), current * factor)
+            if target < current - 0.2:
+                font.Size = target
+                changed = True
+            try:
+                tr.ParagraphFormat.SpaceWithin = 0.85 if aggressive else 0.9
+                tr.ParagraphFormat.SpaceBefore = 0
+                tr.ParagraphFormat.SpaceAfter = 0
+                changed = True
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            tr = shape.TextFrame2.TextRange
+            text = _as_text(tr.Text)
+            limit = 180 if aggressive else 240
+            if len(text) > limit:
+                compact = text.replace('\r', '\n')
+                parts = [p.strip(' ，,。.;；') for p in re.split(r'[\n。；;]+', compact) if p.strip()]
+                if len(parts) > 1:
+                    compact = '\n'.join(parts[:4 if aggressive else 5])
+                if len(compact) > limit:
+                    compact = compact[:max(20, limit - 1)].rstrip(' ，,。.;；') + '…'
+                if compact and compact != text:
+                    tr.Text = compact
+                    changed = True
         except Exception:
             pass
         return changed
@@ -3828,6 +4425,13 @@ class PptMixin:
         )
         return slide
 
+    def _ppt_fit_line_text(self, text, max_chars):
+        text = re.sub(r'\s+', ' ', _as_text(text)).strip()
+        max_chars = max(4, int(max_chars or 20))
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars - 1].rstrip('，。；、,. ') + '…'
+
     def _add_background(self, slide, prs):
         from pptx.enum.shapes import MSO_SHAPE
         from pptx.util import Inches
@@ -3870,9 +4474,11 @@ class PptMixin:
             except Exception:
                 pass
 
-    def _add_textbox(self, slide, text, left, top, width, height, size=16, bold=False, color=None, align=None, style=None, role=None):
+    def _add_textbox(self, slide, text, left, top, width, height, size=16, bold=False, color=None, align=None, style=None, role=None, group=None, allow_overlap=False, text_on_container=False):
         theme = self._theme()
         box = slide.shapes.add_textbox(left, top, width, height)
+        if group or allow_overlap or text_on_container:
+            self._ppt_mark_shape(box, role=role, group=group, allow_overlap=allow_overlap, text_on_container=text_on_container)
         tf = box.text_frame
         self._configure_text_frame(tf)
         p = tf.paragraphs[0]
@@ -4199,12 +4805,13 @@ class PptMixin:
             title, desc, icon, _ = self._item_title_desc(item, i + 1)
             icon = icon or icons[i]
             left = left0 + i * (card_w + gap)
+            group = f'three_card_{i}'
             card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, card_w, card_h)
-            self._ppt_mark_shape(card, role='card_container', group=f'three_card_{i}', allow_overlap=True)
+            self._ppt_mark_shape(card, role='card_container', group=group, allow_overlap=True, text_on_container=True)
             self._set_shape_fill(card, colors[i % len(colors)], theme['line'])
-            self._add_textbox(slide, icon, left + Inches(0.2), top + Inches(0.28), card_w - Inches(0.4), Inches(0.62), 30, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'icon', item), 'icon')
-            self._add_textbox(slide, title, left + Inches(0.22), top + Inches(1.15), card_w - Inches(0.44), Inches(0.55), 20, True, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title')
-            self._add_textbox(slide, desc, left + Inches(0.28), top + Inches(2.05), card_w - Inches(0.56), Inches(1.65), 14, False, theme['muted'], PP_ALIGN.CENTER, self._style_for(data, 'body', item), 'body')
+            self._add_textbox(slide, icon, left + Inches(0.2), top + Inches(0.28), card_w - Inches(0.4), Inches(0.62), 30, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'icon', item), 'icon', group=group, text_on_container=True)
+            self._add_textbox(slide, title, left + Inches(0.22), top + Inches(1.15), card_w - Inches(0.44), Inches(0.55), 20, True, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title', group=group, text_on_container=True)
+            self._add_textbox(slide, desc, left + Inches(0.28), top + Inches(2.05), card_w - Inches(0.56), Inches(1.65), 14, False, theme['muted'], PP_ALIGN.CENTER, self._style_for(data, 'body', item), 'body', group=group, text_on_container=True)
 
     def _ppt_add_process(self, prs, data):
         from pptx.enum.shapes import MSO_SHAPE
@@ -4244,12 +4851,13 @@ class PptMixin:
         from pptx.util import Inches
         theme = self._theme()
         slide = self._blank_slide(prs, data.get('title'), data)
-        events = _as_list(data.get('events') or data.get('steps') or data.get('items'))[:5]
+        events = _as_list(data.get('events') or data.get('steps') or data.get('items'))[:4]
         if not events:
             events = [{'time': '阶段一', 'title': '启动'}, {'time': '阶段二', 'title': '落地'}, {'time': '阶段三', 'title': '优化'}]
         n = len(events)
         left0 = Inches(1.05)
         right = Inches(12.1)
+        min_text_w = Inches(2.25)
         y = Inches(3.05)
         line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left0, y - Inches(0.015), right - left0, Inches(0.03))
         self._ppt_mark_shape(line, role='timeline_axis', group='timeline', allow_overlap=True)
@@ -4263,9 +4871,20 @@ class PptMixin:
             self._ppt_mark_shape(dot, role='timeline_marker', group='timeline', allow_overlap=True)
             self._set_shape_fill(dot, theme['accent'] if i % 2 else theme['primary'], theme['card'])
             top = Inches(1.45) if i % 2 == 0 else Inches(3.45)
-            self._add_textbox(slide, time or f'阶段 {i + 1}', x - Inches(0.75), top, Inches(1.5), Inches(0.35), 13, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'label', item), 'label')
-            self._add_textbox(slide, title, x - Inches(0.95), top + Inches(0.42), Inches(1.9), Inches(0.48), 15, True, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title')
-            self._add_textbox(slide, desc, x - Inches(1.05), top + Inches(0.92), Inches(2.1), Inches(0.68), 11, False, theme['muted'], PP_ALIGN.CENTER, self._style_for(data, 'body', item), 'body')
+            box_w = max(min_text_w, Inches(2.45 if n >= 4 else 2.65))
+            box_left = max(Inches(0.55), min(x - box_w // 2, Inches(12.75) - box_w))
+            safe_title = self._ppt_fit_line_text(title, 14)
+            safe_desc = self._ppt_fit_line_text(desc, 26)
+            group = f'timeline_event_{i}'
+            time_box = self._add_textbox(slide, time or f'阶段 {i + 1}', box_left, top, box_w, Inches(0.36), 12, True, theme['primary'], PP_ALIGN.CENTER, self._style_for(data, 'label', item), 'label', group=group, text_on_container=True)
+            title_box = self._add_textbox(slide, safe_title, box_left, top + Inches(0.42), box_w, Inches(0.58), 12, True, theme['text'], PP_ALIGN.CENTER, self._style_for(data, 'title', item), 'title', group=group, text_on_container=True)
+            desc_box = self._add_textbox(slide, safe_desc, box_left, top + Inches(1.02), box_w, Inches(0.72), 10, False, theme['muted'], PP_ALIGN.CENTER, self._style_for(data, 'body', item), 'body', group=group, text_on_container=True)
+            for tb in (time_box, title_box, desc_box):
+                try:
+                    tb.text_frame.auto_size = None
+                    tb.text_frame.word_wrap = True
+                except Exception:
+                    pass
 
     def _ppt_add_comparison(self, prs, data):
         from pptx.enum.shapes import MSO_SHAPE

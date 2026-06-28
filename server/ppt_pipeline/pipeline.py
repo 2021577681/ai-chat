@@ -6,6 +6,7 @@ from .intent_parser import parse_intent
 from .layout_selector import select_layouts
 from .outline_planner import plan_outline
 from .renderer import render_payload
+from .reflow import enforce_layout_constraints
 from .slide_planner import plan_slides
 from .theme_resolver import resolve_theme
 from .validator import default_validation_rules
@@ -19,6 +20,7 @@ def build_deck_spec(user_request, options=None):
     slides = plan_slides(outline, intent, options)
     slides = select_layouts(slides)
     slides = compress_content(slides)
+    slides, layout_report = enforce_layout_constraints(slides, options)
     theme = resolve_theme(intent, options)
 
     deck = {
@@ -36,6 +38,7 @@ def build_deck_spec(user_request, options=None):
         "pipeline": {
             "intent": intent,
             "outline": outline,
+            "layout_report": layout_report,
             "validation_rules": default_validation_rules({"title": intent.get("title"), "slides": slides}),
         },
     }

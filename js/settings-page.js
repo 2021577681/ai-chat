@@ -99,6 +99,7 @@ function initSettingsPage() {
   window.openSettings = function() { openSettingsPage('main'); };
   window.openPlanSettings = function() { openSettingsPage('plan'); };
   window.openOutlineSettings = function() { openSettingsPage('outline'); };
+  window.openPptSettings = function() { openSettingsPage('ppt'); };
   window.openReflectionSettings = function() { openSettingsPage('reflection'); };
   window.openTools = function() { openSettingsPage('tools'); };
   window.openPrivacySettings = function() { openSettingsPage('privacy'); };
@@ -122,6 +123,7 @@ function initSettingsPage() {
   window.closeSettings = function() { closeSettingsProxy('main'); };
   window.closePlanSettings = function() { closeSettingsProxy('plan'); };
   window.closeOutlineSettings = function() { closeSettingsProxy('outline'); };
+  window.closePptSettings = function() { closeSettingsProxy('ppt'); };
   window.closeReflectionSettings = function() { closeSettingsProxy('reflection'); };
   window.closeTools = function() { closeSettingsProxy('tools'); };
   window.closePrivacySettings = function() { closeSettingsProxy('privacy'); };

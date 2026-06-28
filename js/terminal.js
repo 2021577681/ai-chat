@@ -1062,34 +1062,33 @@ async function generatePpt(data, context) {
   const slideCount = Array.isArray(payload.slides) ? payload.slides.length : 0;
   const r = await callAgentBackend('generate_ppt', { data: payload },
     'AI 想生成 PPT 文件',
-    `[生成 PPT]\n标题：${title}\n页数：${slideCount || payload.slide_count || payload.pages || '自动规划'}\n文件名：${payload.filename || 'generated.pptx'}`,
+    `[生成 PPT]\n标题：${title}\n页数：${slideCount || payload.slide_count || payload.pages || '自动规划'}\n文件名：AI 自动命名\n渲染：每页一张 16:9 图片`,
     context);
   if (typeof r === 'string') return r;
-  const repair = r.auto_repair || {};
-  const validation = r.validation || {};
-  const cycles = Array.isArray(repair.cycles) ? repair.cycles.length : 0;
-  const repairText = cycles
-    ? `；修复闭环 ${cycles}/${repair.max_cycles || cycles} 轮，${validation.passed ? '验证通过' : '仍未通过'}`
-    : (validation.passed === false ? '；验证未通过' : '');
   if (!r.ok) {
     return {
       ok: false,
       path: r.path,
       slides: r.slides || slideCount,
-      validation,
-      auto_repair: repair,
       pipeline: r.pipeline || {},
-      text: `❌ ${r.error || r.message || 'PPT 生成失败'}${r.path ? `：${r.path}` : ''}${repairText}`
+      text: `❌ ${r.error || r.message || 'PPT 生成失败'}${r.path ? `：${r.path}` : ''}`
     };
   }
   return {
     ok: true,
     path: r.path,
     slides: r.slides || slideCount,
-    validation,
-    auto_repair: repair,
+    title: r.title || '',
+    filename: r.filename || '',
+    render_mode: r.render_mode || 'html_image',
+    html_dir: r.html_dir || '',
+    image_dir: r.image_dir || '',
+    html_pages: r.html_pages || [],
+    images: r.images || [],
+    renderer: r.renderer || '',
+    renderer_note: r.renderer_note || '',
     pipeline: r.pipeline || {},
-    text: `✅ PPT 已生成：${r.path}（${r.slides || slideCount} 页）${repairText}`
+    text: `✅ PPT 已生成：${r.path}（${r.slides || slideCount} 页，每页一张图片）`
   };
 }
 

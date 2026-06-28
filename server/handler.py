@@ -30,6 +30,33 @@ from .web import WebMixin
 from .workspace import WorkspaceMixin
 
 
+_LOG_SECRET_KEY_PARTS = (
+    'api_key',
+    'apikey',
+    'authorization',
+    'bearer',
+    'cookie',
+    'password',
+    'secret',
+    'token',
+)
+
+
+def _redact_log_secrets(value):
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if any(part in key_text for part in _LOG_SECRET_KEY_PARTS):
+                out[key] = '***'
+            else:
+                out[key] = _redact_log_secrets(item)
+        return out
+    if isinstance(value, list):
+        return [_redact_log_secrets(item) for item in value]
+    return value
+
+
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
               McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin, PptMixin):
@@ -165,15 +192,10 @@ class Handler(BaseHTTPRequestHandler,
         print(f'\n{"="*60}')
         print(f'📥 收到请求: action="{action}", session="{self.session_id}"')
         if action != 'read_file_binary':
-            log_body = body
+            log_body = _redact_log_secrets(copy.deepcopy(body))
             if action in ('mcp_list_tools', 'mcp_call_tool'):
-                log_body = copy.deepcopy(body)
                 if isinstance(log_body.get('server'), dict) and log_body['server'].get('env'):
                     log_body['server']['env'] = '***'
-            if action in ('remote_connect', 'remote_disconnect'):
-                log_body = copy.deepcopy(body)
-                if log_body.get('password'):
-                    log_body['password'] = '***'
             print(f'📦 完整请求体: {json.dumps(log_body, ensure_ascii=False)[:500]}')
         else:
             print(f'📦 请求体: action=read_file_binary, path={body.get("path", "")}')

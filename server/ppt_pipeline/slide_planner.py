@@ -30,6 +30,7 @@ def _plan_slides_with_llm(outline, intent, options=None):
     system_prompt = options.get("slide_prompt") or options.get("ppt_slide_prompt") or (
         "你是资深 PPT 内容策划专家。请把大纲扩展成可直接渲染的结构化页面内容。"
         "必须只输出 JSON 对象，不要输出解释。"
+        "在生成阶段就要规划好图形组合与留白，不要依赖生成后反复缩小字号来修复版面。"
     )
     user_prompt = f"""
 请根据 PPT 需求和大纲，为每一页生成自然、具体、可落地的页面内容。
@@ -44,6 +45,10 @@ def _plan_slides_with_llm(outline, intent, options=None):
 {{"slides": [页面对象...]}}
 
 页面对象通用字段：title、intent、content_type。
+可选页面级布局约束字段：
+- layout_contract: 对本页的布局约束对象，可含 max_density、safe_zones、composition_groups、avoid_font_shrink。
+- composition_groups: 显式声明本页有意组合的图形组，例如 [{{"id":"cycle_diagram","purpose":"环形流程图","allow_overlap":true}}]。
+- avoid_font_shrink: true 表示该页应优先压缩内容/调整布局，不应靠缩小字号兜底。
 按 content_type 输出对应字段：
 - cover: subtitle
 - agenda/summary: items，3-6 条
@@ -61,6 +66,8 @@ def _plan_slides_with_llm(outline, intent, options=None):
 2. 内容要贴合主题，不要使用泛化套话。
 3. 每页信息密度适中，避免长句。
 4. 输出字段必须是 renderer 可消费的 JSON。
+5. 如果页面包含由多个图形叠加而成的图案、图标、流程节点、徽章、卡片装饰，必须用 composition_groups / layout_contract 显式声明组合意图；不要让验证器把有意组合误判为遮挡。
+6. 内容超出空间时优先减少文字、拆页或选择更宽松版式；不要期望后处理通过不断缩小字号解决。
 """.strip()
     data = generate_json(system_prompt, user_prompt, options=options)
     slides = data.get("slides") if isinstance(data, dict) else None
@@ -79,6 +86,7 @@ def _normalize_slides(slides, outline, intent):
         item["title"] = str(item.get("title") or base.get("title") or intent.get("topic") or "").strip()
         item["intent"] = str(item.get("intent") or base.get("intent") or "").strip()
         item["content_type"] = normalize_layout(item.get("content_type") or item.get("layout") or item.get("type") or base.get("content_type"))
+        _apply_default_layout_contract(item)
         if not item["title"]:
             return None
         out.append(item)
@@ -95,6 +103,7 @@ def _rule_based_slides(outline, intent):
         title = item.get("title") or topic
         content_type = item.get("content_type") or "bullets"
         slide = {"title": title, "intent": item.get("intent", ""), "content_type": content_type}
+        _apply_default_layout_contract(slide)
 
         if content_type == "cover":
             slide.update({"type": "cover", "subtitle": intent.get("subtitle") or intent.get("purpose") or ""})
@@ -138,3 +147,32 @@ def _rule_based_slides(outline, intent):
 
         slides.append(slide)
     return slides
+
+
+def _apply_default_layout_contract(slide):
+    """Attach generation-time layout semantics so repair is not the first line of defense."""
+    if not isinstance(slide, dict):
+        return slide
+    content_type = normalize_layout(slide.get("content_type") or slide.get("layout") or slide.get("type"))
+    contract = slide.get("layout_contract") if isinstance(slide.get("layout_contract"), dict) else {}
+    groups = slide.get("composition_groups") if isinstance(slide.get("composition_groups"), list) else []
+    default_groups = {
+        "three_cards": [{"id": "card_grid", "purpose": "卡片容器、图标和装饰构成整体", "allow_overlap": True}],
+        "process": [{"id": "process_flow", "purpose": "流程节点和连接箭头构成整体", "allow_overlap": True}],
+        "method_pipeline": [{"id": "process_flow", "purpose": "方法流程节点和连接箭头构成整体", "allow_overlap": True}],
+        "timeline": [{"id": "timeline", "purpose": "时间轴、节点和标签构成整体", "allow_overlap": True}],
+        "cycle": [{"id": "cycle_diagram", "purpose": "环形节点、中心节点和箭头构成整体", "allow_overlap": True}],
+        "architecture": [{"id": "architecture_diagram", "purpose": "架构层、连接线和容器构成整体", "allow_overlap": True}],
+    }
+    existing_ids = {str(g.get("id")) for g in groups if isinstance(g, dict)}
+    for group in default_groups.get(content_type, []):
+        if group["id"] not in existing_ids:
+            groups.append(dict(group))
+    contract.setdefault("max_density", "medium")
+    contract.setdefault("avoid_font_shrink", True)
+    if groups:
+        contract.setdefault("composition_groups", groups)
+        slide["composition_groups"] = groups
+    slide["layout_contract"] = contract
+    slide.setdefault("avoid_font_shrink", True)
+    return slide

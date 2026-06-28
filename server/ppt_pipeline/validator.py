@@ -14,6 +14,10 @@ def default_validation_rules(deck_spec):
         "require_chinese": any("\u4e00" <= ch <= "\u9fff" for ch in "\n".join(expected)),
         "max_question_marks": 0,
         "fail_on_warnings": False,
+        "auto_repair_min_font_size": 10,
+        "auto_repair_allow_font_shrink": False,
+        "auto_repair_font_shrink_after_passes": 3,
+        "detect_graphic_overlaps": True,
     }
 
 
