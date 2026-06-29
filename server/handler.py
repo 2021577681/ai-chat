@@ -247,12 +247,6 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_generate_ppt(body)
             elif action == 'ppt_task':
                 self.handle_ppt_task(body)
-            elif action == 'preview_ppt':
-                self.handle_preview_ppt(body)
-            elif action == 'validate_ppt':
-                self.handle_validate_ppt(body)
-            elif action == 'analyze_ppt_template':
-                self.handle_analyze_ppt_template(body)
             elif action == 'screenshot':
                 self.handle_screenshot(body)
             elif action == 'list_windows':

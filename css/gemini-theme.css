@@ -2219,6 +2219,45 @@ body.settings-page-open .settings-docked-mask.show{
   max-height:none;
 }
 
+.settings-page-content .settings-section-ppt{
+  --ppt-settings-gap:18px;
+}
+
+.settings-page-content .settings-section-ppt .form-group{
+  margin-bottom:var(--ppt-settings-gap);
+}
+
+.settings-page-content .settings-section-ppt .form-group label{
+  margin-bottom:8px;
+  line-height:1.35;
+}
+
+.settings-page-content .settings-section-ppt .form-group textarea{
+  line-height:1.6;
+}
+
+.settings-page-content .settings-section-ppt .form-hint{
+  margin-top:8px;
+  line-height:1.65;
+}
+
+.settings-page-content .settings-section-ppt .form-group[style*="display:flex"]{
+  padding:2px 0;
+  align-items:flex-start!important;
+}
+
+.settings-page-content .settings-section-ppt .form-group[style*="display:flex"] .switch{
+  margin-top:2px;
+}
+
+.settings-page-content .settings-section-ppt hr{
+  margin:24px 0 18px!important;
+}
+
+.settings-page-content .settings-section-ppt h3{
+  margin-bottom:16px!important;
+}
+
 [data-theme="dark"] .settings-page,
 [data-theme="dark"] .settings-page-main,
 [data-theme="dark"] .settings-page-top{

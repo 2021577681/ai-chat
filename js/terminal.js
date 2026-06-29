@@ -1058,8 +1058,8 @@ async function searchInFiles(path, pattern, fileGlob, context) {
 
 async function generatePpt(data, context) {
   const payload = data && typeof data === 'object' ? data : {};
-  const title = payload.title || payload.user_request || payload.request || payload.prompt || (Array.isArray(payload.slides) && payload.slides[0] && payload.slides[0].title) || '未命名 PPT';
-  const slideCount = Array.isArray(payload.slides) ? payload.slides.length : 0;
+  const title = payload.title || payload.user_request || payload.request || payload.prompt || '未命名 PPT';
+  const slideCount = payload.slide_count || payload.pages || 0;
   const r = await callAgentBackend('generate_ppt', { data: payload },
     'AI 想生成 PPT 文件',
     `[生成 PPT]\n标题：${title}\n页数：${slideCount || payload.slide_count || payload.pages || '自动规划'}\n文件名：AI 自动命名\n渲染：每页一张 16:9 图片`,
@@ -1155,90 +1155,6 @@ async function generatePptWithProgress(data, context = {}) {
     }
     await new Promise(resolve => setTimeout(resolve, 900));
   }
-}
-
-async function analyzePptTemplate(data, context) {
-  const payload = data && typeof data === 'object' ? { ...data } : {};
-  const templatePath = payload.path || payload.template_path || payload.pptx || payload.file || '';
-  const r = await callAgentBackend('analyze_ppt_template', payload,
-    'AI 想分析 PPT 模板',
-    `[分析 PPT 模板]\n路径：${templatePath}\n保存 profile：${payload.save_profile !== false}`,
-    context);
-  if (typeof r === 'string') return r;
-  if (!r.ok) return `❌ PPT 模板分析失败：${r.error}`;
-  const profile = r.profile || {};
-  const size = profile.size || {};
-  const theme = profile.theme || {};
-  const font = profile.font || {};
-  return {
-    ok: true,
-    profile,
-    profile_path: r.profile_path,
-    text: [
-      `✅ PPT 模板分析完成${r.profile_path ? `：${r.profile_path}` : ''}`,
-      `尺寸：${size.width_in || '-'} x ${size.height_in || '-'} in，比例：${size.aspect_ratio || '-'}`,
-      `主题色：primary=${theme.primary_color || '-'}，accent=${theme.accent_color || '-'}，background=${theme.background_color || '-'}`,
-      `字体：${font.font_family || '-'}，标题 ${font.title_font_size || '-'}，正文 ${font.body_font_size || '-'}`,
-      `固定元素：${Array.isArray(profile.decorations) ? profile.decorations.length : 0} 个`,
-      profile.warnings && profile.warnings.length ? `警告：${profile.warnings.join('；')}` : '警告：无'
-    ].join('\n')
-  };
-}
-
-function formatPptValidationSummary(r) {
-  const issues = Array.isArray(r.issues) ? r.issues : [];
-  const warnings = Array.isArray(r.warnings) ? r.warnings : [];
-  const stats = r.stats || {};
-  const issueText = issues.slice(0, 5).map(x => `- ${x.message || x}`).join('\n');
-  const warningText = warnings.slice(0, 5).map(x => `- ${x.slide ? `第 ${x.slide} 页：` : ''}${x.message || x}`).join('\n');
-  return [
-    `${r.passed ? '✅' : '❌'} PPT 校验${r.passed ? '通过' : '未通过'}：${r.path}`,
-    `页数：${r.slide_count || 0}，评分：${r.score ?? '-'}`,
-    `文字：${stats.text_char_count || 0} 字符，问号：${stats.visible_question_marks || 0}，中文字符：${stats.cjk_char_count || 0}`,
-    issues.length ? `问题：\n${issueText}` : '问题：无',
-    warnings.length ? `警告：\n${warningText}` : '警告：无'
-  ].join('\n');
-}
-
-async function validatePpt(data, context) {
-  const payload = data && typeof data === 'object' ? data : {};
-  const r = await callAgentBackend('validate_ppt', payload, undefined, undefined, context);
-  if (typeof r === 'string') return r;
-  if (!r.ok) return `❌ PPT 校验失败：${r.error}`;
-  return {
-    ok: true,
-    passed: !!r.passed,
-    path: r.path,
-    report: r,
-    text: formatPptValidationSummary(r)
-  };
-}
-
-async function previewPpt(data, context) {
-  const payload = data && typeof data === 'object' ? { ...data } : {};
-  if (!payload._requestTimeoutMs && !payload.requestTimeoutMs) payload._requestTimeoutMs = 180000;
-  const r = await callAgentBackend('preview_ppt', payload, undefined, undefined, context);
-  if (typeof r === 'string') return r;
-  if (!r.ok) return `❌ PPT 预览失败：${r.error}`;
-  const images = Array.isArray(r.images) ? r.images : [];
-  const imageText = images.slice(0, 8).map(x => `- 第 ${x.slide} 页：${x.path}`).join('\n');
-  return {
-    ok: true,
-    passed: !!r.passed,
-    path: r.path,
-    html: r.html,
-    preview_url: r.preview_url,
-    images,
-    renderer: r.renderer,
-    validation: r.validation,
-    text: [
-      `✅ PPT 预览已生成：${r.html}`,
-      `预览入口：${r.preview_url}`,
-      `渲染器：${r.renderer || 'none'}`,
-      `校验：${r.passed ? '通过' : '未通过'}`,
-      imageText ? `图片：\n${imageText}` : '图片：未生成'
-    ].join('\n')
-  };
 }
 
 // ⭐ 网络搜索（通过本地后端 → DuckDuckGo/Bing）

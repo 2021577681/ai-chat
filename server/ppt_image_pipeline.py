@@ -1763,11 +1763,11 @@ def _inject_project_overflow_guard(html_doc):
 })();
 </script>"""
     if re.search(r"</head\s*>", text, flags=re.IGNORECASE):
-        text = re.sub(r"</head\s*>", style + "\n</head>", text, count=1, flags=re.IGNORECASE)
+        text = _inject_before_head_end(text, style)
     else:
         text = style + text
     if re.search(r"</body\s*>", text, flags=re.IGNORECASE):
-        text = re.sub(r"</body\s*>", script + "\n</body>", text, count=1, flags=re.IGNORECASE)
+        text = _inject_before_body_end(text, script)
     else:
         text = text + script
     return text
@@ -2073,8 +2073,26 @@ def _write_text_file(path, content):
 
 def _inject_before_body_end(html_doc, snippet):
     if re.search(r"</body\s*>", html_doc, flags=re.IGNORECASE):
-        return re.sub(r"</body\s*>", snippet + "\n</body>", html_doc, count=1, flags=re.IGNORECASE)
+        return re.sub(
+            r"</body\s*>",
+            lambda m: snippet + "\n" + m.group(0),
+            html_doc,
+            count=1,
+            flags=re.IGNORECASE,
+        )
     return html_doc + "\n" + snippet
+
+
+def _inject_before_head_end(html_doc, snippet):
+    if re.search(r"</head\s*>", html_doc, flags=re.IGNORECASE):
+        return re.sub(
+            r"</head\s*>",
+            lambda m: snippet + "\n" + m.group(0),
+            html_doc,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    return snippet + "\n" + html_doc
 
 
 def _make_no_text_html_copy(html_path):
@@ -2087,7 +2105,7 @@ input, textarea { color: transparent !important; -webkit-text-fill-color: transp
 </style>
 """
     if re.search(r"</head\s*>", html_doc, flags=re.IGNORECASE):
-        out = re.sub(r"</head\s*>", css + "\n</head>", html_doc, count=1, flags=re.IGNORECASE)
+        out = _inject_before_head_end(html_doc, css)
     else:
         out = css + "\n" + html_doc
     target = os.path.join(os.path.dirname(html_path), Path(html_path).stem + "__notext.html")

@@ -439,6 +439,14 @@ function registerMsgTimerExitRecovery() {
   window.addEventListener('beforeunload', sealOpenMsgTimersForPageExit);
 }
 
+const REMOVED_PPT_TOOL_NAMES = new Set(['analyze_ppt_template', 'preview_ppt', 'validate_ppt']);
+
+function pruneRemovedPptTools() {
+  const before = Array.isArray(state.tools) ? state.tools.length : 0;
+  state.tools = (Array.isArray(state.tools) ? state.tools : []).filter(tool => !REMOVED_PPT_TOOL_NAMES.has(String((tool && tool.name) || '')));
+  return before - state.tools.length;
+}
+
 function injectBuiltinTools() {
   if (typeof BUILTIN_TOOLS === 'undefined' || !Array.isArray(BUILTIN_TOOLS)) return;
   let loadedSignatures = [];
@@ -446,6 +454,7 @@ function injectBuiltinTools() {
     const raw = storage.get(BUILTIN_TOOLS_LOADED_KEY);
     if (raw) loadedSignatures = JSON.parse(raw);
   } catch (e) {}
+  if (pruneRemovedPptTools() > 0) persistTools();
   const existingNames = new Set(state.tools.map(t => t.name));
   const currentSignatures = BUILTIN_TOOLS.map(t => t.name);
   const builtinByName = new Map(BUILTIN_TOOLS.map(t => [t.name, t]));
@@ -458,7 +467,7 @@ function injectBuiltinTools() {
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
     'restore_checkpoint',
     // 📊 PPT 工具（仅由顶栏 PPT 模式临时启用）
-    'generate_ppt', 'analyze_ppt_template', 'preview_ppt', 'validate_ppt',
+    'generate_ppt',
     // 📚 论文工具（6 个）
     'arxiv_search', 'semantic_scholar_search', 'dblp_search', 'openalex_search', 'crossref_search', 'fetch_pdf_text'
   ]);
@@ -933,12 +942,13 @@ function activeTaskChat() {
 function resetBuiltinTools() {
   if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。\n\n注意：LMS、版本快照、论文工具不会自动加回，需要在工具面板里点专用按钮启用。')) return;
   storage.remove(BUILTIN_TOOLS_LOADED_KEY);
+  pruneRemovedPptTools();
   
   // ⭐ 与 injectBuiltinTools 保持一致：可选工具组（LMS / Git 快照 / 论文）不自动恢复
   const OPTIONAL_TOOL_NAMES = new Set([
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
     'restore_checkpoint',
-    'generate_ppt', 'analyze_ppt_template', 'preview_ppt', 'validate_ppt',
+    'generate_ppt',
     'arxiv_search', 'semantic_scholar_search', 'dblp_search', 'openalex_search', 'crossref_search', 'fetch_pdf_text'
   ]);
   const isOptional = (name) => 
