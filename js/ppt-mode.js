@@ -1,36 +1,75 @@
 // ============ 📊 PPT 独立模式 ============
 // 顶栏按钮开启后，下一条用户消息会直接走 PPT Pipeline：
-// 理解主题 → 大纲 → 页面类型 → HTML 设计稿 → 浏览器截图 → PPT 图片页 → 导出，而不是普通聊天回答。
+// 项目 PPT 工作流：需求理解/澄清 → 叙事弧大纲 → 选择风格/主题 → 登记版式 → HTML 模板页 → 浏览器截图 → PPT 图片页 → 导出。
 
 const DEFAULT_PPT_UNDERSTAND_PROMPT = [
-  '你是资深演示文稿策划总监。请理解用户要做的 PPT 主题、内容、用途、受众和语气，并为 PPT 自动命名。',
+  '你是 项目 PPT 工作流 的演示策划总监。请理解用户要做的 PPT 主题、内容、用途、受众和语气，并为 PPT 自动命名。',
   '必须只输出 JSON 对象，不要输出解释。',
-  '输出字段：title、subtitle、purpose、audience、language、tone、visual_direction、filename。',
-  'filename 必须贴合主题，使用安全文件名，并以 .pptx 结尾。'
+  '输出字段：title、subtitle、purpose、audience、language、tone、visual_direction、filename、needs_clarification、clarifying_question、clarifying_questions。',
+  'visual_direction 要明确建议使用电子杂志风或瑞士国际主义风；filename 必须贴合主题，使用安全文件名，并以 .pptx 结尾。',
+  '默认使用已迁移到本项目内的 项目 PPT PPT 工作流，模板资源来自 server/ppt_templates/project。',
+  '只有当缺少会实质影响内容或素材使用的关键信息时，才把 needs_clarification 设为 true，并给出最多 3 个具体问题；不要为了普通偏好反复打断流程。'
 ].join('\n');
 
 const DEFAULT_PPT_OUTLINE_PROMPT = [
-  '你是资深演示文稿策划专家。请根据用户需求规划 PPT 大纲。',
+  '你是 项目 PPT 工作流 的内容策划专家。请根据用户需求和理解结果生成 PPT 大纲。',
   '必须只输出 JSON 对象，不要输出解释。',
-  '大纲要贴合主题、用途和受众；标题要具体，避免泛泛而谈。',
-  '页数必须等于 target_slide_count；只规划内容结构和页面意图，不要输出任何元素坐标。'
+  '输出结构：{"outline":[{"page":1,"title":"页面标题","goal":"本页沟通目标","key_points":["要点1","要点2"]}]}',
+  '页数必须等于 target_slide_count；每页标题要具体，避免泛泛而谈。',
+  '使用 项目演示叙事弧组织内容：Hook → Context → Core → Shift → Takeaway。',
+  '大纲只决定叙事顺序和每页沟通目标，不输出 HTML 坐标；但要为后续 layout 选择保留足够明确的内容形状。'
 ].join('\n');
 
 const DEFAULT_PPT_PAGE_TYPE_PROMPT = [
-  '你是演示信息架构设计师。请为 PPT 大纲中的每一页确定页面类型和内容结构。',
+  '你是 项目 PPT 工作流 的信息架构设计师。请为大纲中的每一页确定页面类型、内容结构和模板版式。',
   '必须只输出 JSON 对象，不要输出解释。',
-  '页面类型是语义类型，不是固定模板限制；可使用 cover、agenda、section、concept、comparison、data_story、process、timeline、case、quote、summary、closing、freeform。',
-  '输出 pages，每页包含 page、title、page_type、visual_role、content_blocks。'
+  '输出结构：{"pages":[{"page":1,"title":"页面标题","page_type":"cover|agenda|section|concept|comparison|data_story|process|timeline|case|quote|summary|closing|freeform","visual_role":"本页视觉承担的任务","template_style":"magazine|swiss","layout_id":"A01|A02|A03|A04|A05|A06|A07|A08|A09|A10|SWISS-COVER-ASCII|SWISS-CLOSING-ASCII|S01|...|S22","theme_class":"hero dark|hero light|light|dark|grey|accent|split","image_slots":[],"content_blocks":[{"title":"模块名","text":"模块内容"}]}]}',
+  'template_style 必须跟随输入的 template_style，不要一份 deck 混用 magazine 和 swiss。',
+  'magazine 只能使用 A01-A10；swiss 正文页只能使用 S01-S22，首页/尾页可用 SWISS-COVER-ASCII / SWISS-CLOSING-ASCII。',
+  '版式要多样：不要连续 3 页使用同一主体结构；10 页以上至少 8 个不同 layout_id。',
+  '有图片或截图时必须写 image_slots，并绑定标准比例；没有图片时 image_slots 为空数组。'
 ].join('\n');
 
 const DEFAULT_PPT_HTML_PROMPT = [
-  '你是资深 HTML 演示页面设计师。请把大纲扩展成适合 16:9 HTML 视觉渲染的页面内容。',
+  '你是 项目 PPT 工作流 的 HTML slide section 生成器。请为单页 PPT 生成可插入模板的 <section class="slide ...">。',
   '必须只输出 JSON 对象，不要输出解释。',
-  '输出字段：html，值为完整 HTML 文档。',
-  'HTML 必须自包含，CSS 写在 <style> 内，不依赖外网字体、图片、脚本或第三方库。',
-  '画布为 1600x900 或自适应 16:9；页面信息完整但不拥挤，文本不能明显溢出画布。',
-  '视觉设计根据主题自由发挥，不要受固定 PPT 模板限制。'
+  '输出结构：{"html":"<section class=\\"slide ...\\">...</section>"}',
+  '硬性要求：',
+  '1. 不要输出 <!doctype>、<html>、<head>、<body>、<style> 或 <script>；后端会把 section 填入已复制到项目内的 项目 HTML 模板。',
+  '2. 必须使用输入中的 template_context、layout_id、theme_class 和 allowed_classes；不要发明模板里不存在的 class，必要时只用 inline style 微调。',
+  '3. magazine 风格使用 template.html 的衬线标题、chrome、foot、h-*、display-zh、stat-card、grid-*、pipeline 等类。',
+  '4. swiss 风格使用 template-swiss.html 的无衬线、12 栏、canvas-card、chrome-min、t-*、card-*、grid-12、span-N 等类；每个 section 必须带 data-layout，且只用登记版式。',
+  '5. 图片必须放在 images/ 并按 {页号}-{语义}.{ext} 命名；没有真实图片时不要伪造图片路径。',
+  '6. 页面信息必须完整但不拥挤，文本不能明显溢出画布。',
+  '7. 返回的 section 要贴合 项目 PPT 的版式节奏，不要退回通用网页卡片。'
 ].join('\n');
+
+const PPT_DECK_STYLE_OPTIONS = ['auto', 'magazine', 'swiss'];
+const PPT_DECK_THEME_OPTIONS = {
+  auto: '自动选择',
+  ink_classic: '杂志风 · 墨水经典',
+  indigo_porcelain: '杂志风 · 靛蓝瓷',
+  forest_ink: '杂志风 · 森林墨',
+  kraft_paper: '杂志风 · 牛皮纸',
+  dune: '杂志风 · 沙丘',
+  ikb: '瑞士风 · 克莱因蓝 IKB',
+  lemon: '瑞士风 · 柠檬黄',
+  lemon_green: '瑞士风 · 柠檬绿',
+  safety_orange: '瑞士风 · 安全橙'
+};
+
+function normalizePptPromptText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizePptPromptOverride(value, defaultPrompt, legacyMarkers = []) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const compact = normalizePptPromptText(text);
+  if (compact === normalizePptPromptText(defaultPrompt)) return '';
+  if (legacyMarkers.length && legacyMarkers.every(marker => compact.includes(normalizePptPromptText(marker)))) return '';
+  return text;
+}
 
 function normalizePptSlideCount(value) {
   const count = parseInt(value, 10);
@@ -50,21 +89,31 @@ function normalizePptRepairMaxCycles(value, allowedMax) {
 
 function normalizePptRenderStyle(value) {
   const style = String(value || '').trim();
-  return style || '由 AI 根据主题自由设计';
+  return style || '按 项目 PPT 工作流自动匹配';
 }
 
-function normalizePptAestheticScoreThreshold(value) {
-  const count = parseInt(value, 10);
-  return Number.isFinite(count) ? Math.max(40, Math.min(95, count)) : 82;
-}
-
-function normalizePptAestheticRewriteLimit(value) {
-  const count = parseInt(value, 10);
-  return Number.isFinite(count) ? Math.max(0, Math.min(3, count)) : 2;
-}
 
 function pptRenderStyleLabel(style) {
   return normalizePptRenderStyle(style);
+}
+
+function normalizePptDeckStyle(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return PPT_DECK_STYLE_OPTIONS.includes(v) ? v : 'auto';
+}
+
+function normalizePptDeckTheme(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(PPT_DECK_THEME_OPTIONS, v) ? v : 'auto';
+}
+
+function pptDeckStyleLabel(value) {
+  const v = normalizePptDeckStyle(value);
+  return v === 'swiss' ? '瑞士国际主义' : (v === 'magazine' ? '电子杂志 × 电子墨水' : '自动选择');
+}
+
+function pptDeckThemeLabel(value) {
+  return PPT_DECK_THEME_OPTIONS[normalizePptDeckTheme(value)] || PPT_DECK_THEME_OPTIONS.auto;
 }
 
 function sanitizePptPayloadForUi(payload) {
@@ -78,7 +127,11 @@ function sanitizePptPayloadForUi(payload) {
     user_request: String(p.user_request || '').slice(0, 240),
     slide_count: p.slide_count,
     render_mode: p.render_mode || 'html_image',
+    ppt_template_system: p.ppt_template_system || 'project',
+    ppt_template_style: p.ppt_template_style || 'auto',
+    ppt_template_theme: p.ppt_template_theme || 'auto',
     render_style: p.render_style || '',
+    attachment_count: Array.isArray(p.attachments) ? p.attachments.length : 0,
     filename: p.filename || 'AI 自动命名',
     llm_model: p.llm_model || '当前模型',
     llm_base_url: baseUrl || '未配置',
@@ -86,9 +139,9 @@ function sanitizePptPayloadForUi(payload) {
     llm_api_format: apiFormat || '未知',
     llm_api_path: apiPath || '',
     llm_vision_interface: visionInterface,
-    llm_temperature: p.llm_temperature,
-    aesthetic_score_threshold: p.aesthetic_score_threshold,
-    aesthetic_rewrite_limit: p.aesthetic_rewrite_limit
+    ppt_editable_text: !!(p.ppt_editable_text || p.editable_text_overlay),
+    editable_text_overlay: !!(p.editable_text_overlay || p.ppt_editable_text),
+    llm_temperature: p.llm_temperature
   };
 }
 
@@ -216,30 +269,30 @@ function createPptModeState(payload, intent) {
       {
         id: 'design_recipe',
         step: 4,
-        title: '选择设计配方',
+        title: '选择 模板风格与主题',
         status: 'pending',
-        note: '选择整套 PPT 的配色、背景、字体气质和视觉组件配方。'
+        note: '在电子杂志风 / 瑞士国际主义中选择一种，并绑定预设主题色。'
       },
       {
         id: 'layout_blueprint',
         step: 5,
-        title: '为每页生成布局蓝图',
+        title: '绑定登记版式',
         status: 'pending',
-        note: '封面页和目录页背景独特；同一种类型页面背景保持一致。'
+        note: '杂志风使用 A01-A10；瑞士风正文页使用 S01-S22，不自造版式。'
       },
       {
         id: 'html_design',
         step: 6,
-        title: '生成 HTML',
+        title: '生成 项目 HTML',
         status: 'pending',
-        note: '根据设计配方和布局蓝图生成自包含 16:9 HTML/CSS 页面。'
+        note: '逐页生成 slide section，并套入项目内复制的 项目 HTML 模板。'
       },
       {
-        id: 'aesthetic_review',
+        id: 'quality_review',
         step: 7,
-        title: '审美评分与低分重写',
+        title: '项目模板规则检查',
         status: 'pending',
-        note: '检查背景层次、构图张力、色彩搭配和页面差异，低分页面自动重写。'
+        note: '检查版式约束、主题色、Swiss 禁忌、图片槽位和页面完整度。'
       },
       {
         id: 'browser_render',
@@ -367,6 +420,16 @@ function applyPptPipelineDetails(ppt, generated) {
       filename: intent.filename || generated.filename || ''
     });
   }
+  if (pipeline.interaction && typeof pipeline.interaction === 'object') {
+    const understandStep = pptStep(ppt, 'understand');
+    if (understandStep) {
+      understandStep.meta = {
+        ...(understandStep.meta || {}),
+        guidance_count: pipeline.interaction.guidance_count || 0,
+        source_material_count: pipeline.interaction.source_material_count || 0
+      };
+    }
+  }
   const outline = Array.isArray(pipeline.outline) ? pipeline.outline : [];
   if (outline.length) {
     setPptStep(ppt, 'outline', 'done', `已确认 ${outline.length} 页内容大纲：${outline.slice(0, 4).map(x => x.title).filter(Boolean).join(' / ')}${outline.length > 4 ? '...' : ''}。`, {
@@ -388,11 +451,11 @@ function applyPptPipelineDetails(ppt, generated) {
     });
   }
   if (pipeline.design_system && typeof pipeline.design_system === 'object') {
-    setPptStep(ppt, 'design_recipe', 'done', `已选择设计配方：${pipeline.design_system.theme_name || 'custom'}。`, pipeline.design_system);
+    setPptStep(ppt, 'design_recipe', 'done', `已选择 模板风格：${pipeline.design_system.style_label || pipeline.design_system.theme_name || 'custom'}。`, pipeline.design_system);
   }
   const blueprints = Array.isArray(pipeline.layout_blueprints) ? pipeline.layout_blueprints : [];
   if (blueprints.length) {
-    setPptStep(ppt, 'layout_blueprint', 'done', `已生成 ${blueprints.length} 页布局蓝图，封面/目录使用独特背景，内容页背景保持一致。`, { pages: blueprints.length });
+    setPptStep(ppt, 'layout_blueprint', 'done', `已绑定 ${blueprints.length} 页 项目 PPT 登记版式与主题节奏。`, { pages: blueprints.length });
   }
   const htmlPages = Array.isArray(generated.html_pages) ? generated.html_pages : [];
   const images = Array.isArray(generated.images) ? generated.images : [];
@@ -404,7 +467,7 @@ function applyPptPipelineDetails(ppt, generated) {
     });
     const q = pipeline.quality_report && typeof pipeline.quality_report === 'object' ? pipeline.quality_report : null;
     if (q) {
-      setPptStep(ppt, 'aesthetic_review', q.passed === false ? 'warning' : 'done', `审美评分完成，重写 ${q.rewrite_count || 0} 次${Array.isArray(q.pages) ? `，共 ${q.pages.length} 页` : ''}。`, q);
+      setPptStep(ppt, 'quality_review', q.passed === false ? 'warning' : 'done', `项目模板规则检查完成${Array.isArray(q.pages) ? `，共 ${q.pages.length} 页` : ''}。`, q);
     }
     setPptStep(ppt, 'browser_render', images.length ? (generated.renderer === 'pillow_fallback' ? 'warning' : 'done') : 'warning', images.length
       ? `已按 16:9 渲染并截图 ${images.length} 页${generated.renderer === 'pillow_fallback' ? '（浏览器不可用，已用图片兜底跑通）' : ''}。`
@@ -445,9 +508,8 @@ function pptStageToStepId(stage) {
     blueprint: 'layout_blueprint',
     html: 'html_design',
     html_design: 'html_design',
-    aesthetic_review: 'aesthetic_review',
-    quality_review: 'aesthetic_review',
-    review: 'aesthetic_review',
+    quality_review: 'quality_review',
+    review: 'quality_review',
     render: 'browser_render',
     browser_render: 'browser_render',
     assemble: 'ppt_background',
@@ -494,6 +556,28 @@ function applyPptProgressEvent(ppt, ev) {
   const detail = ev.detail && typeof ev.detail === 'object' ? ev.detail : {};
   if (ev.type === 'task_started') {
     ppt.taskId = ev.task_id || (ev.snapshot && ev.snapshot.task_id) || ppt.taskId;
+    return;
+  }
+  if (ev.type === 'guidance') {
+    if (!Array.isArray(ppt.guidance)) ppt.guidance = [];
+    const item = detail.guidance || {};
+    ppt.guidance.push(item);
+    ppt.progressText = ev.message || '已收到用户补充。';
+    ensurePptStepCall(ppt, 'understand', 'user_guidance', `guidance:${detail.version || Date.now()}`, {
+      status: 'done',
+      args: item,
+      result: ev.message || '已收到用户补充。'
+    });
+    return;
+  }
+  if (ev.type === 'input_required') {
+    ppt.status = 'paused';
+    ppt.progressText = ev.message || 'PPT 生成需要补充信息。';
+    ensurePptStepCall(ppt, pptStageToStepId(ev.stage || 'understand'), ev.stage || 'input_required', `input_required:${ev.stage || Date.now()}`, {
+      status: 'warning',
+      args: detail,
+      result: ev.message || 'PPT 生成需要补充信息。'
+    });
     return;
   }
   if (ev.type === 'task' || ev.type === 'task_control') {
@@ -557,7 +641,14 @@ function applyPptTaskSnapshot(ppt, snap) {
   if (!ppt || !snap) return;
   ppt.taskId = snap.task_id || ppt.taskId;
   (snap.events || []).forEach(ev => applyPptProgressEvent(ppt, ev));
+  if (snap.progress_index !== undefined) ppt.progressIndex = snap.progress_index || 0;
+  if (Array.isArray(snap.guidance)) ppt.guidance = snap.guidance.map(x => ({ ...(x || {}) }));
+  if (snap.guidance_count !== undefined) ppt.guidanceCount = snap.guidance_count;
+  if (snap.guidance_version !== undefined) ppt.guidanceVersion = snap.guidance_version;
   if (snap.status === 'paused') ppt.status = 'paused';
+  else if (snap.status === 'running') ppt.status = 'running';
+  else if (snap.status === 'done') ppt.status = 'done';
+  else if (snap.status === 'error' || snap.status === 'cancelled') ppt.status = snap.status;
 }
 
 function refreshPptModeMessage(msgIdx, chat, options = {}) {
@@ -598,19 +689,62 @@ function ensurePptSettingsModal() {
     <div class="modal wide">
       <h2>📊 PPT 模式 <button class="modal-close" onclick="closePptSettings()">×</button></h2>
       <div class="json-help">
-        开启顶栏 <strong>PPT</strong> 后，下一条消息会按“Step 1 理解主题 → Step 2 生成大纲 → Step 3 确定页面类型 → Step 5 生成 HTML → Step 6 浏览器截图 → Step 7 图片铺入 PPT → Step 9 导出”的流程生成 .pptx。当前阶段不限制模板，让 AI 根据主题自由设计；PPT 文件名由 AI 自动命名。
+        在此启用 PPT 模式后，下一条消息会按项目 PPT 工作流生成：需求理解/澄清 → 叙事弧大纲 → 选择电子杂志或瑞士国际主义风格 → 绑定登记版式和主题色 → 生成模板 HTML 页面 → 浏览器截图 → 图片铺入 PPT → 导出。所有模板和校验资源都使用项目内 <code>server/ppt_templates/project</code>。
+      </div>
+
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <label style="margin:0;">启用 PPT 模式</label>
+          <div class="form-hint" style="margin-top:2px;">启用后下一条消息将直接生成演示文稿，并自动关闭计划 / 大纲 / 师生模式。</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="pptEnabled"><span class="switch-slider"></span></label>
       </div>
 
       <div class="form-group">
         <label>默认页数</label>
         <input type="number" id="pptSlideCount" min="1" max="50" step="1">
-        <div class="form-hint">只控制目标页数，不限制模板；AI 会根据主题安排叙事和视觉形式。</div>
+        <div class="form-hint">只控制目标页数；内容按 Hook → Context → Core → Shift → Takeaway 叙事弧组织。</div>
       </div>
 
       <div class="form-group">
-        <label>视觉风格偏好（可选）</label>
-        <input type="text" id="pptRenderStyle" placeholder="留空则由 AI 根据主题自由设计，例如：科技感、极简商务、活泼教育风">
-        <div class="form-hint">不是模板限制，只是给 HTML/CSS 设计稿的风格参考。</div>
+        <label>模板风格</label>
+        <select id="pptDeckStyle">
+          <option value="auto">自动选择（按主题判断）</option>
+          <option value="magazine">电子杂志 × 电子墨水</option>
+          <option value="swiss">瑞士国际主义 / Swiss Style</option>
+        </select>
+        <div class="form-hint">一份 deck 只能使用一种风格；瑞士风会严格使用 S01-S22 登记版式。</div>
+      </div>
+
+      <div class="form-group">
+        <label>主题色</label>
+        <select id="pptDeckTheme">
+          <option value="auto">自动选择</option>
+          <option value="ink_classic">杂志风 · 墨水经典</option>
+          <option value="indigo_porcelain">杂志风 · 靛蓝瓷</option>
+          <option value="forest_ink">杂志风 · 森林墨</option>
+          <option value="kraft_paper">杂志风 · 牛皮纸</option>
+          <option value="dune">杂志风 · 沙丘</option>
+          <option value="ikb">瑞士风 · 克莱因蓝 IKB</option>
+          <option value="lemon">瑞士风 · 柠檬黄</option>
+          <option value="lemon_green">瑞士风 · 柠檬绿</option>
+          <option value="safety_orange">瑞士风 · 安全橙</option>
+        </select>
+        <div class="form-hint">仅使用项目预设主题色，避免任意 hex 混搭导致视觉失控。</div>
+      </div>
+
+      <div class="form-group">
+        <label>补充风格/素材说明（可选）</label>
+        <input type="text" id="pptRenderStyle" placeholder="例如：受众、分享场景、截图处理、必须包含的数据或禁忌">
+        <div class="form-hint">用于补充 7 问澄清信息；不会切回旧的通用生成逻辑。</div>
+      </div>
+
+      <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+        <div>
+          <label style="margin:0;">PPT 文本可编辑模式</label>
+          <div class="form-hint" style="margin-top:2px;">开启后后端会截图无文字背景，并把 HTML 文本提取为 PPT 可编辑文本框；关闭则保持纯截图模式。</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="pptEditableText"><span class="switch-slider"></span></label>
       </div>
 
       <div class="form-group">
@@ -626,17 +760,6 @@ function ensurePptSettingsModal() {
         </div>
       </div>
 
-      <div class="form-group">
-        <label>审美评分阈值</label>
-        <input type="number" id="pptAestheticScoreThreshold" min="40" max="95" step="1">
-        <div class="form-hint">默认 82。生成 HTML 后低于该分数会进入低分重写；值越高越严格，但耗时和重写概率也会增加。</div>
-      </div>
-
-      <div class="form-group">
-        <label>低分重写次数</label>
-        <input type="number" id="pptAestheticRewriteLimit" min="0" max="3" step="1">
-        <div class="form-hint">默认 2。每页最多自动重写次数；0 表示只评分不重写，最大 3。</div>
-      </div>
 
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
       <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">可编辑 Prompt</h3>
@@ -654,15 +777,15 @@ function ensurePptSettingsModal() {
       </div>
 
       <div class="form-group">
-        <label>Step 3：页面类型 Prompt</label>
+        <label>Step 3：页面类型与 项目版式 Prompt</label>
         <textarea id="pptPageTypePrompt" rows="5" placeholder="留空使用默认页面类型提示词"></textarea>
-        <div class="form-hint">控制“大纲 → 每页语义类型和内容模块”的生成方式。</div>
+        <div class="form-hint">控制“大纲 → 每页语义类型、layout_id、theme_class、图片槽位”的生成方式。</div>
       </div>
 
       <div class="form-group">
-        <label>Step 5：HTML 设计 Prompt</label>
+        <label>Step 6：项目 HTML Section Prompt</label>
         <textarea id="pptHtmlPrompt" rows="6" placeholder="留空使用默认 HTML 页面设计提示词"></textarea>
-        <div class="form-hint">控制“页面类型 → 16:9 HTML/CSS 设计稿”的生成方式。</div>
+        <div class="form-hint">控制“页面类型 → 单个 &lt;section class=&quot;slide&quot;&gt;”，后端会套入项目内 项目模板。</div>
       </div>
 
       <div class="modal-footer">
@@ -678,14 +801,16 @@ function ensurePptSettingsModal() {
 function openPptSettings() {
   const modal = ensurePptSettingsModal();
   const s = state.settings || {};
+  document.getElementById('pptEnabled').checked = !!s.usePpt;
   document.getElementById('pptSlideCount').value = normalizePptSlideCount(s.pptSlideCount || 8);
+  document.getElementById('pptDeckStyle').value = normalizePptDeckStyle(s.pptDeckStyle || s.pptTemplateStyle || 'auto');
+  document.getElementById('pptDeckTheme').value = normalizePptDeckTheme(s.pptDeckTheme || s.pptTemplateTheme || 'auto');
   document.getElementById('pptRenderStyle').value = s.pptRenderStyle || '';
+  document.getElementById('pptEditableText').checked = !!s.pptEditableText;
   document.getElementById('pptModel').value = s.pptModel || '';
   const temp = s.pptTemperature === undefined ? 0.6 : Number(s.pptTemperature);
   document.getElementById('pptTemperature').value = Number.isFinite(temp) ? temp : 0.6;
   document.getElementById('pptTemperatureVal').textContent = document.getElementById('pptTemperature').value;
-  document.getElementById('pptAestheticScoreThreshold').value = normalizePptAestheticScoreThreshold(s.pptAestheticScoreThreshold);
-  document.getElementById('pptAestheticRewriteLimit').value = normalizePptAestheticRewriteLimit(s.pptAestheticRewriteLimit);
   document.getElementById('pptUnderstandPrompt').value = s.pptUnderstandPrompt || DEFAULT_PPT_UNDERSTAND_PROMPT;
   document.getElementById('pptOutlinePrompt').value = s.pptOutlinePrompt || DEFAULT_PPT_OUTLINE_PROMPT;
   document.getElementById('pptPageTypePrompt').value = s.pptPageTypePrompt || DEFAULT_PPT_PAGE_TYPE_PROMPT;
@@ -701,18 +826,34 @@ function closePptSettings() {
 
 function savePptSettings() {
   const s = state.settings;
+  s.usePpt = !!document.getElementById('pptEnabled').checked;
+  if (s.usePpt) {
+    s.usePlan = false;
+    s.useOutline = false;
+    s.useReflection = false;
+    const planBtn = document.getElementById('planBtn');
+    const outlineBtn = document.getElementById('outlineBtn');
+    if (planBtn) planBtn.classList.remove('plan-active');
+    if (outlineBtn) outlineBtn.classList.remove('outline-active');
+  }
   s.pptSlideCount = normalizePptSlideCount(document.getElementById('pptSlideCount').value);
+  s.pptDeckStyle = normalizePptDeckStyle(document.getElementById('pptDeckStyle').value);
+  s.pptDeckTheme = normalizePptDeckTheme(document.getElementById('pptDeckTheme').value);
+  s.pptTemplateSystem = 'project';
+  s.pptTemplateStyle = s.pptDeckStyle;
+  s.pptTemplateTheme = s.pptDeckTheme;
   s.pptRenderStyle = document.getElementById('pptRenderStyle').value.trim();
+  s.pptEditableText = !!document.getElementById('pptEditableText').checked;
   s.pptModel = document.getElementById('pptModel').value.trim();
   const temp = parseFloat(document.getElementById('pptTemperature').value);
   s.pptTemperature = Number.isFinite(temp) ? temp : 0.6;
-  s.pptAestheticScoreThreshold = normalizePptAestheticScoreThreshold(document.getElementById('pptAestheticScoreThreshold').value);
-  s.pptAestheticRewriteLimit = normalizePptAestheticRewriteLimit(document.getElementById('pptAestheticRewriteLimit').value);
-  s.pptUnderstandPrompt = document.getElementById('pptUnderstandPrompt').value.trim();
-  s.pptOutlinePrompt = document.getElementById('pptOutlinePrompt').value.trim();
-  s.pptPageTypePrompt = document.getElementById('pptPageTypePrompt').value.trim();
-  s.pptHtmlPrompt = document.getElementById('pptHtmlPrompt').value.trim();
+  s.pptUnderstandPrompt = normalizePptPromptOverride(document.getElementById('pptUnderstandPrompt').value, DEFAULT_PPT_UNDERSTAND_PROMPT);
+  s.pptOutlinePrompt = normalizePptPromptOverride(document.getElementById('pptOutlinePrompt').value, DEFAULT_PPT_OUTLINE_PROMPT);
+  s.pptPageTypePrompt = normalizePptPromptOverride(document.getElementById('pptPageTypePrompt').value, DEFAULT_PPT_PAGE_TYPE_PROMPT);
+  s.pptHtmlPrompt = normalizePptPromptOverride(document.getElementById('pptHtmlPrompt').value, DEFAULT_PPT_HTML_PROMPT);
   s.pptSlidePrompt = s.pptHtmlPrompt;
+  if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(!!s.usePpt, { render: false });
+  syncPptComposerHint();
   if (typeof persistSettings === 'function') persistSettings();
   closePptSettings();
   if (typeof toast === 'function') toast('✓ PPT 设置已保存');
@@ -753,14 +894,26 @@ function togglePptMode() {
   if (typeof toast === 'function') toast(s.usePpt ? '✓ 已启用 PPT 模式：下一条消息将生成 PPT' : '✓ 已关闭 PPT 模式');
 }
 
-function buildPptModePayload(userRequest) {
+function buildPptModePayload(userRequest, attachments = []) {
   const s = state.settings || {};
   const model = (s.pptModel || s.currentModel || '').trim();
+  const htmlPrompt = normalizePptPromptOverride(
+    s.pptHtmlPrompt || s.pptSlidePrompt || '',
+    DEFAULT_PPT_HTML_PROMPT,
+    ['请把大纲扩展成适合 16:9 HTML 视觉渲染的页面内容']
+  );
   return {
     user_request: userRequest,
+    attachments: Array.isArray(attachments) ? attachments.map(a => ({ ...(a || {}) })) : [],
     slide_count: normalizePptSlideCount(s.pptSlideCount),
     render_mode: 'html_image',
+    ppt_template_system: 'project',
+    template_system: 'project',
+    ppt_template_style: normalizePptDeckStyle(s.pptDeckStyle || s.pptTemplateStyle || 'auto'),
+    ppt_template_theme: normalizePptDeckTheme(s.pptDeckTheme || s.pptTemplateTheme || 'auto'),
     render_style: s.pptRenderStyle || '',
+    ppt_editable_text: !!s.pptEditableText,
+    editable_text_overlay: !!s.pptEditableText,
     llm_api_key: s.apiKey || '',
     llm_base_url: s.baseUrl || '',
     llm_api_format: s.apiFormat || '',
@@ -769,13 +922,15 @@ function buildPptModePayload(userRequest) {
     llm_max_tokens: Math.max(parseInt(s.maxTokens || 0, 10) || 0, 4096),
     llm_model: model,
     llm_temperature: s.pptTemperature === undefined ? 0.6 : s.pptTemperature,
-    aesthetic_score_threshold: normalizePptAestheticScoreThreshold(s.pptAestheticScoreThreshold),
-    aesthetic_rewrite_limit: normalizePptAestheticRewriteLimit(s.pptAestheticRewriteLimit),
-    ppt_understand_prompt: s.pptUnderstandPrompt || '',
-    ppt_outline_prompt: s.pptOutlinePrompt || '',
-    ppt_page_type_prompt: s.pptPageTypePrompt || '',
-    ppt_html_prompt: s.pptHtmlPrompt || s.pptSlidePrompt || '',
-    ppt_slide_prompt: s.pptHtmlPrompt || s.pptSlidePrompt || ''
+    ppt_understand_prompt: normalizePptPromptOverride(s.pptUnderstandPrompt, DEFAULT_PPT_UNDERSTAND_PROMPT),
+    ppt_outline_prompt: normalizePptPromptOverride(s.pptOutlinePrompt, DEFAULT_PPT_OUTLINE_PROMPT, ['你是资深演示文稿策划专家。请根据用户需求规划 PPT 大纲。']),
+    ppt_page_type_prompt: normalizePptPromptOverride(
+      s.pptPageTypePrompt,
+      DEFAULT_PPT_PAGE_TYPE_PROMPT,
+      ['页面类型是语义类型，不是固定模板限制', '输出 pages，每页包含 page、title、page_type、visual_role、content_blocks。']
+    ),
+    ppt_html_prompt: htmlPrompt,
+    ppt_slide_prompt: htmlPrompt
   };
 }
 
@@ -786,6 +941,103 @@ function currentLastUserText(chat) {
     if (m && m.role === 'user') return typeof _messageTextForEdit === 'function' ? _messageTextForEdit(m) : String(m.content || '');
   }
   return '';
+}
+
+function currentLastUserAttachments(chat) {
+  const msgs = (chat && chat.messages) || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m && m.role === 'user') return Array.isArray(m.attachments) ? m.attachments.map(a => ({ ...(a || {}) })) : [];
+  }
+  return [];
+}
+
+function clonePptAttachments(attachments) {
+  return Array.isArray(attachments) ? attachments.map(a => ({ ...(a || {}) })) : [];
+}
+
+function takePptGuidanceAttachments(chat) {
+  const out = clonePptAttachments(state.pendingAttachments || []);
+  const pendingAI = (typeof takePendingAIAttachments === 'function')
+    ? takePendingAIAttachments(chat && chat.id)
+    : (state.pendingAIAttachments || []).splice(0);
+  for (const att of pendingAI || []) {
+    if (att && !out.some(ex => ex && ex.id === att.id)) out.push({ ...att });
+  }
+  state.pendingAttachments = [];
+  if (typeof renderPendingAtts === 'function') renderPendingAtts();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  return out;
+}
+
+function clearPptGuidanceInput(idx) {
+  const ta = document.getElementById(`pptGuide_${idx}`);
+  if (ta) ta.value = '';
+}
+
+function handlePptGuidancePaste(e) {
+  if (!e || !e.clipboardData || typeof addAttachment !== 'function') return;
+  let added = 0;
+  for (const item of e.clipboardData.items || []) {
+    if (item.kind === 'file') {
+      const f = item.getAsFile();
+      if (f) {
+        addAttachment(f, f.type && f.type.startsWith('image/') ? 'image' : 'file');
+        added += 1;
+      }
+    }
+  }
+  if (added && typeof toast === 'function') toast(`已加入 ${added} 个附件，点击继续后会发送给 PPT 流程`, 1800);
+}
+
+function handlePptGuidanceDragOver(e) {
+  if (e) e.preventDefault();
+}
+
+function handlePptGuidanceDrop(e) {
+  if (!e || !e.dataTransfer || typeof addAttachment !== 'function') return;
+  e.preventDefault();
+  let added = 0;
+  for (const f of e.dataTransfer.files || []) {
+    addAttachment(f, f.type && f.type.startsWith('image/') ? 'image' : 'file');
+    added += 1;
+  }
+  if (added && typeof toast === 'function') toast(`已加入 ${added} 个附件，点击继续后会发送给 PPT 流程`, 1800);
+}
+
+function renderPptStepMeta(metaObj) {
+  if (!metaObj || typeof metaObj !== 'object') return '';
+  const labelMap = {
+    path: '文件',
+    slides: '页数',
+    pages: '页数',
+    titles: '标题',
+    detail_chars: '结构大小',
+    html: 'HTML',
+    html_dir: 'HTML目录',
+    image_dir: '图片目录',
+    mode: '模式',
+    renderer: '渲染器',
+    model: '模型',
+    title: '标题',
+    purpose: '用途',
+    audience: '受众',
+    filename: '文件名',
+    request_chars: '请求长度',
+    target_slides: '目标页数',
+    guidance_count: '用户补充',
+    source_material_count: '素材'
+  };
+  const allowedKeys = new Set(Object.keys(labelMap));
+  return Object.entries(metaObj).filter(([key, value]) => {
+    if (!allowedKeys.has(key)) return false;
+    if (value === undefined || value === null || value === '') return false;
+    if (Array.isArray(value) || typeof value === 'object') return false;
+    return true;
+  }).map(([key, value]) => {
+    const shown = value === true ? '是' : (value === false ? '否' : String(value));
+    return `<span>${escapeHtml(labelMap[key])}：${escapeHtml(shown)}</span>`;
+  }).join('');
 }
 
 function renderPptPanel(m, idx) {
@@ -805,12 +1057,26 @@ function renderPptPanel(m, idx) {
   else if (ppt.status === 'paused') statusBadge = '<span class="outline-status-badge paused">已暂停</span>';
   else statusBadge = '<span class="outline-status-badge paused">待处理</span>';
 
-  const controlHtml = ppt.taskId && (ppt.status === 'paused' || ppt.status === 'running') ? `
+  const controlHtml = ppt.taskId && (ppt.status === 'paused' || ppt.status === 'running') ? (ppt.status === 'paused' ? `
+    <div class="outline-actions paused ppt-task-controls">
+      <div class="outline-actions-hint">PPT 已暂停。可以补充风格、素材、页数、路径或修改意见；不填写也可以直接继续。</div>
+      <textarea class="outline-inject-input" id="pptGuide_${idx}" rows="3"
+        onpaste="handlePptGuidancePaste(event)"
+        ondragover="handlePptGuidanceDragOver(event)"
+        ondrop="handlePptGuidanceDrop(event)"
+        placeholder="给 PPT 流程留言：例如「改成瑞士风」「第 4 页必须用 output/data.csv」「这张截图放在封面」。可在这里粘贴/拖入图片和文件。"></textarea>
+      <div class="outline-actions-btns">
+        <button class="outline-btn resume" onclick="resumePptTaskFromPanel(${idx})">继续执行</button>
+        <button class="outline-btn finish" onclick="resumePptTaskFromPanel(${idx}, true)">仅继续</button>
+        <button class="outline-btn cancel" onclick="cancelPptTaskFromPanel(${idx})">放弃生成</button>
+      </div>
+      <div class="form-hint">任务ID：${escapeHtml(ppt.taskId || '')}</div>
+    </div>` : `
     <div class="ppt-task-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
-      ${ppt.status === 'paused' ? `<button class="btn mini" onclick="resumePptTaskFromPanel(${idx})">继续执行</button>` : `<button class="btn mini" onclick="pausePptTaskFromPanel(${idx})">暂停</button>`}
-      <button class="btn mini danger" onclick="cancelPptTaskFromPanel(${idx})">取消任务</button>
+      <button class="btn mini" onclick="pausePptTaskFromPanel(${idx})">暂停并留言</button>
+      <button class="btn mini danger" onclick="cancelPptTaskFromPanel(${idx})">放弃生成</button>
       <span class="form-hint">任务ID：${escapeHtml(ppt.taskId || '')}</span>
-    </div>` : '';
+    </div>`) : '';
 
   const stats = [
     `${doneCount}/${total} 步`,
@@ -822,14 +1088,7 @@ function renderPptPanel(m, idx) {
     const status = step.status || 'pending';
     const itemClass = status === 'active' || status === 'running' ? 'active' : status;
     const displayStep = step.step || i + 1;
-    const meta = step.meta && typeof step.meta === 'object'
-      ? Object.entries(step.meta).filter(([, value]) => value !== undefined && value !== null && value !== '').map(([key, value]) => {
-          const label = { path: '文件', slides: '页数', pages: '页数', titles: '标题', detail_chars: '结构大小', html: 'HTML', html_dir: 'HTML目录', image_dir: '图片目录', mode: '模式', renderer: '渲染器', model: '模型', base_url: 'Base URL', api_key: 'API Key', api_format: '接口格式', api_path: '接口路径', title: '标题', purpose: '用途', audience: '受众', filename: '文件名', page_types: '页面类型', request_chars: '请求长度', target_slides: '目标页数' }[key] || key;
-          if (key === 'outline') return '';
-          const shown = Array.isArray(value) ? value.join(' ｜ ') : (value === true ? '是' : (value === false ? '否' : String(value)));
-          return `<span>${escapeHtml(label)}：${escapeHtml(shown)}</span>`;
-        }).filter(Boolean).join('')
-      : '';
+    const meta = renderPptStepMeta(step.meta);
     const calls = Array.isArray(step.calls) ? step.calls : [];
     return `
       <li class="outline-item ppt-step ${itemClass}" data-step-id="${escapeHtml(step.id || String(i + 1))}">
@@ -868,12 +1127,15 @@ function renderPptPanel(m, idx) {
   </div>`;
   const configHtml = `
     <div class="ppt-config-grid">
+      <span>工作流：项目模板</span>
+      <span>风格：${escapeHtml(pptDeckStyleLabel(config.ppt_template_style))}</span>
+      <span>主题：${escapeHtml(pptDeckThemeLabel(config.ppt_template_theme))}</span>
       <span>渲染：HTML → 16:9 图片</span>
-      <span>风格：${escapeHtml(pptRenderStyleLabel(config.render_style))}</span>
-      <span>审美阈值：${escapeHtml(String(config.aesthetic_score_threshold || 82))}</span>
-      <span>低分重写：${escapeHtml(String(config.aesthetic_rewrite_limit ?? 2))} 次</span>
+      <span>检查：项目模板规则</span>
       <span>模型：${escapeHtml(config.llm_model || '当前模型')}</span>
       <span>命名：${escapeHtml(config.filename || 'AI 自动命名')}</span>
+      ${config.render_style ? `<span>补充说明：${escapeHtml(pptRenderStyleLabel(config.render_style))}</span>` : ''}
+      ${config.attachment_count ? `<span>初始附件：${escapeHtml(String(config.attachment_count))} 个</span>` : ''}
     </div>`;
 
   const progressHtml = ppt.status === 'running' || ppt.inProgress
@@ -883,12 +1145,12 @@ function renderPptPanel(m, idx) {
   return `
     <div class="outline-panel ppt-panel ${ppt.expanded === false ? 'collapsed' : ''}" data-msg-idx="${idx}">
       <button class="outline-toggle ppt-toggle" onclick="togglePptPanel(${idx})">
-        <span>PPT 生成流程</span>
+        <span>PPT 项目 PPT 工作流</span>
         <span class="outline-stats">${escapeHtml(stats || '准备中')}</span>
       </button>
       <div class="outline-body">
         <div class="outline-section main">
-          <div class="outline-section-header">PPT 图片页流程 ${statusBadge}</div>
+          <div class="outline-section-header">PPT 项目 PPT 图片页流程 ${statusBadge}</div>
           <div class="outline-section-body">
             ${total ? `<div class="outline-progress-bar"><div class="outline-progress-fill" style="width:${pct}%;"></div></div>` : ''}
             ${configHtml}
@@ -912,19 +1174,52 @@ function togglePptPanel(idx) {
   if (typeof saveData === 'function') saveData();
 }
 
-async function resumePptTaskFromPanel(idx) {
+async function resumePptTaskFromPanel(idx, skipGuidance = false) {
   const c = currentChat();
   const msg = c && c.messages && c.messages[idx];
   if (!msg || !msg.pptMode || !msg.pptMode.taskId) return;
   const taskId = msg.pptMode.taskId;
+  const ta = document.getElementById(`pptGuide_${idx}`);
+  const guidanceText = skipGuidance ? '' : (ta ? ta.value.trim() : '');
+  const attachments = skipGuidance ? [] : takePptGuidanceAttachments(c);
+  const hasGuidance = !!guidanceText || attachments.length > 0;
   msg.pptMode.status = 'running';
   msg.pptMode.inProgress = true;
-  msg.pptMode.progressText = '正在恢复 PPT 任务...';
+  msg.pptMode.progressText = hasGuidance ? '正在带着用户补充继续 PPT 任务...' : '正在恢复 PPT 任务...';
   refreshPptModeMessage(idx, c);
-  await controlPptTask(taskId, 'resume', { skipConfirm: true });
-  let since = 0;
+  const ctrl = new AbortController();
+  if (typeof beginChatTask === 'function') beginChatTask(c.id, ctrl, { resetStop: true });
+  else state.abortCtrl = ctrl;
+  if (typeof setChatTaskMode === 'function') setChatTaskMode(c.id, 'ppt');
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  let since = msg.pptMode.progressIndex || 0;
   try {
+    if (hasGuidance) {
+      const snap = await controlPptTask(taskId, 'guide', {
+        message: guidanceText,
+        attachments,
+        source: 'ppt-card',
+        since
+      }, { skipConfirm: true });
+      if (snap && snap.ok) applyPptTaskSnapshot(msg.pptMode, snap);
+      clearPptGuidanceInput(idx);
+    } else {
+      const snap = await controlPptTask(taskId, 'resume', { since }, { skipConfirm: true });
+      if (snap && snap.ok) applyPptTaskSnapshot(msg.pptMode, snap);
+    }
+    since = msg.pptMode.progressIndex || since;
     while (true) {
+      const task = typeof chatTaskById === 'function' ? chatTaskById(c.id) : null;
+      if (ctrl.signal.aborted || !!(task && task.stopRequested) || !!state.stopRequested) {
+        const pauseSnap = await controlPptTask(taskId, 'pause', { since }, { skipConfirm: true });
+        if (pauseSnap && pauseSnap.ok) applyPptTaskSnapshot(msg.pptMode, pauseSnap);
+        msg.pptMode.status = 'paused';
+        msg.pptMode.inProgress = false;
+        msg.pptMode.progressText = '已请求暂停，当前小步结束后会停住。';
+        refreshPptModeMessage(idx, c);
+        return;
+      }
       const snap = await pollPptTask(taskId, since, { skipConfirm: true });
       if (!snap || !snap.ok) throw new Error((snap && snap.error) || 'PPT 任务轮询失败');
       since = snap.progress_index || since;
@@ -940,7 +1235,11 @@ async function resumePptTaskFromPanel(idx) {
         return;
       }
       if (snap.status === 'error' || snap.status === 'cancelled') throw new Error(snap.error || 'PPT 任务已结束');
-      if (snap.status === 'paused') return;
+      if (snap.status === 'paused') {
+        msg.pptMode.inProgress = false;
+        refreshPptModeMessage(idx, c);
+        return;
+      }
       await new Promise(resolve => setTimeout(resolve, 900));
     }
   } catch (e) {
@@ -948,17 +1247,88 @@ async function resumePptTaskFromPanel(idx) {
     msg.pptMode.error = e.message || String(e);
     msg.pptMode.inProgress = false;
     refreshPptModeMessage(idx, c);
+  } finally {
+    const task = typeof chatTaskById === 'function' ? chatTaskById(c.id) : null;
+    if (!task || task.abortCtrl === ctrl) {
+      if (typeof clearChatTask === 'function') clearChatTask(c.id);
+      else {
+        state.isGenerating = false;
+        state.abortCtrl = null;
+      }
+    }
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+    if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
 
 async function pausePptTaskFromPanel(idx) {
   const c = currentChat(); const msg = c && c.messages && c.messages[idx];
-  if (msg && msg.pptMode && msg.pptMode.taskId) await controlPptTask(msg.pptMode.taskId, 'pause', { skipConfirm: true });
+  if (msg && msg.pptMode && msg.pptMode.taskId) {
+    msg.pptMode.status = 'paused';
+    msg.pptMode.progressText = '已请求暂停，当前小步结束后会停住。';
+    refreshPptModeMessage(idx, c);
+    const snap = await controlPptTask(msg.pptMode.taskId, 'pause', { since: msg.pptMode.progressIndex || 0 }, { skipConfirm: true });
+    if (snap && snap.ok) applyPptTaskSnapshot(msg.pptMode, snap);
+    refreshPptModeMessage(idx, c);
+  }
 }
 
 async function cancelPptTaskFromPanel(idx) {
   const c = currentChat(); const msg = c && c.messages && c.messages[idx];
-  if (msg && msg.pptMode && msg.pptMode.taskId && confirm('确定取消这个 PPT 后端任务吗？取消后不能恢复。')) await controlPptTask(msg.pptMode.taskId, 'cancel', { skipConfirm: true });
+  if (msg && msg.pptMode && msg.pptMode.taskId && confirm('确定取消这个 PPT 后端任务吗？取消后不能恢复。')) {
+    const snap = await controlPptTask(msg.pptMode.taskId, 'cancel', { since: msg.pptMode.progressIndex || 0 }, { skipConfirm: true });
+    if (snap && snap.ok) applyPptTaskSnapshot(msg.pptMode, snap);
+    msg.pptMode.status = 'cancelled';
+    msg.pptMode.inProgress = false;
+    msg.content = 'PPT 生成已放弃。';
+    refreshPptModeMessage(idx, c);
+  }
+}
+
+function latestActivePptMessageIndex(chat) {
+  const msgs = (chat && chat.messages) || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const ppt = msgs[i] && msgs[i].pptMode;
+    if (ppt && ppt.taskId && (ppt.status === 'running' || ppt.status === 'paused')) return i;
+  }
+  return -1;
+}
+
+function queuePptMidrunGuidanceFromComposer(chat, input, text) {
+  if (!chat || (!text && !(state.pendingAttachments || []).length)) return false;
+  const idx = latestActivePptMessageIndex(chat);
+  if (idx < 0) return false;
+  const msg = chat.messages[idx];
+  const attachments = takePptGuidanceAttachments(chat);
+  if (input) {
+    input.value = '';
+    input.style.height = 'auto';
+  }
+  if (typeof traceUserMessage === 'function') traceUserMessage(text || '');
+  if (!Array.isArray(msg.pptMode.guidance)) msg.pptMode.guidance = [];
+  msg.pptMode.guidance.push({
+    message: text || '',
+    source: 'composer',
+    attachments: attachments.map(a => ({ name: a.name, type: a.type, mime: a.mime, size: a.size }))
+  });
+  msg.pptMode.progressText = '已收到中途补充，后续 PPT 步骤会优先遵循。';
+  refreshPptModeMessage(idx, chat);
+  controlPptTask(msg.pptMode.taskId, 'guide', {
+    message: text || '',
+    attachments,
+    source: 'composer',
+    since: msg.pptMode.progressIndex || 0
+  }, { skipConfirm: true }).then(snap => {
+    if (snap && snap.ok) {
+      applyPptTaskSnapshot(msg.pptMode, snap);
+      refreshPptModeMessage(idx, chat);
+    }
+  }).catch(err => {
+    if (typeof toast === 'function') toast(`PPT 留言发送失败：${err && err.message ? err.message : err}`, 3000);
+  });
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof toast === 'function') toast('已发送到 PPT 流程，后续步骤会读取这条补充', 1800);
+  return true;
 }
 
 async function callAPIWithPptMode(options = {}) {
@@ -971,7 +1341,7 @@ async function callAPIWithPptMode(options = {}) {
     await fallbackToNormalChatFromPptMode(options);
     return;
   }
-  const payload = buildPptModePayload(userRequest);
+  const payload = buildPptModePayload(userRequest, currentLastUserAttachments(c));
 
   const aiMsg = {
     role: 'assistant',
@@ -1030,7 +1400,7 @@ async function callAPIWithPptMode(options = {}) {
     });
     const htmlEvent = addPptStepCall(aiMsg.pptMode, 'html_design', {
       key: 'html_design:generate',
-      name: 'step_5_html_design',
+      name: 'step_6_html_design',
       status: 'pending',
       args: { target_slides: payload.slide_count, prompt: payload.ppt_html_prompt ? '自定义' : '默认' },
       result: '等待 HTML 设计稿、截图和 PPT 导出结果...'

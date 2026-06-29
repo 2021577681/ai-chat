@@ -1,4 +1,4 @@
-// ============ 常量配置 ============
+﻿// ============ 常量配置 ============
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
@@ -213,298 +213,35 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'generate_ppt',
-    description: '📊 生成真实 .pptx。新 PPT 模式使用固定流程：Step 1 理解用户主题和内容 → Step 2 生成 PPT 大纲 → Step 3 为每一页确定页面类型 → Step 5 为每页生成自包含 16:9 HTML 设计稿 → Step 6 使用浏览器渲染为 16:9 图片 → Step 7 将图片铺满插入 PPT → Step 9 导出 PPT。当前阶段不使用模板限制、不做校验/修复闭环；AI 自己命名 PPT，最终 PPT 的每一页都是一张完整图片。',
+    description: '📊 生成真实 .pptx。PPT 模式已迁移为 项目 PPT 工作流：理解/澄清需求 → 叙事弧大纲 → 选择电子杂志或瑞士国际主义风格 → 绑定登记版式与预设主题色 → 生成 项目 HTML 模板页 → 浏览器截图 → 将图片铺满插入 PPT → 导出。所有模板、references 和校验脚本均使用项目内 server/ppt_templates/project。',
     parameters: {
       type: 'object',
       properties: {
-        user_request: { type: 'string', description: '高层自然语言需求。未提供 slides 时，后端会走新的图片页流程：理解主题、生成大纲、确定页面类型、生成 HTML、浏览器截图、图片铺入 PPT、导出。' },
+        user_request: { type: 'string', description: '高层自然语言需求。后端会走 项目 PPT 工作流：理解主题、叙事弧大纲、选择风格/主题、登记版式、生成模板 HTML、截图、图片铺入 PPT、导出。' },
         request: { type: 'string', description: 'user_request 的别名。' },
         prompt: { type: 'string', description: 'user_request 的别名。' },
         slide_count: { type: 'number', description: '目标页数，1-50。未提供时后端会从用户需求中提取，仍没有则默认 8 页。' },
-        render_mode: { type: 'string', description: '渲染模式。新模式使用 html_image：每页 HTML 设计稿渲染成一张 16:9 图片再铺入 PPT。' },
-        render_style: { type: 'string', description: '可选视觉风格偏好，不是模板限制；留空由 AI 根据主题自由设计。' },
+        render_mode: { type: 'string', description: '渲染模式。当前固定使用 html_image：每页 项目 HTML 模板页渲染成一张 16:9 图片再铺入 PPT。' },
+        ppt_template_system: { type: 'string', description: '固定为 project；兼容参数，后端会强制使用项目内 项目 PPT 工作流。' },
+        ppt_template_style: { type: 'string', description: '模板风格：auto、magazine（电子杂志 × 电子墨水）或 swiss（瑞士国际主义）。' },
+        ppt_template_theme: { type: 'string', description: '项目主题色：auto、ink_classic、indigo_porcelain、forest_ink、kraft_paper、dune、ikb、lemon、lemon_green、safety_orange。' },
+        render_style: { type: 'string', description: '可选补充说明，如受众、场景、素材/截图处理、硬约束；不会切回旧通用生成逻辑。' },
+        ppt_editable_text: { type: 'boolean', description: 'PPT 文本可编辑模式。true 时后端截图无文字背景，并把 HTML 文本转成 PPT 可编辑文本框。' },
+        editable_text_overlay: { type: 'boolean', description: 'ppt_editable_text 的别名。' },
         ppt_understand_prompt: { type: 'string', description: '可选：Step 1 理解主题和 AI 命名的自定义 Prompt。' },
         ppt_outline_prompt: { type: 'string', description: '可选：Step 2 生成 PPT 大纲的自定义 Prompt。' },
-        ppt_page_type_prompt: { type: 'string', description: '可选：Step 3 确定每页页面类型的自定义 Prompt。' },
-        ppt_html_prompt: { type: 'string', description: '可选：Step 5 生成每页 HTML 设计稿的自定义 Prompt。' },
-        aesthetic_score_threshold: { type: 'number', description: '可选：PPT 图片页流程审美评分阈值，40-95，默认 82；低于该分数会触发低分重写。' },
-        aesthetic_rewrite_limit: { type: 'number', description: '可选：每页低分自动重写次数，0-3，默认 2；0 表示只评分不重写。' },
-        filename: { type: 'string', description: '兼容旧参数；新图片页流程默认由 AI 自动命名 PPT，不需要传文件名。' },
-        path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
-        template_path: { type: 'string', description: '兼容旧参数；新图片页流程不使用 PPT 模板限制。' },
-        template_mode: { type: 'string', description: '兼容旧参数；新图片页流程不使用模板模式。' },
-        replacements: { type: 'object', description: '可选的模板占位符替换映射，如 {title, subtitle, body, footer, 自定义占位符名}。支持 {{title}}、{title}、[title]、<title>、《title》。未提供时也会按标题/正文槽位自动填充。' },
-        trim_extra_template_slides: { type: 'boolean', description: '模板页数多于 slides 时是否裁掉多余模板页，默认 true；模板页数少于 slides 时会追加按模板风格生成的页面，避免静默丢内容。' },
-        profile_path: { type: 'string', description: '可选模板分析缓存 JSON 输出路径；传 template_path 时默认写入 output/ppt_templates/<模板名>_<hash>.profile.json。' },
-        title: { type: 'string', description: 'PPT 总标题' },
-        subtitle: { type: 'string', description: 'PPT 副标题，可用于封面' },
-        style: {
-          type: 'object',
-          description: '全局文字和主题样式。可含 font_family/font_size/title_font_size/body_font_size/color/text_color/primary_color/accent_color/background_color/muted_color/bold/italic/align。颜色支持 #RRGGBB、rgb(37,99,235)、primary/text/muted/accent/white/black 等。页面和具体文本对象的 style 会覆盖全局样式。',
-          properties: {
-            font_family: { type: 'string', description: '全局字体，例如 Microsoft YaHei、SimSun、Arial' },
-            font_size: { type: 'number', description: '全局默认字号，建议 10-32' },
-            title_font_size: { type: 'number', description: '页面标题默认字号' },
-            body_font_size: { type: 'number', description: '正文默认字号' },
-            color: { type: 'string', description: '全局默认文字颜色，例如 #0f172a' },
-            primary_color: { type: 'string', description: '主题主色，例如 #2563eb' },
-            accent_color: { type: 'string', description: '强调色，例如 #f97316' },
-            background_color: { type: 'string', description: '页面背景色，例如 #f8fafc' },
-            muted_color: { type: 'string', description: '弱化文字颜色' },
-            bold: { type: 'boolean', description: '全局默认是否加粗' },
-            italic: { type: 'boolean', description: '全局默认是否斜体' },
-            align: { type: 'string', description: '默认对齐：left/center/right/justify' }
-          }
-        },
-        theme: {
-          type: 'object',
-          description: '全局主题色别名，等价于 style 中的主题色设置；如果同时提供 style 和 theme，style 优先生效。'
-        },
-        slides: {
-          type: 'array',
-          description: '幻灯片列表。强烈建议组合：cover + agenda + 多种矢量版式 + summary。学术/项目汇报优先使用 architecture/method_pipeline/table/chart/experiment_design/ablation；通用内容页使用 cards/process/timeline/comparison 等。尽量不要全用 bullets。每页标题不超过 20 字，要点 3-5 条。每页和每个文本对象可带 style，例如 {font_family,font_size,color,bold,italic,align}。',
-          items: {
-            type: 'object',
-            properties: {
-              type: {
-                type: 'string',
-                description: '页面类型：cover、agenda、three_cards、process、timeline、comparison、two_column、matrix、pyramid、cycle、funnel、quote、architecture 项目架构、method_pipeline 研究流程、table 表格、chart 图表、experiment_design 实验设计、ablation 消融实验、summary、bullets。做 PPT 时内容页优先选矢量版式。'
-              },
-              title: { type: 'string', description: '页面标题' },
-              subtitle: { type: 'string', description: '封面或章节页副标题' },
-              style: {
-                type: 'object',
-                description: '本页默认样式，覆盖全局 style。可含 font_family/font_size/color/bold/italic/align/title_font_size/body_font_size 等。'
-              },
-              title_style: {
-                type: 'object',
-                description: '本页标题样式，覆盖全局标题样式。可含 font_family/font_size/color/bold/italic/align。'
-              },
-              body_style: {
-                type: 'object',
-                description: '本页正文/说明文字样式，覆盖全局正文样式。可含 font_family/font_size/color/bold/italic/align。'
-              },
-              layout_contract: {
-                type: 'object',
-                description: '本页生成前布局约束。用于让 AI 在生成阶段明确元素搭配，而不是生成后靠缩字号修。可含 max_density、safe_zones、composition_groups、avoid_font_shrink。'
-              },
-              composition_groups: {
-                type: 'array',
-                description: '显式声明本页有意组合的图形组。多个图形叠加构成一个图标、流程节点、徽章、卡片装饰或复杂图案时必须填写，验证和自动修复会据此避免误拆。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    id: { type: 'string', description: '组合图形组 ID，例如 cycle_diagram、process_flow、card_grid' },
-                    purpose: { type: 'string', description: '组合意图说明' },
-                    allow_overlap: { type: 'boolean', description: '该组内图形是否允许有意重叠，通常为 true' }
-                  }
-                }
-              },
-              avoid_font_shrink: {
-                type: 'boolean',
-                description: '是否避免自动修复阶段靠缩小字号兜底；默认建议 true，内容放不下时应优先压缩内容、拆页或换宽松版式。'
-              },
-              bullets: {
-                type: 'array',
-                description: '要点列表。可传字符串，或 {text, level, style} 对象；style 可指定该条文字的字体、字号、颜色等。',
-                items: {
-                  oneOf: [
-                    { type: 'string' },
-                    {
-                      type: 'object',
-                      properties: {
-                        text: { type: 'string', description: '要点文本' },
-                        level: { type: 'number', description: '缩进层级，0-4' },
-                        style: { type: 'object', description: '该条要点样式，例如 {font_size:18,color:"#dc2626",bold:true}' }
-                      }
-                    }
-                  ]
-                }
-              },
-              items: {
-                type: 'array',
-                description: '目录页或总结页条目；等价于 bullets',
-                items: { type: 'string' }
-              },
-              content: { type: 'string', description: '可选正文；未提供 bullets 时使用' },
-              cards: {
-                type: 'array',
-                description: 'three_cards 卡片列表，建议 3-4 个。每项可含 title/icon/desc。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    title: { type: 'string', description: '卡片标题' },
-                    icon: { type: 'string', description: '可选图标字符或序号，如 ①、🧭' },
-                    desc: { type: 'string', description: '卡片说明，建议不超过 30 字' },
-                    style: { type: 'object', description: '整张卡片文字默认样式' },
-                    title_style: { type: 'object', description: '卡片标题样式' },
-                    desc_style: { type: 'object', description: '卡片说明样式' },
-                    icon_style: { type: 'object', description: '卡片图标/序号样式' }
-                  }
-                }
-              },
-              steps: {
-                type: 'array',
-                description: 'process 流程步骤，建议 3-5 个；也可用于 timeline。每项可含 title/desc。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    title: { type: 'string', description: '步骤标题' },
-                    desc: { type: 'string', description: '步骤说明，建议不超过 24 字' },
-                    style: { type: 'object', description: '该步骤默认文字样式' },
-                    title_style: { type: 'object', description: '步骤标题样式' },
-                    desc_style: { type: 'object', description: '步骤说明样式' }
-                  }
-                }
-              },
-              events: {
-                type: 'array',
-                description: 'timeline 时间轴事件，建议 3-5 个。每项可含 time/title/desc。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    time: { type: 'string', description: '阶段、时间或里程碑标签' },
-                    title: { type: 'string', description: '事件标题' },
-                    desc: { type: 'string', description: '事件说明，建议不超过 24 字' },
-                    style: { type: 'object', description: '该事件默认文字样式' },
-                    title_style: { type: 'object', description: '事件标题样式' },
-                    desc_style: { type: 'object', description: '事件说明样式' },
-                    label_style: { type: 'object', description: '时间/阶段标签样式' }
-                  }
-                }
-              },
-              left: {
-                type: 'object',
-                description: 'comparison 左侧对比项，格式 {title, items}',
-                properties: {
-                  title: { type: 'string', description: '左侧标题' },
-                  items: { type: 'array', items: { type: 'string' }, description: '左侧要点' }
-                }
-              },
-              right: {
-                type: 'object',
-                description: 'comparison 右侧对比项，格式 {title, items}',
-                properties: {
-                  title: { type: 'string', description: '右侧标题' },
-                  items: { type: 'array', items: { type: 'string' }, description: '右侧要点' }
-                }
-              },
-              quadrants: {
-                type: 'array',
-                description: 'matrix 四象限内容，建议 4 项。每项可含 title/desc。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    title: { type: 'string', description: '象限标题' },
-                    desc: { type: 'string', description: '象限说明' },
-                    style: { type: 'object', description: '该象限默认文字样式' },
-                    title_style: { type: 'object', description: '象限标题样式' },
-                    desc_style: { type: 'object', description: '象限说明样式' }
-                  }
-                }
-              },
-              levels: {
-                type: 'array',
-                description: 'pyramid 金字塔层级，从底层到顶层或从基础到高级，建议 3-5 项。',
-                items: { type: 'string' }
-              },
-              stages: {
-                type: 'array',
-                description: 'funnel 漏斗阶段，建议 3-5 项。每项可为字符串或 {title, desc}。',
-                items: {
-                  oneOf: [
-                    { type: 'string' },
-                    {
-                      type: 'object',
-                      properties: {
-                        title: { type: 'string', description: '阶段标题' },
-                        desc: { type: 'string', description: '阶段说明' }
-                      }
-                    }
-                  ]
-                }
-              },
-              quote: { type: 'string', description: 'quote 金句页的核心引用文本' },
-              author: { type: 'string', description: 'quote 金句页引用来源或署名' },
-              quote_style: { type: 'object', description: 'quote 金句正文样式，可含 font_family/font_size/color/bold/italic/align' },
-              author_style: { type: 'object', description: 'quote 署名样式' },
-              layers: {
-                type: 'array',
-                description: 'architecture 项目/系统架构层，建议 3-5 层。每项 {title, desc, items}，items 是模块列表。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    title: { type: 'string', description: '架构层标题，如 数据层、模型层、应用层' },
-                    desc: { type: 'string', description: '可选层说明' },
-                    items: { type: 'array', items: { type: 'string' }, description: '该层包含的模块/组件；如需单项样式，可传 {text, style}' },
-                    style: { type: 'object', description: '该架构层默认文字样式' },
-                    title_style: { type: 'object', description: '架构层标题样式' },
-                    desc_style: { type: 'object', description: '架构层说明样式' }
-                  }
-                }
-              },
-              headers: {
-                type: 'array',
-                description: 'table/ablation 表头，建议 3-6 列。',
-                items: { type: 'string' }
-              },
-              rows: {
-                type: 'array',
-                description: 'table/ablation 表格行。每行是字符串数组，或对象数组。',
-                items: {
-                  oneOf: [
-                    { type: 'array', items: { type: 'string' } },
-                    { type: 'object' }
-                  ]
-                }
-              },
-              categories: {
-                type: 'array',
-                description: 'chart 图表分类标签，例如模型名、实验轮次。',
-                items: { type: 'string' }
-              },
-              values: {
-                type: 'array',
-                description: 'chart 图表数值，与 categories 对应。',
-                items: { type: 'number' }
-              },
-              chart_type: {
-                type: 'string',
-                description: 'chart 图表类型：bar 柱状图 或 line 折线图。默认 bar。'
-              },
-              groups: {
-                type: 'array',
-                description: 'experiment_design 实验组列表，建议 2-4 组。每项 {name, method, metrics}。',
-                items: {
-                  type: 'object',
-                  properties: {
-                    name: { type: 'string', description: '实验组名，如 Baseline、Ours' },
-                    method: { type: 'string', description: '实验方法说明' },
-                    metrics: { type: 'array', items: { type: 'string' }, description: '评价指标；如需单项样式，可传 {text, style}' },
-                    style: { type: 'object', description: '该实验组默认文字样式' },
-                    title_style: { type: 'object', description: '实验组标题样式' },
-                    desc_style: { type: 'object', description: '实验方法说明样式' }
-                  }
-                }
-              },
-              variants: {
-                type: 'array',
-                description: 'ablation 消融实验变体；可作为 rows 的别名。',
-                items: {
-                  oneOf: [
-                    { type: 'array', items: { type: 'string' } },
-                    { type: 'object' }
-                  ]
-                }
-              },
-              center: {
-                type: 'string',
-                description: 'cycle 循环闭环中心文字，例如 闭环、增长飞轮'
-              }
-            }
-          }
-        }
-      },
+        ppt_page_type_prompt: { type: 'string', description: '可选：Step 3 确定每页页面类型、项目 layout_id、theme_class 和图片槽位的自定义 Prompt。' },
+        ppt_html_prompt: { type: 'string', description: '可选：Step 6 生成 项目 slide section 的自定义 Prompt；后端会套入项目内 HTML 模板。' },
+        path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<AI 自动命名文件名>.pptx。' },
+        output_path: { type: 'string', description: 'path 的别名。' },
+        llm_model: { type: 'string', description: '可选：本次 PPT 规划使用的模型；留空使用当前模型。' },
+        llm_temperature: { type: 'number', description: '可选：PPT 规划温度，默认 0.6。' },
+        llm_max_tokens: { type: 'number', description: '可选：LLM 最大输出 token；后端会保证至少满足各阶段需要。' },
+        llm_api_key: { type: 'string', description: '可选：沿用当前会话 API Key。' },
+        llm_base_url: { type: 'string', description: '可选：沿用当前会话 Base URL。' },
+        llm_api_format: { type: 'string', description: '可选：openai、responses、anthropic 等接口格式。' },
+        llm_api_path: { type: 'string', description: '可选：自定义 LLM API path。' },
+        llm_json_headers: { type: 'string', description: '可选：JSON 字符串形式的额外请求头。' }      },
       required: []
     },
     code: 'return await generatePpt(args);'
@@ -1056,3 +793,4 @@ const BUILTIN_TOOLS = [
     code: 'return await aiGitRestore(args.commit, args.path);'
   }
 ];
+

@@ -94,14 +94,18 @@ function _clearComposerAfterSend(input) {
 function _canGuideCurrentTask(chatId) {
   const task = (typeof chatTaskById === 'function') ? chatTaskById(chatId) : null;
   if (!task || !task.isGenerating) return false;
+  if (task.mode === 'ppt' && typeof queuePptMidrunGuidanceFromComposer === 'function') return true;
   return !task.mode || task.mode === 'chat';
 }
 
 function queueMidrunGuidance(chat, input, text) {
   if (!chat || !input || (!text && !state.pendingAttachments.length)) return false;
   if (!_canGuideCurrentTask(chat.id)) return false;
-  const userMsg = _buildUserMessageFromInput(chat, text, { midrunGuidance: true });
   const task = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
+  if (task && task.mode === 'ppt' && typeof queuePptMidrunGuidanceFromComposer === 'function') {
+    return queuePptMidrunGuidanceFromComposer(chat, input, text);
+  }
+  const userMsg = _buildUserMessageFromInput(chat, text, { midrunGuidance: true });
   if (task && task.pendingGuidance) {
     const previous = task.pendingGuidance;
     previous.content = [previous.content || '', userMsg.content || ''].filter(Boolean).join('\n\n');

@@ -113,8 +113,15 @@ class PptMixin:
         if command in ('status', 'poll', 'get'):
             since = body.get('since') if body.get('since') is not None else data.get('since')
             return self._send_json(200, get_ppt_task(task_id, since or 0))
-        if command in ('pause', 'stop', 'resume', 'cancel', 'abort'):
-            return self._send_json(200, control_ppt_task(task_id, command))
+        if command in ('pause', 'stop', 'resume', 'cancel', 'abort', 'guide', 'guidance', 'feedback', 'comment', 'resume_with_guidance'):
+            control_payload = {}
+            if isinstance(data, dict):
+                control_payload.update(data)
+            if isinstance(body, dict):
+                for key, value in body.items():
+                    if key != 'data':
+                        control_payload[key] = value
+            return self._send_json(200, control_ppt_task(task_id, command, control_payload))
         return self._send_json(200, {'ok': False, 'error': f'未知 PPT 任务命令: {command}'})
 
     def handle_generate_ppt(self, body):
