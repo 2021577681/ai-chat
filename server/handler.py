@@ -245,6 +245,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_git(body)
             elif action == 'generate_ppt':
                 self.handle_generate_ppt(body)
+            elif action == 'ppt_task':
+                self.handle_ppt_task(body)
             elif action == 'preview_ppt':
                 self.handle_preview_ppt(body)
             elif action == 'validate_ppt':

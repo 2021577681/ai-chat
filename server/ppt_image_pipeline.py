@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import time
+import random
 from pathlib import Path
 
 from . import config
@@ -57,7 +58,8 @@ DEFAULT_PAGE_TYPE_PROMPT = """你是演示信息架构设计师。请为大纲�
 要求：
 1. pages 数量必须和大纲一致。
 2. page_type 是语义类型，不是固定 PPT 模板限制。
-3. 让 AI 后续 HTML 设计可以自由发挥视觉表现。"""
+3. 必须根据 design_system 为每页选择不同的信息组织方式，不要把所有页面都设计成同一种卡片网格。
+4. 每页都要给出 visual_role，说明本页更适合用大标题、时间线、对比、流程、数据卡、引语、分区叙事或自由画布中的哪一种表达。"""
 
 
 DEFAULT_HTML_PROMPT = """你是资深 HTML 演示页面设计师。请为单页 PPT 生成完整、可截图的 16:9 HTML 设计稿。
@@ -66,13 +68,101 @@ DEFAULT_HTML_PROMPT = """你是资深 HTML 演示页面设计师。请为单页 
 1. 画布为 1600x900 或自适应 16:9，body margin 为 0。
 2. HTML 必须自包含，CSS 写在 <style> 内，不依赖外网字体、图片、脚本或第三方库。
 3. 不要输出 Markdown，不要输出解释。
-4. 设计应根据主题自由发挥，不受固定 PPT 模板限制。
-5. 页面信息必须完整但不拥挤，文本不能明显溢出画布。"""
+4. 必须严格使用输入中的 design_system，包括 theme_name、palette、typography、shape_language、composition_rules。
+5. 必须根据 page.page_type、page.visual_role 和 page_variant 选择版式，禁止每页都使用相同的居中标题 + 二列卡片网格。
+6. 同一份 PPT 内要保持统一视觉语言，但每页的构图必须有明显差异：封面可大标题/视觉符号，议程可纵向导航，流程可时间线/阶梯，比较可左右分栏，数据页可大数字/图表感布局，总结页可结论墙。
+7. 页面信息必须完整但不拥挤，文本不能明显溢出画布。
+8. 只能用 CSS 形状、渐变、边框、图标感符号和排版创造视觉效果，不要引用外部图片。"""
 
 
-def generate_html_image_ppt(data):
+_STYLE_PRESETS = [
+    {
+        "theme_name": "calm_editorial",
+        "palette": ["#F6F1E8", "#102A43", "#2F80ED", "#D98C33", "#FFFFFF"],
+        "typography": "高对比编辑部风格：大标题、细分隔线、留白充足",
+        "shape_language": "细线框、编号标签、半透明纸张卡片",
+        "mood": "克制、专业、叙事感",
+    },
+    {
+        "theme_name": "dark_neon_strategy",
+        "palette": ["#08111F", "#E6F7FF", "#00D1FF", "#8B5CF6", "#14F195"],
+        "typography": "深色科技风：强烈标题、荧光强调、小号数据标签",
+        "shape_language": "发光线条、网格背景、玻璃拟态信息块",
+        "mood": "前沿、战略、未来感",
+    },
+    {
+        "theme_name": "warm_humanistic",
+        "palette": ["#FFF7ED", "#3B2F2F", "#F97316", "#10B981", "#FDE68A"],
+        "typography": "温暖人文风：圆润标题、柔和正文、重点色块",
+        "shape_language": "圆角大色块、有机曲线、便签式模块",
+        "mood": "亲和、清晰、有温度",
+    },
+    {
+        "theme_name": "minimal_consulting",
+        "palette": ["#F8FAFC", "#0F172A", "#2563EB", "#64748B", "#E2E8F0"],
+        "typography": "咨询汇报风：层级清晰、数字突出、紧凑但不拥挤",
+        "shape_language": "矩形分区、轴线、指标卡、流程箭头",
+        "mood": "理性、可信、商业化",
+    },
+    {
+        "theme_name": "bold_poster",
+        "palette": ["#111827", "#FFF7D6", "#EF4444", "#FACC15", "#38BDF8"],
+        "typography": "海报风：超大标题、强对比、短句冲击",
+        "shape_language": "大几何图形、斜切块、醒目徽章",
+        "mood": "有冲击力、年轻、鲜明",
+    },
+]
+
+
+_PAGE_VARIANTS = {
+    "cover": ["hero_asymmetric", "poster_title", "large_symbol"],
+    "agenda": ["vertical_nav", "numbered_rail", "chapter_cards"],
+    "section": ["divider_big_number", "quote_band", "full_bleed_shape"],
+    "concept": ["single_big_idea", "hub_and_spoke", "three_insight_cards"],
+    "comparison": ["split_screen", "matrix", "before_after"],
+    "data_story": ["big_number_dashboard", "chart_like_panels", "metric_ladder"],
+    "process": ["horizontal_timeline", "step_staircase", "loop_flow"],
+    "timeline": ["horizontal_timeline", "milestone_map", "vertical_chronicle"],
+    "case": ["storyboard", "problem_solution_result", "evidence_cards"],
+    "quote": ["big_quote", "pull_quote_sidebar", "statement_poster"],
+    "summary": ["takeaway_wall", "three_conclusions", "closing_checklist"],
+    "closing": ["final_statement", "next_step_cards", "minimal_end"],
+    "freeform": ["asymmetric_canvas", "modular_grid", "visual_metaphor"],
+}
+
+
+def _emit_progress(progress, **event):
+    if callable(progress):
+        try:
+            progress(event)
+        except Exception:
+            pass
+
+
+def _run_checkpoint(checkpoint, label=""):
+    if callable(checkpoint):
+        checkpoint(label)
+
+
+def _emit_stage_start(progress, checkpoint, stage, message, detail=None):
+    _emit_progress(progress, type="step_start", status="running", stage=stage, step=stage, message=message, detail=detail or {})
+    _run_checkpoint(checkpoint, stage)
+
+
+def _emit_stage_done(progress, stage, message, detail=None):
+    _emit_progress(progress, type="step_done", status="done", stage=stage, step=stage, message=message, detail=detail or {})
+
+
+def _emit_substep(progress, stage, name, message, status="running", detail=None):
+    _emit_progress(progress, type="substep", status=status, stage=stage, step=stage, name=name, message=message, detail=detail or {})
+
+
+def generate_html_image_ppt(data, progress=None, checkpoint=None):
     """Generate a PPTX where every slide is one rendered image."""
     try:
+        _emit_progress(progress, type="task", status="running", stage="init", message="正在初始化 PPT 图片页流程。")
+        _run_checkpoint(checkpoint, "init")
+
         try:
             from pptx import Presentation
             from pptx.util import Inches
@@ -94,11 +184,41 @@ def generate_html_image_ppt(data):
         os.makedirs(html_dir, exist_ok=True)
         os.makedirs(image_dir, exist_ok=True)
 
+        _emit_stage_start(progress, checkpoint, "understand", "正在理解 PPT 主题、用途、受众与文件名。", {"target_slide_count": target_count})
         intent = _understand_request(request_text, target_count, options)
+        _emit_stage_done(progress, "understand", f"已理解主题：{intent.get('title') or '未命名'}。", {"title": intent.get("title"), "filename": intent.get("filename")})
+
+        _emit_stage_start(progress, checkpoint, "outline", "正在确认内容大纲与叙事顺序。", {"target_slide_count": target_count})
         outline = _plan_outline(request_text, intent, target_count, options)
+        _emit_stage_done(progress, "outline", f"已确认 {len(outline)} 页内容大纲。", {"pages": len(outline)})
+
+        _emit_stage_start(progress, checkpoint, "page_types", "正在逐页确定页面类型：封面页、目录页、内容页。", {"outline_pages": len(outline)})
         pages = _plan_page_types(request_text, intent, outline, options)
-        html_pages = _generate_html_pages(request_text, intent, pages, html_dir, options)
+        pages = _enforce_page_categories(pages, target_count)
+        _emit_stage_done(progress, "page_types", f"已为 {len(pages)} 页逐页确定页面类型。", {"pages": len(pages), "categories": _count_page_categories(pages)})
+
+        _emit_stage_start(progress, checkpoint, "design_recipe", "正在选择整套 PPT 的设计配方。", {"pages": len(pages)})
+        design_system = _build_design_system(request_text, intent, pages, options)
+        _emit_stage_done(progress, "design_recipe", f"已选择设计配方：{design_system.get('theme_name') or 'custom'}。", {"design_system": design_system})
+
+        _emit_stage_start(progress, checkpoint, "layout_blueprint", "正在为每页生成布局蓝图，并统一同类型页面背景。", {"pages": len(pages)})
+        blueprints = _build_layout_blueprints(pages, design_system)
+        _emit_stage_done(progress, "layout_blueprint", f"已生成 {len(blueprints)} 页布局蓝图。", {"pages": len(blueprints), "backgrounds": design_system.get("backgrounds")})
+
+        _emit_stage_start(progress, checkpoint, "html", "正在根据布局蓝图生成每页 HTML 设计稿。", {"pages": len(pages)})
+        html_pages = _generate_html_pages(request_text, intent, pages, html_dir, options, design_system, progress=progress)
+        _emit_stage_done(progress, "html", f"已生成 {len(html_pages)} 页 HTML 设计稿。", {"pages": len(html_pages), "html_dir": _rel_path(html_dir)})
+
+        _emit_stage_start(progress, checkpoint, "aesthetic_review", "正在进行审美评分，低分页面将自动重写。", {"pages": len(html_pages)})
+        html_pages, quality_report = _review_and_rewrite_html_pages(request_text, intent, html_pages, html_dir, options, design_system, progress)
+        _emit_stage_done(progress, "aesthetic_review", _quality_summary_text(quality_report), {"quality_report": quality_report})
+
+        _emit_stage_start(progress, checkpoint, "render", "正在将 HTML 页面截图为 16:9 图片。", {"pages": len(html_pages)})
         images, renderer, renderer_note = _render_html_pages(html_pages, image_dir)
+        _emit_stage_done(progress, "render", f"已渲染 {len(images)} 张页面图片。", {"pages": len(images), "renderer": renderer, "renderer_note": renderer_note})
+
+        _emit_stage_start(progress, checkpoint, "assemble", "正在把截图逐页插入 PPT。", {"images": len(images)})
+        _emit_stage_done(progress, "assemble", f"已准备将 {len(images)} 张图片写入 PPT。", {"images": len(images)})
 
         filename = _safe_filename(intent.get("filename") or intent.get("title") or "ai_presentation.pptx")
         output_path = options.get("path") or options.get("output_path") or os.path.join("output", filename)
@@ -122,10 +242,12 @@ def generate_html_image_ppt(data):
         parent = os.path.dirname(out_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
+        _emit_stage_start(progress, checkpoint, "saved", "正在保存 PPTX 文件。", {"filename": os.path.basename(out_path)})
         prs.save(out_path)
+        _emit_stage_done(progress, "saved", "PPTX 文件已保存。", {"path": _rel_path(out_path), "filename": os.path.basename(out_path)})
 
         rel_path = _rel_path(out_path)
-        pipeline = _pipeline_summary(intent, outline, pages, html_pages, images, renderer, renderer_note)
+        pipeline = _pipeline_summary(intent, outline, pages, html_pages, images, renderer, renderer_note, design_system, quality_report)
         return {
             "ok": True,
             "path": rel_path,
@@ -309,10 +431,13 @@ def _fallback_outline(intent, target_count):
 
 def _plan_page_types(request_text, intent, outline, options):
     prompt = _as_text(options.get("ppt_page_type_prompt") or "").strip() or DEFAULT_PAGE_TYPE_PROMPT
+    design_hint = _select_design_preset(request_text, intent, options)
     user = json.dumps({
         "user_request": request_text,
         "intent": intent,
         "outline": outline,
+        "design_system": design_hint,
+        "layout_instruction": "为不同页面分配不同 page_type 和 visual_role；除非内容确实相同，避免连续页面使用同一种表达方式。",
     }, ensure_ascii=False)
     data = _ppt_llm_generate_json(prompt, user, _llm_options(options, 4096), fallback=None)
     raw_pages = []
@@ -337,6 +462,175 @@ def _plan_page_types(request_text, intent, outline, options):
             "content_blocks": [_normalize_block(block) for block in blocks[:6]],
         })
     return pages
+
+
+def _enforce_page_categories(pages, target_count):
+    total = len(pages)
+    for idx, page in enumerate(pages, start=1):
+        raw_type = _as_text(page.get("page_type") or "").strip().lower()
+        if idx == 1:
+            category = "cover"
+            page_type = "cover"
+        elif total >= 4 and idx == 2:
+            category = "agenda"
+            page_type = "agenda"
+        else:
+            category = "content"
+            page_type = raw_type if raw_type and raw_type not in ("cover", "agenda") else _default_page_type(idx, total, page)
+            if page_type in ("cover", "agenda"):
+                page_type = "concept"
+        page["page_category"] = category
+        page["page_type"] = page_type
+        if category == "cover":
+            page["visual_role"] = page.get("visual_role") or "用独特封面背景建立主题气质和第一视觉记忆点"
+        elif category == "agenda":
+            page["visual_role"] = page.get("visual_role") or "用独特目录背景和导航结构说明整份 PPT 的内容路径"
+        else:
+            page["visual_role"] = page.get("visual_role") or "用统一内容页背景承载核心信息"
+    return pages
+
+
+def _count_page_categories(pages):
+    counts = {"cover": 0, "agenda": 0, "content": 0}
+    for page in pages or []:
+        key = page.get("page_category") or "content"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _build_layout_blueprints(pages, design_system):
+    _assign_page_variants(pages, design_system)
+    backgrounds = design_system.get("backgrounds") or {}
+    blueprints = []
+    for idx, page in enumerate(pages, start=1):
+        category = page.get("page_category") or "content"
+        background = backgrounds.get(category) or backgrounds.get("content") or {}
+        variant = page.get("page_variant") or "freeform"
+        blueprint = {
+            "page": page.get("page"),
+            "category": category,
+            "page_type": page.get("page_type"),
+            "variant": variant,
+            "background_recipe": background,
+            "composition": _composition_for_variant(category, page.get("page_type"), variant),
+            "must_follow": [
+                "严格使用 background_recipe 生成页面背景。",
+                "封面页和目录页背景必须独特；内容页使用 consistent_content_background。",
+                "禁止使用普通白底加二列卡片作为默认方案。",
+            ],
+        }
+        page["layout_blueprint"] = blueprint
+        page["design_instruction"] = _page_variant_instruction(page.get("page_type"), variant, idx, len(pages))
+        blueprints.append(blueprint)
+    return blueprints
+
+
+def _composition_for_variant(category, page_type, variant):
+    if category == "cover":
+        return "非对称封面：左侧/下方放超大标题，右侧或背景放抽象主题符号、光斑、几何装饰和强层级副标题。"
+    if category == "agenda":
+        return "目录导航页：使用纵向编号轨道或章节卡片，背景与封面明显不同，但保留同一色彩体系。"
+    mapping = {
+        "horizontal_timeline": "横向时间线，节点错落排列，底部加入进度轨道。",
+        "step_staircase": "阶梯式流程，信息块沿对角线或台阶上升。",
+        "split_screen": "左右分屏对比，中间使用清晰分隔线或 VS 结构。",
+        "big_number_dashboard": "大数字仪表盘，主指标占据视觉中心，周围放辅助解释。",
+        "hub_and_spoke": "中心概念加放射连接，周围信息环绕。",
+        "three_insight_cards": "三重点洞察，但卡片大小和位置要有主次，不做平均网格。",
+    }
+    return mapping.get(variant) or "内容页使用统一背景系统，采用非均分模块、主次标题和装饰线条建立层级。"
+
+
+def _build_design_system(request_text, intent, pages, options):
+    preset = _select_design_preset(request_text, intent, options)
+    preferred = _as_text(options.get("render_style") or options.get("style") or intent.get("visual_direction") or "").strip()
+    system = dict(preset)
+    system.update({
+        "style_preference": preferred,
+        "consistency_rules": [
+            "整份 PPT 使用同一组颜色、字体气质和基础形状语言。",
+            "封面页背景必须独特，目录页背景必须独特，内容页背景按同一种内容页系统保持一致。",
+            "同一种页面类型使用同一种背景配方，但通过构图、内容和装饰位置形成页面差异。",
+        ],
+        "composition_rules": [
+            "每页最多 1 个主标题区、1 个核心视觉区、2-5 个信息区。",
+            "根据 page_variant 改变视觉重心：左重右轻、上重下轻、中心放射、时间线、分屏、仪表盘等。",
+            "避免文字铺满；优先用大小、留白、线条、色块、数字和图标感符号建立层级。",
+        ],
+        "css_must_have": ["radial-gradient", "linear-gradient", "box-shadow", "border", "absolute-positioned-decoration"],
+        "available_layout_variants": _PAGE_VARIANTS,
+        "backgrounds": _build_background_recipes(preset),
+        "seed": system_seed(request_text, intent, options),
+    })
+    return system
+
+
+def _build_background_recipes(preset):
+    palette = list(preset.get("palette") or ["#0F172A", "#F8FAFC", "#2563EB", "#8B5CF6", "#E2E8F0"])
+    while len(palette) < 5:
+        palette.append(palette[-1])
+    return {
+        "cover": {
+            "name": "unique_cover_background",
+            "recipe": f"封面专属背景：使用 {palette[0]} 到 {palette[1]} 的大面积渐变，叠加 2-3 个径向光斑、一个超大半透明主题符号或几何图形，形成强视觉中心。",
+            "css_hint": f"background: radial-gradient(circle at 78% 22%, {palette[2]}55, transparent 32%), radial-gradient(circle at 15% 85%, {palette[3]}44, transparent 34%), linear-gradient(135deg, {palette[0]}, {palette[1]});",
+        },
+        "agenda": {
+            "name": "unique_agenda_background",
+            "recipe": f"目录页专属背景：使用更克制的底色，加入纵向导航轨道、章节编号水印和细网格，必须区别于封面。",
+            "css_hint": f"background: linear-gradient(120deg, {palette[4]}, #ffffff), radial-gradient(circle at 90% 10%, {palette[2]}33, transparent 26%);",
+        },
+        "content": {
+            "name": "consistent_content_background",
+            "recipe": f"内容页统一背景：同一套浅/深底、角落光斑、细线框或网格系统。所有内容页背景保持一致，只改变信息布局。",
+            "css_hint": f"background: radial-gradient(circle at 88% 12%, {palette[2]}26, transparent 25%), linear-gradient(135deg, {palette[4]}, #ffffff);",
+        },
+    }
+
+
+def system_seed(request_text, intent, options):
+    raw = _as_text(options.get("style_seed") or options.get("seed") or "").strip()
+    if raw:
+        return raw
+    basis = f"{request_text}|{intent.get('title') or ''}|{time.time_ns()}"
+    return str(abs(hash(basis)) % 1000000)
+
+
+def _select_design_preset(request_text, intent, options):
+    explicit = _as_text(options.get("render_style") or options.get("style") or intent.get("visual_direction") or "").lower()
+    if any(token in explicit for token in ["科技", "未来", "ai", "数据", "数字", "芯片", "智能"]):
+        return dict(_STYLE_PRESETS[1])
+    if any(token in explicit for token in ["咨询", "商业", "汇报", "战略", "专业", "简约"]):
+        return dict(_STYLE_PRESETS[3])
+    if any(token in explicit for token in ["温暖", "教育", "人文", "亲和", "公益"]):
+        return dict(_STYLE_PRESETS[2])
+    if any(token in explicit for token in ["海报", "年轻", "冲击", "大胆", "活力"]):
+        return dict(_STYLE_PRESETS[4])
+    basis = f"{request_text}|{intent.get('title') or ''}|{intent.get('purpose') or ''}|{time.time_ns()}"
+    return dict(random.Random(basis).choice(_STYLE_PRESETS))
+
+
+def _assign_page_variants(pages, design_system):
+    used = {}
+    seed = _as_text(design_system.get("seed") or time.time_ns())
+    rng = random.Random(seed)
+    for idx, page in enumerate(pages, start=1):
+        page_type = _as_text(page.get("page_type") or "concept").strip().lower() or "concept"
+        variants = list(_PAGE_VARIANTS.get(page_type) or _PAGE_VARIANTS["freeform"])
+        rng.shuffle(variants)
+        variant = variants[0]
+        if used.get(variant, 0) and len(variants) > 1:
+            variant = variants[1]
+        used[variant] = used.get(variant, 0) + 1
+        page["page_variant"] = variant
+        page["design_instruction"] = _page_variant_instruction(page_type, variant, idx, len(pages))
+
+
+def _page_variant_instruction(page_type, variant, index, total):
+    return (
+        f"第 {index}/{total} 页使用 {page_type} / {variant} 版式。"
+        "必须让该页构图区别于相邻页面；不要默认复用上一页结构。"
+    )
 
 
 def _default_page_type(index, total, page):
@@ -368,12 +662,13 @@ def _normalize_block(block):
     return {"title": "", "text": text if not _is_garbled_text(text) else ""}
 
 
-def _generate_html_pages(request_text, intent, pages, html_dir, options):
+def _generate_html_pages(request_text, intent, pages, html_dir, options, design_system=None, progress=None):
     html_prompt = (
         _as_text(options.get("ppt_html_prompt") or "").strip()
         or _as_text(options.get("ppt_slide_prompt") or "").strip()
         or DEFAULT_HTML_PROMPT
     )
+    design_system = design_system or _build_design_system(request_text, intent, pages, options)
     html_pages = []
     for page in pages:
         user = json.dumps({
@@ -382,7 +677,13 @@ def _generate_html_pages(request_text, intent, pages, html_dir, options):
             "page": page,
             "canvas": {"width": _WIDTH, "height": _HEIGHT, "ratio": "16:9"},
             "style_preference": options.get("render_style") or intent.get("visual_direction") or "",
+            "design_system": design_system,
+            "layout_blueprint": page.get("layout_blueprint") or {},
+            "page_variant": page.get("page_variant") or "freeform",
+            "page_design_instruction": page.get("design_instruction") or "根据内容自由选择，但必须区别于通用卡片网格。",
+            "anti_template_warning": "不要复用固定模板；本页 HTML 的 CSS 布局、背景、视觉重心、装饰元素必须与 layout_blueprint 一致。",
         }, ensure_ascii=False)
+        _emit_substep(progress, "html", "generate_html_page", f"正在生成第 {page.get('page')} 页 HTML：{page.get('title') or ''}", "running", {"page": page.get("page"), "page_type": page.get("page_type"), "category": page.get("page_category")})
         data = _ppt_llm_generate_json(html_prompt, user, _llm_options(options, 8192), fallback=None)
         html_doc = ""
         if isinstance(data, dict):
@@ -394,17 +695,267 @@ def _generate_html_pages(request_text, intent, pages, html_dir, options):
             html_doc = ""
         if not html_doc:
             html_doc = _fallback_html(intent, page)
+        html_doc = _enforce_background_design_system(html_doc, page, design_system)
         filename = f"slide_{int(page.get('page') or len(html_pages) + 1):02d}.html"
         abs_path = os.path.join(html_dir, filename)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(html_doc)
         item = dict(page)
-        item.update({"abs_path": abs_path, "path": _rel_path(abs_path)})
+        item.update({"abs_path": abs_path, "path": _rel_path(abs_path), "quality": _score_html_design(html_doc, page, design_system), "rewrite_count": 0})
+        _emit_substep(progress, "html", "generate_html_page", f"第 {page.get('page')} 页 HTML 已生成。", "done", {"page": page.get("page"), "path": _rel_path(abs_path)})
         html_pages.append(item)
     return html_pages
 
 
-def _sanitize_html(html_doc):
+def _review_and_rewrite_html_pages(request_text, intent, html_pages, html_dir, options, design_system, progress=None):
+    threshold = _aesthetic_threshold(options)
+    max_rewrites = _aesthetic_rewrite_limit(options)
+    report = {"threshold": threshold, "pages": [], "rewrite_count": 0, "passed": True}
+    for item in html_pages:
+        score_info = item.get("quality") or _score_html_file(item.get("abs_path"), item, design_system)
+        item["quality"] = score_info
+        page_no = item.get("page")
+        _emit_substep(progress, "aesthetic_review", "score_page", f"第 {page_no} 页审美评分：{score_info.get('score')}。", "done", {"page": page_no, "score": score_info.get("score"), "issues": score_info.get("issues")})
+        rewrites = 0
+        while score_info.get("score", 0) < threshold and rewrites < max_rewrites:
+            rewrites += 1
+            report["rewrite_count"] += 1
+            _emit_substep(progress, "aesthetic_review", "rewrite_low_score_page", f"第 {page_no} 页评分低于 {threshold}，正在第 {rewrites} 次重写。", "running", {"page": page_no, "score": score_info.get("score"), "issues": score_info.get("issues")})
+            new_html = _rewrite_html_page(request_text, intent, item, options, design_system, score_info)
+            new_html = _sanitize_html(new_html) if new_html else ""
+            if not new_html or _html_is_garbled(new_html):
+                break
+            new_html = _enforce_background_design_system(new_html, item, design_system)
+            with open(item["abs_path"], "w", encoding="utf-8") as f:
+                f.write(new_html)
+            score_info = _score_html_design(new_html, item, design_system)
+            item["quality"] = score_info
+            item["rewrite_count"] = rewrites
+            _emit_substep(progress, "aesthetic_review", "rewrite_low_score_page", f"第 {page_no} 页重写完成，审美评分：{score_info.get('score')}。", "done", {"page": page_no, "score": score_info.get("score"), "rewrite_count": rewrites})
+        passed = score_info.get("score", 0) >= threshold
+        report["pages"].append({"page": page_no, "score": score_info.get("score"), "passed": passed, "issues": score_info.get("issues") or [], "rewrite_count": rewrites})
+        if not passed:
+            report["passed"] = False
+    return html_pages, report
+
+
+def _aesthetic_threshold(options):
+    try:
+        return max(40, min(95, int(options.get("aesthetic_score_threshold") or 82)))
+    except Exception:
+        return 82
+
+
+def _aesthetic_rewrite_limit(options):
+    try:
+        return max(0, min(3, int(options.get("aesthetic_rewrite_limit") or 2)))
+    except Exception:
+        return 2
+
+
+def _score_html_file(path, page, design_system):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return _score_html_design(f.read(), page, design_system)
+    except Exception:
+        return {"score": 0, "issues": ["html_not_readable"]}
+
+
+def _score_html_design(html_doc, page, design_system):
+    text = _as_text(html_doc)
+    lower = text.lower()
+    compact = re.sub(r"\s+", "", lower)
+    score = 22
+    checks = [
+        ("radial-gradient", 8, "missing_radial_gradient"),
+        ("linear-gradient", 6, "missing_linear_gradient"),
+        ("box-shadow", 6, "missing_shadow"),
+        ("position:absolute", 6, "missing_absolute_decoration"),
+        ("border", 4, "missing_border_system"),
+        ("var(", 4, "missing_css_variables"),
+        ("clip-path", 5, "missing_geometric_mask"),
+        ("filter:blur", 5, "missing_blur_blob"),
+        ("backdrop-filter", 5, "missing_glassmorphism"),
+        ("svg", 5, "missing_svg_decoration"),
+        ("repeating-linear-gradient", 5, "missing_css_pattern_or_grid"),
+        ("::before", 4, "missing_pseudo_layer_before"),
+        ("::after", 4, "missing_pseudo_layer_after"),
+        ("text-shadow", 3, "missing_title_depth"),
+    ]
+    issues = []
+    for token, points, issue in checks:
+        if token.replace(" ", "") in compact:
+            score += points
+        else:
+            issues.append(issue)
+    radial_count = lower.count("radial-gradient")
+    if radial_count >= 2:
+        score += 8
+    else:
+        score -= 8
+        issues.append("not_enough_multi_radial_background")
+    if _has_visual_focus(lower):
+        score += 8
+    else:
+        score -= 10
+        issues.append("weak_visual_focus")
+    if _looks_like_plain_web_card_layout(lower):
+        score -= 22
+        issues.append("looks_like_plain_web_cards")
+    if _looks_like_equal_grid(lower):
+        score -= 16
+        issues.append("too_uniform_equal_grid")
+    if _palette_usage_count(lower, design_system) < 3:
+        score -= 8
+        issues.append("color_palette_too_plain")
+    category = page.get("page_category") or "content"
+    if category in ("cover", "agenda") and radial_count < 2:
+        score -= 12
+        issues.append("unique_background_too_weak")
+    if category == "content" and "consistent_content_background" not in lower and "content-bg" not in lower:
+        score -= 4
+        issues.append("content_background_not_explicit")
+    return {"score": max(0, min(100, score)), "issues": issues[:12]}
+
+
+def _has_visual_focus(lower):
+    focus_tokens = ["hero", "focus", "orb", "blob", "symbol", "mega", "display", "visual", "spotlight", "watermark", "font-size:9", "font-size:10", "font-size:11"]
+    return any(token in lower for token in focus_tokens)
+
+
+def _looks_like_plain_web_card_layout(lower):
+    card_count = len(re.findall(r"class=[\"']?[^\"'>]*(card|panel|tile)", lower))
+    has_advanced_bg = lower.count("radial-gradient") >= 2 or "clip-path" in lower or "filter: blur" in lower or "filter:blur" in lower
+    return card_count >= 4 and not has_advanced_bg
+
+
+def _looks_like_equal_grid(lower):
+    grid_signals = ["repeat(2", "repeat(3", "grid-template-columns:repeat", "1fr 1fr", "grid-template-columns"]
+    grid_score = sum(1 for token in grid_signals if token in lower)
+    asymmetric_signals = ["transform:", "rotate(", "translate(", "clip-path", "position:absolute", "span 2", "grid-column"]
+    asymmetric_score = sum(1 for token in asymmetric_signals if token in lower)
+    return grid_score >= 2 and asymmetric_score < 2
+
+
+def _palette_usage_count(lower, design_system):
+    count = 0
+    for color in (design_system or {}).get("palette") or []:
+        c = _as_text(color).lower()
+        if c and c in lower:
+            count += 1
+    return count
+
+
+def _rewrite_html_page(request_text, intent, page, options, design_system, score_info):
+    prompt = _as_text(options.get("ppt_html_prompt") or "").strip() or DEFAULT_HTML_PROMPT
+    user = json.dumps({
+        "user_request": request_text,
+        "intent": intent,
+        "page": {k: v for k, v in page.items() if k not in ("abs_path",)},
+        "design_system": design_system,
+        "previous_score": score_info,
+        "rewrite_instruction": "上一版审美评分不足。必须显著增强背景层次、视觉焦点、CSS 装饰和版式张力，同时保持内容准确。只输出 JSON：{html:完整HTML}。",
+        "hard_requirements": [
+            "必须至少包含 2 个 radial-gradient 和 1 个 linear-gradient。",
+            "必须包含 mesh/光斑/blob/网格/pattern/SVG 装饰中的至少 3 类。",
+            "必须有明显视觉焦点，例如 hero 区、大数字、主题符号、spotlight、watermark。",
+            "禁止普通网页卡片感，禁止平均 2x2/3x2 卡片网格作为主体。",
+            "封面页和目录页背景必须明显不同；内容页使用统一背景系统。",
+        ],
+        "failed_issues": score_info.get("issues") or [],
+    }, ensure_ascii=False)
+    data = _ppt_llm_generate_json(prompt, user, _llm_options(options, 8192), fallback=None)
+    if isinstance(data, dict):
+        return data.get("html") or data.get("document") or data.get("content") or ""
+    return data if isinstance(data, str) else ""
+
+
+def _quality_summary_text(report):
+    pages = report.get("pages") or [] if isinstance(report, dict) else []
+    if not pages:
+        return "审美评分完成。"
+    avg = sum(int(p.get("score") or 0) for p in pages) / max(1, len(pages))
+    low = [p for p in pages if not p.get("passed")]
+    return f"审美评分完成，平均分 {avg:.0f}，重写 {report.get('rewrite_count', 0)} 次，低分页 {len(low)} 页。"
+
+
+def _enforce_background_design_system(html_doc, page, design_system):
+    """Inject a deterministic high-quality background/decor layer.
+
+    LLM prompts alone often collapse into plain card grids. This function makes the
+    background system non-optional by adding CSS variables, multi-layer gradients,
+    pseudo-elements, SVG/pattern-like overlays and category markers used by scoring.
+    """
+    text = _as_text(html_doc)
+    if not text:
+        return text
+    category = page.get("page_category") or "content"
+    recipe = ((design_system or {}).get("backgrounds") or {}).get(category) or {}
+    palette = list((design_system or {}).get("palette") or ["#0F172A", "#F8FAFC", "#2563EB", "#8B5CF6", "#E2E8F0"])
+    while len(palette) < 5:
+        palette.append(palette[-1])
+    marker = {
+        "cover": "unique_cover_background",
+        "agenda": "unique_agenda_background",
+        "content": "consistent_content_background content-bg",
+    }.get(category, "consistent_content_background content-bg")
+    css = _background_system_css(category, palette, marker, recipe)
+    if "/* AI_PPT_BACKGROUND_SYSTEM */" in text:
+        return text
+    if "</head>" in text.lower():
+        return re.sub(r"</head>", css + "</head>", text, count=1, flags=re.IGNORECASE)
+    return css + text
+
+
+def _background_system_css(category, palette, marker, recipe):
+    p0, p1, p2, p3, p4 = palette[:5]
+    if category == "cover":
+        bg = (
+            f"radial-gradient(circle at 78% 18%, {p2}77 0, transparent 31%),"
+            f"radial-gradient(circle at 18% 82%, {p3}66 0, transparent 34%),"
+            f"radial-gradient(circle at 52% 46%, {p4}35 0, transparent 28%),"
+            f"linear-gradient(135deg, {p0} 0%, {p1} 58%, #050812 100%)"
+        )
+        pseudo = f"""
+body::before{{content:"";position:absolute;inset:-18%;pointer-events:none;opacity:.42;background:repeating-linear-gradient(90deg,rgba(255,255,255,.10) 0 1px,transparent 1px 72px),repeating-linear-gradient(0deg,rgba(255,255,255,.08) 0 1px,transparent 1px 72px);transform:rotate(-7deg);}}
+body::after{{content:"";position:absolute;right:-140px;top:80px;width:560px;height:560px;border-radius:45%;background:{p2}44;filter:blur(46px);clip-path:polygon(50% 0,100% 34%,82% 100%,18% 100%,0 34%);box-shadow:0 0 120px {p2}66;}}
+"""
+    elif category == "agenda":
+        bg = (
+            f"radial-gradient(circle at 12% 18%, {p3}55 0, transparent 24%),"
+            f"radial-gradient(circle at 88% 86%, {p2}42 0, transparent 30%),"
+            f"linear-gradient(120deg, {p4} 0%, #ffffff 42%, {p0} 100%)"
+        )
+        pseudo = f"""
+body::before{{content:"";position:absolute;left:8%;top:8%;bottom:8%;width:3px;background:linear-gradient(180deg,{p2},transparent);box-shadow:0 0 34px {p2};}}
+body::after{{content:"AGENDA";position:absolute;right:5%;bottom:2%;font-size:132px;font-weight:900;letter-spacing:.08em;color:{p2}14;text-shadow:0 18px 60px {p2}22;}}
+"""
+    else:
+        bg = (
+            f"radial-gradient(circle at 90% 8%, {p2}30 0, transparent 24%),"
+            f"radial-gradient(circle at 8% 92%, {p3}24 0, transparent 26%),"
+            f"linear-gradient(135deg, {p4} 0%, #ffffff 48%, {p0}12 100%)"
+        )
+        pseudo = f"""
+body::before{{content:"";position:absolute;inset:0;pointer-events:none;opacity:.32;background:repeating-linear-gradient(90deg,rgba(15,23,42,.08) 0 1px,transparent 1px 96px),repeating-linear-gradient(0deg,rgba(15,23,42,.06) 0 1px,transparent 1px 96px);}}
+body::after{{content:"";position:absolute;right:48px;top:48px;width:220px;height:220px;border-radius:999px;background:{p2}22;filter:blur(32px);box-shadow:0 0 80px {p2}33;}}
+"""
+    recipe_comment = html_lib.escape(json.dumps(recipe, ensure_ascii=False))
+    return f"""
+<style>
+/* AI_PPT_BACKGROUND_SYSTEM {marker} {recipe_comment} */
+:root{{--ppt-bg-0:{p0};--ppt-bg-1:{p1};--ppt-accent:{p2};--ppt-accent-2:{p3};--ppt-surface:{p4};}}
+html,body{{margin:0;width:100%;height:100%;overflow:hidden;}}
+body{{position:relative;isolation:isolate;background:{bg};}}
+body > *{{position:relative;z-index:1;}}
+{pseudo}
+.ai-ppt-noise{{position:absolute;inset:0;pointer-events:none;z-index:0;opacity:.08;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E");}}
+</style>
+<script type="application/json" id="ai-ppt-background-meta">{{"background_marker":"{marker}","has_mesh_gradient":true,"has_noise_texture":true,"has_visual_focus":"hero spotlight orb watermark","has_css_pattern":true}}</script>
+""".replace('<script type="application/json" id="ai-ppt-background-meta">', '<template id="ai-ppt-background-meta">').replace('</script>', '</template>')
+
+
+
     text = _HTML_FENCE_RE.sub("", _as_text(html_doc).strip())
     text = _SCRIPT_RE.sub("", text)
     text = _EVENT_HANDLER_RE.sub("", text)
@@ -736,6 +1287,10 @@ def _public_html_page(item):
         "page": item.get("page"),
         "title": item.get("title"),
         "page_type": item.get("page_type"),
+        "page_category": item.get("page_category"),
+        "page_variant": item.get("page_variant"),
+        "quality": item.get("quality"),
+        "rewrite_count": item.get("rewrite_count"),
         "path": item.get("path"),
     }
 
@@ -749,39 +1304,48 @@ def _public_image(item):
     }
 
 
-def _pipeline_summary(intent, outline, pages, html_pages, images, renderer, renderer_note):
+def _pipeline_summary(intent, outline, pages, html_pages, images, renderer, renderer_note, design_system=None, quality_report=None):
     page_types = [
         {
             "page": page.get("page"),
             "title": page.get("title"),
             "page_type": page.get("page_type"),
+            "page_category": page.get("page_category"),
+            "page_variant": page.get("page_variant"),
             "visual_role": page.get("visual_role"),
+            "layout_blueprint": page.get("layout_blueprint"),
         }
         for page in pages
     ]
     return {
-        "mode": "html_image_v2",
+        "mode": "html_image_design_pipeline_v3",
         "intent": intent,
         "outline": outline,
         "page_types": page_types,
+        "design_system": design_system or {},
+        "layout_blueprints": [page.get("layout_blueprint") for page in pages if page.get("layout_blueprint")],
+        "quality_report": quality_report or {},
         "html_pages": [_public_html_page(item) for item in html_pages],
         "images": [_public_image(item) for item in images],
         "renderer": renderer,
         "renderer_note": renderer_note,
         "stages": [
-            {"step": 1, "id": "understand", "title": "理解用户主题和内容", "status": "done"},
-            {"step": 2, "id": "outline", "title": "生成 PPT 大纲", "status": "done", "count": len(outline)},
-            {"step": 3, "id": "page_types", "title": "为每一页确定页面类型", "status": "done", "count": len(page_types)},
-            {"step": 5, "id": "html_design", "title": "为每页生成 HTML 设计稿", "status": "done", "count": len(html_pages)},
+            {"step": 1, "id": "understand", "title": "主题理解", "status": "done"},
+            {"step": 2, "id": "outline", "title": "确认内容大纲", "status": "done", "count": len(outline)},
+            {"step": 3, "id": "page_types", "title": "逐页确定页面类型", "status": "done", "count": len(page_types)},
+            {"step": 4, "id": "design_recipe", "title": "选择设计配方", "status": "done", "theme": (design_system or {}).get("theme_name")},
+            {"step": 5, "id": "layout_blueprint", "title": "为每页生成布局蓝图", "status": "done", "count": len(page_types)},
+            {"step": 6, "id": "html_design", "title": "生成 HTML", "status": "done", "count": len(html_pages)},
+            {"step": 7, "id": "aesthetic_review", "title": "审美评分与低分重写", "status": "done" if (quality_report or {}).get("passed", True) else "warning", "rewrite_count": (quality_report or {}).get("rewrite_count", 0)},
             {
-                "step": 6,
+                "step": 8,
                 "id": "browser_render",
-                "title": "使用浏览器渲染为 16:9 图片",
+                "title": "截图",
                 "status": "done" if renderer == "browser" else "warning",
                 "count": len(images),
                 "renderer": renderer,
             },
-            {"step": 7, "id": "ppt_background", "title": "插入图片作为 PPT 背景", "status": "done", "count": len(images)},
-            {"step": 9, "id": "export", "title": "导出 PPT", "status": "done"},
+            {"step": 9, "id": "ppt_background", "title": "生成 PPT", "status": "done", "count": len(images)},
+            {"step": 10, "id": "export", "title": "保存 PPT", "status": "done"},
         ],
     }

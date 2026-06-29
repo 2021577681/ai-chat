@@ -1092,6 +1092,59 @@ async function generatePpt(data, context) {
   };
 }
 
+async function pptTaskRequest(command, data, context) {
+  const payload = data && typeof data === 'object' ? data : {};
+  const params = { command, ...payload };
+  return await callAgentBackend('ppt_task', params, undefined, undefined, {
+    ...(context && typeof context === 'object' ? context : {}),
+    skipConfirm: true
+  });
+}
+
+async function startPptTask(data, context) {
+  return await pptTaskRequest('start', { data }, context);
+}
+
+async function pollPptTask(taskId, since, context) {
+  return await pptTaskRequest('poll', { task_id: taskId, since: since || 0 }, context);
+}
+
+async function controlPptTask(taskId, command, context) {
+  return await pptTaskRequest(command, { task_id: taskId }, context);
+}
+
+async function generatePptWithProgress(data, context = {}) {
+  const onProgress = typeof context.onProgress === 'function' ? context.onProgress : null;
+  const signal = context.signal;
+  const started = await startPptTask(data, context);
+  if (!started || !started.ok) return started || { ok: false, error: 'PPT 任务启动失败' };
+  const taskId = started.task_id;
+  if (onProgress) onProgress({ type: 'task_started', task_id: taskId, snapshot: started });
+  let since = 0;
+  let sentPause = false;
+  const isStopped = typeof context.isStopped === 'function' ? context.isStopped : () => false;
+  while (true) {
+    if (signal && signal.aborted && !sentPause) {
+      sentPause = true;
+      try { await controlPptTask(taskId, 'pause', context); } catch (_) {}
+    } else if (isStopped() && !sentPause) {
+      sentPause = true;
+      try { await controlPptTask(taskId, 'pause', context); } catch (_) {}
+    }
+    const snap = await pollPptTask(taskId, since, context);
+    if (!snap || !snap.ok) return snap || { ok: false, error: 'PPT 任务轮询失败' };
+    since = snap.progress_index || since;
+    if (onProgress) onProgress({ type: 'task_poll', task_id: taskId, snapshot: snap });
+    if (snap.status === 'done') return { ...(snap.result || {}), task_id: taskId };
+    if (snap.status === 'error') return { ok: false, error: snap.error || 'PPT 任务失败', task_id: taskId, result: snap.result };
+    if (snap.status === 'cancelled') return { ok: false, cancelled: true, error: snap.error || 'PPT 任务已取消', task_id: taskId };
+    if (sentPause && snap.status === 'paused') {
+      return { ok: false, paused: true, task_id: taskId, error: 'PPT 任务已暂停，可点击恢复继续。', snapshot: snap };
+    }
+    await new Promise(resolve => setTimeout(resolve, 900));
+  }
+}
+
 async function analyzePptTemplate(data, context) {
   const payload = data && typeof data === 'object' ? { ...data } : {};
   const templatePath = payload.path || payload.template_path || payload.pptx || payload.file || '';

@@ -27,7 +27,7 @@ from xml.etree import ElementTree as ET
 
 from . import config
 from .ppt_image_pipeline import generate_html_image_ppt
-from .ppt_pipeline import build_deck_spec
+from .ppt_tasks import control_ppt_task, get_ppt_task, start_ppt_task
 from .ppt_pipeline.llm_client import (
     generate_json as _ppt_llm_generate_json,
     generate_json_with_images as _ppt_llm_generate_json_with_images,
@@ -46,26 +46,6 @@ _STYLE_KEYS = {
     'primary_color', 'accent_color', 'background_color', 'bg_color',
     'text_color', 'muted_color', 'card_color', 'line_color'
 }
-
-_PIPELINE_RUNTIME_OPTION_KEYS = {
-    'validate_after_generate',
-    'auto_repair_text_layout',
-    'trim_extra_template_slides',
-    'min_slides',
-    'max_slides',
-    'expected_text',
-    'require_chinese',
-    'max_question_marks',
-    'fail_on_warnings',
-    'detect_graphic_overlaps',
-    'rules',
-}
-
-_PIPELINE_RUNTIME_OPTION_PREFIXES = (
-    'llm_',
-    'ai_',
-    'auto_repair_',
-)
 
 _EMU_PER_INCH = 914400.0
 
@@ -119,25 +99,27 @@ def _safe_filename(name):
     return name
 
 
-def _preserve_pipeline_runtime_options(deck_spec, options):
-    """Keep rendering/validation options after high-level planning builds slides."""
-    if not isinstance(deck_spec, dict) or not isinstance(options, dict):
-        return deck_spec
-    for key, value in options.items():
-        if key in deck_spec:
-            continue
-        if key in _PIPELINE_RUNTIME_OPTION_KEYS or key.startswith(_PIPELINE_RUNTIME_OPTION_PREFIXES):
-            deck_spec[key] = value
-    return deck_spec
-
-
 class PptMixin:
     """Handler mixin：生成 PPTX 文件。"""
+
+    def handle_ppt_task(self, body):
+        data = body.get('data') or {}
+        if not isinstance(data, dict):
+            data = {}
+        command = _as_text(body.get('command') or data.get('command') or 'status', 'status').strip().lower()
+        task_id = _as_text(body.get('task_id') or data.get('task_id') or '', '')
+        if command == 'start':
+            return self._send_json(200, start_ppt_task(data.get('payload') or data.get('data') or data))
+        if command in ('status', 'poll', 'get'):
+            since = body.get('since') if body.get('since') is not None else data.get('since')
+            return self._send_json(200, get_ppt_task(task_id, since or 0))
+        if command in ('pause', 'stop', 'resume', 'cancel', 'abort'):
+            return self._send_json(200, control_ppt_task(task_id, command))
+        return self._send_json(200, {'ok': False, 'error': f'未知 PPT 任务命令: {command}'})
 
     def handle_generate_ppt(self, body):
         self._ppt_global_style = {}
         self._ppt_current_slide = {}
-        self._ppt_pipeline_spec = {}
         try:
             data = body.get('data') or {}
             if not isinstance(data, dict):
@@ -147,14 +129,10 @@ class PptMixin:
             # let the new HTML-image pipeline produce one rendered image per slide.
             # Existing structured JSON remains supported below for compatibility.
             if (data.get('user_request') or data.get('request') or data.get('prompt')) and not data.get('slides'):
-                request_text = data.get('user_request') or data.get('request') or data.get('prompt')
                 render_mode = _as_text(data.get('render_mode') or 'html_image', 'html_image').strip().lower()
-                if render_mode not in ('native', 'vector', 'structured'):
-                    return self._send_json(200, generate_html_image_ppt(data))
-                deck_spec = build_deck_spec(request_text, data)
-                deck_spec = _preserve_pipeline_runtime_options(deck_spec, data)
-                data = deck_spec
-                self._ppt_pipeline_spec = deck_spec
+                if render_mode in ('native', 'vector', 'structured'):
+                    return self._send_json(200, {'ok': False, 'error': '旧版结构化 PPT 高阶流程已移除，请使用默认 html_image 图片页流程，或直接传 slides 生成结构化 PPT。'})
+                return self._send_json(200, generate_html_image_ppt(data))
 
             try:
                 from pptx import Presentation
@@ -1443,7 +1421,7 @@ class PptMixin:
         return body
 
     def _ppt_response_pipeline(self, slides, data=None):
-        pipeline = dict(self._ppt_pipeline_spec.get('pipeline') or {})
+        pipeline = {}
         if not pipeline:
             pipeline = {}
         if 'outline' not in pipeline:

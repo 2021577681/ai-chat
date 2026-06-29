@@ -227,6 +227,8 @@ const BUILTIN_TOOLS = [
         ppt_outline_prompt: { type: 'string', description: '可选：Step 2 生成 PPT 大纲的自定义 Prompt。' },
         ppt_page_type_prompt: { type: 'string', description: '可选：Step 3 确定每页页面类型的自定义 Prompt。' },
         ppt_html_prompt: { type: 'string', description: '可选：Step 5 生成每页 HTML 设计稿的自定义 Prompt。' },
+        aesthetic_score_threshold: { type: 'number', description: '可选：PPT 图片页流程审美评分阈值，40-95，默认 82；低于该分数会触发低分重写。' },
+        aesthetic_rewrite_limit: { type: 'number', description: '可选：每页低分自动重写次数，0-3，默认 2；0 表示只评分不重写。' },
         filename: { type: 'string', description: '兼容旧参数；新图片页流程默认由 AI 自动命名 PPT，不需要传文件名。' },
         path: { type: 'string', description: '可选输出路径，必须在沙箱内；默认 output/<filename>' },
         template_path: { type: 'string', description: '兼容旧参数；新图片页流程不使用 PPT 模板限制。' },

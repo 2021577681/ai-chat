@@ -1,9 +1,8 @@
-"""PPT pipeline package.
+"""Shared PPT pipeline helpers.
 
-This package turns a high-level user request into the structured JSON already
-understood by :mod:`server.ppt_core`.
+The old structured/vector high-level PPT pipeline has been removed.  The
+current HTML-image PPT mode still reuses :mod:`server.ppt_pipeline.llm_client`
+for JSON LLM calls.
 """
 
-from .pipeline import build_deck_spec, run_pipeline
-
-__all__ = ["build_deck_spec", "run_pipeline"]
+__all__ = []

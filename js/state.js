@@ -84,6 +84,8 @@ let state = {
     pptSlidePrompt: '',
     pptModel: '',
     pptTemperature: 0.6,
+    pptAestheticScoreThreshold: 82,
+    pptAestheticRewriteLimit: 2,
     pptAutoRepairMaxCycles: 8,
     pptAutoRepairMaxAllowedCycles: 20,
     contextLimitMode: 'auto',

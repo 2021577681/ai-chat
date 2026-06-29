@@ -53,6 +53,16 @@ function normalizePptRenderStyle(value) {
   return style || '由 AI 根据主题自由设计';
 }
 
+function normalizePptAestheticScoreThreshold(value) {
+  const count = parseInt(value, 10);
+  return Number.isFinite(count) ? Math.max(40, Math.min(95, count)) : 82;
+}
+
+function normalizePptAestheticRewriteLimit(value) {
+  const count = parseInt(value, 10);
+  return Number.isFinite(count) ? Math.max(0, Math.min(3, count)) : 2;
+}
+
 function pptRenderStyleLabel(style) {
   return normalizePptRenderStyle(style);
 }
@@ -76,7 +86,9 @@ function sanitizePptPayloadForUi(payload) {
     llm_api_format: apiFormat || '未知',
     llm_api_path: apiPath || '',
     llm_vision_interface: visionInterface,
-    llm_temperature: p.llm_temperature
+    llm_temperature: p.llm_temperature,
+    aesthetic_score_threshold: p.aesthetic_score_threshold,
+    aesthetic_rewrite_limit: p.aesthetic_rewrite_limit
   };
 }
 
@@ -183,51 +195,72 @@ function createPptModeState(payload, intent) {
       {
         id: 'understand',
         step: 1,
-        title: '理解用户主题和内容',
+        title: '主题理解',
         status: 'active',
         note: intent && intent.reason ? `${intent.reason} 正在抽取主题、用途、受众和 AI 文件名。` : '正在抽取主题、用途、受众和 AI 文件名。'
       },
       {
         id: 'outline',
         step: 2,
-        title: '生成 PPT 大纲',
+        title: '确认内容大纲',
         status: 'pending',
-        note: `目标页数 ${clean.slide_count || '自动'} 页，只规划叙事结构和每页沟通目标。`
+        note: `目标页数 ${clean.slide_count || '自动'} 页，确认叙事结构和每页沟通目标。`
       },
       {
         id: 'page_types',
         step: 3,
-        title: '为每一页确定页面类型',
+        title: '逐页确定页面类型',
         status: 'pending',
-        note: '为每页确定语义页面类型和内容模块，不套用固定模板。'
+        note: '每一页都确定类型；页数较多时包含封面页、目录页和内容页。'
+      },
+      {
+        id: 'design_recipe',
+        step: 4,
+        title: '选择设计配方',
+        status: 'pending',
+        note: '选择整套 PPT 的配色、背景、字体气质和视觉组件配方。'
+      },
+      {
+        id: 'layout_blueprint',
+        step: 5,
+        title: '为每页生成布局蓝图',
+        status: 'pending',
+        note: '封面页和目录页背景独特；同一种类型页面背景保持一致。'
       },
       {
         id: 'html_design',
-        step: 5,
-        title: '为每页生成 HTML 设计稿',
+        step: 6,
+        title: '生成 HTML',
         status: 'pending',
-        note: 'AI 生成自包含 16:9 HTML/CSS 页面，让视觉设计自由发挥。'
+        note: '根据设计配方和布局蓝图生成自包含 16:9 HTML/CSS 页面。'
+      },
+      {
+        id: 'aesthetic_review',
+        step: 7,
+        title: '审美评分与低分重写',
+        status: 'pending',
+        note: '检查背景层次、构图张力、色彩搭配和页面差异，低分页面自动重写。'
       },
       {
         id: 'browser_render',
-        step: 6,
-        title: '使用浏览器渲染为 16:9 图片',
+        step: 8,
+        title: '截图',
         status: 'pending',
         note: '用本机浏览器按 16:9 渲染 HTML 并截图为页面图片。'
       },
       {
         id: 'ppt_background',
-        step: 7,
-        title: '插入图片作为 PPT 背景',
+        step: 9,
+        title: '生成 PPT',
         status: 'pending',
         note: '每张截图铺满一页 PPT，因此你看到的每页就是一张图片。'
       },
       {
         id: 'export',
-        step: 9,
-        title: '导出 PPT',
+        step: 10,
+        title: '保存 PPT',
         status: 'pending',
-        note: '保存并返回 AI 自动命名的 PPT 文件路径。暂不加入验证/修复机制。'
+        note: '保存并返回 AI 自动命名的 PPT 文件路径。'
       }
     ],
     events: []
@@ -276,12 +309,39 @@ function setPptStep(ppt, id, status, note, meta) {
   step.updatedAt = Date.now();
 }
 
+function isPptDoneLikeStatus(status) {
+  return status === 'done' || status === 'warning' || status === 'skipped' || status === 'error';
+}
+
+function finishPptRunningCalls(step, status = 'done', result) {
+  if (!step || !Array.isArray(step.calls)) return;
+  step.calls.forEach(call => {
+    if (!call || call.status !== 'running') return;
+    call.status = status;
+    if (result !== undefined && !call.result) call.result = result;
+    if (!call.finishedAt) call.finishedAt = Date.now();
+  });
+}
+
+function finishPptPreviousActiveSteps(ppt, activeId) {
+  if (!ppt || !Array.isArray(ppt.steps)) return;
+  const activeStep = pptStep(ppt, activeId);
+  const activeOrder = activeStep && Number(activeStep.step || 0);
+  ppt.steps.forEach(step => {
+    if (!step || step.id === activeId) return;
+    if (step.status !== 'active' && step.status !== 'running') return;
+    const stepOrder = Number(step.step || 0);
+    if (!activeOrder || !stepOrder || stepOrder < activeOrder) {
+      step.status = 'done';
+      step.updatedAt = Date.now();
+      finishPptRunningCalls(step, 'done', step.note || '已完成。');
+    }
+  });
+}
+
 function setPptOnlyActive(ppt, id, note, meta) {
   if (!ppt || !Array.isArray(ppt.steps)) return;
-  ppt.steps.forEach(step => {
-    if (!step || step.id === id) return;
-    if (step.status === 'active' || step.status === 'running') step.status = 'pending';
-  });
+  finishPptPreviousActiveSteps(ppt, id);
   setPptStep(ppt, id, 'active', note, meta);
 }
 
@@ -309,78 +369,48 @@ function applyPptPipelineDetails(ppt, generated) {
   }
   const outline = Array.isArray(pipeline.outline) ? pipeline.outline : [];
   if (outline.length) {
-    setPptStep(
-      ppt,
-      'outline',
-      'done',
-      `已规划 ${outline.length} 页大纲：${outline.slice(0, 4).map(x => x.title).filter(Boolean).join(' / ')}${outline.length > 4 ? '...' : ''}。`,
-      {
-        pages: outline.length,
-        titles: summarizePptTitles(outline),
-        detail_chars: estimatePptTextLength(outline),
-        outline
-      }
-    );
+    setPptStep(ppt, 'outline', 'done', `已确认 ${outline.length} 页内容大纲：${outline.slice(0, 4).map(x => x.title).filter(Boolean).join(' / ')}${outline.length > 4 ? '...' : ''}。`, {
+      pages: outline.length,
+      titles: summarizePptTitles(outline),
+      detail_chars: estimatePptTextLength(outline),
+      outline
+    });
     const outlineStep = pptStep(ppt, 'outline');
-    if (outlineStep) outlineStep.calls = [{
-      name: 'plan_outline',
-      status: 'done',
-      args: { pages: outline.length },
-      result: `已规划 ${outline.length} 页：${summarizePptTitles(outline)}`
-    }];
+    if (outlineStep) outlineStep.calls = [{ name: 'confirm_outline', status: 'done', args: { pages: outline.length }, result: `已确认 ${outline.length} 页：${summarizePptTitles(outline)}` }];
   }
   const pageTypes = Array.isArray(pipeline.page_types) ? pipeline.page_types : [];
   if (pageTypes.length) {
-    setPptStep(
-      ppt,
-      'page_types',
-      'done',
-      `已确定 ${pageTypes.length} 页页面类型：${pageTypes.slice(0, 5).map(x => x.page_type || x.type || '-').join(' / ')}${pageTypes.length > 5 ? '...' : ''}。`,
-      {
-        pages: pageTypes.length,
-        titles: summarizePptTitles(pageTypes),
-        page_types: pageTypes.map(x => x.page_type || x.type || '').filter(Boolean).join(' / ')
-      }
-    );
-    const pageTypesStep = pptStep(ppt, 'page_types');
-    if (pageTypesStep) pageTypesStep.calls = [{
-      name: 'plan_pages',
-      status: 'done',
-      args: { outline_pages: outline.length || pageTypes.length },
-      result: `已确定 ${pageTypes.length} 页页面类型和内容模块。`
-    }];
+    const categories = pageTypes.reduce((acc, x) => { const k = x.page_category || 'content'; acc[k] = (acc[k] || 0) + 1; return acc; }, {});
+    setPptStep(ppt, 'page_types', 'done', `已逐页确定 ${pageTypes.length} 页类型：封面 ${categories.cover || 0} 页，目录 ${categories.agenda || 0} 页，内容 ${categories.content || 0} 页。`, {
+      pages: pageTypes.length,
+      categories,
+      page_types: pageTypes.map(x => x.page_type || x.type || '').filter(Boolean).join(' / ')
+    });
+  }
+  if (pipeline.design_system && typeof pipeline.design_system === 'object') {
+    setPptStep(ppt, 'design_recipe', 'done', `已选择设计配方：${pipeline.design_system.theme_name || 'custom'}。`, pipeline.design_system);
+  }
+  const blueprints = Array.isArray(pipeline.layout_blueprints) ? pipeline.layout_blueprints : [];
+  if (blueprints.length) {
+    setPptStep(ppt, 'layout_blueprint', 'done', `已生成 ${blueprints.length} 页布局蓝图，封面/目录使用独特背景，内容页背景保持一致。`, { pages: blueprints.length });
   }
   const htmlPages = Array.isArray(generated.html_pages) ? generated.html_pages : [];
   const images = Array.isArray(generated.images) ? generated.images : [];
   if (htmlPages.length || images.length || generated.render_mode === 'html_image') {
-    setPptStep(
-      ppt,
-      'html_design',
-      'done',
-      `已生成 ${htmlPages.length || generated.slides || outline.length || ''} 页 HTML/CSS 设计稿。`,
-      {
-        pages: htmlPages.length || generated.slides || outline.length || '',
-        mode: generated.render_mode || 'html_image',
-        html_dir: generated.html_dir || ''
-      }
-    );
-    setPptStep(
-      ppt,
-      'browser_render',
-      images.length ? (generated.renderer === 'pillow_fallback' ? 'warning' : 'done') : 'warning',
-      images.length
-        ? `已按 16:9 渲染并截图 ${images.length} 页${generated.renderer === 'pillow_fallback' ? '（浏览器不可用，已用图片兜底跑通）' : ''}。`
-        : '未返回截图明细，但后端已进入 HTML 图片渲染流程。',
-      { pages: images.length || '', image_dir: generated.image_dir || '', renderer: generated.renderer || '' }
-    );
+    setPptStep(ppt, 'html_design', 'done', `已生成 ${htmlPages.length || generated.slides || outline.length || ''} 页 HTML/CSS 设计稿。`, {
+      pages: htmlPages.length || generated.slides || outline.length || '',
+      mode: generated.render_mode || 'html_image',
+      html_dir: generated.html_dir || ''
+    });
+    const q = pipeline.quality_report && typeof pipeline.quality_report === 'object' ? pipeline.quality_report : null;
+    if (q) {
+      setPptStep(ppt, 'aesthetic_review', q.passed === false ? 'warning' : 'done', `审美评分完成，重写 ${q.rewrite_count || 0} 次${Array.isArray(q.pages) ? `，共 ${q.pages.length} 页` : ''}。`, q);
+    }
+    setPptStep(ppt, 'browser_render', images.length ? (generated.renderer === 'pillow_fallback' ? 'warning' : 'done') : 'warning', images.length
+      ? `已按 16:9 渲染并截图 ${images.length} 页${generated.renderer === 'pillow_fallback' ? '（浏览器不可用，已用图片兜底跑通）' : ''}。`
+      : '未返回截图明细，但后端已进入 HTML 图片渲染流程。', { pages: images.length || '', image_dir: generated.image_dir || '', renderer: generated.renderer || '' });
     if (images.length) {
-      setPptStep(
-        ppt,
-        'ppt_background',
-        'done',
-        `已将 ${images.length} 张图片逐页铺满插入 PPT。`,
-        { pages: images.length }
-      );
+      setPptStep(ppt, 'ppt_background', 'done', `已将 ${images.length} 张图片逐页铺满插入 PPT。`, { pages: images.length });
     }
   }
 }
@@ -401,14 +431,150 @@ function addPptEvent(ppt, event) {
   return next;
 }
 
+function pptStageToStepId(stage) {
+  const key = String(stage || '').trim();
+  const map = {
+    init: 'understand',
+    understand: 'understand',
+    outline: 'outline',
+    page_types: 'page_types',
+    page_type: 'page_types',
+    design_recipe: 'design_recipe',
+    recipe: 'design_recipe',
+    layout_blueprint: 'layout_blueprint',
+    blueprint: 'layout_blueprint',
+    html: 'html_design',
+    html_design: 'html_design',
+    aesthetic_review: 'aesthetic_review',
+    quality_review: 'aesthetic_review',
+    review: 'aesthetic_review',
+    render: 'browser_render',
+    browser_render: 'browser_render',
+    assemble: 'ppt_background',
+    ppt_background: 'ppt_background',
+    saved: 'export',
+    export: 'export'
+  };
+  return map[key] || key;
+}
+
+function addPptStepCall(ppt, stepId, event) {
+  return ensurePptStepCall(ppt, pptStageToStepId(stepId), event && event.name, event && (event.key || event.id || event.name), event || {});
+}
+
 function finishPptEvent(event, patch = {}) {
   if (!event) return;
   Object.assign(event, patch);
   if (!event.finishedAt) event.finishedAt = Date.now();
 }
 
-function refreshPptModeMessage(msgIdx, chat) {
-  if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, chat);
+function ensurePptStepCall(ppt, stepId, name, key, patch = {}) {
+  const step = pptStep(ppt, stepId);
+  if (!step) return null;
+  if (!Array.isArray(step.calls)) step.calls = [];
+  const callKey = key || name;
+  let call = step.calls.find(x => x && x._key === callKey);
+  if (!call) {
+    call = { _key: callKey, name: name || callKey, status: patch.status || 'running', args: {}, result: '' };
+    step.calls.push(call);
+  }
+  Object.assign(call, patch);
+  return call;
+}
+
+function isPptSavedProgressEvent(ev, mappedStepId) {
+  const stage = String((ev && ev.stage) || '').trim();
+  const message = String((ev && ev.message) || '').trim();
+  return mappedStepId === 'export' && (stage === 'saved' || message.includes('PPTX 文件已保存'));
+}
+
+function applyPptProgressEvent(ppt, ev) {
+  if (!ppt || !ev || typeof ev !== 'object') return;
+  const stepId = ev.step || ev.stage || '';
+  const detail = ev.detail && typeof ev.detail === 'object' ? ev.detail : {};
+  if (ev.type === 'task_started') {
+    ppt.taskId = ev.task_id || (ev.snapshot && ev.snapshot.task_id) || ppt.taskId;
+    return;
+  }
+  if (ev.type === 'task' || ev.type === 'task_control') {
+    const mappedStepId = pptStageToStepId(stepId || ev.stage || ev.type);
+    if (ev.status === 'paused') {
+      ppt.status = 'paused';
+      ppt.progressText = ev.message || 'PPT 任务已暂停，可恢复执行。';
+    } else if (ev.status === 'running') {
+      ppt.status = 'running';
+      ppt.progressText = ev.message || ppt.progressText;
+    }
+    const savedDone = isPptSavedProgressEvent(ev, mappedStepId);
+    const status = ev.status === 'paused' ? 'warning' : (ev.status === 'error' ? 'error' : (ev.status === 'running' && !savedDone ? 'running' : 'done'));
+    ensurePptStepCall(ppt, mappedStepId, ev.stage || ev.type, `${mappedStepId}:${ev.stage || ev.type}:task`, { status, args: detail, result: ev.message || '' });
+    const step = pptStep(ppt, mappedStepId);
+    if (step && savedDone) {
+      setPptStep(ppt, mappedStepId, 'done', ev.message || 'PPTX 文件已保存。', detail);
+      finishPptRunningCalls(step, 'done', ev.message || 'PPTX 文件已保存。');
+      ppt.progressText = ev.message || ppt.progressText;
+    } else if (step && ev.status === 'running') {
+      setPptOnlyActive(ppt, mappedStepId, ev.message || step.note, detail);
+    }
+    return;
+  }
+  if (!stepId) return;
+  if (ev.type === 'step_start') {
+    const mappedStepId = pptStageToStepId(stepId);
+    setPptOnlyActive(ppt, mappedStepId, ev.message || '正在执行...', detail);
+    ppt.progressText = ev.message || ppt.progressText;
+    ensurePptStepCall(ppt, mappedStepId, stepId, `${mappedStepId}:${stepId}:main`, { status: 'running', args: detail, result: ev.message || '' });
+    return;
+  }
+  if (ev.type === 'step_done') {
+    const mappedStepId = pptStageToStepId(stepId);
+    const status = mappedStepId === 'browser_render' && detail.renderer === 'pillow_fallback' ? 'warning' : 'done';
+    setPptStep(ppt, mappedStepId, status, ev.message || '已完成。', detail);
+    ensurePptStepCall(ppt, mappedStepId, stepId, `${mappedStepId}:${stepId}:main`, { status, args: detail, result: ev.message || '已完成。' });
+    finishPptRunningCalls(pptStep(ppt, mappedStepId), status, ev.message || '已完成。');
+    ppt.progressText = ev.message || ppt.progressText;
+    if (mappedStepId === 'export' && detail.path) ppt.path = detail.path;
+    return;
+  }
+  if (ev.type === 'substep') {
+    const page = detail.page || '';
+    const name = ev.name || 'substep';
+    const mappedStepId = pptStageToStepId(stepId);
+    const key = `${mappedStepId}:${name}:${page || Date.now()}`;
+    const status = ev.status || 'running';
+    ensurePptStepCall(ppt, mappedStepId, name, key, { status, args: detail, result: ev.message || '' });
+    const step = pptStep(ppt, mappedStepId);
+    if (step && status === 'running') {
+      step.status = 'active';
+      step.note = ev.message || step.note;
+      step.updatedAt = Date.now();
+    }
+    ppt.progressText = ev.message || ppt.progressText;
+  }
+}
+
+function applyPptTaskSnapshot(ppt, snap) {
+  if (!ppt || !snap) return;
+  ppt.taskId = snap.task_id || ppt.taskId;
+  (snap.events || []).forEach(ev => applyPptProgressEvent(ppt, ev));
+  if (snap.status === 'paused') ppt.status = 'paused';
+}
+
+function refreshPptModeMessage(msgIdx, chat, options = {}) {
+  const c = chat || currentChat();
+  const msg = c && c.messages && c.messages[msgIdx];
+  const full = !!options.full;
+  const inner = document.getElementById('messagesInner');
+  const existingPanel = inner && inner.querySelector(`.message[data-idx="${msgIdx}"] .ppt-panel`);
+  if (!full && msg && msg.pptMode && existingPanel) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderPptPanel(msg, msgIdx);
+    const newPanel = tmp.firstElementChild;
+    if (newPanel) {
+      existingPanel.replaceWith(newPanel);
+      if (typeof postRender === 'function') postRender(newPanel);
+    }
+  } else if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, chat);
   else if (typeof renderMessages === 'function') renderMessages();
   if (typeof saveData === 'function') saveData();
 }
@@ -460,6 +626,18 @@ function ensurePptSettingsModal() {
         </div>
       </div>
 
+      <div class="form-group">
+        <label>审美评分阈值</label>
+        <input type="number" id="pptAestheticScoreThreshold" min="40" max="95" step="1">
+        <div class="form-hint">默认 82。生成 HTML 后低于该分数会进入低分重写；值越高越严格，但耗时和重写概率也会增加。</div>
+      </div>
+
+      <div class="form-group">
+        <label>低分重写次数</label>
+        <input type="number" id="pptAestheticRewriteLimit" min="0" max="3" step="1">
+        <div class="form-hint">默认 2。每页最多自动重写次数；0 表示只评分不重写，最大 3。</div>
+      </div>
+
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
       <h3 style="font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:6px;">可编辑 Prompt</h3>
 
@@ -506,6 +684,8 @@ function openPptSettings() {
   const temp = s.pptTemperature === undefined ? 0.6 : Number(s.pptTemperature);
   document.getElementById('pptTemperature').value = Number.isFinite(temp) ? temp : 0.6;
   document.getElementById('pptTemperatureVal').textContent = document.getElementById('pptTemperature').value;
+  document.getElementById('pptAestheticScoreThreshold').value = normalizePptAestheticScoreThreshold(s.pptAestheticScoreThreshold);
+  document.getElementById('pptAestheticRewriteLimit').value = normalizePptAestheticRewriteLimit(s.pptAestheticRewriteLimit);
   document.getElementById('pptUnderstandPrompt').value = s.pptUnderstandPrompt || DEFAULT_PPT_UNDERSTAND_PROMPT;
   document.getElementById('pptOutlinePrompt').value = s.pptOutlinePrompt || DEFAULT_PPT_OUTLINE_PROMPT;
   document.getElementById('pptPageTypePrompt').value = s.pptPageTypePrompt || DEFAULT_PPT_PAGE_TYPE_PROMPT;
@@ -526,6 +706,8 @@ function savePptSettings() {
   s.pptModel = document.getElementById('pptModel').value.trim();
   const temp = parseFloat(document.getElementById('pptTemperature').value);
   s.pptTemperature = Number.isFinite(temp) ? temp : 0.6;
+  s.pptAestheticScoreThreshold = normalizePptAestheticScoreThreshold(document.getElementById('pptAestheticScoreThreshold').value);
+  s.pptAestheticRewriteLimit = normalizePptAestheticRewriteLimit(document.getElementById('pptAestheticRewriteLimit').value);
   s.pptUnderstandPrompt = document.getElementById('pptUnderstandPrompt').value.trim();
   s.pptOutlinePrompt = document.getElementById('pptOutlinePrompt').value.trim();
   s.pptPageTypePrompt = document.getElementById('pptPageTypePrompt').value.trim();
@@ -587,6 +769,8 @@ function buildPptModePayload(userRequest) {
     llm_max_tokens: Math.max(parseInt(s.maxTokens || 0, 10) || 0, 4096),
     llm_model: model,
     llm_temperature: s.pptTemperature === undefined ? 0.6 : s.pptTemperature,
+    aesthetic_score_threshold: normalizePptAestheticScoreThreshold(s.pptAestheticScoreThreshold),
+    aesthetic_rewrite_limit: normalizePptAestheticRewriteLimit(s.pptAestheticRewriteLimit),
     ppt_understand_prompt: s.pptUnderstandPrompt || '',
     ppt_outline_prompt: s.pptOutlinePrompt || '',
     ppt_page_type_prompt: s.pptPageTypePrompt || '',
@@ -618,7 +802,15 @@ function renderPptPanel(m, idx) {
   if (ppt.status === 'running') statusBadge = '<span class="outline-status-badge running">进行中</span>';
   else if (ppt.status === 'done') statusBadge = '<span class="outline-status-badge done">已完成</span>';
   else if (ppt.status === 'error') statusBadge = '<span class="outline-status-badge error">出错</span>';
+  else if (ppt.status === 'paused') statusBadge = '<span class="outline-status-badge paused">已暂停</span>';
   else statusBadge = '<span class="outline-status-badge paused">待处理</span>';
+
+  const controlHtml = ppt.taskId && (ppt.status === 'paused' || ppt.status === 'running') ? `
+    <div class="ppt-task-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
+      ${ppt.status === 'paused' ? `<button class="btn mini" onclick="resumePptTaskFromPanel(${idx})">继续执行</button>` : `<button class="btn mini" onclick="pausePptTaskFromPanel(${idx})">暂停</button>`}
+      <button class="btn mini danger" onclick="cancelPptTaskFromPanel(${idx})">取消任务</button>
+      <span class="form-hint">任务ID：${escapeHtml(ppt.taskId || '')}</span>
+    </div>` : '';
 
   const stats = [
     `${doneCount}/${total} 步`,
@@ -654,8 +846,8 @@ function renderPptPanel(m, idx) {
             const callResult = String(call.result || '');
             const callResultShort = callResult.length > 260 ? callResult.slice(0, 260) + '...' : callResult;
             const callStatus = call.status || 'done';
-            const callCls = callStatus === 'running' ? 'running' : (callStatus === 'error' ? 'error' : (callStatus === 'warning' ? 'warning' : 'success'));
-            const callIcon = callStatus === 'running' ? '<span class="outline-tool-spin"></span>' : (callStatus === 'error' ? '!' : (callStatus === 'warning' ? '!' : 'OK'));
+            const callCls = callStatus === 'running' ? 'running' : (callStatus === 'error' ? 'error' : (callStatus === 'warning' ? 'warning' : (callStatus === 'pending' ? 'pending' : 'success')));
+            const callIcon = callStatus === 'running' ? '<span class="outline-tool-spin"></span>' : (callStatus === 'error' ? '!' : (callStatus === 'warning' ? '!' : (callStatus === 'pending' ? '…' : 'OK')));
             return `<div class="outline-tool-call ppt-step-call ${callCls}">
               <div class="outline-tool-head">
                 <span class="outline-tool-icon">${callIcon}</span>
@@ -678,38 +870,11 @@ function renderPptPanel(m, idx) {
     <div class="ppt-config-grid">
       <span>渲染：HTML → 16:9 图片</span>
       <span>风格：${escapeHtml(pptRenderStyleLabel(config.render_style))}</span>
+      <span>审美阈值：${escapeHtml(String(config.aesthetic_score_threshold || 82))}</span>
+      <span>低分重写：${escapeHtml(String(config.aesthetic_rewrite_limit ?? 2))} 次</span>
       <span>模型：${escapeHtml(config.llm_model || '当前模型')}</span>
       <span>命名：${escapeHtml(config.filename || 'AI 自动命名')}</span>
     </div>`;
-
-  let eventsHtml = '';
-  if (Array.isArray(ppt.events) && ppt.events.length) {
-    eventsHtml = `
-      <div class="outline-section sub ppt-events-section">
-        <div class="outline-section-header">后台调用</div>
-        <div class="outline-section-body">
-          <div class="outline-tool-calls">
-            ${ppt.events.map(ev => {
-              const argsStr = JSON.stringify(ev.args || {});
-              const argsShort = argsStr.length > 120 ? argsStr.slice(0, 120) + '...' : argsStr;
-              const result = String(ev.result || '');
-              const resultShort = result.length > 420 ? result.slice(0, 420) + '...' : result;
-              const cls = ev.status === 'running' ? 'running' : (ev.status === 'error' ? 'error' : (ev.status === 'warning' ? 'warning' : 'success'));
-              const icon = ev.status === 'running' ? '<span class="outline-tool-spin"></span>' : (ev.status === 'error' ? '!' : (ev.status === 'warning' ? '!' : 'OK'));
-              return `
-                <div class="outline-tool-call ppt-event ${cls}">
-                  <div class="outline-tool-head">
-                    <span class="outline-tool-icon">${icon}</span>
-                    <span class="outline-tool-name">${escapeHtml(ev.name || 'PPT 调用')}</span>
-                    <span class="outline-tool-args" title="${escapeHtml(argsStr)}">${escapeHtml(argsShort)}</span>
-                  </div>
-                  ${result ? `<div class="outline-tool-result">${escapeHtml(resultShort)}</div>` : ''}
-                </div>`;
-            }).join('')}
-          </div>
-        </div>
-      </div>`;
-  }
 
   const progressHtml = ppt.status === 'running' || ppt.inProgress
     ? `<div class="ref-progress"><span class="ref-spinner"></span><span>${escapeHtml(ppt.progressText || '正在生成 PPT...')}</span></div>`
@@ -727,11 +892,11 @@ function renderPptPanel(m, idx) {
           <div class="outline-section-body">
             ${total ? `<div class="outline-progress-bar"><div class="outline-progress-fill" style="width:${pct}%;"></div></div>` : ''}
             ${configHtml}
+            ${controlHtml}
             ${llmConfigHtml}
             ${stepHtml}
           </div>
         </div>
-        ${eventsHtml}
         ${progressHtml}
       </div>
     </div>`;
@@ -745,6 +910,55 @@ function togglePptPanel(idx) {
   if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
   else if (typeof renderMessages === 'function') renderMessages();
   if (typeof saveData === 'function') saveData();
+}
+
+async function resumePptTaskFromPanel(idx) {
+  const c = currentChat();
+  const msg = c && c.messages && c.messages[idx];
+  if (!msg || !msg.pptMode || !msg.pptMode.taskId) return;
+  const taskId = msg.pptMode.taskId;
+  msg.pptMode.status = 'running';
+  msg.pptMode.inProgress = true;
+  msg.pptMode.progressText = '正在恢复 PPT 任务...';
+  refreshPptModeMessage(idx, c);
+  await controlPptTask(taskId, 'resume', { skipConfirm: true });
+  let since = 0;
+  try {
+    while (true) {
+      const snap = await pollPptTask(taskId, since, { skipConfirm: true });
+      if (!snap || !snap.ok) throw new Error((snap && snap.error) || 'PPT 任务轮询失败');
+      since = snap.progress_index || since;
+      applyPptTaskSnapshot(msg.pptMode, snap);
+      refreshPptModeMessage(idx, c);
+      if (snap.status === 'done') {
+        const generated = snap.result || {};
+        applyPptPipelineDetails(msg.pptMode, generated);
+        msg.content = generated.message || generated.text || `✅ PPT 已生成：${generated.path || ''}`;
+        msg.pptMode.status = 'done';
+        msg.pptMode.inProgress = false;
+        refreshPptModeMessage(idx, c);
+        return;
+      }
+      if (snap.status === 'error' || snap.status === 'cancelled') throw new Error(snap.error || 'PPT 任务已结束');
+      if (snap.status === 'paused') return;
+      await new Promise(resolve => setTimeout(resolve, 900));
+    }
+  } catch (e) {
+    msg.pptMode.status = 'error';
+    msg.pptMode.error = e.message || String(e);
+    msg.pptMode.inProgress = false;
+    refreshPptModeMessage(idx, c);
+  }
+}
+
+async function pausePptTaskFromPanel(idx) {
+  const c = currentChat(); const msg = c && c.messages && c.messages[idx];
+  if (msg && msg.pptMode && msg.pptMode.taskId) await controlPptTask(msg.pptMode.taskId, 'pause', { skipConfirm: true });
+}
+
+async function cancelPptTaskFromPanel(idx) {
+  const c = currentChat(); const msg = c && c.messages && c.messages[idx];
+  if (msg && msg.pptMode && msg.pptMode.taskId && confirm('确定取消这个 PPT 后端任务吗？取消后不能恢复。')) await controlPptTask(msg.pptMode.taskId, 'cancel', { skipConfirm: true });
 }
 
 async function callAPIWithPptMode(options = {}) {
@@ -786,33 +1000,38 @@ async function callAPIWithPptMode(options = {}) {
       api_key: payload.llm_api_key ? '已配置' : '未配置'
     });
     aiMsg.pptMode.progressText = 'Step 1：理解用户主题和内容...';
-    const generateEvent = addPptEvent(aiMsg.pptMode, {
+    const generateEvent = addPptStepCall(aiMsg.pptMode, 'understand', {
+      key: 'pipeline:start',
       name: 'run_image_ppt_pipeline',
       status: 'running',
       args: sanitizePptPayloadForUi(payload),
       result: '等待后端完成：理解主题 / 大纲 / 页面类型 / HTML / 浏览器截图 / 图片铺入 PPT / 导出。'
     });
-    const intentEvent = addPptEvent(aiMsg.pptMode, {
+    const intentEvent = addPptStepCall(aiMsg.pptMode, 'understand', {
+      key: 'understand:intent',
       name: 'step_1_understand',
       status: 'running',
       args: { request_chars: userRequest.length, target_slides: payload.slide_count, render_mode: payload.render_mode },
       result: '等待 generate_ppt 返回后回填理解结果...'
     });
-    const outlineEvent = addPptEvent(aiMsg.pptMode, {
+    const outlineEvent = addPptStepCall(aiMsg.pptMode, 'outline', {
+      key: 'outline:plan',
       name: 'step_2_outline',
-      status: 'running',
+      status: 'pending',
       args: { target_slides: payload.slide_count, prompt: payload.ppt_outline_prompt ? '自定义' : '默认' },
       result: '等待大纲规划结果...'
     });
-    const pageTypeEvent = addPptEvent(aiMsg.pptMode, {
+    const pageTypeEvent = addPptStepCall(aiMsg.pptMode, 'page_types', {
+      key: 'page_types:plan',
       name: 'step_3_page_types',
-      status: 'running',
+      status: 'pending',
       args: { target_slides: payload.slide_count, prompt: payload.ppt_page_type_prompt ? '自定义' : '默认' },
       result: '等待每页页面类型规划结果...'
     });
-    const htmlEvent = addPptEvent(aiMsg.pptMode, {
+    const htmlEvent = addPptStepCall(aiMsg.pptMode, 'html_design', {
+      key: 'html_design:generate',
       name: 'step_5_html_design',
-      status: 'running',
+      status: 'pending',
       args: { target_slides: payload.slide_count, prompt: payload.ppt_html_prompt ? '自定义' : '默认' },
       result: '等待 HTML 设计稿、截图和 PPT 导出结果...'
     });
@@ -824,8 +1043,28 @@ async function callAPIWithPptMode(options = {}) {
     setPptStep(aiMsg.pptMode, 'page_types', 'pending', '等待 Step 2 完成后确定每页页面类型。');
     refreshPptModeMessage(msgIdx, c);
 
-    const generated = await generatePpt(payload, { signal: ctrl.signal, source: 'ppt-mode', chatId: c.id });
+    const generated = await generatePptWithProgress(payload, {
+      signal: ctrl.signal,
+      source: 'ppt-mode',
+      chatId: c.id,
+      skipConfirm: true,
+      isStopped: () => {
+        const t = typeof chatTaskById === 'function' ? chatTaskById(c.id) : null;
+        return !!(t && t.stopRequested) || !!state.stopRequested;
+      },
+      onProgress: ev => {
+        applyPptTaskSnapshot(aiMsg.pptMode, ev.snapshot || { events: [ev], task_id: ev.task_id });
+        refreshPptModeMessage(msgIdx, c);
+      }
+    });
     if (typeof generated === 'string') throw new Error(generated);
+    if (generated && generated.paused) {
+      aiMsg.pptMode.status = 'paused';
+      aiMsg.pptMode.inProgress = false;
+      aiMsg.content = '⏸️ PPT 任务已暂停，可在卡片中点击“继续执行”。';
+      refreshPptModeMessage(msgIdx, c);
+      return;
+    }
     if (!generated || !generated.ok) {
       finishPptEvent(generateEvent, {
         status: 'error',
@@ -840,6 +1079,9 @@ async function callAPIWithPptMode(options = {}) {
     const pageTypesForEvents = Array.isArray(pipeline.page_types) ? pipeline.page_types : [];
     const htmlPagesForEvents = Array.isArray(generated.html_pages) ? generated.html_pages : [];
     const imagesForEvents = Array.isArray(generated.images) ? generated.images : [];
+    if (outlineEvent && outlineEvent.status === 'pending') outlineEvent.status = 'running';
+    if (pageTypeEvent && pageTypeEvent.status === 'pending') pageTypeEvent.status = 'running';
+    if (htmlEvent && htmlEvent.status === 'pending') htmlEvent.status = 'running';
     finishPptEvent(intentEvent, { status: 'done', ok: true, result: pipeline.intent ? `已理解：${pipeline.intent.title || '未命名'}；用途 ${pipeline.intent.purpose || '-'}；受众 ${pipeline.intent.audience || '-'}；文件名 ${generated.filename || pipeline.intent.filename || 'AI 自动命名'}` : '已完成主题和内容理解。' });
     finishPptEvent(outlineEvent, { status: outlineForEvents.length ? 'done' : 'warning', ok: !!outlineForEvents.length, result: outlineForEvents.length ? `已规划 ${outlineForEvents.length} 页：${summarizePptTitles(outlineForEvents)}` : '未返回可展示的大纲明细。' });
     finishPptEvent(pageTypeEvent, { status: pageTypesForEvents.length ? 'done' : 'warning', ok: !!pageTypesForEvents.length, result: pageTypesForEvents.length ? `已确定 ${pageTypesForEvents.length} 页页面类型。` : '未返回页面类型明细。' });
@@ -872,6 +1114,7 @@ async function callAPIWithPptMode(options = {}) {
 
     aiMsg.content = `${generated.text || generated.message || `✅ PPT 已按图片页流程生成：${generated.path}`}`;
     setPptStep(aiMsg.pptMode, 'export', 'done', `已导出 PPT 文件：${generated.path || '-'}`, { path: generated.path, slides: generated.slides, filename: generated.filename || '' });
+    finishPptRunningCalls(pptStep(aiMsg.pptMode, 'export'), 'done', `已导出 PPT 文件：${generated.path || '-'}`);
     aiMsg.pptMode.status = 'done';
     aiMsg.pptMode.path = generated.path;
     aiMsg.pptMode.slides = generated.slides;
@@ -881,6 +1124,7 @@ async function callAPIWithPptMode(options = {}) {
     (aiMsg.pptMode.events || [])
       .filter(ev => ev && ev.status === 'running')
       .forEach(ev => finishPptEvent(ev, { status: 'error', ok: false, result: e.message || String(e) }));
+    (aiMsg.pptMode.steps || []).forEach(step => finishPptRunningCalls(step, 'error', e.message || String(e)));
     const runningStep = (aiMsg.pptMode.steps || []).find(step => step.status === 'active');
     if (runningStep) setPptStep(aiMsg.pptMode, runningStep.id, 'error', e.message || String(e));
     setPptStep(aiMsg.pptMode, 'export', 'error', 'PPT 生成流程已中断。');
@@ -904,7 +1148,7 @@ async function callAPIWithPptMode(options = {}) {
       state.abortCtrl = null;
     }
     saveData();
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
+    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     else renderMessages();
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
