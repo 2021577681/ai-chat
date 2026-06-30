@@ -221,8 +221,6 @@ const BUILTIN_TOOLS = [
         request: { type: 'string', description: 'user_request 的别名。' },
         prompt: { type: 'string', description: 'user_request 的别名。' },
         slide_count: { type: 'number', description: '目标页数，1-50。未提供时后端会从用户需求中提取，仍没有则默认 8 页。' },
-        render_mode: { type: 'string', description: '渲染模式。当前固定使用 html_image：每页 项目 HTML 模板页渲染成一张 16:9 图片再铺入 PPT。' },
-        ppt_template_system: { type: 'string', description: '固定为 project；兼容参数，后端会强制使用项目内 项目 PPT 工作流。' },
         ppt_template_style: { type: 'string', description: '模板风格：auto、magazine（电子杂志 × 电子墨水）或 swiss（瑞士国际主义）。' },
         ppt_template_theme: { type: 'string', description: '项目主题色：auto、ink_classic、indigo_porcelain、forest_ink、kraft_paper、dune、ikb、lemon、lemon_green、safety_orange。' },
         render_style: { type: 'string', description: '可选补充说明，如受众、场景、素材/截图处理、硬约束；不会切回旧通用生成逻辑。' },

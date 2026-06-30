@@ -1,8 +1,7 @@
 # ============================================================
 # server/ppt_core.py - PPT image pipeline facade
 # ============================================================
-# The old native/structured PPT implementation has been removed.
-# This mixin only exposes the current project HTML-image PPT workflow.
+# This mixin exposes the current project HTML-image PPT workflow.
 
 from .ppt_image_pipeline import generate_html_image_ppt
 from .ppt_tasks import control_ppt_task, get_ppt_task, start_ppt_task
@@ -59,36 +58,5 @@ class PptMixin:
         data = body.get("data") or {}
         if not isinstance(data, dict):
             return self._send_json(200, {"ok": False, "error": "data 必须是对象"})
-
-        if data.get("slides") is not None:
-            return self._send_json(200, {
-                "ok": False,
-                "error": "旧版 slides 结构化 PPT 流程已移除，请改用 user_request/request/prompt 走当前 html_image PPT 模式。",
-            })
-
-        legacy_template_keys = [
-            key for key in (
-                "template",
-                "template_path",
-                "template_mode",
-                "template_strategy",
-                "template_profile",
-                "template_profile_path",
-            )
-            if data.get(key)
-        ]
-        if legacy_template_keys:
-            return self._send_json(200, {
-                "ok": False,
-                "error": "旧版 PPT 模板填充/结构化模板流程已移除，请使用当前 project HTML 图片页模板流程。",
-                "unsupported_keys": legacy_template_keys,
-            })
-
-        render_mode = _as_text(data.get("render_mode") or "html_image", "html_image").strip().lower()
-        if render_mode and render_mode != "html_image":
-            return self._send_json(200, {
-                "ok": False,
-                "error": "旧版 native/vector/structured 渲染模式已移除，当前仅支持 html_image。",
-            })
 
         return self._send_json(200, generate_html_image_ppt(data))

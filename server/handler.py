@@ -23,7 +23,7 @@ from .mcp_skills import McpSkillsMixin
 from .music import MusicMixin
 from .preview import PreviewMixin
 from .remote import RemoteMixin
-from .ppt import PptMixin
+from .ppt_core import PptMixin
 from .proxy import ProxyMixin
 from .screenshot import ScreenshotMixin
 from .web import WebMixin

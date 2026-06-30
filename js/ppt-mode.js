@@ -803,8 +803,8 @@ function openPptSettings() {
   const s = state.settings || {};
   document.getElementById('pptEnabled').checked = !!s.usePpt;
   document.getElementById('pptSlideCount').value = normalizePptSlideCount(s.pptSlideCount || 8);
-  document.getElementById('pptDeckStyle').value = normalizePptDeckStyle(s.pptDeckStyle || s.pptTemplateStyle || 'auto');
-  document.getElementById('pptDeckTheme').value = normalizePptDeckTheme(s.pptDeckTheme || s.pptTemplateTheme || 'auto');
+  document.getElementById('pptDeckStyle').value = normalizePptDeckStyle(s.pptDeckStyle || 'auto');
+  document.getElementById('pptDeckTheme').value = normalizePptDeckTheme(s.pptDeckTheme || 'auto');
   document.getElementById('pptRenderStyle').value = s.pptRenderStyle || '';
   document.getElementById('pptEditableText').checked = !!s.pptEditableText;
   document.getElementById('pptModel').value = s.pptModel || '';
@@ -814,7 +814,7 @@ function openPptSettings() {
   document.getElementById('pptUnderstandPrompt').value = s.pptUnderstandPrompt || DEFAULT_PPT_UNDERSTAND_PROMPT;
   document.getElementById('pptOutlinePrompt').value = s.pptOutlinePrompt || DEFAULT_PPT_OUTLINE_PROMPT;
   document.getElementById('pptPageTypePrompt').value = s.pptPageTypePrompt || DEFAULT_PPT_PAGE_TYPE_PROMPT;
-  document.getElementById('pptHtmlPrompt').value = s.pptHtmlPrompt || s.pptSlidePrompt || DEFAULT_PPT_HTML_PROMPT;
+  document.getElementById('pptHtmlPrompt').value = s.pptHtmlPrompt || DEFAULT_PPT_HTML_PROMPT;
   modal.classList.add('show');
   if (typeof initMainSettingsSelectSkins === 'function') initMainSettingsSelectSkins(modal);
 }
@@ -839,9 +839,6 @@ function savePptSettings() {
   s.pptSlideCount = normalizePptSlideCount(document.getElementById('pptSlideCount').value);
   s.pptDeckStyle = normalizePptDeckStyle(document.getElementById('pptDeckStyle').value);
   s.pptDeckTheme = normalizePptDeckTheme(document.getElementById('pptDeckTheme').value);
-  s.pptTemplateSystem = 'project';
-  s.pptTemplateStyle = s.pptDeckStyle;
-  s.pptTemplateTheme = s.pptDeckTheme;
   s.pptRenderStyle = document.getElementById('pptRenderStyle').value.trim();
   s.pptEditableText = !!document.getElementById('pptEditableText').checked;
   s.pptModel = document.getElementById('pptModel').value.trim();
@@ -851,7 +848,6 @@ function savePptSettings() {
   s.pptOutlinePrompt = normalizePptPromptOverride(document.getElementById('pptOutlinePrompt').value, DEFAULT_PPT_OUTLINE_PROMPT);
   s.pptPageTypePrompt = normalizePptPromptOverride(document.getElementById('pptPageTypePrompt').value, DEFAULT_PPT_PAGE_TYPE_PROMPT);
   s.pptHtmlPrompt = normalizePptPromptOverride(document.getElementById('pptHtmlPrompt').value, DEFAULT_PPT_HTML_PROMPT);
-  s.pptSlidePrompt = s.pptHtmlPrompt;
   if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(!!s.usePpt, { render: false });
   syncPptComposerHint();
   if (typeof persistSettings === 'function') persistSettings();
@@ -898,7 +894,7 @@ function buildPptModePayload(userRequest, attachments = []) {
   const s = state.settings || {};
   const model = (s.pptModel || s.currentModel || '').trim();
   const htmlPrompt = normalizePptPromptOverride(
-    s.pptHtmlPrompt || s.pptSlidePrompt || '',
+    s.pptHtmlPrompt || '',
     DEFAULT_PPT_HTML_PROMPT,
     ['请把大纲扩展成适合 16:9 HTML 视觉渲染的页面内容']
   );
@@ -906,11 +902,8 @@ function buildPptModePayload(userRequest, attachments = []) {
     user_request: userRequest,
     attachments: Array.isArray(attachments) ? attachments.map(a => ({ ...(a || {}) })) : [],
     slide_count: normalizePptSlideCount(s.pptSlideCount),
-    render_mode: 'html_image',
-    ppt_template_system: 'project',
-    template_system: 'project',
-    ppt_template_style: normalizePptDeckStyle(s.pptDeckStyle || s.pptTemplateStyle || 'auto'),
-    ppt_template_theme: normalizePptDeckTheme(s.pptDeckTheme || s.pptTemplateTheme || 'auto'),
+    ppt_template_style: normalizePptDeckStyle(s.pptDeckStyle || 'auto'),
+    ppt_template_theme: normalizePptDeckTheme(s.pptDeckTheme || 'auto'),
     render_style: s.pptRenderStyle || '',
     ppt_editable_text: !!s.pptEditableText,
     editable_text_overlay: !!s.pptEditableText,
@@ -929,8 +922,7 @@ function buildPptModePayload(userRequest, attachments = []) {
       DEFAULT_PPT_PAGE_TYPE_PROMPT,
       ['页面类型是语义类型，不是固定模板限制', '输出 pages，每页包含 page、title、page_type、visual_role、content_blocks。']
     ),
-    ppt_html_prompt: htmlPrompt,
-    ppt_slide_prompt: htmlPrompt
+    ppt_html_prompt: htmlPrompt
   };
 }
 
@@ -1043,9 +1035,7 @@ function renderPptStepMeta(metaObj) {
 function renderPptPanel(m, idx) {
   const ppt = m && m.pptMode;
   if (!ppt) return '';
-  const steps = Array.isArray(ppt.steps) && ppt.steps.length ? ppt.steps : [
-    { id: 'legacy', title: 'PPT 生成', status: ppt.status === 'done' ? 'done' : (ppt.status === 'error' ? 'error' : 'active'), note: ppt.path || ppt.error || '正在处理...' }
-  ];
+  const steps = Array.isArray(ppt.steps) ? ppt.steps : [];
   const doneCount = steps.filter(step => step.status === 'done' || step.status === 'skipped' || step.status === 'warning').length;
   const total = steps.length;
   const pct = total ? Math.round(doneCount / total * 100) : 0;
@@ -1381,7 +1371,7 @@ async function callAPIWithPptMode(options = {}) {
       key: 'understand:intent',
       name: 'step_1_understand',
       status: 'running',
-      args: { request_chars: userRequest.length, target_slides: payload.slide_count, render_mode: payload.render_mode },
+      args: { request_chars: userRequest.length, target_slides: payload.slide_count },
       result: '等待 generate_ppt 返回后回填理解结果...'
     });
     const outlineEvent = addPptStepCall(aiMsg.pptMode, 'outline', {
