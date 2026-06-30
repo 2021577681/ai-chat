@@ -190,15 +190,6 @@ function isPptTool(name) {
   return typeof name === 'string' && PPT_TOOL_NAMES.includes(name);
 }
 
-function pptToolsEnabled() {
-  return state.tools.some(t => isPptTool(t.name));
-}
-
-function pptToolCount() {
-  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
-  return BUILTIN_TOOLS.filter(t => PPT_TOOL_NAMES.includes(t.name)).length;
-}
-
 function ensurePptToolsEnabled() {
   if (typeof BUILTIN_TOOLS === 'undefined' || !Array.isArray(BUILTIN_TOOLS)) return 0;
   let added = 0;
@@ -226,13 +217,6 @@ function syncPptToolsWithMode(enabled = !!(state.settings && state.settings.useP
     if (options.render !== false && typeof renderToolList === 'function') renderToolList();
   }
 }
-
-function togglePptTools() {
-  if (typeof togglePptMode === 'function') togglePptMode();
-  else toast('请使用顶栏 PPT 按钮开启 PPT 模式');
-}
-
-function updatePptToggleBtn() {}
 
 // ============ 📚 论文工具批量启停 ============
 const PAPER_TOOL_NAMES = [

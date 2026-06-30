@@ -1069,10 +1069,6 @@ def system_seed(request_text, intent, options):
     return str(abs(hash(basis)) % 1000000)
 
 
-def _is_project_design_system(design_system):
-    return (design_system or {}).get("template_system") == _PROJECT_TEMPLATE_SYSTEM
-
-
 def _project_skill_prompt_excerpt():
     global _PROJECT_SKILL_PROMPT_CACHE
     if _PROJECT_SKILL_PROMPT_CACHE is not None:

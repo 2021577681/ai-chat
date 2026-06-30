@@ -76,17 +76,6 @@ function normalizePptSlideCount(value) {
   return Number.isFinite(count) ? Math.max(1, Math.min(50, count)) : 8;
 }
 
-function normalizePptRepairAllowedMaxCycles(value) {
-  const count = parseInt(value, 10);
-  return Number.isFinite(count) ? Math.max(1, Math.min(100, count)) : 20;
-}
-
-function normalizePptRepairMaxCycles(value, allowedMax) {
-  const allowed = normalizePptRepairAllowedMaxCycles(allowedMax);
-  const count = parseInt(value, 10);
-  return Number.isFinite(count) ? Math.max(1, Math.min(allowed, count)) : Math.min(8, allowed);
-}
-
 function normalizePptRenderStyle(value) {
   const style = String(value || '').trim();
   return style || '按 项目 PPT 工作流自动匹配';
@@ -320,35 +309,6 @@ function createPptModeState(payload, intent) {
   };
 }
 
-function summarizePptValidationBrief(brief) {
-  if (!brief || typeof brief !== 'object') return '';
-  const bits = [];
-  bits.push(brief.passed ? '通过' : '未通过');
-  if (brief.score !== undefined && brief.score !== null) bits.push(`评分 ${brief.score}`);
-  if (brief.issue_count) bits.push(`错误 ${brief.issue_count}`);
-  if (brief.warning_count) bits.push(`警告 ${brief.warning_count}`);
-  if (brief.text_overlap_count) bits.push(`文字重叠 ${brief.text_overlap_count}`);
-  if (brief.text_overflow_count) bits.push(`文字溢出 ${brief.text_overflow_count}`);
-  if (brief.text_graphic_overlap_count) bits.push(`图文冲突 ${brief.text_graphic_overlap_count}`);
-  if (brief.visual_checked) {
-    if (brief.visual_available) bits.push(`视觉${brief.visual_passed === false ? '未通过' : '通过'}`);
-    else bits.push(`视觉未执行：${brief.visual_summary || '不可用'}`);
-    if (brief.visual_issue_count) bits.push(`视觉问题 ${brief.visual_issue_count}`);
-  }
-  return bits.join(' · ');
-}
-
-function summarizePptIssues(items, max = 3) {
-  if (!Array.isArray(items) || !items.length) return '';
-  return items.slice(0, max).map((item, i) => {
-    if (!item || typeof item !== 'object') return `${i + 1}. ${String(item)}`;
-    const slide = item.slide || item.page ? `第${item.slide || item.page}页` : '全局';
-    const kind = item.kind || item.type || item.severity || '问题';
-    const msg = item.message || item.description || item.summary || '';
-    return `${i + 1}. ${slide} ${kind}：${msg}`;
-  }).join('；');
-}
-
 function pptStep(ppt, id) {
   return ppt && Array.isArray(ppt.steps) ? ppt.steps.find(step => step.id === id) : null;
 }
@@ -360,10 +320,6 @@ function setPptStep(ppt, id, status, note, meta) {
   if (note !== undefined) step.note = note;
   if (meta !== undefined) step.meta = meta;
   step.updatedAt = Date.now();
-}
-
-function isPptDoneLikeStatus(status) {
-  return status === 'done' || status === 'warning' || status === 'skipped' || status === 'error';
 }
 
 function finishPptRunningCalls(step, status = 'done', result) {
@@ -476,22 +432,6 @@ function applyPptPipelineDetails(ppt, generated) {
       setPptStep(ppt, 'ppt_background', 'done', `已将 ${images.length} 张图片逐页铺满插入 PPT。`, { pages: images.length });
     }
   }
-}
-
-function addPptEvent(ppt, event) {
-  if (!ppt) return null;
-  if (!Array.isArray(ppt.events)) ppt.events = [];
-  const next = {
-    id: event.id || `ppt_evt_${Date.now()}_${ppt.events.length}`,
-    name: event.name || 'ppt_step',
-    status: event.status || 'done',
-    args: event.args || {},
-    result: event.result || '',
-    ok: event.ok !== false,
-    ts: Date.now()
-  };
-  ppt.events.push(next);
-  return next;
 }
 
 function pptStageToStepId(stage) {
@@ -864,30 +804,6 @@ function resetPptPromptsToDefault() {
   if (outline) outline.value = DEFAULT_PPT_OUTLINE_PROMPT;
   if (pageType) pageType.value = DEFAULT_PPT_PAGE_TYPE_PROMPT;
   if (html) html.value = DEFAULT_PPT_HTML_PROMPT;
-}
-
-function togglePptMode() {
-  const s = state.settings;
-  s.usePpt = !s.usePpt;
-  if (s.usePpt) {
-    s.usePlan = false;
-    s.useOutline = false;
-    s.useReflection = false;
-    const planBtn = document.getElementById('planBtn');
-    const outlineBtn = document.getElementById('outlineBtn');
-    const reflectBtn = document.getElementById('reflectBtn');
-    if (planBtn) planBtn.classList.remove('plan-active');
-    if (outlineBtn) outlineBtn.classList.remove('outline-active');
-    if (reflectBtn) reflectBtn.classList.remove('reflect-active');
-  }
-  if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(!!s.usePpt, { render: false });
-  const btn = document.getElementById('pptModeBtn');
-  if (btn) btn.classList.toggle('ppt-active', !!s.usePpt);
-  syncPptComposerHint();
-  if (typeof persistSettings === 'function') persistSettings();
-  if (typeof renderToolList === 'function') renderToolList();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast(s.usePpt ? '✓ 已启用 PPT 模式：下一条消息将生成 PPT' : '✓ 已关闭 PPT 模式');
 }
 
 function buildPptModePayload(userRequest, attachments = []) {

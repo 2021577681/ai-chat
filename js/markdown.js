@@ -17,6 +17,13 @@ function renderMarkdown(text) {
     inlineCodes.push(c);
     return `\x00ICODE${inlineCodes.length - 1}\x00`;
   });
+
+  // 2.5. 抽取标准 Markdown 链接，避免后续文件路径自动链接误处理链接文本或 URL
+  const markdownLinks = [];
+  text = text.replace(/\[([^\]\n]+)\]\(([^)]+)\)/g, (m, label, url) => {
+    markdownLinks.push({ label, url });
+    return `\x00LINK${markdownLinks.length - 1}\x00`;
+  });
   
   // 3. 抽取数学公式
   const mathBlocks = [];
@@ -48,8 +55,13 @@ function renderMarkdown(text) {
   text = text.replace(/~~([^~]+)~~/g, '<del>$1</del>');
   
   // 8. 链接
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  
+  text = renderFilePathLinks(text);
+  text = text.replace(/\x00LINK(\d+)\x00/g, (m, i) => {
+    const link = markdownLinks[+i];
+    const href = escapeHtml(String(link.url || '')).replace(/&quot;/g, '%22');
+    return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(link.label || '')}</a>`;
+  });
+
   // 9. 引用
   text = text.replace(/^&gt;\s?(.+)$/gm, '<blockquote>$1</blockquote>');
   text = text.replace(/(<\/blockquote>\n<blockquote>)/g, '<br>');
@@ -175,6 +187,54 @@ function renderLists(text) {
   closeAll();
   return out.join('\n');
 }
+
+const MARKDOWN_FILE_LINK_EXTENSIONS = new Set([
+  'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'html', 'htm', 'json', 'jsonl',
+  'md', 'markdown', 'txt', 'py', 'pyw', 'java', 'c', 'cpp', 'h', 'hpp', 'cs',
+  'go', 'rs', 'php', 'rb', 'swift', 'kt', 'kts', 'scala', 'sh', 'bash', 'zsh',
+  'bat', 'cmd', 'ps1', 'sql', 'xml', 'yaml', 'yml', 'toml', 'ini', 'env',
+  'vue', 'svelte', 'scss', 'sass', 'less', 'csv', 'log'
+]);
+
+function normalizeMarkdownFileLinkPath(path) {
+  let p = String(path || '').trim();
+  p = p.replace(/^\.\//, '');
+  p = p.replace(/\\+/g, '/');
+  return p;
+}
+
+function isLikelyMarkdownFileLinkPath(path) {
+  const p = normalizeMarkdownFileLinkPath(path);
+  if (!p || p.length > 240) return false;
+  if (/^(https?:|data:|mailto:|javascript:)/i.test(p)) return false;
+  if (p.includes('..')) return false;
+  if (!p.includes('/')) return false;
+  const extMatch = p.match(/\.([a-z0-9]+)$/i);
+  if (!extMatch) return false;
+  if (!MARKDOWN_FILE_LINK_EXTENSIONS.has(extMatch[1].toLowerCase())) return false;
+  return /^[\w@.+\-/\\\u4e00-\u9fa5 ]+$/.test(p);
+}
+
+function renderFilePathLinks(text) {
+  const pattern = /(^|[\s(（\[【:：,，;；])((?:\.\/)?(?:[\w@.+\-\u4e00-\u9fa5 ]+[\\/])+[\w@.+\-\u4e00-\u9fa5 ]+\.[A-Za-z0-9]{1,12})(?=$|[\s)）\]】,，;；.。!！?？])/g;
+  return String(text || '').replace(pattern, (match, prefix, rawPath) => {
+    if (!isLikelyMarkdownFileLinkPath(rawPath)) return match;
+    const normalized = normalizeMarkdownFileLinkPath(rawPath);
+    return `${prefix}<a href="#" class="file-path-link" data-explorer-file="${escapeHtml(normalized)}" title="在资源管理器中打开 ${escapeHtml(normalized)}">${escapeHtml(rawPath)}</a>`;
+  });
+}
+
+document.addEventListener('click', event => {
+  const link = event.target && event.target.closest ? event.target.closest('a.file-path-link[data-explorer-file]') : null;
+  if (!link) return;
+  event.preventDefault();
+  const path = link.getAttribute('data-explorer-file') || '';
+  if (path && typeof openFileExplorerPath === 'function') {
+    openFileExplorerPath(path);
+  } else if (typeof toast === 'function') {
+    toast('资源管理器未加载，暂时无法打开文件');
+  }
+});
 
 // ⭐ 改造：接受 root 参数，只在指定子树内渲染，避免全文档扫描带来的卡顿
 // opts.skipMath = true 时跳过 KaTeX（适用于流式输出过程，公式半截会浪费）

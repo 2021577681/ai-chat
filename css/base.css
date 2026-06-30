@@ -355,6 +355,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .msg-content h4{font-size:1em}
 .msg-content a{color:var(--primary);text-decoration:none}
 .msg-content a:hover{text-decoration:underline}
+.msg-content a.file-path-link{font-family:'SF Mono',Monaco,Consolas,monospace;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:1px 5px;white-space:nowrap}
 .msg-content hr{border:none;border-top:1px solid var(--border);margin:14px 0}
 
 /* 代码块 */
