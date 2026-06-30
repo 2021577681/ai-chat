@@ -98,6 +98,58 @@ function _fmtTokenUsageTime(ts) {
   return `${_fmtTokenUsageDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function _tokenUsageEndOfDateValue(dateStr) {
+  const start = _parseLocalDateStart(dateStr);
+  return start.getTime() + 24 * 3600 * 1000;
+}
+
+function _getTokenUsageRange() {
+  if (!window._tokenUsageRange) {
+    const today = _todayTokenUsageDateValue();
+    window._tokenUsageRange = { start: '', end: today };
+  }
+  return window._tokenUsageRange;
+}
+
+function onTokenUsageRangeChange(field, value) {
+  const range = _getTokenUsageRange();
+  range[field] = value || '';
+  window._tokenUsageRange = range;
+  renderTokenUsageStats();
+}
+
+function setTokenUsageQuickRange(mode) {
+  const now = new Date();
+  const today = _fmtTokenUsageDate(now.getTime());
+  let start = '';
+  let end = today;
+  if (mode === 'today') {
+    start = today;
+  } else if (mode === '7d') {
+    start = _fmtTokenUsageDate(now.getTime() - 6 * 24 * 3600 * 1000);
+  } else if (mode === '30d') {
+    start = _fmtTokenUsageDate(now.getTime() - 29 * 24 * 3600 * 1000);
+  } else if (mode === 'all') {
+    start = '';
+    end = '';
+  }
+  window._tokenUsageRange = { start, end };
+  renderTokenUsageStats();
+}
+
+function _filterTokenUsageEventsByRange(events, range) {
+  const startMs = range?.start ? _parseLocalDateStart(range.start).getTime() : -Infinity;
+  const endMs = range?.end ? _tokenUsageEndOfDateValue(range.end) : Infinity;
+  return events.filter(ev => ev.ts >= startMs && ev.ts < endMs);
+}
+
+function _tokenUsageRangeLabel(range) {
+  if (!range?.start && !range?.end) return '全部时间';
+  if (range?.start && range?.end) return `${range.start} → ${range.end}`;
+  if (range?.start) return `${range.start} 起`;
+  return `截至 ${range.end}`;
+}
+
 function _renderMiniBars(rows, labelKey, valueKey, maxRows = 14) {
   const top = rows.slice(-maxRows);
   const max = Math.max(1, ...top.map(r => r[valueKey] || 0));
@@ -212,8 +264,11 @@ function renderTokenUsageStats() {
   const el = document.getElementById('tokenUsageContent');
   if (!el) return;
 
-  const events = _collectTokenUsageEvents();
-  if (!events.length) {
+  const allEvents = _collectTokenUsageEvents();
+  const selectedDate = _getTokenUsageSelectedDate();
+  const range = _getTokenUsageRange();
+  const events = _filterTokenUsageEventsByRange(allEvents, range);
+  if (!allEvents.length) {
     el.innerHTML = `
       <div class="json-help">暂无 Token 使用记录。发送请求并拿到 API usage 后，这里会自动汇总。</div>
     `;
@@ -271,9 +326,8 @@ function renderTokenUsageStats() {
 
   const modelRows = [...byModel.values()].sort((a, b) => b.usd - a.usd || b.requests - a.requests);
 
-  const selectedDate = _getTokenUsageSelectedDate();
   const latestEvents = events.slice(-12).reverse();
-  const legacyCount = events.filter(e => e._legacy).length;
+  const legacyCount = allEvents.filter(e => e._legacy).length;
 
   el.innerHTML = `
     <div class="json-help">
@@ -289,7 +343,26 @@ function renderTokenUsageStats() {
     </div>
 
     <div class="token-usage-section">
-      <h3 class="token-usage-section-title">按模型汇总</h3>
+      <div class="token-usage-section-title token-usage-model-head">
+        <span>按模型汇总</span>
+        <div class="token-usage-range-toolbar">
+          <span class="token-usage-range-summary">范围：${escapeHtml(_tokenUsageRangeLabel(range))}</span>
+          <label class="token-usage-date-picker token-usage-range-picker">
+            <span>开始</span>
+            <input type="date" value="${escapeHtml(range.start || '')}" onchange="onTokenUsageRangeChange('start', this.value)">
+          </label>
+          <label class="token-usage-date-picker token-usage-range-picker">
+            <span>结束</span>
+            <input type="date" value="${escapeHtml(range.end || '')}" onchange="onTokenUsageRangeChange('end', this.value)">
+          </label>
+          <div class="token-usage-quick-ranges">
+            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('today')">今天</button>
+            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('7d')">近 7 天</button>
+            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('30d')">近 30 天</button>
+            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('all')">全部</button>
+          </div>
+        </div>
+      </div>
       <div class="token-usage-table-wrap">
         <table class="token-usage-table">
           <thead>
@@ -298,7 +371,7 @@ function renderTokenUsageStats() {
             </tr>
           </thead>
           <tbody>
-            ${modelRows.map(r => `
+            ${modelRows.length ? modelRows.map(r => `
               <tr>
                 <td class="token-usage-model"><code>${escapeHtml(r.model)}</code></td>
                 <td class="num">${formatNumber(r.requests)}</td>
@@ -308,14 +381,14 @@ function renderTokenUsageStats() {
                 <td class="num">${formatNumber(r.thinkingTokens)}</td>
                 <td class="num">${_fmtTokenUsageMoney(r.usd)}</td>
                 <td class="token-usage-time-range">${_fmtTokenUsageDate(r.firstTs)} → ${_fmtTokenUsageDate(r.lastTs)}</td>
-              </tr>`).join('')}
+              </tr>`).join('') : `<tr><td colspan="8" class="token-usage-empty-row">该时间段暂无统计数据</td></tr>`}
           </tbody>
         </table>
       </div>
     </div>
 
     <div class="token-usage-section token-usage-panel">
-      ${_renderRequestCurve(events, selectedDate)}
+      ${_renderRequestCurve(allEvents, selectedDate)}
     </div>
 
     <div class="token-usage-section token-usage-panel">

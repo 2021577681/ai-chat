@@ -28,6 +28,7 @@ import sys
 
 from . import config
 from .sandbox import check_path_or_error
+from .window_focus import focus_window_for_path
 
 
 def _strip_patch_path(path):
@@ -1019,10 +1020,12 @@ class FilesMixin:
                 try:
                     is_dir = os.path.isdir(full)
                     size = 0 if is_dir else os.path.getsize(full)
+                    mtime = os.path.getmtime(full)
                     entries.append({
                         'name': name,
                         'type': 'dir' if is_dir else 'file',
-                        'size': size
+                        'size': size,
+                        'mtime': mtime
                     })
                 except:
                     pass
@@ -1105,6 +1108,7 @@ class FilesMixin:
         try:
             if sys.platform == 'win32':
                 os.startfile(path)  # type: ignore[attr-defined]
+                focus_window_for_path(path, timeout=4.0)
             elif sys.platform == 'darwin':
                 subprocess.Popen(
                     ['open', path],

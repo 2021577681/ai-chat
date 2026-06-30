@@ -7,7 +7,7 @@
 
 function buildOpenAIMessages(history, options = {}) {
   history = (history || []).filter(m =>
-    m && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
+    m && !m._hiddenFromAI && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
   );
   history = typeof privacyGuardPrepareHistory === 'function'
     ? privacyGuardPrepareHistory(history, { format: 'openai', ...options })
@@ -125,7 +125,7 @@ function fixOpenAIMessageSequence(messages) {
 // ============ OpenAI Responses API ============
 function buildOpenAIResponsesInput(history, options = {}) {
   history = (history || []).filter(m =>
-    m && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
+    m && !m._hiddenFromAI && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
   );
   history = typeof privacyGuardPrepareHistory === 'function'
     ? privacyGuardPrepareHistory(history, { format: 'responses', ...options })
@@ -205,7 +205,7 @@ function buildOpenAIResponsesInput(history, options = {}) {
 // ⭐ 关键修复：支持 PDF 和图片
 function buildAnthropicMessages(history, options = {}) {
   history = (history || []).filter(m =>
-    m && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
+    m && !m._hiddenFromAI && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
   );
   history = typeof privacyGuardPrepareHistory === 'function'
     ? privacyGuardPrepareHistory(history, { format: 'anthropic', ...options })

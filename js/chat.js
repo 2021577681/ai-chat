@@ -1180,6 +1180,7 @@ function renderMsg(m, idx) {
           ${hasRefBadge ? '<span class="msg-badge">🎭 师生</span>' : ''}
           ${hasPptBadge ? '<span class="msg-badge" style="background:linear-gradient(135deg,#2563eb,#f97316);">PPT</span>' : ''}
           ${!isUser ? `<span class="msg-timer" data-msg-idx="${idx}">${formatMsgTimer(m)}</span>` : ''}
+          ${isUser && typeof formatScheduledCountdown === 'function' ? formatScheduledCountdown(m, idx) : ''}
         </div>
         ${attsHtml}
         ${toolCallsHtml}
@@ -1193,6 +1194,7 @@ function renderMsg(m, idx) {
         ${outlineDiffHtml}
         ${m.pptMode && m.content ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
         ${m.reflection ? `<div class="msg-content plan-final-answer">${renderMarkdown(m.content || '')}</div>` : ''}
+        ${isUser && typeof renderScheduledMeta === 'function' ? renderScheduledMeta(m) : ''}
         ${!isUser ? `
         <div class="msg-actions">
           <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
@@ -1285,6 +1287,13 @@ function tickMsgTimers() {
       frozenJustNow = true;
     }
   });
+
+  if (typeof updateScheduledCountdownNodes === 'function') {
+    updateScheduledCountdownNodes(c);
+  }
+  if (typeof processScheduledTasks === 'function') {
+    processScheduledTasks();
+  }
 
   // ⭐ 有消息刚刚被冻结 → 可能解锁工具流程折叠：触发一次重新分组
   //   注意只在"发生状态切换"的那一帧触发，避免 250ms/次的高频 DOM 重排
@@ -1421,12 +1430,13 @@ async function onSend() {
   const currentGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(currentId) : !!state.isGenerating;
   const input = document.getElementById('input');
   const text = input.value.trim();
-  if (_editResendState && _editResendState.chatId === currentId) {
+  const scheduledActive = typeof isScheduledSendActive === 'function' && isScheduledSendActive();
+  if (!scheduledActive && _editResendState && _editResendState.chatId === currentId) {
     if (await submitEditResend(input)) return;
   } else if (_editResendState) {
     _editResendState = null;
   }
-  if (currentGenerating) {
+  if (!scheduledActive && currentGenerating) {
     const c = currentChat();
     if (c && (text || state.pendingAttachments.length)) {
       console.log('[onSend] 当前对话正在生成，发送中途引导...');
@@ -1509,6 +1519,24 @@ async function onSend() {
     }
   }
   
+  if (scheduledActive) {
+    if (typeof createScheduledMessageFromComposer !== 'function') {
+      toast('定时任务模块未加载', 3000);
+      return;
+    }
+    const scheduled = createScheduledMessageFromComposer(c, input, text);
+    if (!scheduled) return;
+    if (c.messages.length === 1) c.title = (text || '定时任务').slice(0, 30);
+    if (typeof maybeInsertBeacon === 'function') {
+      try { maybeInsertBeacon(c); } catch (e) { console.warn('[beacon] 插入失败:', e); }
+    }
+    renderChatList();
+    renderMessages();
+    saveData();
+    if (typeof scrollBottom === 'function') requestAnimationFrame(() => scrollBottom());
+    return;
+  }
+
   const userMsg = _buildUserMessageFromInput(c, text);
   
   c.messages.push(userMsg);

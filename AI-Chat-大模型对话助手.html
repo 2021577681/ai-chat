@@ -226,10 +226,10 @@
       <button class="stats-toggle-btn" id="statsToggleBtn" type="button" onclick="toggleStatsBar()" title="收起 Token / 请求速度统计栏">统计</button>
       <div class="topbar-spacer"></div>
       <button class="topbar-btn" id="temporaryChatBtn" onclick="startTemporaryChat()" title="临时会话：刷新保留，切换或新建对话后删除"><img class="topbar-btn-icon" src="icon/时间_time.png" alt=""><span>临时</span></button>
+      <button class="topbar-btn" id="scheduleBtn" onclick="toggleScheduledSend()" title="定时发送：到点后才让 AI 响应"><img class="topbar-btn-icon" src="icon/闹钟_alarm-clock.png" alt=""><span>定时</span></button>
       <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
       <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
       <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
-      <button class="topbar-btn" id="privacyBtn" onclick="togglePrivacyGuard()" oncontextmenu="event.preventDefault();openPrivacySettings()" title="隐私模式"><img class="topbar-btn-icon" src="icon/保护_protect.png" alt=""><span>隐私</span></button>
       <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
       <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）"><img class="topbar-btn-icon" src="icon/日志_log.png" alt=""><span>日志</span></button>
       <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话"><img class="topbar-btn-icon" src="icon/健康_health.png" alt=""><span>体检</span></button>
@@ -300,6 +300,11 @@
                     <span class="effort-option-text">max</span><span class="effort-option-check">✓</span>
                   </button>
                 </div>
+              </div>
+              <div class="schedule-picker" id="schedulePicker" hidden>
+                <span class="schedule-picker-label">定时</span>
+                <input type="datetime-local" id="scheduleTimeInput" class="schedule-time-input" title="选择 AI 开始响应的时间">
+                <button type="button" class="schedule-clear" onclick="toggleScheduledSend(false)" title="取消定时">×</button>
               </div>
               <button class="send-btn" id="sendBtn" onclick="onSend()">↑</button>
             </div>
@@ -509,6 +514,24 @@
         </div>
       </div>
       <label class="switch"><input type="checkbox" id="useLocalProxy"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <div>
+        <label style="margin:0;">搜索工具使用本地代理</label>
+        <div class="form-hint" style="margin-top:2px;">
+          仅影响 <code>web_search</code> 网络搜索请求，可用于 Google / DuckDuckGo 等搜索源。需本机代理软件已启动。
+        </div>
+      </div>
+      <label class="switch"><input type="checkbox" id="searchProxyEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group">
+      <label>搜索代理地址</label>
+      <input type="text" id="searchProxyUrl" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:7890">
+      <div class="form-hint">
+        支持 HTTP/HTTPS 代理；SOCKS 代理需 Python requests 安装 socks 支持：<code>pip install requests[socks]</code>。
+      </div>
     </div>
     
     <div class="form-group">
@@ -1960,6 +1983,7 @@
 <script src="js/beacon.js"></script>
 <script src="js/chat.js"></script>
 <script src="js/ppt-mode.js"></script>
+<script src="js/scheduled-tasks.js"></script>
 <script src="js/task-queue.js"></script>
 <script src="js/concurrent-requests.js"></script>
 <script src="js/debate-mode.js"></script>

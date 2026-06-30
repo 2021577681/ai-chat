@@ -70,6 +70,7 @@ async function init() {
     if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(true, { render: false });
   }
   if (typeof updatePrivacyGuardButton === 'function') updatePrivacyGuardButton();
+  if (typeof initScheduledSend === 'function') initScheduledSend();
   
   // 6. 更新底部状态信息
   updateSendBtn();

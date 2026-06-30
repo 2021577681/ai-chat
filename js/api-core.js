@@ -33,6 +33,9 @@ function _buildRequestBodyInternal(history, modelOverride, streamOverride, optio
   const s = state.settings;
   const model = modelOverride || s.currentModel;
   const stream = streamOverride !== undefined ? streamOverride : !!s.stream;
+  if (Array.isArray(history)) {
+    history = history.filter(m => !(m && m._hiddenFromAI));
+  }
   
   // ⭐ system 保持稳定（不混入动态摘要），最大化 prompt cache 命中率
   // 摘要由各适配器自行注入到 messages 数组中（OpenAI: 作为 system message；Anthropic: prepend 到首条 user）

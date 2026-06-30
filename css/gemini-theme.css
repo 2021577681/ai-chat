@@ -353,6 +353,7 @@ body{
 .topbar-btn.outline-active,
 .topbar-btn.ppt-active,
 .topbar-btn.temporary-active,
+.topbar-btn.schedule-active,
 .topbar-btn.privacy-active{
   border-color:transparent;
   box-shadow:none;
@@ -391,6 +392,11 @@ body{
 .topbar-btn.temporary-active{
   background:#fce8e6;
   color:#c5221f;
+}
+
+.topbar-btn.schedule-active{
+  background:#fef7e0;
+  color:#a14200;
 }
 
 .topbar:has(:where(.privacy-active)) .topbar-btn.temporary-active{

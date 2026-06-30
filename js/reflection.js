@@ -50,7 +50,7 @@ async function callAPIWithReflection(options = {}) {
   c.messages.push(aiMsg);
   renderIfVisible();
   
-  const historyForUse = c.messages.slice(0, -1);
+  const historyForUse = c.messages.slice(0, -1).filter(m => !(m && m._hiddenFromAI));
   const studentModel = s.refStudentModel.trim() || s.currentModel;
   const teacherModel = s.refTeacherModel.trim() || s.currentModel;
   const userQuestion = extractUserQuestion(historyForUse);

@@ -29,6 +29,13 @@ function openSettings() {
   // ⭐ 本地代理开关
   const proxyEl = document.getElementById('useLocalProxy');
   if (proxyEl) proxyEl.checked = !!s.useLocalProxy;
+  // 🌐 搜索工具本地代理
+  const searchProxyEnabledEl = document.getElementById('searchProxyEnabled');
+  if (searchProxyEnabledEl) searchProxyEnabledEl.checked = !!s.searchProxyEnabled;
+  const searchProxyUrlEl = document.getElementById('searchProxyUrl');
+  if (searchProxyUrlEl) {
+    searchProxyUrlEl.value = s.searchProxyUrl || 'http://127.0.0.1:7890';
+  }
   // ⭐ 自动重试次数
   const retryEl = document.getElementById('retryMaxAttempts');
   const retryValEl = document.getElementById('retryMaxAttemptsVal');
@@ -340,6 +347,14 @@ function saveAndClose() {
   // ⭐ 本地代理开关
   const proxyEl = document.getElementById('useLocalProxy');
   if (proxyEl) s.useLocalProxy = proxyEl.checked;
+  // 🌐 搜索工具本地代理
+  const searchProxyEnabledEl = document.getElementById('searchProxyEnabled');
+  if (searchProxyEnabledEl) s.searchProxyEnabled = searchProxyEnabledEl.checked;
+  const searchProxyUrlEl = document.getElementById('searchProxyUrl');
+  if (searchProxyUrlEl) {
+    const v = (searchProxyUrlEl.value || '').trim();
+    s.searchProxyUrl = v || 'http://127.0.0.1:7890';
+  }
   // ⭐ 自动重试次数
   const retryEl = document.getElementById('retryMaxAttempts');
   if (retryEl) {

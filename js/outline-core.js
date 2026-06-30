@@ -110,7 +110,7 @@ async function executeOutlineToolWithTimeout(name, args, context, timeoutMs) {
 
 function outlineExtractTaskText(history) {
   return (history || [])
-    .filter(m => m && m.role === 'user')
+    .filter(m => m && m.role === 'user' && !m._hiddenFromAI)
     .map(m => {
       if (typeof m.content === 'string') return m.content;
       try { return JSON.stringify(m.content); } catch (e) { return ''; }
@@ -606,7 +606,7 @@ function outlineBuildResponsesInput(history, conversationMessages) {
   };
   const all = [...(history || []), ...(conversationMessages || [])];
   for (const msg of all) {
-    if (!msg || typeof msg !== 'object' || msg._isCompressing) continue;
+    if (!msg || typeof msg !== 'object' || msg._isCompressing || msg._hiddenFromAI) continue;
     if (msg.role === 'user' && Array.isArray(msg.content)) {
       const parts = outlineResponsesUserContentParts(msg.content);
       out.push({ role: 'user', content: parts.length ? parts : '' });
@@ -910,7 +910,7 @@ async function callAPIWithOutline(options = {}) {
       if (isCurrentChat(c)) renderMessages();
     }
     
-    history = c.messages.slice(0, -1);
+    history = c.messages.slice(0, -1).filter(m => !(m && m._hiddenFromAI));
     model = (s.outlineModel || '').trim() || s.currentModel;
     maxRounds = aiMsg.outline.maxRounds;
     conversationMessages = [];

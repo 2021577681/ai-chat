@@ -4,6 +4,10 @@ const FILE_EXPLORER_STATE = {
   visible: false,
   path: '.',
   loading: false,
+  autoRefreshTimer: null,
+  autoRefreshInFlight: false,
+  autoRefreshSignature: '',
+  autoRefreshPath: '.',
   entries: [],
   editorPath: '',
   editorOriginal: '',
@@ -492,6 +496,15 @@ function fileExplorerSort(entries) {
   });
 }
 
+function fileExplorerEntriesSignature(entries) {
+  return (Array.isArray(entries) ? entries : []).map(entry => [
+    entry && entry.name ? String(entry.name) : '',
+    entry && entry.type ? String(entry.type) : '',
+    Number(entry && entry.size || 0),
+    Number(entry && entry.mtime || 0)
+  ].join('\u0001')).sort().join('\u0002');
+}
+
 function renderFileExplorerLoading() {
   const list = document.getElementById('fileExplorerList');
   if (list) {
@@ -560,11 +573,11 @@ function renderFileExplorer() {
   }).join('');
 }
 
-async function loadFileExplorer(path = FILE_EXPLORER_STATE.path) {
+async function loadFileExplorer(path = FILE_EXPLORER_STATE.path, options = {}) {
   if (FILE_EXPLORER_STATE.loading) return;
   FILE_EXPLORER_STATE.loading = true;
   FILE_EXPLORER_STATE.path = normalizeExplorerPath(path);
-  renderFileExplorerLoading();
+  if (!options.silent) renderFileExplorerLoading();
   setFileExplorerPathDisplay(FILE_EXPLORER_STATE.path);
   try {
     if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
@@ -572,6 +585,8 @@ async function loadFileExplorer(path = FILE_EXPLORER_STATE.path) {
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '读取目录失败');
     FILE_EXPLORER_STATE.entries = Array.isArray(r.entries) ? r.entries : [];
+    FILE_EXPLORER_STATE.autoRefreshSignature = fileExplorerEntriesSignature(FILE_EXPLORER_STATE.entries);
+    FILE_EXPLORER_STATE.autoRefreshPath = FILE_EXPLORER_STATE.path;
     renderFileExplorer();
   } catch (e) {
     const list = document.getElementById('fileExplorerList');
@@ -580,6 +595,43 @@ async function loadFileExplorer(path = FILE_EXPLORER_STATE.path) {
     }
   } finally {
     FILE_EXPLORER_STATE.loading = false;
+  }
+}
+
+function startFileExplorerAutoRefresh() {
+  stopFileExplorerAutoRefresh();
+  FILE_EXPLORER_STATE.autoRefreshTimer = setInterval(pollFileExplorerChanges, 2500);
+}
+
+function stopFileExplorerAutoRefresh() {
+  if (FILE_EXPLORER_STATE.autoRefreshTimer) {
+    clearInterval(FILE_EXPLORER_STATE.autoRefreshTimer);
+    FILE_EXPLORER_STATE.autoRefreshTimer = null;
+  }
+  FILE_EXPLORER_STATE.autoRefreshInFlight = false;
+}
+
+async function pollFileExplorerChanges() {
+  if (!FILE_EXPLORER_STATE.visible || FILE_EXPLORER_STATE.loading || FILE_EXPLORER_STATE.autoRefreshInFlight) return;
+  FILE_EXPLORER_STATE.autoRefreshInFlight = true;
+  const path = normalizeExplorerPath(FILE_EXPLORER_STATE.path);
+  try {
+    if (typeof callAgentBackend !== 'function') return;
+    const r = await callAgentBackend('list_dir', { path });
+    if (typeof r === 'string' || !r || !r.ok) return;
+    if (path !== normalizeExplorerPath(FILE_EXPLORER_STATE.path) || !FILE_EXPLORER_STATE.visible) return;
+    const entries = Array.isArray(r.entries) ? r.entries : [];
+    const signature = fileExplorerEntriesSignature(entries);
+    if (FILE_EXPLORER_STATE.autoRefreshPath !== path || FILE_EXPLORER_STATE.autoRefreshSignature !== signature) {
+      FILE_EXPLORER_STATE.entries = entries;
+      FILE_EXPLORER_STATE.autoRefreshPath = path;
+      FILE_EXPLORER_STATE.autoRefreshSignature = signature;
+      renderFileExplorer();
+    }
+  } catch (e) {
+    // 自动刷新失败时保持当前列表，避免后台轮询打断用户操作。
+  } finally {
+    FILE_EXPLORER_STATE.autoRefreshInFlight = false;
   }
 }
 
@@ -596,7 +648,12 @@ function setSidebarExplorerMode(visible) {
   }
   if (chatPanel) chatPanel.hidden = FILE_EXPLORER_STATE.visible;
   if (explorerPanel) explorerPanel.hidden = !FILE_EXPLORER_STATE.visible;
-  if (FILE_EXPLORER_STATE.visible) loadFileExplorer(FILE_EXPLORER_STATE.path);
+  if (FILE_EXPLORER_STATE.visible) {
+    loadFileExplorer(FILE_EXPLORER_STATE.path);
+    startFileExplorerAutoRefresh();
+  } else {
+    stopFileExplorerAutoRefresh();
+  }
 }
 
 function toggleSidebarExplorer() {
@@ -604,7 +661,7 @@ function toggleSidebarExplorer() {
 }
 
 function refreshFileExplorer() {
-  loadFileExplorer(FILE_EXPLORER_STATE.path);
+  loadFileExplorer(FILE_EXPLORER_STATE.path, { silent: true });
 }
 
 function resetFileExplorerToRoot() {

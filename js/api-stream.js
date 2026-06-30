@@ -179,6 +179,12 @@ function updateSendBtn() {
       return;
     }
     let info = `${state.settings.apiFormat === 'anthropic' ? '🟠 Anthropic' : '🟢 OpenAI'}`;
+    if (typeof isScheduledSendActive === 'function' && isScheduledSendActive()) {
+      const text = typeof getScheduledSendInfoText === 'function' ? getScheduledSendInfoText() : '⏰ 定时发送';
+      document.getElementById('inputInfo').textContent = text + privacySuffix;
+      btn.textContent = '⏰';
+      return;
+    }
     if (state.settings.usePlan) info += ` · 📋 计划模式(${state.settings.planMaxSteps}步)`;
     if (state.settings.useReflection) info += ` · 🎭 师生(评审${state.settings.refRounds}轮)`;
     if (state.settings.useOutline) info += ` · 📑 大纲(${state.settings.outlineMaxRounds || 30}轮)`;

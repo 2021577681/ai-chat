@@ -1238,7 +1238,8 @@ function queuePptMidrunGuidanceFromComposer(chat, input, text) {
 }
 
 async function callAPIWithPptMode(options = {}) {
-  const c = currentChat();
+  const requestedChatId = options && options.chatId;
+  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
   if (!c) return;
   const userRequest = currentLastUserText(c).trim();
   if (!userRequest) return;

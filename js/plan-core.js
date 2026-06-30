@@ -171,8 +171,9 @@ function planStepsForPrompt(plan) {
   }));
 }
 
-async function callAPIWithPlan() {
-  const c = currentChat();
+async function callAPIWithPlan(options = {}) {
+  const requestedChatId = options && options.chatId;
+  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
   if (!c) return;
   const s = state.settings;
   const taskChatId = c.id;
@@ -226,7 +227,7 @@ async function callAPIWithPlan() {
   c.messages.push(aiMsg);
   renderIfVisible();
   
-  const historyForUse = c.messages.slice(0, -1);
+  const historyForUse = c.messages.slice(0, -1).filter(m => !(m && m._hiddenFromAI));
   const userQuestion = extractUserQuestion(historyForUse);
   aiMsg.plan._userQuestion = userQuestion;
   

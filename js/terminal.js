@@ -1157,12 +1157,19 @@ async function generatePptWithProgress(data, context = {}) {
   }
 }
 
-// ⭐ 网络搜索（通过本地后端 → DuckDuckGo/Bing）
+// ⭐ 网络搜索（通过本地后端 → 多搜索源自动回退）
 async function webSearch(query, maxResults, region, context) {
+  const engine = (context && (context.engine || context.source)) || undefined;
+  const s = (typeof state !== 'undefined' && state.settings) ? state.settings : {};
+  const proxyEnabled = context && context.proxy_enabled !== undefined ? !!context.proxy_enabled : !!s.searchProxyEnabled;
+  const proxyUrl = (context && context.proxy_url) || s.searchProxyUrl || '';
   const r = await callAgentBackend('web_search', {
     query,
     max_results: maxResults || 8,
-    region: region || 'wt-wt'
+    region: region || 'wt-wt',
+    engine,
+    proxy_enabled: proxyEnabled,
+    proxy_url: proxyUrl
   }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ 搜索失败：${r.error}`;

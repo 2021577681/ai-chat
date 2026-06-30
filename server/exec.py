@@ -14,6 +14,7 @@ import tempfile
 
 from . import config
 from .sandbox import command_workspace_violation, is_dangerous_command, is_inside_workspace, resolve_path
+from .window_focus import focus_window_soon
 
 
 def _unique_encodings(names):
@@ -99,9 +100,11 @@ class ExecMixin:
             proc = None
 
             if system == 'windows':
+                terminal_title = 'AI Terminal'
                 commands = [
+                    ['wt.exe', 'new-tab', '--title', terminal_title, '-d', cwd_abs],
                     ['wt.exe', '-d', cwd_abs],
-                    ['cmd.exe', '/k', 'title AI 终端'],
+                    ['cmd.exe', '/k', f'title {terminal_title}'],
                 ]
                 last_error = None
                 for cmd in commands:
@@ -116,6 +119,11 @@ class ExecMixin:
                         last_error = e
                 if proc is None:
                     raise last_error or RuntimeError('无法启动 Windows 终端')
+                focus_window_soon(
+                    pid=getattr(proc, 'pid', None),
+                    title_keywords=[terminal_title, 'Windows Terminal'],
+                    timeout=3.0
+                )
             elif system == 'darwin':
                 safe_cwd = cwd_abs.replace('\\', '/').replace('"', '\\"')
                 script = f'tell application "Terminal" to do script "cd {safe_cwd}"'
