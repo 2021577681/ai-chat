@@ -452,7 +452,7 @@ function importApiProfilesFromBackup(payload) {
 
 function buildExportData() {
   const OUTLINE_KEYS = [
-    'useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow',
+    'useOutline', 'outlineMaxRounds', 'outlineMaxItems', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow',
     'outlineCodeTaskPrompt', 'outlineClassifierPrompt',
     'outlineBudgetHalfPrompt', 'outlineBudgetLowPrompt', 'outlineBudgetCriticalPrompt',
     'outlineGateNoVerifyPrompt', 'outlineGateStaleVerifyPrompt', 'outlineGateFailedVerifyPrompt',
@@ -615,7 +615,7 @@ function applyImport() {
   if (!pendingImportData) { alert('请先选择文件或粘贴 JSON'); return; }
   
   const OUTLINE_KEYS = [
-    'useOutline', 'outlineMaxRounds', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow',
+    'useOutline', 'outlineMaxRounds', 'outlineMaxItems', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow',
     'outlineCodeTaskPrompt', 'outlineClassifierPrompt',
     'outlineBudgetHalfPrompt', 'outlineBudgetLowPrompt', 'outlineBudgetCriticalPrompt',
     'outlineGateNoVerifyPrompt', 'outlineGateStaleVerifyPrompt', 'outlineGateFailedVerifyPrompt',

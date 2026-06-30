@@ -51,6 +51,7 @@ let state = {
     // 📑 大纲模式（动态规划）
     useOutline: false,
     outlineMaxRounds: 30,
+    outlineMaxItems: 8,
     outlineModel: '',
     outlineSystemPrompt: '',  // 留空则使用 outline.js 中的 DEFAULT_OUTLINE_SYSTEM_PROMPT
     outlinePermissionAutoAllow: false, // 大纲模式权限弹窗 3 分钟无人响应时默认允许本次调用

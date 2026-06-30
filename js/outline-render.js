@@ -238,9 +238,21 @@ function renderOutlineAIMessageCard(msg) {
 }
 
 function renderOutlineDiffSummary(m, idx) {
-  const summary = m && m.outline && m.outline.diffSummary;
   const outline = m && m.outline;
-  if ((!summary || !Array.isArray(summary.files) || !summary.files.length) && !(outline && outline.checkpointId)) return '';
+  if (!outline) return '';
+  const isFinalized = ['completed', 'truncated', 'paused', 'error', 'cancelled'].includes(outline.status) && !outline.inProgress;
+  const summary = outline.diffSummary;
+  const hasSummaryFiles = !!(summary && Array.isArray(summary.files) && summary.files.length);
+
+  // 最终编辑信息卡片只在大纲任务真正结束/暂停/出错后显示。
+  // 否则切换对话触发重渲染时，运行中的 checkpoint/diff 状态可能被当成最终结果提前展示。
+  if (!isFinalized) return '';
+
+  // checkpointId 会在写入类工具第一次成功时提前出现；如果此时因为切换对话触发重渲染，
+  // 不能仅凭 checkpointId 渲染最终编辑卡片，否则会显示“已编辑 0 个文件”。
+  // 只有大纲任务结束/暂停/出错后，才允许用 checkpointId 兜底显示撤销入口。
+  if (!hasSummaryFiles && !outline.checkpointId) return '';
+
   const verify = (typeof outlineVerificationState === 'function') ? outlineVerificationState(m.outline) : null;
   let verifyHtml = '';
   if (verify && verify.hasMutation) {
@@ -496,6 +508,9 @@ function openOutlineSettings() {
   if (e('outline_maxRounds')) {
     e('outline_maxRounds').value = Math.max(1, parseInt(s.outlineMaxRounds) || 30);
   }
+  if (e('outline_maxItems')) {
+    e('outline_maxItems').value = Math.max(3, parseInt(s.outlineMaxItems) || 8);
+  }
   if (e('outline_permissionAutoAllow')) e('outline_permissionAutoAllow').checked = !!s.outlinePermissionAutoAllow;
   if (e('outline_model')) e('outline_model').value = s.outlineModel || '';
   fillOutlinePromptFields();
@@ -513,6 +528,10 @@ function saveOutlineSettings() {
   if (e('outline_maxRounds')) {
     const rounds = parseInt(e('outline_maxRounds').value);
     s.outlineMaxRounds = (isNaN(rounds) || rounds < 1) ? 30 : rounds;
+  }
+  if (e('outline_maxItems')) {
+    const items = parseInt(e('outline_maxItems').value);
+    s.outlineMaxItems = (isNaN(items) || items < 3) ? 8 : items;
   }
   if (e('outline_permissionAutoAllow')) s.outlinePermissionAutoAllow = e('outline_permissionAutoAllow').checked;
   if (e('outline_model')) s.outlineModel = e('outline_model').value.trim();

@@ -552,7 +552,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .pending-att img{width:40px;height:40px;object-fit:cover;border-radius:4px}
 .pending-att .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pending-att .remove{background:var(--danger);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-textarea{width:100%;border:none;background:transparent;resize:none;outline:none;color:var(--text);font-family:inherit;font-size:14.5px;padding:8px 10px;min-height:24px;max-height:200px;line-height:1.5}
+textarea{width:100%;border:none;background:transparent;resize:none;outline:none;color:var(--text);font-family:inherit;font-size:14.5px;padding:8px 10px;min-height:24px;max-height:100px;line-height:1.5}
 .input-bar{display:flex;align-items:center;padding:4px 6px;gap:6px}
 .input-tool{background:transparent;border:none;width:30px;height:30px;border-radius:8px;cursor:pointer;color:var(--text-secondary);font-size:16px;display:flex;align-items:center;justify-content:center}
 .input-tool:hover{background:var(--bg-hover);color:var(--text)}

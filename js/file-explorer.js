@@ -1257,6 +1257,21 @@ function copyFileEditorContent() {
   });
 }
 
+async function openFileWithSystemDefault(path) {
+  const normalizedPath = normalizeExplorerPath(path);
+  try {
+    if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
+    const r = await callAgentBackend('open_file_default', { path: normalizedPath });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '系统默认应用打开失败');
+    if (typeof toast === 'function') toast(`已使用系统默认应用打开：${fileExplorerBasename(normalizedPath)}`);
+  } catch (e) {
+    if (typeof toast === 'function') {
+      toast(`无法使用系统默认应用打开：${e.message || String(e)}`);
+    }
+  }
+}
+
 function openFileExplorerPath(path, type = '') {
   const normalizedPath = normalizeExplorerPath(path);
   if (type === 'dir') {
@@ -1267,7 +1282,7 @@ function openFileExplorerPath(path, type = '') {
   else if (isFileExplorerPdfFile(normalizedPath)) openPdfViewer(normalizedPath);
   else if (isFileExplorerImageFile(normalizedPath)) openImageViewer(normalizedPath);
   else if (isFileExplorerMediaFile(normalizedPath)) openMediaViewer(normalizedPath);
-  else if (typeof toast === 'function') toast('暂只支持文本类文件、PDF、图片、音频和视频');
+  else openFileWithSystemDefault(normalizedPath);
 }
 
 function siblingExplorerPath(path, newName) {

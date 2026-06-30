@@ -195,7 +195,7 @@ function _setComposerDraft(input, text) {
   if (!input) return;
   input.value = text || '';
   input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  input.style.height = Math.min(input.scrollHeight, 100) + 'px';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
   if (typeof input.setSelectionRange === 'function') {

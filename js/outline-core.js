@@ -224,8 +224,18 @@ function outlineShouldUseCodeProfile(taskProfile, history) {
     || ['code_change', 'debug', 'test_only'].includes(taskProfile.intent);
 }
 
+function outlineMaxItemsSetting() {
+  const raw = state && state.settings ? parseInt(state.settings.outlineMaxItems, 10) : 8;
+  return Math.max(3, Number.isFinite(raw) ? raw : 8);
+}
+
+function outlinePromptVars(extra = {}) {
+  const maxOutlineItems = outlineMaxItemsSetting();
+  return { maxOutlineItems, ...extra };
+}
+
 function buildOutlineSystemPromptForProfile(basePrompt, history, taskProfile) {
-  const prompt = basePrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT;
+  const prompt = outlineTemplate(basePrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, outlinePromptVars());
   if (!outlineShouldUseCodeProfile(taskProfile, history)) return prompt;
   let extra = outlinePromptSetting('outlineCodeTaskPrompt', CODE_TASK_OUTLINE_PROFILE_PROMPT);
   if (taskProfile && taskProfile.suggestedCommands && taskProfile.suggestedCommands.length) {
@@ -1234,7 +1244,7 @@ async function callAPIWithOutline(options = {}) {
         if (loop === 0 && !(aiMsg.outline.items && aiMsg.outline.items.length)) {
           conversationMessages.push({
             role: 'user',
-            content: outlinePromptText('outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT)
+            content: outlinePromptText('outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT, outlinePromptVars())
           });
           finalAnswer = '';
           aiMsg.outline.status = 'running';
@@ -1420,7 +1430,7 @@ async function callAPIWithOutline(options = {}) {
       if (loop === 0 && !(aiMsg.outline.items && aiMsg.outline.items.length)) {
         conversationMessages.push({
           role: 'user',
-          content: outlinePromptText('outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT)
+          content: outlinePromptText('outlineRequireStartPrompt', DEFAULT_OUTLINE_REQUIRE_START_PROMPT, outlinePromptVars())
         });
         finalAnswer = '';
         aiMsg.outline.status = 'running';

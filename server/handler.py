@@ -239,6 +239,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_web_search(body)
             elif action == 'fetch_url':
                 self.handle_fetch_url(body)
+            elif action == 'open_file_default':
+                self.handle_open_file_default(body)
             elif action == 'file_info':
                 self.handle_file_info(body)
             elif action == 'git':

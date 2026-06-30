@@ -892,6 +892,12 @@
       <div class="form-hint">每次 LLM 调用算一轮。受您的请求频率限制保护，超限自动等待。</div>
     </div>
 
+    <div class="form-group">
+      <label>初始大纲步骤数上限</label>
+      <input type="number" id="outline_maxItems" min="3" step="1" placeholder="8">
+      <div class="form-hint">控制新任务开始时提示 AI 创建的 pending 条目数量上限；执行中仍可按需动态追加。</div>
+    </div>
+
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
       <div><label style="margin:0;">权限等待超时自动允许</label><div class="form-hint" style="margin-top:2px;">仅大纲模式生效；工具权限弹窗 3 分钟无人点击允许或阻止时，默认允许本次调用。</div></div>
       <label class="switch"><input type="checkbox" id="outline_permissionAutoAllow"><span class="switch-slider"></span></label>

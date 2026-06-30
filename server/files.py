@@ -23,6 +23,8 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
+import sys
 
 from . import config
 from .sandbox import check_path_or_error
@@ -1090,3 +1092,35 @@ class FilesMixin:
             })
         except Exception as e:
             self._send_json(200, {'ok': False, 'error': str(e)})
+
+    # ============ 使用系统默认应用打开文件 ============
+    def handle_open_file_default(self, body):
+        path, err = check_path_or_error(body.get('path', ''))
+        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if not os.path.exists(path):
+            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+        if not os.path.isfile(path):
+            return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
+
+        try:
+            if sys.platform == 'win32':
+                os.startfile(path)  # type: ignore[attr-defined]
+            elif sys.platform == 'darwin':
+                subprocess.Popen(
+                    ['open', path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL
+                )
+            else:
+                subprocess.Popen(
+                    ['xdg-open', path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL
+                )
+            self._send_json(200, {'ok': True, 'path': path, 'platform': sys.platform})
+        except FileNotFoundError as e:
+            self._send_json(200, {'ok': False, 'error': f'系统打开命令不可用: {e}'})
+        except Exception as e:
+            self._send_json(200, {'ok': False, 'error': f'无法使用默认应用打开文件: {e}'})

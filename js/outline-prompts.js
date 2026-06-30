@@ -66,7 +66,7 @@ const OUTLINE_TOOL_NAMES = new Set(['save_outline', 'append_outline', 'update_ou
 
 const DEFAULT_OUTLINE_SYSTEM_PROMPT = `你正在协助用户完成一项工作任务。请按以下流程进行：
 
-1. **开始时**：先调用 save_outline 工具列出工作大纲（3-8 个条目）。每个条目包含 id（如 a1、a2）、title（简洁标题）、status（初始都设为 pending）。
+1. **开始时**：先调用 save_outline 工具列出工作大纲（3-{{maxOutlineItems}} 个条目）。每个条目包含 id（如 a1、a2）、title（简洁标题）、status（初始都设为 pending）。
 2. **执行过程中**：每开始处理一个新条目前，调用 update_outline 把它标记为 active；完成后调用 update_outline 标记为 done 并在 note 里写一句完成摘要。可自由使用其他工具收集信息、操作文件等。
 3. **动态调整**：如发现需要补充新内容，调用 append_outline 追加；某条不再需要时，update_outline 标记为 skipped。
 4. **完成时**：所有条目都标为 done 或 skipped 后，**停止调用任何工具**，直接给出最终的综合回答。
@@ -133,7 +133,7 @@ const DEFAULT_OUTLINE_FRESH_TASK_PROMPT = `【系统提示·全新大纲任务�
 
 请不要继承、继续或复用本对话中任何旧的大纲、旧执行过程、旧 pending/active 条目、旧门禁状态或旧恢复状态。旧内容只能作为历史背景参考。
 本次任务必须重新从 save_outline 开始，为用户最新请求创建新的工作大纲。`;
-const DEFAULT_OUTLINE_REQUIRE_START_PROMPT = '【系统提示】本次是新的大纲模式任务，但你还没有创建本次任务的大纲。不要直接最终回答。请立即调用 save_outline，为用户最新请求创建 3-8 个 pending 条目，然后按大纲继续执行。';
+const DEFAULT_OUTLINE_REQUIRE_START_PROMPT = '【系统提示】本次是新的大纲模式任务，但你还没有创建本次任务的大纲。不要直接最终回答。请立即调用 save_outline，为用户最新请求创建 3-{{maxOutlineItems}} 个 pending 条目，然后按大纲继续执行。';
 const DEFAULT_OUTLINE_TOOL_REJECT_STOP_PROMPT = '【系统提示】用户拒绝了该工具操作，并要求停止所有后续工具调用。请不要再调用工具，基于已完成内容直接给出简短说明。';
 const DEFAULT_OUTLINE_TOOL_REJECT_ONCE_PROMPT = '【系统提示】用户拒绝了该工具操作。请不要重复同一操作；如任务还能继续，请改用无需该权限的路径，否则直接说明受限情况。';
 const DEFAULT_OUTLINE_STALLED_PROMPT = '【系统提示】你似乎在原地踏步，请重新评估当前进展。如果信息已足够，请直接给出最终答案并停止调用工具；如果仍需推进，请明确下一步行动。';

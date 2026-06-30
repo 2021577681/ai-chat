@@ -1318,7 +1318,7 @@ function applyPromptToChat(promptId) {
   if (!input) return;
   input.value = prompt.content || '';
   input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  input.style.height = Math.min(input.scrollHeight, 100) + 'px';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
 }
