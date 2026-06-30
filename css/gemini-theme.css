@@ -1442,6 +1442,60 @@ body{
   color:var(--text);
 }
 
+[data-theme="dark"][data-cool-mode] .reflection-panel,
+[data-theme="dark"][data-cool-mode] .plan-panel,
+[data-theme="dark"][data-cool-mode] .outline-panel,
+[data-theme="dark"][data-cool-mode] .plan-section,
+[data-theme="dark"][data-cool-mode] .outline-section,
+[data-theme="dark"][data-cool-mode] .outline-diff-card,
+[data-theme="dark"][data-cool-mode] .outline-diff-head,
+[data-theme="dark"][data-cool-mode] .outline-diff-checkpoint,
+[data-theme="dark"][data-cool-mode] .outline-diff-more-wrap{
+  background:var(--gemini-surface);
+  background-color:var(--gemini-surface);
+}
+
+[data-theme="dark"][data-cool-mode] .outline-toggle,
+[data-theme="dark"][data-cool-mode] .plan-toggle,
+[data-theme="dark"][data-cool-mode] .reflection-body,
+[data-theme="dark"][data-cool-mode] .plan-body,
+[data-theme="dark"][data-cool-mode] .outline-body,
+[data-theme="dark"][data-cool-mode] .plan-step-list,
+[data-theme="dark"][data-cool-mode] .outline-item-list,
+[data-theme="dark"][data-cool-mode] .plan-section-body,
+[data-theme="dark"][data-cool-mode] .outline-section-body,
+[data-theme="dark"][data-cool-mode] .ref-turn,
+[data-theme="dark"][data-cool-mode] .plan-tool-calls,
+[data-theme="dark"][data-cool-mode] .outline-tool-calls,
+[data-theme="dark"][data-cool-mode] .plan-tool-call,
+[data-theme="dark"][data-cool-mode] .outline-tool-call,
+[data-theme="dark"][data-cool-mode] .outline-ai-message,
+[data-theme="dark"][data-cool-mode] .outline-ai-text,
+[data-theme="dark"][data-cool-mode] .plan-tool-result,
+[data-theme="dark"][data-cool-mode] .outline-tool-result,
+[data-theme="dark"][data-cool-mode] .outline-panel .outline-body > .ref-progress,
+[data-theme="dark"][data-cool-mode] .plan-panel .plan-body > .ref-progress{
+  background:var(--gemini-surface) !important;
+  background-color:var(--gemini-surface) !important;
+}
+
+[data-theme="dark"][data-cool-mode] .plan-step-item,
+[data-theme="dark"][data-cool-mode] .outline-item{
+  background:var(--gemini-surface-soft) !important;
+  background-color:var(--gemini-surface-soft) !important;
+}
+
+[data-theme="dark"][data-cool-mode] .plan-step-item.done,
+[data-theme="dark"][data-cool-mode] .plan-step-item.running,
+[data-theme="dark"][data-cool-mode] .plan-step-item.failed,
+[data-theme="dark"][data-cool-mode] .plan-step-item.skipped,
+[data-theme="dark"][data-cool-mode] .outline-item.active,
+[data-theme="dark"][data-cool-mode] .outline-item.done,
+[data-theme="dark"][data-cool-mode] .outline-item.skipped{
+  background:var(--gemini-surface-soft) !important;
+  background-color:var(--gemini-surface-soft) !important;
+}
+
 .tool-flow-chip,
 .task-queue-status,
 .task-queue-tree-status,
@@ -2540,6 +2594,7 @@ body.settings-page-open .settings-docked-mask.show{
 [data-theme="dark"] .topbar-btn-icon,
 [data-theme="dark"] .status-icon,
 [data-theme="dark"] .icon-btn-img,
+[data-theme="dark"] .outline-diff-icon,
 [data-theme="dark"] .workspace-icon,
 [data-theme="dark"] .sidebar-mode-btn img{
   filter:brightness(0) invert(1) opacity(.88);
@@ -3350,4 +3405,110 @@ body.settings-page-open .settings-docked-mask.show{
 
 [data-theme="dark"][data-security-mode] .settings-select-option-check{
   color:#f1c16d;
+}
+
+/* Keep plan/outline workflow cards opaque over animated or themed chat backgrounds. */
+.plan-panel,
+.outline-panel{
+  background:var(--gemini-surface);
+  background-color:var(--gemini-surface);
+}
+
+.plan-body,
+.outline-body{
+  background:var(--gemini-surface);
+  background-color:var(--gemini-surface);
+}
+
+.plan-section,
+.outline-section{
+  background:var(--gemini-surface);
+  background-color:var(--gemini-surface);
+}
+
+.plan-section-body,
+.outline-section-body,
+.plan-step-list,
+.outline-item-list{
+  background:var(--gemini-surface);
+  background-color:var(--gemini-surface);
+}
+
+.plan-step-item,
+.outline-item{
+  background:var(--gemini-surface-soft);
+  background-color:var(--gemini-surface-soft);
+}
+
+.plan-step-item.done,
+.plan-step-item.running,
+.plan-step-item.failed,
+.plan-step-item.skipped,
+.outline-item.active,
+.outline-item.done,
+.outline-item.skipped,
+.ppt-panel .outline-item.active,
+.ppt-panel .outline-item.warning,
+.ppt-panel .outline-item.error{
+  background-color:var(--gemini-surface-soft);
+}
+
+[data-theme="dark"] .plan-panel,
+[data-theme="dark"] .outline-panel,
+[data-theme="dark"] .plan-body,
+[data-theme="dark"] .outline-body,
+[data-theme="dark"] .plan-section,
+[data-theme="dark"] .outline-section,
+[data-theme="dark"] .plan-section-body,
+[data-theme="dark"] .outline-section-body,
+[data-theme="dark"] .plan-step-list,
+[data-theme="dark"] .outline-item-list{
+  background:#1e1f20;
+  background-color:#1e1f20;
+}
+
+[data-theme="dark"] .plan-step-item,
+[data-theme="dark"] .outline-item,
+[data-theme="dark"] .plan-step-item.done,
+[data-theme="dark"] .plan-step-item.running,
+[data-theme="dark"] .plan-step-item.failed,
+[data-theme="dark"] .plan-step-item.skipped,
+[data-theme="dark"] .outline-item.active,
+[data-theme="dark"] .outline-item.done,
+[data-theme="dark"] .outline-item.skipped,
+[data-theme="dark"] .ppt-panel .outline-item.active,
+[data-theme="dark"] .ppt-panel .outline-item.warning,
+[data-theme="dark"] .ppt-panel .outline-item.error{
+  background:#242528;
+  background-color:#242528;
+}
+
+[data-theme="dark"][data-security-mode] .plan-panel,
+[data-theme="dark"][data-security-mode] .outline-panel,
+[data-theme="dark"][data-security-mode] .plan-body,
+[data-theme="dark"][data-security-mode] .outline-body,
+[data-theme="dark"][data-security-mode] .plan-section,
+[data-theme="dark"][data-security-mode] .outline-section,
+[data-theme="dark"][data-security-mode] .plan-section-body,
+[data-theme="dark"][data-security-mode] .outline-section-body,
+[data-theme="dark"][data-security-mode] .plan-step-list,
+[data-theme="dark"][data-security-mode] .outline-item-list{
+  background:#0c0804;
+  background-color:#0c0804;
+}
+
+[data-theme="dark"][data-security-mode] .plan-step-item,
+[data-theme="dark"][data-security-mode] .outline-item,
+[data-theme="dark"][data-security-mode] .plan-step-item.done,
+[data-theme="dark"][data-security-mode] .plan-step-item.running,
+[data-theme="dark"][data-security-mode] .plan-step-item.failed,
+[data-theme="dark"][data-security-mode] .plan-step-item.skipped,
+[data-theme="dark"][data-security-mode] .outline-item.active,
+[data-theme="dark"][data-security-mode] .outline-item.done,
+[data-theme="dark"][data-security-mode] .outline-item.skipped,
+[data-theme="dark"][data-security-mode] .ppt-panel .outline-item.active,
+[data-theme="dark"][data-security-mode] .ppt-panel .outline-item.warning,
+[data-theme="dark"][data-security-mode] .ppt-panel .outline-item.error{
+  background:#171008;
+  background-color:#171008;
 }

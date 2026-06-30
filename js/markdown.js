@@ -1,5 +1,27 @@
 // ============ Markdown 渲染 ============
 
+function isSafeMarkdownLinkUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return false;
+
+  // Strip whitespace/control chars before scheme detection to catch variants like
+  // "java\nscript:" or "java script:".
+  const compact = raw.replace(/[\u0000-\u001F\u007F\s]+/g, '').toLowerCase();
+  const schemeMatch = compact.match(/^([a-z][a-z0-9+.-]*):/);
+  if (schemeMatch) {
+    return schemeMatch[1] === 'http' || schemeMatch[1] === 'https' || schemeMatch[1] === 'mailto';
+  }
+
+  if (compact.startsWith('//')) return false;
+  return true;
+}
+
+function renderUnsafeMarkdownLink(label, url) {
+  const safeLabel = escapeHtml(label || '');
+  const safeUrl = String(url || '').trim();
+  return safeUrl ? `${safeLabel} (${escapeHtml(safeUrl)})` : safeLabel;
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
   
@@ -14,8 +36,12 @@ function renderMarkdown(text) {
   // 2. 抽取行内代码
   const inlineCodes = [];
   text = text.replace(/`([^`\n]+)`/g, (m, c) => {
-    inlineCodes.push(c);
-    return `\x00ICODE${inlineCodes.length - 1}\x00`;
+    const id = inlineCodes.length;
+    inlineCodes.push({
+      code: c,
+      isFilePath: (typeof isLikelyMarkdownFileLinkPath === 'function') && isLikelyMarkdownFileLinkPath(c)
+    });
+    return `\x00ICODE${id}\x00`;
   });
 
   // 2.5. 抽取标准 Markdown 链接，避免后续文件路径自动链接误处理链接文本或 URL
@@ -58,8 +84,12 @@ function renderMarkdown(text) {
   text = renderFilePathLinks(text);
   text = text.replace(/\x00LINK(\d+)\x00/g, (m, i) => {
     const link = markdownLinks[+i];
-    const href = escapeHtml(String(link.url || '')).replace(/&quot;/g, '%22');
-    return `<a href="${href}" target="_blank" rel="noopener">${escapeHtml(link.label || '')}</a>`;
+    const rawHref = String(link.url || '').trim();
+    if (!isSafeMarkdownLinkUrl(rawHref)) {
+      return renderUnsafeMarkdownLink(link.label || '', rawHref);
+    }
+    const href = escapeHtml(rawHref).replace(/&quot;/g, '%22');
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label || '')}</a>`;
   });
 
   // 9. 引用
@@ -88,7 +118,15 @@ function renderMarkdown(text) {
   });
   
   // 14. 还原行内代码
-  text = text.replace(/\x00ICODE(\d+)\x00/g, (m, i) => `<code>${escapeHtml(inlineCodes[+i])}</code>`);
+  text = text.replace(/\x00ICODE(\d+)\x00/g, (m, i) => {
+    const item = inlineCodes[+i];
+    const code = item && typeof item === 'object' ? item.code : item;
+    if (item && item.isFilePath) {
+      const normalized = normalizeMarkdownFileLinkPath(code);
+      return `<a href="#" class="file-path-link inline-code-file-link" data-explorer-file="${escapeHtml(normalized)}" title="在资源管理器中打开 ${escapeHtml(normalized)}"><code>${escapeHtml(code)}</code></a>`;
+    }
+    return `<code>${escapeHtml(code)}</code>`;
+  });
   
   // 15. 还原代码块
   text = text.replace(/\x00CODE(\d+)\x00/g, (m, i) => {

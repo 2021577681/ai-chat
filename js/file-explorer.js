@@ -68,6 +68,15 @@ function parentExplorerPath(path) {
   return parts.length ? parts.join('/') : '.';
 }
 
+function setFileExplorerPathDisplay(path) {
+  const pathEl = document.getElementById('fileExplorerPath');
+  if (!pathEl) return;
+  const normalized = normalizeExplorerPath(path);
+  pathEl.textContent = normalized;
+  pathEl.title = normalized;
+  pathEl.setAttribute('aria-label', normalized);
+}
+
 function fileExplorerIcon(entry) {
   if (!entry || entry.type === 'dir') return '📁';
   const name = String(entry.name || '').toLowerCase();
@@ -525,9 +534,8 @@ function hideFileExplorerContextMenu() {
 
 function renderFileExplorer() {
   const list = document.getElementById('fileExplorerList');
-  const pathEl = document.getElementById('fileExplorerPath');
   const upBtn = document.getElementById('fileExplorerUpBtn');
-  if (pathEl) pathEl.textContent = FILE_EXPLORER_STATE.path;
+  setFileExplorerPathDisplay(FILE_EXPLORER_STATE.path);
   if (upBtn) upBtn.disabled = FILE_EXPLORER_STATE.path === '.';
   if (!list) return;
 
@@ -557,8 +565,7 @@ async function loadFileExplorer(path = FILE_EXPLORER_STATE.path) {
   FILE_EXPLORER_STATE.loading = true;
   FILE_EXPLORER_STATE.path = normalizeExplorerPath(path);
   renderFileExplorerLoading();
-  const pathEl = document.getElementById('fileExplorerPath');
-  if (pathEl) pathEl.textContent = FILE_EXPLORER_STATE.path;
+  setFileExplorerPathDisplay(FILE_EXPLORER_STATE.path);
   try {
     if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
     const r = await callAgentBackend('list_dir', { path: FILE_EXPLORER_STATE.path });
