@@ -1101,9 +1101,10 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
   margin:0 0 10px;color:var(--text);font-size:13px;font-weight:700;
   display:flex;align-items:center;justify-content:space-between;gap:8px
 }
-.token-usage-model-head{align-items:flex-start;flex-wrap:wrap}
+.token-usage-model-head{align-items:center;flex-wrap:wrap;min-height:32px}
+.token-usage-model-head>span{display:flex;align-items:center;min-height:32px;line-height:32px}
 .token-usage-range-toolbar{
-  display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;
+  display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;min-height:32px;
   font-size:12px;font-weight:500;color:var(--text-secondary)
 }
 .token-usage-range-summary{white-space:nowrap;color:var(--text-secondary)}
@@ -1173,6 +1174,13 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 }
 .token-usage-date-picker input:focus{
   outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(59,130,246,.14)
+}
+[data-theme="dark"] .token-usage-date-picker input{color-scheme:dark}
+[data-theme="dark"] .token-usage-date-picker input::-webkit-calendar-picker-indicator{
+  filter:invert(1) brightness(1.35);opacity:.86;cursor:pointer
+}
+[data-theme="dark"] .token-usage-date-picker input::-webkit-calendar-picker-indicator:hover{
+  opacity:1
 }
 .token-usage-chart-wrap{width:100%;overflow-x:auto;color:var(--primary)}
 .token-usage-chart-wrap svg{width:100%;min-width:720px;display:block}

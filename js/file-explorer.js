@@ -46,7 +46,7 @@ const FILE_EXPLORER_TEXT_EXTENSIONS = new Set([
   'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
   'py', 'java', 'c', 'h', 'cpp', 'hpp', 'cs', 'go', 'rs', 'php',
   'rb', 'swift', 'kt', 'kts', 'sql', 'sh', 'bash', 'zsh', 'ps1',
-  'bat', 'cmd', 'gitignore', 'dockerfile', 'env', 'log', 'csv',
+  'bat', 'cmd', 'tex', 'gitignore', 'dockerfile', 'env', 'log', 'csv',
   'tsv', 'properties'
 ]);
 
@@ -112,6 +112,10 @@ function isFileExplorerPythonFile(path) {
   return /^py$/i.test(fileExplorerExtension(path));
 }
 
+function isFileExplorerTexFile(path) {
+  return /^tex$/i.test(fileExplorerExtension(path));
+}
+
 function isFileExplorerPdfFile(path) {
   return fileExplorerExtension(path) === 'pdf';
 }
@@ -165,6 +169,175 @@ function hasFileEditorCodeMirror() {
   return typeof window !== 'undefined' && typeof window.CodeMirror === 'function';
 }
 
+function defineFileExplorerSimpleMode(name, options = {}) {
+  if (!hasFileEditorCodeMirror()) return false;
+  const CodeMirror = window.CodeMirror;
+  if (CodeMirror.modes && CodeMirror.modes[name]) return true;
+  const keywords = new Set(options.keywords || []);
+  const atoms = new Set(options.atoms || ['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+  const builtin = new Set(options.builtin || []);
+  const lineComment = Object.prototype.hasOwnProperty.call(options, 'lineComment') ? options.lineComment : '//';
+  const blockCommentStart = Object.prototype.hasOwnProperty.call(options, 'blockCommentStart') ? options.blockCommentStart : '/*';
+  const blockCommentEnd = Object.prototype.hasOwnProperty.call(options, 'blockCommentEnd') ? options.blockCommentEnd : '*/';
+  const numberPattern = options.numberPattern || /^(?:0x[\da-f]+|0b[01]+|\d+(?:\.\d+)?(?:e[+\-]?\d+)?)/i;
+  const variablePattern = options.variablePattern || /^[A-Za-z_$][\w$-]*/;
+
+  CodeMirror.defineMode(name, function() {
+    return {
+      startState() {
+        return { inBlockComment: false };
+      },
+      token(stream, state) {
+        if (state.inBlockComment) {
+          if (stream.skipTo(blockCommentEnd)) {
+            stream.match(blockCommentEnd);
+            state.inBlockComment = false;
+          } else {
+            stream.skipToEnd();
+          }
+          return 'comment';
+        }
+        if (stream.eatSpace()) return null;
+        if (lineComment && stream.match(lineComment)) {
+          stream.skipToEnd();
+          return 'comment';
+        }
+        if (blockCommentStart && stream.match(blockCommentStart)) {
+          state.inBlockComment = true;
+          return 'comment';
+        }
+        if (stream.match(/"(?:[^"\\]|\\.)*"?|`(?:[^`\\]|\\.)*`?|'(?:[^'\\]|\\.)*'?/)) return 'string';
+        if (stream.match(numberPattern)) return 'number';
+        if (stream.match(/[{}\[\]();,.]/)) return 'bracket';
+        if (stream.match(/[+\-*\/%=&|!<>?:~^]+/)) return 'operator';
+        const word = stream.match(variablePattern);
+        if (word) {
+          const value = word[0];
+          if (keywords.has(value)) return 'keyword';
+          if (atoms.has(value)) return 'atom';
+          if (builtin.has(value)) return 'builtin';
+          return 'variable';
+        }
+        stream.next();
+        return null;
+      },
+      lineComment
+    };
+  });
+  return true;
+}
+
+function registerFileExplorerCommonCodeMirrorModes() {
+  if (!hasFileEditorCodeMirror()) return false;
+  defineFileExplorerSimpleMode('file-explorer-javascript', {
+    keywords: ['as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'export', 'extends', 'finally', 'for', 'from', 'function', 'get', 'if', 'import', 'in', 'instanceof', 'let', 'new', 'of', 'return', 'set', 'static', 'super', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'interface', 'type', 'enum', 'implements', 'namespace', 'private', 'protected', 'public', 'readonly'],
+    builtin: ['Array', 'Boolean', 'Date', 'Error', 'JSON', 'Map', 'Math', 'Number', 'Object', 'Promise', 'RegExp', 'Set', 'String', 'Symbol', 'console', 'document', 'window']
+  });
+  defineFileExplorerSimpleMode('file-explorer-clike', {
+    keywords: ['alignas', 'alignof', 'auto', 'bool', 'break', 'case', 'catch', 'char', 'class', 'const', 'constexpr', 'continue', 'default', 'delete', 'do', 'double', 'else', 'enum', 'extern', 'false', 'final', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long', 'namespace', 'new', 'noexcept', 'nullptr', 'operator', 'private', 'protected', 'public', 'return', 'short', 'signed', 'sizeof', 'static', 'struct', 'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile', 'while', 'include', 'define', 'ifdef', 'ifndef', 'endif', 'pragma'],
+    atoms: ['true', 'false', 'NULL', 'nullptr']
+  });
+  defineFileExplorerSimpleMode('file-explorer-css', {
+    keywords: ['align-items', 'animation', 'background', 'border', 'box-shadow', 'color', 'display', 'flex', 'font', 'gap', 'grid', 'height', 'justify-content', 'margin', 'padding', 'position', 'transform', 'transition', 'width', 'z-index'],
+    atoms: ['auto', 'block', 'bold', 'center', 'flex', 'grid', 'hidden', 'inline', 'none', 'relative', 'absolute', 'fixed', 'solid', 'transparent'],
+    lineComment: '',
+    variablePattern: /^-?[_a-zA-Z][\w-]*/
+  });
+  defineFileExplorerSimpleMode('file-explorer-shell', {
+    keywords: ['case', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'for', 'function', 'if', 'in', 'then', 'until', 'while', 'echo', 'exit', 'export', 'local', 'read', 'set'],
+    atoms: ['true', 'false'],
+    lineComment: '#',
+    blockCommentStart: '',
+    blockCommentEnd: ''
+  });
+  defineFileExplorerSimpleMode('file-explorer-sql', {
+    keywords: ['ADD', 'ALTER', 'AND', 'AS', 'ASC', 'BETWEEN', 'BY', 'CREATE', 'DELETE', 'DESC', 'DISTINCT', 'DROP', 'FROM', 'GROUP', 'HAVING', 'IN', 'INSERT', 'INTO', 'JOIN', 'LEFT', 'LIKE', 'LIMIT', 'NOT', 'NULL', 'ON', 'OR', 'ORDER', 'OUTER', 'PRIMARY', 'RIGHT', 'SELECT', 'SET', 'TABLE', 'UPDATE', 'VALUES', 'WHERE'],
+    atoms: ['NULL', 'TRUE', 'FALSE'],
+    lineComment: '--'
+  });
+  return true;
+}
+
+function registerFileExplorerConfigCodeMirrorMode() {
+  if (!hasFileEditorCodeMirror()) return false;
+  const CodeMirror = window.CodeMirror;
+  if (CodeMirror.modes && CodeMirror.modes['file-explorer-config']) return true;
+  CodeMirror.defineMode('file-explorer-config', function() {
+    return {
+      token(stream) {
+        if (stream.eatSpace()) return null;
+        if (stream.match(/<!--/)) {
+          if (!stream.skipTo('-->')) stream.skipToEnd();
+          else stream.match('-->');
+          return 'comment';
+        }
+        if (stream.match(/[#;].*$/)) return 'comment';
+        if (stream.match(/"(?:[^"\\]|\\.)*"?|`(?:[^`\\]|\\.)*`?|'(?:[^'\\]|\\.)*'?/)) return 'string';
+        if (stream.match(/<\/?[A-Za-z][\w:-]*/)) return 'tag';
+        if (stream.match(/[{}\[\]<>]/)) return 'bracket';
+        if (stream.match(/[-+]?\d+(?:\.\d+)?/)) return 'number';
+        if (stream.match(/\b(?:true|false|null|yes|no|on|off)\b/i)) return 'atom';
+        if (stream.match(/[A-Za-z_][\w.-]*(?=\s*[:=])/)) return 'property';
+        if (stream.match(/[=:,]/)) return 'operator';
+        stream.next();
+        return null;
+      }
+    };
+  });
+  return true;
+}
+
+function registerFileExplorerTexCodeMirrorMode() {
+  if (!hasFileEditorCodeMirror()) return false;
+  const CodeMirror = window.CodeMirror;
+  if (CodeMirror.modes && CodeMirror.modes.stex) return true;
+  CodeMirror.defineMode('stex', function() {
+    return {
+      startState() {
+        return { inMath: false };
+      },
+      token(stream, state) {
+        if (stream.eatSpace()) return null;
+        if (stream.match('%')) {
+          stream.skipToEnd();
+          return 'comment';
+        }
+        if (stream.match(/\\(?:begin|end)(?=\s*\{)/)) return 'keyword';
+        if (stream.match(/\\[a-zA-Z@]+\*?|\\./)) return 'tag';
+        if (stream.match(/\$\$?|\\\(|\\\)|\\\[|\\\]/)) {
+          state.inMath = !state.inMath;
+          return 'operator';
+        }
+        if (stream.match(/[{}\[\](),;]/)) return 'bracket';
+        if (stream.match(/#[0-9]+/)) return 'atom';
+        if (state.inMath && stream.match(/[=+\-*\/^_<>'|:]+/)) return 'operator';
+        if (state.inMath && stream.match(/\d+(?:\.\d+)?/)) return 'number';
+        stream.next();
+        return state.inMath ? 'variable-2' : null;
+      },
+      lineComment: '%'
+    };
+  });
+  CodeMirror.defineMIME && CodeMirror.defineMIME('text/x-stex', 'stex');
+  return true;
+}
+
+function fileExplorerCodeMirrorMode(path) {
+  const ext = fileExplorerExtension(path);
+  if (isFileExplorerPythonFile(path)) return 'python';
+  if (isFileExplorerTexFile(path) && registerFileExplorerTexCodeMirrorMode()) return 'stex';
+  if (/^(json|jsonl|yaml|yml|toml|ini|cfg|conf|properties|xml|svg|html|htm)$/i.test(ext)) {
+    return registerFileExplorerConfigCodeMirrorMode() ? 'file-explorer-config' : null;
+  }
+  if (!registerFileExplorerCommonCodeMirrorModes()) return null;
+  if (/^(js|mjs|cjs|jsx|ts|tsx)$/i.test(ext)) return 'file-explorer-javascript';
+  if (/^(c|h|cpp|cc|cxx|hpp|hh|hxx|java|cs|go|rs|kt|kts|swift|php)$/i.test(ext)) return 'file-explorer-clike';
+  if (/^(css|scss|sass|less)$/i.test(ext)) return 'file-explorer-css';
+  if (/^(sh|bash|zsh|ps1|bat|cmd)$/i.test(ext)) return 'file-explorer-shell';
+  if (/^sql$/i.test(ext)) return 'file-explorer-sql';
+  return null;
+}
+
 function fileEditorCurrentValue() {
   const cm = FILE_EXPLORER_STATE.editorCodeMirror;
   if (cm) return cm.getValue();
@@ -186,33 +359,38 @@ function refreshFileEditorCodeMirror() {
   return true;
 }
 
-function ensureFileEditorCodeMirror() {
+function ensureFileEditorCodeMirror(path = FILE_EXPLORER_STATE.editorPath) {
   if (!hasFileEditorCodeMirror()) return null;
   const textarea = fileEditorTextarea();
   const shell = fileEditorCodeShell();
   if (!textarea || !shell) return null;
-  if (FILE_EXPLORER_STATE.editorCodeMirror) return FILE_EXPLORER_STATE.editorCodeMirror;
+  const mode = fileExplorerCodeMirrorMode(path);
+  const isPython = isFileExplorerPythonFile(path);
+  if (FILE_EXPLORER_STATE.editorCodeMirror) {
+    FILE_EXPLORER_STATE.editorCodeMirror.setOption('mode', mode);
+    return FILE_EXPLORER_STATE.editorCodeMirror;
+  }
   const cm = window.CodeMirror.fromTextArea(textarea, {
-    mode: 'python',
+    mode,
     theme: 'material-darker',
     lineNumbers: true,
     indentUnit: 4,
     tabSize: 4,
     indentWithTabs: false,
     lineWrapping: false,
-    autoCloseBrackets: true,
-    foldGutter: true,
-    gutters: ['CodeMirror-foldgutter', 'CodeMirror-linenumbers'],
-    foldOptions: {
+    autoCloseBrackets: !!mode,
+    foldGutter: isPython,
+    gutters: isPython ? ['CodeMirror-foldgutter', 'CodeMirror-linenumbers'] : ['CodeMirror-linenumbers'],
+    foldOptions: isPython ? {
       rangeFinder: window.CodeMirror.fold && window.CodeMirror.fold.indent
-    },
-    extraKeys: {
+    } : undefined,
+    extraKeys: isPython ? {
       Tab(editor) {
         if (editor.somethingSelected()) editor.indentSelection('add');
         else editor.replaceSelection('    ', 'end');
       },
       'Ctrl-Q'(editor) { editor.foldCode(editor.getCursor()); }
-    }
+    } : undefined
   });
   cm.on('change', () => {
     syncFileEditorTextareaFromCodeMirror();
@@ -397,7 +575,7 @@ function setPythonEditorMode(enabled) {
   FILE_EXPLORER_STATE.editorPythonMode = !!enabled;
   if (shell) shell.classList.toggle('python-editor', !!enabled);
   if (enabled && hasFileEditorCodeMirror()) {
-    const cm = ensureFileEditorCodeMirror();
+    const cm = ensureFileEditorCodeMirror(FILE_EXPLORER_STATE.editorPath);
     if (cm) {
       cm.setOption('readOnly', !!(fileEditorTextarea() && fileEditorTextarea().disabled));
       refreshFileEditorCodeMirror();
@@ -410,6 +588,22 @@ function setPythonEditorMode(enabled) {
     renderPythonEditor();
     syncPythonEditorScroll();
   }
+}
+
+function setFileEditorSyntaxMode(path) {
+  const normalizedPath = normalizeExplorerPath(path || FILE_EXPLORER_STATE.editorPath);
+  if (isFileExplorerPythonFile(normalizedPath)) {
+    setPythonEditorMode(true);
+    return;
+  }
+  setPythonEditorMode(false);
+  const mode = fileExplorerCodeMirrorMode(normalizedPath);
+  if (!mode || !hasFileEditorCodeMirror()) return;
+  const cm = ensureFileEditorCodeMirror(normalizedPath);
+  if (!cm) return;
+  cm.setOption('mode', mode);
+  cm.setOption('readOnly', !!(fileEditorTextarea() && fileEditorTextarea().disabled));
+  refreshFileEditorCodeMirror();
 }
 
 function replaceEditorSelection(textarea, text, selectStart = null, selectEnd = null) {
@@ -522,6 +716,7 @@ function ensureFileExplorerContextMenu() {
   menu.innerHTML = `
     <div data-menu-section="item">
       <button type="button" data-action="open">打开</button>
+      <button type="button" data-action="compile-tex" data-tex-only="true" hidden>编译</button>
       <button type="button" data-action="rename">重命名</button>
       <button type="button" data-action="copy-path">复制路径</button>
       <button type="button" data-action="delete">删除</button>
@@ -732,9 +927,11 @@ function ensureInlineCodeMirror(path) {
   const shell = inlineFileCodeShell();
   if (!textarea || !shell) return null;
   if (FILE_EXPLORER_STATE.inlineCodeMirror) return FILE_EXPLORER_STATE.inlineCodeMirror;
-  const isPython = isFileExplorerPythonFile(path || FILE_EXPLORER_STATE.inlineFilePath);
+  const targetPath = path || FILE_EXPLORER_STATE.inlineFilePath;
+  const isPython = isFileExplorerPythonFile(targetPath);
+  const mode = fileExplorerCodeMirrorMode(targetPath);
   const cm = window.CodeMirror.fromTextArea(textarea, {
-    mode: isPython ? 'python' : null,
+    mode,
     theme: 'material-darker',
     lineNumbers: true,
     indentUnit: 4,
@@ -742,7 +939,7 @@ function ensureInlineCodeMirror(path) {
     indentWithTabs: false,
     lineWrapping: false,
     readOnly: !!textarea.disabled,
-    autoCloseBrackets: isPython,
+    autoCloseBrackets: !!mode,
     foldGutter: isPython,
     gutters: isPython ? ['CodeMirror-foldgutter', 'CodeMirror-linenumbers'] : ['CodeMirror-linenumbers'],
     foldOptions: isPython ? {
@@ -1237,7 +1434,7 @@ async function openFileEditor(path) {
   textarea.hidden = false;
   setFileEditorMarkdownPreview(false);
   setFileEditorCodePreview(false);
-  setPythonEditorMode(isFileExplorerPythonFile(normalizedPath));
+  setFileEditorSyntaxMode(normalizedPath);
   modal.classList.add('show');
   setFileEditorStatus('正在读取...', 'loading');
   try {
@@ -1253,7 +1450,7 @@ async function openFileEditor(path) {
     FILE_EXPLORER_STATE.editorOriginal = textarea.value;
     setFileEditorMarkdownPreview(false);
     setFileEditorCodePreview(false);
-    setPythonEditorMode(isFileExplorerPythonFile(normalizedPath));
+    setFileEditorSyntaxMode(normalizedPath);
     if (FILE_EXPLORER_STATE.editorCodeMirror) {
       FILE_EXPLORER_STATE.editorCodeMirror.setOption('readOnly', false);
     }
@@ -1358,6 +1555,32 @@ function siblingExplorerPath(path, newName) {
 
 function fileExplorerBasename(path) {
   return String(path || '').split('/').filter(Boolean).pop() || '';
+}
+
+async function compileTexFile(path = FILE_EXPLORER_STATE.contextPath) {
+  const normalizedPath = normalizeExplorerPath(path);
+  if (!isFileExplorerTexFile(normalizedPath)) {
+    if (typeof toast === 'function') toast('仅支持编译 .tex 文件');
+    return;
+  }
+  try {
+    if (typeof toast === 'function') toast('正在调用 xelatex 编译...');
+    if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
+    const r = await callAgentBackend('compile_tex', { path: normalizedPath }, { skipConfirm: true });
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) {
+      const installHint = r && r.install_hint ? `\n${r.install_hint}` : '';
+      throw new Error(((r && r.error) || 'TeX 编译失败') + installHint);
+    }
+    const pdfPath = normalizeExplorerPath(r.pdf_path || normalizedPath.replace(/\.tex$/i, '.pdf'));
+    if (typeof toast === 'function') toast('编译完成，正在打开 PDF...');
+    if (FILE_EXPLORER_STATE.visible) refreshFileExplorer();
+    await openPdfViewer(pdfPath);
+  } catch (e) {
+    const message = e.message || String(e);
+    if (typeof toast === 'function') toast(message, 6000);
+    else alert(message);
+  }
 }
 
 function setPdfViewerStatus(message, kind = '') {
@@ -1620,6 +1843,9 @@ function showFileExplorerContextMenu(event, item) {
   menu.querySelectorAll('[data-menu-section]').forEach(section => {
     section.hidden = section.dataset.menuSection !== FILE_EXPLORER_STATE.contextScope;
   });
+  menu.querySelectorAll('[data-tex-only]').forEach(btn => {
+    btn.hidden = !(isItem && type !== 'dir' && isFileExplorerTexFile(path));
+  });
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
   const padding = 8;
@@ -1767,6 +1993,7 @@ function handleFileExplorerContextMenuAction(event) {
   if (!path) return;
   const action = btn.dataset.action;
   if (action === 'open') openFileExplorerPath(path, type);
+  else if (action === 'compile-tex') compileTexFile(path);
   else if (action === 'rename') renameFileExplorerPath(path);
   else if (action === 'copy-path') copyFileExplorerPath(path);
   else if (action === 'delete') deleteFileExplorerPath(path);

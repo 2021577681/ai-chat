@@ -2853,6 +2853,28 @@ body.settings-page-open .settings-docked-mask.show{
   box-shadow:inset 0 0 0 1px rgba(232,234,237,.12);
 }
 
+/* Dark mode: make native date/time picker icons visible on dark inputs. */
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="datetime-local"],
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] input[type="month"]{
+  color-scheme:dark;
+}
+
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="month"]::-webkit-calendar-picker-indicator{
+  filter:invert(1) brightness(1.35) contrast(.95);
+  opacity:.82;
+  cursor:pointer;
+}
+
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator:hover,
+[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator:hover,
+[data-theme="dark"] input[type="month"]::-webkit-calendar-picker-indicator:hover{opacity:1}
+
 [data-theme="dark"] .form-group input[type="range"],
 [data-theme="dark"] .form-row input[type="range"],
 [data-theme="dark"] .slider-row input[type="range"]{

@@ -241,6 +241,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_fetch_url(body)
             elif action == 'open_file_default':
                 self.handle_open_file_default(body)
+            elif action == 'compile_tex':
+                self.handle_compile_tex(body)
             elif action == 'file_info':
                 self.handle_file_info(body)
             elif action == 'git':

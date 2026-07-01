@@ -1096,6 +1096,75 @@ class FilesMixin:
         except Exception as e:
             self._send_json(200, {'ok': False, 'error': str(e)})
 
+    # ============ 编译 TeX 文件为 PDF ============
+    def handle_compile_tex(self, body):
+        path, err = check_path_or_error(body.get('path', ''))
+        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if not os.path.exists(path):
+            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+        if not os.path.isfile(path):
+            return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
+        if not path.lower().endswith('.tex'):
+            return self._send_json(200, {'ok': False, 'error': '仅支持编译 .tex 文件'})
+
+        xelatex = shutil.which('xelatex')
+        install_hint = (
+            '未检测到 xelatex。请先安装 TeX Live、MiKTeX 或 MacTeX，并确认 xelatex 已加入 PATH，'
+            '然后重启本地服务后再试。'
+        )
+        if not xelatex:
+            return self._send_json(200, {
+                'ok': False,
+                'error': '本机环境不支持 TeX 编译：找不到 xelatex',
+                'install_hint': install_hint,
+                'missing': 'xelatex'
+            })
+
+        workdir = os.path.dirname(path) or os.getcwd()
+        filename = os.path.basename(path)
+        pdf_abs = os.path.splitext(path)[0] + '.pdf'
+
+        try:
+            print(f'📄 [TeX 编译] {path}')
+            proc = subprocess.run(
+                [xelatex, '-interaction=nonstopmode', '-halt-on-error', filename],
+                cwd=workdir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=120
+            )
+        except subprocess.TimeoutExpired:
+            return self._send_json(200, {
+                'ok': False,
+                'error': 'xelatex 编译超时（超过 120 秒）',
+                'install_hint': ''
+            })
+        except FileNotFoundError:
+            return self._send_json(200, {
+                'ok': False,
+                'error': '本机环境不支持 TeX 编译：找不到 xelatex',
+                'install_hint': install_hint,
+                'missing': 'xelatex'
+            })
+        except Exception as e:
+            return self._send_json(200, {'ok': False, 'error': f'调用 xelatex 失败: {e}'})
+
+        if proc.returncode != 0 or not os.path.exists(pdf_abs):
+            output = ((proc.stdout or '') + '\n' + (proc.stderr or '')).strip()
+            if len(output) > 4000:
+                output = output[-4000:]
+            return self._send_json(200, {
+                'ok': False,
+                'error': 'xelatex 编译失败' + (f':\n{output}' if output else ''),
+                'returncode': proc.returncode
+            })
+
+        rel_pdf = os.path.relpath(pdf_abs, config.WORKSPACE_ROOT).replace(os.sep, '/')
+        self._send_json(200, {'ok': True, 'path': path, 'pdf_path': rel_pdf})
+
     # ============ 使用系统默认应用打开文件 ============
     def handle_open_file_default(self, body):
         path, err = check_path_or_error(body.get('path', ''))
