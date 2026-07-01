@@ -35,29 +35,42 @@ class FileHelperBridge:
         self.filehelper_chat = None
         self.filehelper_ready = False
 
+    @staticmethod
+    def _is_cacheable_chat(candidate: Any, wx: Any) -> bool:
+        """Return whether candidate looks like a dedicated chat/session object."""
+        if candidate is None or candidate is wx or isinstance(candidate, bool):
+            return False
+        return hasattr(candidate, "GetAllMessage") or hasattr(candidate, "SendMsg")
+
     def ensure_open(self) -> tuple[str, Any]:
         if self.wx is None or not self.backend_name:
             self.backend_name, self.wx = core.open_wechat()
             self.started_at = datetime.now().isoformat(timespec="seconds")
         return self.backend_name, self.wx
 
-    def ensure_filehelper_chat(self) -> tuple[str, Any, Any]:
-        """Open WeChat and switch to 文件传输助手 only once per bridge process.
+    def ensure_filehelper_chat(self, force_switch: bool = False) -> tuple[str, Any, Any | None]:
+        """Open WeChat and return a safe 文件传输助手 chat/session when available.
 
-        The bridge is persistent, so repeated ChatWith/SwitchToChat calls on every
-        poll/send add large UI automation delays. After the first successful
-        switch, keep using the current wx object or a returned chat/session object
-        if the backend provides one.
+        Cache only a dedicated chat/session object. If the backend only switches
+        the active WeChat window and returns None/bool/wx, callers must not treat
+        wx as permanently bound to 文件传输助手.
         """
         backend_name, wx = self.ensure_open()
-        if not self.filehelper_ready:
+        if self.filehelper_chat is not None:
+            return backend_name, wx, self.filehelper_chat
+        if force_switch or not self.filehelper_ready:
             with core.redirect_backend_stdout():
-                self.filehelper_chat = core.switch_to_safe_chat(wx, backend_name)
-            self.filehelper_ready = True
-        return backend_name, wx, self.filehelper_chat or wx
+                candidate = core.switch_to_safe_chat(wx, backend_name)
+            if self._is_cacheable_chat(candidate, wx):
+                self.filehelper_chat = candidate
+                self.filehelper_ready = True
+            else:
+                self.filehelper_chat = None
+                self.filehelper_ready = False
+        return backend_name, wx, self.filehelper_chat
 
     def start(self) -> dict[str, Any]:
-        backend_name, wx, _chat = self.ensure_filehelper_chat()
+        backend_name, wx, _chat = self.ensure_filehelper_chat(force_switch=True)
         return {
             "ok": True,
             "action": "start",
@@ -78,10 +91,10 @@ class FileHelperBridge:
         }
 
     def read_messages(self, limit: int) -> dict[str, Any]:
-        backend_name, wx, chat = self.ensure_filehelper_chat()
+        backend_name, wx, chat = self.ensure_filehelper_chat(force_switch=self.filehelper_chat is None)
         limit = max(1, min(50, int(limit or 20)))
         with core.redirect_backend_stdout():
-            reader = chat if hasattr(chat, "GetAllMessage") else wx
+            reader = chat if chat is not None and hasattr(chat, "GetAllMessage") else wx
             messages = reader.GetAllMessage()
         if isinstance(messages, list):
             raw_messages = messages[-limit:]
@@ -111,7 +124,8 @@ class FileHelperBridge:
         return stripped.startswith("[Agent]")
 
     def send_message(self, text: str, prefix: str = "[Agent] ") -> dict[str, Any]:
-        backend_name, wx, chat = self.ensure_filehelper_chat()
+        backend_name, wx = self.ensure_open()
+        chat = self.filehelper_chat
         text = str(text or "")
         # The remote-control UI already formats replies as "[Agent][id]...".
         # Treat any leading "[Agent]" marker as already prefixed; otherwise the
@@ -119,11 +133,18 @@ class FileHelperBridge:
         if prefix and not text.startswith(prefix) and not self._has_agent_prefix(text):
             text = prefix + text
         with core.redirect_backend_stdout():
-            sender = chat if hasattr(chat, "SendMsg") else wx
-            try:
-                result = sender.SendMsg(text)
-            except TypeError:
-                result = sender.SendMsg(text, who=core.SAFE_CHAT_NAME)
+            if chat is not None and hasattr(chat, "SendMsg"):
+                try:
+                    result = chat.SendMsg(text)
+                except TypeError:
+                    result = chat.SendMsg(text, who=core.SAFE_CHAT_NAME)
+            else:
+                try:
+                    result = wx.SendMsg(text, who=core.SAFE_CHAT_NAME)
+                except Exception:
+                    backend_name, wx, chat = self.ensure_filehelper_chat(force_switch=True)
+                    sender = chat if chat is not None and hasattr(chat, "SendMsg") else wx
+                    result = sender.SendMsg(text)
         return {
             "ok": True,
             "action": "send",

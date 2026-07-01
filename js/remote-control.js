@@ -15,6 +15,81 @@ const REMOTE_CONTROL_DEFAULTS = {
   maxReplyChars: 3000
 };
 
+const REMOTE_CONTROL_COMMANDS = [
+  {
+    name: '帮助',
+    example: '/帮助',
+    desc: '返回遥控指令用法。',
+    aliases: 'help'
+  },
+  {
+    name: '状态',
+    example: '/状态',
+    desc: '查看运行中对话数量和已绑定遥控序号。',
+    aliases: 'status'
+  },
+  {
+    name: '停止',
+    example: '/停止 或 /停止/1',
+    desc: '停止全部正在生成的对话，或停止指定序号对话。',
+    aliases: 'stop'
+  },
+  {
+    name: '新建对话',
+    example: '/新建对话/1：你好',
+    desc: '创建并绑定一个遥控序号。',
+    aliases: '新建、new；也支持 /新建对话1'
+  },
+  {
+    name: '临时对话',
+    example: '/临时：你好',
+    desc: '创建或继续无序号临时会话；切换或新建其它对话后自动清除。',
+    aliases: '临时对话、tmp'
+  },
+  {
+    name: '继续 / 引导',
+    example: '/1：补充一下',
+    desc: '继续指定对话；若该对话正在生成，则作为中途引导。',
+    aliases: '数字序号'
+  },
+  {
+    name: '工具模式',
+    example: '/1/工具：查资料后回答',
+    desc: '本次对话启用工具，并记为该遥控序号默认工具偏好。',
+    aliases: 'tool、tools'
+  },
+  {
+    name: '大纲模式',
+    example: '/新建对话/1/大纲：整理方案',
+    desc: '用动态大纲模式执行任务。',
+    aliases: 'outline'
+  },
+  {
+    name: '计划模式',
+    example: '/新建对话/1/计划：拆解任务',
+    desc: '用计划模式规划、执行和验证。',
+    aliases: 'plan'
+  },
+  {
+    name: '普通模式',
+    example: '/1/普通：直接回答',
+    desc: '关闭该序号默认工具偏好，按普通对话路径处理。',
+    aliases: 'normal'
+  },
+  {
+    name: '统计',
+    example: '/统计/1',
+    desc: '查看指定遥控对话的 token 使用统计。',
+    aliases: 'stats、token、tokens；也支持 /统计1'
+  },
+  {
+    name: '重新生成',
+    example: '/重新生成/1',
+    desc: '删除最近一条助手回复并重新生成。',
+    aliases: '重生成、regen、regenerate；也支持 /重新生成1'
+  }
+];
+
 let remoteControlTimer = null;
 let remoteControlPolling = false;
 let remoteControlBridgeStartPromise = null;
@@ -130,7 +205,7 @@ function remoteControlNormalizeCommandTokens(tokens) {
   for (const rawToken of tokens || []) {
     const token = String(rawToken || '').trim();
     if (!token) continue;
-    const glued = token.match(/^(新建对话|新建|临时对话|临时|大纲|计划|工具|普通|状态|停止|帮助)(\d+)$/);
+    const glued = token.match(/^(新建对话|新建|临时对话|临时|大纲|计划|工具|普通|状态|停止|帮助|统计|重新生成|重生成|regen|regenerate)(\d+)$/);
     if (glued) {
       normalized.push(glued[1], glued[2]);
     } else {
@@ -151,7 +226,9 @@ function remoteControlParseMessage(text) {
     '大纲': 'outline', 'outline': 'outline', '计划': 'plan', 'plan': 'plan',
     '工具': 'tools', 'tool': 'tools', 'tools': 'tools',
     '普通': 'normal', 'normal': 'normal', '帮助': 'help', 'help': 'help',
-    '状态': 'status', 'status': 'status', '停止': 'stop', 'stop': 'stop'
+    '状态': 'status', 'status': 'status', '停止': 'stop', 'stop': 'stop',
+    '统计': 'stats', 'stats': 'stats', 'token': 'stats', 'tokens': 'stats',
+    '重新生成': 'regenerate', '重生成': 'regenerate', 'regen': 'regenerate', 'regenerate': 'regenerate'
   };
 
   const result = {
@@ -167,6 +244,8 @@ function remoteControlParseMessage(text) {
     help: false,
     status: false,
     stop: false,
+    stats: false,
+    regenerate: false,
     id: ''
   };
 
@@ -185,14 +264,22 @@ function remoteControlParseMessage(text) {
     else if (op === 'help') result.help = true;
     else if (op === 'status') result.status = true;
     else if (op === 'stop') result.stop = true;
+    else if (op === 'stats') result.stats = true;
+    else if (op === 'regenerate') result.regenerate = true;
   }
 
-  if (result.help || result.status) return result;
+  if (result.help || result.status || (result.stop && !result.id)) return result;
+  if (result.temporary) {
+    if (result.id) return { ok: false, error: '临时对话不使用序号，请发送 /临时：你的问题' };
+    if (result.create) return { ok: false, error: '临时对话请直接发送 /临时：你的问题，不需要 /新建对话。' };
+    if (!result.body) return { ok: false, error: '缺少正文，请发送 /临时：你的问题' };
+    return result;
+  }
   if (!result.id) return { ok: false, error: '缺少对话编号，例如 /新建对话/1：你好 或 /1：继续' };
   if (result.create && tokens[0] !== '新建对话' && tokens[0] !== '新建' && tokens[0] !== 'new') {
     return { ok: false, error: '/新建对话/序号 必须放在开头，例如 /新建对话/1：你好；也支持 /新建对话1：你好' };
   }
-  if (!result.body && !result.stop) return { ok: false, error: '缺少正文，请用冒号分隔，例如 /1：帮我总结' };
+  if (!result.body && !result.stop && !result.stats && !result.regenerate) return { ok: false, error: '缺少正文，请用冒号分隔，例如 /1：帮我总结' };
   return result;
 }
 
@@ -273,7 +360,36 @@ function remoteControlRenderUsedIdsList() {
   }).join('');
 }
 
+function remoteControlEscapeHtml(text) {
+  return String(text || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function remoteControlRenderCommandList() {
+  const countEl = document.getElementById('remoteControlCommandCount');
+  const listEl = document.getElementById('remoteControlCommandList');
+  if (countEl) countEl.textContent = `共 ${REMOTE_CONTROL_COMMANDS.length} 类`;
+  if (!listEl) return;
+  listEl.innerHTML = REMOTE_CONTROL_COMMANDS.map(cmd => {
+    const name = remoteControlEscapeHtml(cmd.name);
+    const example = remoteControlEscapeHtml(cmd.example);
+    const desc = remoteControlEscapeHtml(cmd.desc);
+    const aliases = remoteControlEscapeHtml(cmd.aliases || '无');
+    return `
+      <div class="remote-control-command-item">
+        <div class="remote-control-command-title">
+          <strong>${name}</strong>
+          <code>${example}</code>
+        </div>
+        <div class="remote-control-command-desc">${desc}</div>
+        <div class="remote-control-command-alias">别名：${aliases}</div>
+      </div>`;
+  }).join('');
+}
+
 function remoteControlCreateChat(remoteId, opts = {}) {
+  if (!opts.temporary && typeof discardTemporaryChat === 'function') {
+    try { discardTemporaryChat({ nextCurrentId: null }); } catch (e) {}
+  }
   const id = (opts.temporary ? 'tmp_remote_' : 'c_remote_') + String(remoteId).replace(/[^\w-]/g, '_') + '_' + Date.now();
   const chat = {
     id,
@@ -292,6 +408,29 @@ function remoteControlCreateChat(remoteId, opts = {}) {
   state.currentId = id;
   remoteControlKnownChats.set(String(remoteId), id);
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
+  return chat;
+}
+
+function remoteControlEnsureTemporaryChat(parsed) {
+  let chat = state.temporaryChat && state.temporaryChat.temporary ? state.temporaryChat : null;
+  if (!chat) {
+    chat = typeof createTemporaryChat === 'function'
+      ? createTemporaryChat()
+      : { id: 'tmp_' + Date.now(), title: '临时会话', messages: [], createdAt: Date.now(), temporary: true };
+    state.temporaryChat = chat;
+  }
+  state.currentId = chat.id;
+  chat.remoteControl = chat.remoteControl || { id: '临时', replyNo: 0 };
+  chat.remoteControl.id = '临时';
+  chat.remoteControl.temporary = true;
+  chat.remoteControl.ephemeral = true;
+  if (parsed && parsed.tools) chat.remoteControl.useToolsDefault = true;
+  if (parsed && parsed.normal && !parsed.tools) chat.remoteControl.useToolsDefault = false;
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  if (typeof updateTemporaryChatButton === 'function') updateTemporaryChatButton();
+  saveData();
+  renderChatList();
+  if (isCurrentChat(chat)) renderMessages();
   return chat;
 }
 
@@ -387,14 +526,18 @@ async function remoteControlSendWechat(text) {
     return result.value;
   } finally {
     remoteControlPendingSends = Math.max(0, remoteControlPendingSends - 1);
-    if (remoteControlSettings().enabled && remoteControlActiveCommands <= 0 && remoteControlPendingSends <= 0) {
+    if (remoteControlCanSchedulePoll()) {
       remoteControlScheduleNext();
     }
   }
 }
 
 function remoteControlCanSchedulePoll() {
-  return remoteControlSettings().enabled && remoteControlActiveCommands <= 0 && remoteControlPendingSends <= 0;
+  // AI generation should not block polling anymore. The backend bridge now
+  // serializes WeChat UI access and gives send higher priority than poll/read.
+  // Locally pause only while a send request is being submitted, so the reply can
+  // enter the backend priority queue immediately.
+  return remoteControlSettings().enabled && remoteControlPendingSends <= 0;
 }
 
 function remoteControlMessageKey(msg) {
@@ -424,8 +567,165 @@ function remoteControlAcquireRemoteLock(remoteId) {
   return true;
 }
 
-async function remoteControlRunChat(chat, parsed) {
+function remoteControlIsGuidanceCandidate(parsed) {
+  return !!(parsed && (parsed.id || parsed.temporary) && parsed.body && !parsed.create && !parsed.stop && !parsed.stats && !parsed.regenerate && !parsed.help && !parsed.status);
+}
+
+function remoteControlCanGuideChat(chat) {
+  if (!chat || typeof chatTaskById !== 'function') return false;
+  const task = chatTaskById(chat.id);
+  if (!task || !task.isGenerating) return false;
+  if (task.mode && task.mode !== 'chat') return false;
+  return true;
+}
+
+function remoteControlQueueGuidance(chat, parsed) {
+  if (!remoteControlIsGuidanceCandidate(parsed) || !remoteControlCanGuideChat(chat)) return false;
+  const userMsg = {
+    role: 'user',
+    content: remoteControlUserContent(parsed),
+    _midrunGuidance: true,
+    _queuedAt: Date.now()
+  };
+  const task = chatTaskById(chat.id);
+  if (task && task.pendingGuidance) {
+    task.pendingGuidance.content = [task.pendingGuidance.content || '', userMsg.content || ''].filter(Boolean).join('\n\n');
+    task.pendingGuidance._queuedAt = Date.now();
+    task.guidanceRequested = true;
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  } else if (typeof setChatTaskGuidance === 'function') {
+    setChatTaskGuidance(chat.id, userMsg);
+  } else if (task) {
+    task.pendingGuidance = userMsg;
+    task.guidanceRequested = true;
+    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  }
+
+  const runningTask = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
+  const ctrl = runningTask ? (runningTask.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  if (runningTask) {
+    runningTask.stopRequested = true;
+    runningTask.guidanceRequested = true;
+  }
+  state.stopRequested = true;
+  if (ctrl) {
+    try { ctrl.abort(); } catch (e) { console.error('[remote-control] guidance abort failed:', e); }
+  }
+  if (typeof window !== 'undefined' && window._rateWaitAbort) {
+    try { window._rateWaitAbort(ctrl && ctrl.signal); } catch (e) {}
+  }
+  if (typeof window !== 'undefined' && typeof window.cancelAutoResend === 'function') {
+    try { window.cancelAutoResend(chat.id, false); } catch (e) {}
+  }
+  if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+  if (typeof traceUserMessage === 'function') traceUserMessage(parsed.body || userMsg.content);
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  return true;
+}
+
+function remoteControlGuidanceAck(parsed) {
+  if (parsed && parsed.temporary && !parsed.id) return '[System]已引导临时对话';
+  return '[System]已引导对话' + (parsed && parsed.id ? parsed.id : '');
+}
+
+function remoteControlReplyId(parsed) {
+  if (parsed && parsed.id) return String(parsed.id);
+  if (parsed && parsed.temporary) return '临时';
+  return '';
+}
+
+function remoteControlFormatTokenStats(chat) {
+  if (!chat) return '对话不存在。';
+  const stats = (typeof getChatTokenStats === 'function') ? getChatTokenStats(chat) : (chat.tokenStats || null);
+  const remoteId = chat.remoteControl && chat.remoteControl.id ? chat.remoteControl.id : '';
+  if (!stats || Number(stats.totalRequests || 0) <= 0) return `对话 ${remoteId} 还没有发送过请求，暂无 token 统计。`;
+  const fmt = (typeof formatNumber === 'function')
+    ? formatNumber
+    : (n) => {
+        n = Number(n || 0);
+        if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+        return String(n);
+      };
+  const lines = [
+    '本对话累计',
+    `总请求次数：${Number(stats.totalRequests || 0)}`,
+    `累计输入 token：${fmt(stats.inputTokens || 0)}`,
+    `累计输出 token：${fmt(stats.outputTokens || 0)}`
+  ];
+  if (Number(stats.cacheReadTokens || 0) > 0) lines.push(`缓存命中（节省）：${fmt(stats.cacheReadTokens || 0)}`);
+  if (Number(stats.cacheCreateTokens || 0) > 0) lines.push(`缓存创建：${fmt(stats.cacheCreateTokens || 0)}`);
+  if (Number(stats.thinkingTokens || 0) > 0) lines.push(`思考 token：${fmt(stats.thinkingTokens || 0)}`);
+  lines.push(`总计：${fmt(Number(stats.inputTokens || 0) + Number(stats.outputTokens || 0))}`);
+  if (Number(stats.lastInputTokens || 0) > 0 || Number(stats.lastOutputTokens || 0) > 0) {
+    lines.push('', '最近一次请求', `输入：${fmt(stats.lastInputTokens || 0)} tokens`, `输出：${fmt(stats.lastOutputTokens || 0)} tokens`);
+  }
+  return lines.join('\n');
+}
+
+function remoteControlStopAllGeneratingChats() {
+  const tasks = (typeof ensureChatTasks === 'function') ? ensureChatTasks() : {};
+  const ids = Object.values(tasks).filter(t => t && t.isGenerating && t.chatId).map(t => t.chatId);
+  let stopped = 0;
+  for (const chatId of ids) {
+    if (typeof requestStopChatTask === 'function') {
+      if (requestStopChatTask(chatId)) stopped++;
+    } else {
+      stopped++;
+    }
+  }
+  return stopped;
+}
+
+async function remoteControlRegenerateChat(chat, parsed) {
   const remoteId = String(parsed.id);
+  if (!chat || !Array.isArray(chat.messages)) {
+    await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 不存在。`));
+    return;
+  }
+  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) {
+    if (typeof requestStopChatTask === 'function') requestStopChatTask(chat.id);
+    await new Promise(r => setTimeout(r, 200));
+  }
+  let idx = -1;
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    const m = chat.messages[i];
+    if (m && m.role === 'assistant' && !m._hiddenFromUI) { idx = i; break; }
+  }
+  if (idx < 0) {
+    await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 没有可重新生成的助手消息。`));
+    return;
+  }
+  const reply = chat.messages[idx] || {};
+  const mode = reply.pptMode ? 'ppt' : (reply.outline ? 'outline' : (reply.plan ? 'plan' : (reply.reflection ? 'reflection' : 'normal')));
+  chat.messages = chat.messages.slice(0, idx);
+  while (chat.messages.length && chat.messages[chat.messages.length - 1].role === 'tool') chat.messages.pop();
+  saveData();
+  if (isCurrentChat(chat)) renderMessages();
+  const before = chat.messages.length;
+  try {
+    const useTools = !!(chat.remoteControl && chat.remoteControl.useToolsDefault);
+    if (mode === 'outline') await callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else if (mode === 'plan') await callAPIWithPlan({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else if (mode === 'ppt' && typeof callAPIWithPptMode === 'function') await callAPIWithPptMode({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else if (mode === 'reflection' && typeof callAPIWithReflection === 'function') await callAPIWithReflection({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else await callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
+  } catch (e) {
+    await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 重新生成失败：${e.message || e}`));
+    return;
+  }
+  const answer = remoteControlLatestAssistantText(chat, before);
+  await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 已重新生成。\n${answer || '（无文本回复）'}`));
+  saveData();
+}
+
+async function remoteControlRunChat(chat, parsed) {
+  const remoteId = remoteControlReplyId(parsed);
+  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id) && remoteControlQueueGuidance(chat, parsed)) {
+    await remoteControlSendWechat(remoteControlGuidanceAck(parsed));
+    return;
+  }
   if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) {
     await remoteControlSendWechat(remoteControlFormatReply(remoteId, (chat.remoteControl.replyNo || 0) + 1, '该对话正在生成中，请稍后再发。你也可以用其他编号新建并行对话。'));
     return;
@@ -433,7 +733,7 @@ async function remoteControlRunChat(chat, parsed) {
 
   const before = chat.messages.length;
   remoteControlAppendUser(chat, remoteControlUserContent(parsed));
-  const useTools = !!(parsed.tools || (chat.remoteControl && chat.remoteControl.useToolsDefault));
+  const useTools = parsed.normal && !parsed.tools ? false : !!(parsed.tools || (chat.remoteControl && chat.remoteControl.useToolsDefault));
   try {
     const apiStartedAt = remoteControlNow();
     if (parsed.outline) await callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
@@ -456,19 +756,35 @@ async function remoteControlRunChat(chat, parsed) {
 
 async function remoteControlHandleParsed(parsed) {
   if (parsed.help) {
-    await remoteControlSendWechat('[Agent][Help]:\n用法：/新建对话/1/大纲/工具：任务；继续：/1：追加指令。支持 /工具、/大纲、/计划、/临时对话、/状态、/停止。');
+    await remoteControlSendWechat('[Agent][Help]:\n用法：/新建对话/1/大纲/工具：任务；继续：/1：追加指令；临时：/临时：任务。支持 /工具、/大纲、/计划、/状态、/统计/1、/停止/1、/重新生成/1、/停止。');
     return;
   }
   if (parsed.status) {
     const tasks = (typeof ensureChatTasks === 'function') ? ensureChatTasks() : {};
     const running = Object.values(tasks).filter(t => t && t.isGenerating).map(t => t.chatId).length;
     remoteControlPruneKnownChats();
-    await remoteControlSendWechat(`[Agent][Status]:\n遥控已开启；运行中任务 ${running} 个；已绑定对话 ${remoteControlKnownChats.size} 个。`);
+    await remoteControlSendWechat(remoteControlFormatSystem(`当前状态：运行中对话 ${running} 个；已绑定对话 ${remoteControlKnownChats.size} 个。`));
+    return;
+  }
+  if (parsed.stop && !parsed.id) {
+    const stopped = remoteControlStopAllGeneratingChats();
+    await remoteControlSendWechat(remoteControlFormatSystem(`已请求停止所有正在生成的对话（${stopped} 个）。`));
+    return;
+  }
+  if (parsed.temporary && !parsed.id) {
+    const chat = remoteControlEnsureTemporaryChat(parsed);
+    await remoteControlRunChat(chat, parsed);
     return;
   }
   const lockId = parsed.id ? String(parsed.id) : '';
   if (lockId && !remoteControlAcquireRemoteLock(lockId)) {
-    console.warn('[remote-control] duplicate/in-flight remote id ignored:', lockId);
+    const existingChat = remoteControlFindChat(parsed.id) || remoteControlDeduplicateRemoteChats(parsed.id);
+    if (remoteControlQueueGuidance(existingChat, parsed)) {
+      await remoteControlSendWechat(remoteControlGuidanceAck(parsed));
+    } else {
+      await remoteControlSendWechat(remoteControlFormatSystem('对话' + parsed.id + '正在执行，当前指令暂未执行。'));
+    }
+    console.warn('[remote-control] duplicate/in-flight remote id handled:', lockId);
     return;
   }
   try {
@@ -487,9 +803,21 @@ async function remoteControlHandleParsed(parsed) {
       chat.remoteControl = chat.remoteControl || { id: String(parsed.id), replyNo: 0 };
       chat.remoteControl.useToolsDefault = true;
     }
+    if (parsed.normal && !parsed.tools && chat) {
+      chat.remoteControl = chat.remoteControl || { id: String(parsed.id), replyNo: 0 };
+      chat.remoteControl.useToolsDefault = false;
+    }
+    if (parsed.stats) {
+      await remoteControlSendWechat(remoteControlFormatSystem(remoteControlFormatTokenStats(chat)));
+      return;
+    }
+    if (parsed.regenerate) {
+      await remoteControlRegenerateChat(chat, parsed);
+      return;
+    }
     if (parsed.stop) {
       if (typeof requestStopChatTask === 'function') requestStopChatTask(chat.id);
-      await remoteControlSendWechat(remoteControlFormatReply(parsed.id, (chat.remoteControl.replyNo || 0) + 1, '已请求停止该对话任务。'));
+      await remoteControlSendWechat(remoteControlFormatSystem(`已请求停止对话 ${parsed.id} 的生成。`));
       return;
     }
     await remoteControlRunChat(chat, parsed);
@@ -524,15 +852,30 @@ function remoteControlDispatchParsed(parsed, msg) {
 async function remoteControlPollOnce() {
   if (remoteControlPolling) return;
   if (!remoteControlSettings().enabled) return;
+  if (remoteControlPendingSends > 0) return;
   remoteControlPolling = true;
   try {
     const cfg = remoteControlSettings();
     const limit = Math.max(1, Math.min(50, parseInt(cfg.pollLimit || 20, 10) || 20));
     const pollStartedAt = remoteControlNow();
-    const result = await executeTool('wechat_filehelper_poll', { limit, timeout: 0, interval: 1 }, { skipConfirm: true });
-    remoteControlLogTiming('wechat poll', pollStartedAt, `limit=${limit}`);
-    if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
-    const payload = result.value && result.value.stdout ? JSON.parse(result.value.stdout) : (typeof result.value === 'string' ? JSON.parse(result.value) : result.value);
+    let payload;
+    if (typeof callAgentBackend === 'function') {
+      payload = await callAgentBackend('wechat_bridge', {
+        op: 'poll',
+        limit,
+        timeout: 0,
+        interval: 1,
+        requestTimeoutMs: 90000,
+        bridge_timeout: 90
+      }, undefined, undefined, { skipConfirm: true });
+      remoteControlLogTiming('wechat poll', pollStartedAt, `limit=${limit}${payload && payload.busy ? ' busy' : ''}`);
+      if (!payload || !payload.ok) throw new Error((payload && payload.error) || JSON.stringify(payload));
+    } else {
+      const result = await executeTool('wechat_filehelper_poll', { limit, timeout: 0, interval: 1 }, { skipConfirm: true });
+      remoteControlLogTiming('wechat poll', pollStartedAt, `limit=${limit}`);
+      if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
+      payload = result.value && result.value.stdout ? JSON.parse(result.value.stdout) : (typeof result.value === 'string' ? JSON.parse(result.value) : result.value);
+    }
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     for (const msg of messages) {
       const content = String(msg.content || '').trim();
@@ -561,7 +904,7 @@ function remoteControlScheduleNext() {
   }
   const cfg = remoteControlSettings();
   if (!cfg.enabled) return;
-  if (remoteControlActiveCommands > 0 || remoteControlPendingSends > 0) return;
+  if (remoteControlPendingSends > 0) return;
   const ms = Math.max(1, parseFloat(cfg.pollIntervalSec || 5) || 5) * 1000;
   remoteControlTimer = setTimeout(remoteControlPollOnce, ms);
 }
@@ -614,6 +957,7 @@ function loadRemoteControlSettingsToModal() {
   _rcSetValue('remoteControlShortReplyPrompt', cfg.shortReplyPrompt || REMOTE_CONTROL_DEFAULTS.shortReplyPrompt);
   _rcSetValue('remoteControlMaxReplyChars', cfg.maxReplyChars || 3000);
   remoteControlRenderUsedIdsList();
+  remoteControlRenderCommandList();
 }
 
 async function saveRemoteControlSettingsFromModal() {
@@ -685,4 +1029,5 @@ if (typeof window !== 'undefined') {
   window.remoteControlPruneKnownChats = remoteControlPruneKnownChats;
   window.remoteControlUsedIdEntries = remoteControlUsedIdEntries;
   window.remoteControlRenderUsedIdsList = remoteControlRenderUsedIdsList;
+  window.remoteControlRenderCommandList = remoteControlRenderCommandList;
 }

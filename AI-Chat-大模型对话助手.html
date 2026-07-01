@@ -667,6 +667,15 @@
       <div class="form-hint">删除对应遥控对话后，该序号会自动释放；重新打开本界面会刷新当前列表。</div>
     </div>
 
+    <div class="form-group remote-control-command-section">
+      <div class="remote-control-command-head">
+        <label>支持的遥控指令</label>
+        <span id="remoteControlCommandCount" class="remote-control-command-count">共 0 类</span>
+      </div>
+      <div class="form-hint">按实际解析能力统计；同义写法不重复计数，冒号可用 <code>：</code> 或 <code>:</code>。</div>
+      <div id="remoteControlCommandList" class="remote-control-command-list"></div>
+    </div>
+
     <div class="modal-footer">
       <button class="btn" onclick="closeRemoteControlSettings()">取消</button>
       <button class="btn btn-primary" onclick="saveAndCloseRemoteControlSettings()">保存</button>
