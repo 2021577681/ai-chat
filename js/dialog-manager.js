@@ -298,6 +298,8 @@ const ICON_EXPORT_DOC = '<img src="icon/文件-word_file-word.png" alt="">';
 const ICON_EXPORT_PDF = '<img src="icon/pdf文件_file-pdf-one.png" alt="">';
 const ICON_RENAME = '<img src="icon/铅笔_pencil.png" alt="">';
 const ICON_DELETE = '<img src="icon/删除_delete.png" alt="">';
+const ICON_HIDE_CHAT = '<img src="icon/预览-关闭_preview-close-one.png" alt="">';
+const ICON_SHOW_CHAT = '<img src="icon/预览-打开_preview-open.png" alt="">';
 const ICON_BREADCRUMB = '<img src="icon/文件夹-开_folder-open.png" alt="">';
 const ICON_VIEW_ICONS = '<img src="icon/全部_all-application.png" alt="">';
 const ICON_VIEW_LIST = '<img src="icon/汉堡图标_hamburger-button.png" alt="">';
@@ -844,8 +846,18 @@ function dialogExplorerContextMenu(e, type, id) {
   const inGroupView = dialogManagerCurrentFolderId.startsWith('__group_');
   const renameBtn = menu.querySelector('[data-explorer-action="rename"]');
   const deleteBtn = menu.querySelector('[data-explorer-action="delete"]');
+  const hideBtn = menu.querySelector('[data-explorer-action="hideChat"]');
   if (renameBtn) renameBtn.hidden = (type === 'area' || inGroupView);
   if (deleteBtn) deleteBtn.hidden = (type === 'area' || inGroupView);
+  if (hideBtn) {
+    const canToggleHidden = type === 'chat' || type === 'folder';
+    hideBtn.hidden = !canToggleHidden;
+    if (canToggleHidden) {
+      const isHidden = dialogExplorerTargetHidden(type, id);
+      hideBtn.innerHTML = '<span class="dialog-explorer-context-icon">' + (isHidden ? ICON_SHOW_CHAT : ICON_HIDE_CHAT) + '</span>' + (isHidden ? '取消隐藏' : '隐藏对话');
+      hideBtn.title = isHidden ? '取消隐藏对话，让它重新显示在主侧栏' : '隐藏对话，不在主侧栏显示';
+    }
+  }
 
   // Export buttons only for standalone chat (not for taskGroup)
   ['exportMd','exportTxt','exportJson','exportDoc','exportPdf'].forEach(action => {
@@ -922,9 +934,17 @@ function dialogExplorerHandleContextAction(e) {
     else if (action === 'delete') dialogExplorerDeleteTaskGroup(realGroupId);
   } else if (target.type === 'folder') {
     if (action === 'rename') dialogExplorerRenameFolder(target.id);
+    else if (action === 'hideChat') {
+      if (dialogExplorerTargetHidden('folder', target.id)) dialogExplorerUnhideFolderChats(target.id);
+      else dialogExplorerHideFolderChats(target.id);
+    }
     else if (action === 'delete') dialogExplorerDeleteFolder(target.id);
   } else if (target.type === 'chat') {
     if (action === 'rename') dialogExplorerRenameChat(target.id);
+    else if (action === 'hideChat') {
+      if (dialogExplorerTargetHidden('chat', target.id)) dialogExplorerUnhideChat(target.id);
+      else dialogExplorerHideChat(target.id);
+    }
     else if (action === 'delete') dialogExplorerDeleteChat(target.id);
   }
 }
@@ -1071,6 +1091,113 @@ function dialogExplorerDeleteTaskGroup(groupId) {
     dialogManagerCurrentFolderId = '';
   }
   renderDialogManagerFolders();
+}
+
+function dialogExplorerFolderAndDescendantIds(folderId) {
+  const dm = ensureDialogManagerSettings();
+  const ids = new Set();
+  if (!folderId) return ids;
+  function collect(pid) {
+    dm.folders.forEach(folder => {
+      if ((folder.parentId || '') === pid && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        collect(folder.id);
+      }
+    });
+  }
+  ids.add(folderId);
+  collect(folderId);
+  return ids;
+}
+
+function dialogExplorerChatsInFolderTree(folderId) {
+  const folderIds = dialogExplorerFolderAndDescendantIds(folderId);
+  return (state.chats || []).filter(chat => chat && folderIds.has(chat.dialogFolderId || ''));
+}
+
+function dialogExplorerTargetHidden(type, id) {
+  if (type === 'chat') {
+    const chat = chatById(id);
+    return !!(chat && chat._hiddenFromUI);
+  }
+  if (type === 'folder') {
+    const chats = dialogExplorerChatsInFolderTree(id);
+    return !!(chats.length && chats.every(chat => chat && chat._hiddenFromUI));
+  }
+  return false;
+}
+
+function dialogExplorerRefreshAfterVisibilityChange(folderId) {
+  if (folderId) touchFolder(folderId);
+  saveData();
+  renderChatList();
+  if (typeof renderMessages === 'function') renderMessages();
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  renderDialogManagerFolders();
+}
+
+function dialogExplorerAfterHideChats(hiddenIds, folderId) {
+  if (!hiddenIds || !hiddenIds.size) return;
+  if (state.currentId && hiddenIds.has(state.currentId)) {
+    state.currentId = (typeof sidebarChats === 'function' ? sidebarChats() : (state.chats || []).filter(c => c && !c._hiddenFromUI))[0]?.id || null;
+  }
+  dialogExplorerRefreshAfterVisibilityChange(folderId);
+}
+
+function dialogExplorerHideChat(chatId) {
+  const chat = chatById(chatId);
+  if (!chat) return;
+  if (chat._hiddenFromUI) {
+    if (typeof toast === 'function') toast('该对话已隐藏');
+    return;
+  }
+  chat._hiddenFromUI = true;
+  dialogExplorerAfterHideChats(new Set([chatId]), chat.dialogFolderId || '');
+  if (typeof toast === 'function') toast('已隐藏对话');
+}
+
+function dialogExplorerHideFolderChats(folderId) {
+  const dm = ensureDialogManagerSettings();
+  const folder = dm.folders.find(f => f.id === folderId);
+  if (!folder) return;
+  const affectedChats = dialogExplorerChatsInFolderTree(folderId);
+  const visibleChats = affectedChats.filter(chat => !chat._hiddenFromUI);
+  if (!visibleChats.length) {
+    if (typeof toast === 'function') toast('该文件夹中没有可隐藏的对话');
+    return;
+  }
+  visibleChats.forEach(chat => { chat._hiddenFromUI = true; });
+  dialogExplorerAfterHideChats(new Set(visibleChats.map(chat => chat.id)), folderId);
+  if (typeof toast === 'function') toast(`已隐藏 ${visibleChats.length} 个对话`);
+}
+
+function dialogExplorerUnhideChat(chatId) {
+  const chat = chatById(chatId);
+  if (!chat) return;
+  if (!chat._hiddenFromUI) {
+    if (typeof toast === 'function') toast('该对话未隐藏');
+    return;
+  }
+  delete chat._hiddenFromUI;
+  dialogExplorerRefreshAfterVisibilityChange(chat.dialogFolderId || '');
+  if (typeof toast === 'function') toast('已取消隐藏对话');
+}
+
+function dialogExplorerUnhideFolderChats(folderId) {
+  const dm = ensureDialogManagerSettings();
+  const folder = dm.folders.find(f => f.id === folderId);
+  if (!folder) return;
+  const affectedChats = dialogExplorerChatsInFolderTree(folderId);
+  const hiddenChats = affectedChats.filter(chat => chat._hiddenFromUI);
+  if (!hiddenChats.length) {
+    if (typeof toast === 'function') toast('该文件夹中没有隐藏的对话');
+    return;
+  }
+  hiddenChats.forEach(chat => { delete chat._hiddenFromUI; });
+  dialogExplorerRefreshAfterVisibilityChange(folderId);
+  if (typeof toast === 'function') toast(`已取消隐藏 ${hiddenChats.length} 个对话`);
 }
 
 function dialogExplorerDeleteChat(chatId) {

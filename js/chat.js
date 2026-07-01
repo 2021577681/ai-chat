@@ -392,6 +392,7 @@ function isTaskQueueSidebarGroupedChat(chat) {
 
 function sidebarChats() {
   return (state.chats || [])
+    .filter(chat => chat && !chat._hiddenFromUI)
     .map((chat, index) => ({ chat, index }))
     .sort((a, b) => {
       const ap = Number(a.chat && a.chat.pinnedAt) || 0;

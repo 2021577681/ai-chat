@@ -1484,7 +1484,7 @@
       <div class="backup-options">
         <div class="backup-option-section">
           <div class="backup-section-title">配置</div>
-          <label class="backup-check"><input type="checkbox" id="exp_settings" checked><span><strong>基础设置</strong><em>当前 API、模型、上下文、压缩和全局偏好</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="exp_settings" checked><span><strong>全部设置</strong><em>设置界面的所有设置项；可用下方模式开关排除对应模式</em></span></label>
           <label class="backup-check sensitive"><input type="checkbox" id="exp_apiKey" checked><span><strong>API Key</strong><em>敏感；不勾选会清空导出的 key</em></span></label>
           <label class="backup-check"><input type="checkbox" id="exp_apiProfiles" checked><span><strong>API 配置档案</strong><em>多套 API Profile、当前激活档案</em></span></label>
         </div>
@@ -1496,9 +1496,9 @@
         </div>
         <div class="backup-option-section">
           <div class="backup-section-title">模式设置</div>
-          <label class="backup-check compact"><input type="checkbox" id="exp_plan" checked><span><strong>计划模式</strong></span></label>
-          <label class="backup-check compact"><input type="checkbox" id="exp_reflection" checked><span><strong>师生设置</strong></span></label>
-          <label class="backup-check compact"><input type="checkbox" id="exp_outline" checked><span><strong>大纲设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_plan" checked><span><strong>计划模式设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_reflection" checked><span><strong>师生模式设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="exp_outline" checked><span><strong>大纲模式设置</strong></span></label>
         </div>
       </div>
     </div>
@@ -1523,7 +1523,7 @@
       <div class="backup-options">
         <div class="backup-option-section">
           <div class="backup-section-title">配置</div>
-          <label class="backup-check"><input type="checkbox" id="imp_settings" checked><span><strong>基础设置</strong><em>合并到当前设置，保留当前主题</em></span></label>
+          <label class="backup-check"><input type="checkbox" id="imp_settings" checked><span><strong>全部设置</strong><em>合并并恢复设置界面的所有设置项</em></span></label>
           <label class="backup-check"><input type="checkbox" id="imp_apiProfiles" checked><span><strong>API 配置档案</strong><em>新增档案；已有 id 跳过，同名自动重命名</em></span></label>
         </div>
         <div class="backup-option-section">
@@ -1534,9 +1534,9 @@
         </div>
         <div class="backup-option-section">
           <div class="backup-section-title">模式设置</div>
-          <label class="backup-check compact"><input type="checkbox" id="imp_plan" checked><span><strong>计划模式</strong></span></label>
-          <label class="backup-check compact"><input type="checkbox" id="imp_reflection" checked><span><strong>师生</strong></span></label>
-          <label class="backup-check compact"><input type="checkbox" id="imp_outline" checked><span><strong>大纲</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_plan" checked><span><strong>计划模式设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_reflection" checked><span><strong>师生模式设置</strong></span></label>
+          <label class="backup-check compact"><input type="checkbox" id="imp_outline" checked><span><strong>大纲模式设置</strong></span></label>
         </div>
       </div>
     </div>
@@ -1762,6 +1762,7 @@
           <button type="button" data-explorer-action="exportDoc"><span class="dialog-explorer-context-icon"><img src="icon/文件-word_file-word.png" alt=""></span>导出到 DOC</button>
           <button type="button" data-explorer-action="exportPdf"><span class="dialog-explorer-context-icon"><img src="icon/pdf文件_file-pdf-one.png" alt=""></span>导出到 PDF</button>
           <button type="button" data-explorer-action="rename"><span class="dialog-explorer-context-icon"><img src="icon/铅笔_pencil.png" alt=""></span>重命名</button>
+          <button type="button" data-explorer-action="hideChat"><span class="dialog-explorer-context-icon"><img src="icon/预览-关闭_preview-close-one.png" alt=""></span>隐藏对话</button>
           <button type="button" data-explorer-action="delete"><span class="dialog-explorer-context-icon"><img src="icon/删除_delete.png" alt=""></span>删除</button>
         </div>
       </section>

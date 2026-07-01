@@ -22,6 +22,98 @@ function backupReadChecked(id, fallback = false) {
   return el ? !!el.checked : fallback;
 }
 
+function backupSettingsKeysByPrefixFrom(source, prefixes) {
+  const s = source && typeof source === 'object' ? source : {};
+  return Object.keys(s).filter(k => prefixes.some(prefix => k === prefix || k.startsWith(prefix)));
+}
+
+function backupSettingsKeysByPrefix(prefixes) {
+  return backupSettingsKeysByPrefixFrom(state && state.settings ? state.settings : {}, prefixes);
+}
+
+function backupOutlineSettingKeys() {
+  return backupSettingsKeysByPrefix(['useOutline', 'outline']);
+}
+
+function backupReflectionSettingKeys() {
+  return backupSettingsKeysByPrefix(['useReflection', 'ref']);
+}
+
+function backupPlanSettingKeys() {
+  return backupSettingsKeysByPrefix(['usePlan', 'plan']);
+}
+
+function backupApplySettingsSubset(target, source, keys) {
+  if (!target || !source || !Array.isArray(keys)) return;
+  keys.forEach(k => {
+    if (source[k] !== undefined) target[k] = backupJsonClone(source[k]);
+  });
+}
+
+function backupDeleteSettingKeys(target, keys) {
+  if (!target || !Array.isArray(keys)) return;
+  keys.forEach(k => {
+    delete target[k];
+  });
+}
+
+const BACKUP_SETTING_STORAGE_ITEMS = [
+  { id: 'pricingList', key: 'aichat_custom_pricing_v1', label: '定价列表' },
+  { id: 'pricingConfig', key: 'aichat_pricing_config_v1', label: '定价配置' },
+  { id: 'terminalPerms', key: 'aichat_terminal_perms_v1', label: '权限管理' },
+  { id: 'concurrentRequests', key: 'aichat_concurrent_requests_settings_v1', label: '并发请求设置' },
+  { id: 'debateSettings', key: 'aichat_debate_settings_v1', label: '辩论模式设置' },
+  { id: 'musicPlayer', key: 'aichat_music_player_v1', label: '音乐播放器设置' }
+];
+
+function backupStorageGet(key) {
+  try {
+    if (typeof storage !== 'undefined' && storage && typeof storage.get === 'function') return storage.get(key);
+  } catch (e) {}
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
+function backupStorageSet(key, value) {
+  try {
+    if (typeof storage !== 'undefined' && storage && typeof storage.set === 'function') {
+      storage.set(key, value);
+      return true;
+    }
+  } catch (e) {}
+  try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
+}
+
+function backupParseStoredJson(raw) {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  try { return JSON.parse(raw); } catch (e) { return raw; }
+}
+
+function backupBuildExtraSettings() {
+  const out = {};
+  BACKUP_SETTING_STORAGE_ITEMS.forEach(item => {
+    const raw = backupStorageGet(item.key);
+    if (raw !== undefined && raw !== null) out[item.id] = backupParseStoredJson(raw);
+  });
+  return out;
+}
+
+function backupApplyExtraSettings(extra) {
+  if (!extra || typeof extra !== 'object') return [];
+  const imported = [];
+  BACKUP_SETTING_STORAGE_ITEMS.forEach(item => {
+    if (!Object.prototype.hasOwnProperty.call(extra, item.id)) return;
+    const value = extra[item.id];
+    const raw = typeof value === 'string' ? value : JSON.stringify(value);
+    if (backupStorageSet(item.key, raw)) {
+      imported.push(item.label);
+      if (item.id === 'terminalPerms' && typeof TERMINAL_CONFIG !== 'undefined') {
+        TERMINAL_CONFIG.permanentAllow = (value && typeof value === 'object' && !Array.isArray(value)) ? backupJsonClone(value) : {};
+      }
+    }
+  });
+  return imported;
+}
+
 function backupPlainText(value) {
   if (value === undefined || value === null) return '';
   if (typeof value === 'string') return value;
@@ -451,17 +543,6 @@ function importApiProfilesFromBackup(payload) {
 }
 
 function buildExportData() {
-  const OUTLINE_KEYS = [
-    'useOutline', 'outlineMaxRounds', 'outlineMaxItems', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow',
-    'outlineCodeTaskPrompt', 'outlineClassifierPrompt',
-    'outlineBudgetHalfPrompt', 'outlineBudgetLowPrompt', 'outlineBudgetCriticalPrompt',
-    'outlineGateNoVerifyPrompt', 'outlineGateStaleVerifyPrompt', 'outlineGateFailedVerifyPrompt',
-    'outlineForceFinalSystemPrompt', 'outlineForceFinalUserPrompt', 'outlineUserInjectionPrompt',
-    'outlineToolRejectStopPrompt', 'outlineToolRejectOncePrompt', 'outlineStalledPrompt'
-  ];
-  const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
-  const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
-
   const inc = {
     settings: backupReadChecked('exp_settings', true),
     apiKey: backupReadChecked('exp_apiKey', true),
@@ -486,15 +567,14 @@ function buildExportData() {
   if (inc.settings) {
     const settings = JSON.parse(JSON.stringify(state.settings));
     if (!inc.apiKey) settings.apiKey = '';
-    if (!inc.reflection) REFLECTION_KEYS.forEach(k => delete settings[k]);
-    if (!inc.plan) PLAN_KEYS.forEach(k => delete settings[k]);
-    if (!inc.outline) OUTLINE_KEYS.forEach(k => delete settings[k]);
     data.settings = settings;
+    const extraSettings = backupBuildExtraSettings();
+    if (Object.keys(extraSettings).length) data.extraSettings = extraSettings;
   } else {
     const ds = {};
-    if (inc.reflection) REFLECTION_KEYS.forEach(k => ds[k] = state.settings[k]);
-    if (inc.plan) PLAN_KEYS.forEach(k => ds[k] = state.settings[k]);
-    if (inc.outline) OUTLINE_KEYS.forEach(k => ds[k] = state.settings[k]);
+    if (inc.reflection) backupApplySettingsSubset(ds, state.settings, backupReflectionSettingKeys());
+    if (inc.plan) backupApplySettingsSubset(ds, state.settings, backupPlanSettingKeys());
+    if (inc.outline) backupApplySettingsSubset(ds, state.settings, backupOutlineSettingKeys());
     if (Object.keys(ds).length) data.settings = ds;
   }
   
@@ -564,6 +644,12 @@ function parseAndPreviewImport() {
       if (data.settings.baseUrl) summary += `&nbsp;&nbsp;Base URL: <code>${escapeHtml(data.settings.baseUrl)}</code><br>`;
       if (data.settings.currentModel) summary += `&nbsp;&nbsp;模型: <code>${escapeHtml(data.settings.currentModel)}</code><br>`;
     }
+    if (data.extraSettings && typeof data.extraSettings === 'object') {
+      const names = BACKUP_SETTING_STORAGE_ITEMS
+        .filter(item => Object.prototype.hasOwnProperty.call(data.extraSettings, item.id))
+        .map(item => item.label);
+      if (names.length) summary += `- ⚙️ 独立设置 ${names.length} 项：${names.map(escapeHtml).join('、')}<br>`;
+    }
     if (data.tools && Array.isArray(data.tools)) {
       const newTools = data.tools.filter(t => !state.tools.some(et => et.name === t.name));
       summary += `- 🛠 工具 ${data.tools.length} 个`;
@@ -613,17 +699,6 @@ function applyImport() {
   const text = document.getElementById('importText').value.trim();
   if (text && !pendingImportData) parseAndPreviewImport();
   if (!pendingImportData) { alert('请先选择文件或粘贴 JSON'); return; }
-  
-  const OUTLINE_KEYS = [
-    'useOutline', 'outlineMaxRounds', 'outlineMaxItems', 'outlineModel', 'outlineSystemPrompt', 'outlinePermissionAutoAllow',
-    'outlineCodeTaskPrompt', 'outlineClassifierPrompt',
-    'outlineBudgetHalfPrompt', 'outlineBudgetLowPrompt', 'outlineBudgetCriticalPrompt',
-    'outlineGateNoVerifyPrompt', 'outlineGateStaleVerifyPrompt', 'outlineGateFailedVerifyPrompt',
-    'outlineForceFinalSystemPrompt', 'outlineForceFinalUserPrompt', 'outlineUserInjectionPrompt',
-    'outlineToolRejectStopPrompt', 'outlineToolRejectOncePrompt', 'outlineStalledPrompt'
-  ];
-  const REFLECTION_KEYS = ['useReflection', 'refRounds', 'refMinScore', 'refStudentModel', 'refTeacherModel', 'refStudentPrompt', 'refTeacherPrompt', 'refStudentUseTools', 'refTeacherUseTools', 'refStudentMaxToolRounds', 'refTeacherMaxToolRounds'];
-  const PLAN_KEYS = ['usePlan', 'planReview', 'planSynthesize', 'planMaxSteps', 'planReviewRounds', 'planPlannerModel', 'planExecutorModel', 'planPlannerPrompt', 'planExecutorPrompt'];
 
   const data = pendingImportData;
   const opts = {
@@ -641,33 +716,28 @@ function applyImport() {
   
   if (data.settings) {
     if (opts.settings) {
-      const oldTheme = state.settings.theme;
       const incoming = { ...data.settings };
-      if (!opts.reflection) REFLECTION_KEYS.forEach(k => delete incoming[k]);
-      if (!opts.plan) PLAN_KEYS.forEach(k => delete incoming[k]);
-      if (!opts.outline) OUTLINE_KEYS.forEach(k => delete incoming[k]);
-      state.settings = { ...state.settings, ...incoming, theme: oldTheme };
+      state.settings = { ...state.settings, ...backupJsonClone(incoming) };
       imported.push('设置');
     } else {
       if (opts.reflection) {
-        REFLECTION_KEYS.forEach(k => {
-          if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
-        });
+        backupApplySettingsSubset(state.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['useReflection', 'ref']));
         imported.push('师生');
       }
       if (opts.plan) {
-        PLAN_KEYS.forEach(k => {
-          if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
-        });
+        backupApplySettingsSubset(state.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['usePlan', 'plan']));
         imported.push('计划模式');
       }
       if (opts.outline) {
-        OUTLINE_KEYS.forEach(k => {
-          if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
-        });
+        backupApplySettingsSubset(state.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['useOutline', 'outline']));
         imported.push('大纲');
       }
     }
+  }
+  
+  if (opts.settings && data.extraSettings) {
+    const extraImported = backupApplyExtraSettings(data.extraSettings);
+    if (extraImported.length) imported.push(`独立设置：${extraImported.join('、')}`);
   }
   
   if (opts.apiProfiles && data.apiProfiles) {
