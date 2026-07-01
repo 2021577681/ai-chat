@@ -2,7 +2,7 @@
 const STORE_KEY = 'aichat_data_v6';
 const SETTINGS_KEY = 'aichat_settings_v6';
 const TOOLS_KEY = 'aichat_tools_v6';
-const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v19';  // v19：PPT 高层生成改为 HTML 图片页流程
+const BUILTIN_TOOLS_LOADED_KEY = 'aichat_builtin_tools_v22';  // v22：微信文件传输助手工具优先走常驻 bridge
 
 // 🛡️ 敏感凭证集中清单（用于"一键清除所有凭证"功能）
 // 每项 { key, label, type, scope }
@@ -164,6 +164,72 @@ const BUILTIN_TOOLS = [
       required: ['command']
     },
     code: 'return await executeTerminalCommand(args.command, args.cwd, args.new_window);'
+  },
+  {
+    name: 'wechat_filehelper_read',
+    description: '读取微信“文件传输助手”的最近消息。隐私限制：该工具硬编码只访问文件传输助手，不允许指定其他联系人或群聊。用于查看微信端发来的 Agent 指令上下文。',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: '读取最近 N 条消息，默认 10，最大建议 50' }
+      }
+    },
+    code: `
+      const limit = Math.max(1, Math.min(50, parseInt(args.limit || 10, 10) || 10));
+      const r = await callAgentBackend('wechat_bridge', { op: 'read', limit, requestTimeoutMs: 90000 });
+      if (r && r.ok) return r;
+      const err = String((r && r.error) || '');
+      if (!r || /wechat_bridge|unknown|Failed to fetch|无法连接/i.test(err)) {
+        return await executeTerminalCommand('python lms_tool\\\\wechat_filehelper_agent_tool.py read --limit ' + limit, undefined, false, toolContext);
+      }
+      throw new Error(err || JSON.stringify(r));
+    `
+  },
+  {
+    name: 'wechat_filehelper_poll',
+    description: '轮询微信“文件传输助手”的新消息，只返回未处理过且非 [Agent] 前缀的消息。隐私限制：该工具硬编码只访问文件传输助手，不允许读取其他聊天。适合 Agent 等待微信指令。',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: '扫描最近 N 条消息，默认 20，最大建议 50' },
+        timeout: { type: 'number', description: '最多等待新消息的秒数，默认 0' },
+        interval: { type: 'number', description: '等待时的轮询间隔秒数，默认 1' }
+      }
+    },
+    code: `
+      const limit = Math.max(1, Math.min(50, parseInt(args.limit || 20, 10) || 20));
+      const timeout = Math.max(0, Math.min(300, Number(args.timeout || 0) || 0));
+      const interval = Math.max(0.2, Math.min(10, Number(args.interval || 1) || 1));
+      const r = await callAgentBackend('wechat_bridge', { op: 'poll', limit, timeout, interval, requestTimeoutMs: Math.max(90000, (timeout + 60) * 1000) });
+      if (r && r.ok) return r;
+      const err = String((r && r.error) || '');
+      if (!r || /wechat_bridge|unknown|Failed to fetch|无法连接/i.test(err)) {
+        return await executeTerminalCommand('python lms_tool\\\\wechat_filehelper_agent_tool.py poll --limit ' + limit + ' --timeout ' + timeout + ' --interval ' + interval, undefined, false, toolContext);
+      }
+      throw new Error(err || JSON.stringify(r));
+    `
+  },
+  {
+    name: 'wechat_filehelper_send',
+    description: '向微信“文件传输助手”发送 Agent 结果。隐私限制：该工具硬编码只发送到文件传输助手，不允许指定其他联系人或群聊。默认消息会带 [Agent] 前缀以避免轮询自触发。',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '要发送到文件传输助手的文本' }
+      },
+      required: ['text']
+    },
+    code: `
+      const text = String(args.text || '');
+      const b64 = btoa(unescape(encodeURIComponent(text)));
+      const r = await callAgentBackend('wechat_bridge', { op: 'send', text_base64: b64, requestTimeoutMs: 90000 });
+      if (r && r.ok) return r;
+      const err = String((r && r.error) || '');
+      if (!r || /wechat_bridge|unknown|Failed to fetch|无法连接/i.test(err)) {
+        return await executeTerminalCommand('python lms_tool\\\\wechat_filehelper_agent_tool.py send --text-base64 ' + b64, undefined, false, toolContext);
+      }
+      throw new Error(err || JSON.stringify(r));
+    `
   },
   {
     name: 'read_note',

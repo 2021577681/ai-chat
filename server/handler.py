@@ -27,6 +27,7 @@ from .ppt_core import PptMixin
 from .proxy import ProxyMixin
 from .screenshot import ScreenshotMixin
 from .web import WebMixin
+from .wechat_bridge import WechatBridgeMixin
 from .workspace import WorkspaceMixin
 
 
@@ -59,7 +60,8 @@ def _redact_log_secrets(value):
 
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
-              McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin, PptMixin):
+              McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin,
+              WechatBridgeMixin, PptMixin):
     """主 HTTP Handler，通过 mixin 组合所有功能。
     各 mixin 都依赖本类提供的 _send_json / _write_cors_headers / self.headers / self.rfile / self.wfile。
     """
@@ -277,6 +279,8 @@ class Handler(BaseHTTPRequestHandler,
                 self.handle_remote_list_dirs(body)
             elif action == 'remote_disconnect':
                 self.handle_remote_disconnect(body)
+            elif action == 'wechat_bridge':
+                self.handle_wechat_bridge(body)
             else:
                 self._send_json(400, {'ok': False, 'error': f'❌ 未知操作: {action}'})
         except Exception as e:

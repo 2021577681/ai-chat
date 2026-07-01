@@ -429,14 +429,17 @@ async function callAPI(roundLimit, options = {}) {
   const toolRoundsUsed = Math.max(0, toolBudgetLimit - roundLimit);
   const mainToolsAllowedThisRound = taskUseTools && roundLimit > 0;
   const shouldInjectMainToolBudgetPrompt = taskUseTools || !!options.textToolCallRecoveryUsed;
-  const mainToolBudgetPrompt = shouldInjectMainToolBudgetPrompt
-    ? buildAgentLoopToolBudgetPrompt({
-        hasTools: taskUseTools,
-        round: toolRoundsUsed,
-        maxRounds: toolBudgetLimit,
-        forceFinal: !mainToolsAllowedThisRound
-      })
-    : '';
+  const mainToolBudgetPromptParts = [];
+  if (shouldInjectMainToolBudgetPrompt) {
+    mainToolBudgetPromptParts.push(buildAgentLoopToolBudgetPrompt({
+      hasTools: taskUseTools,
+      round: toolRoundsUsed,
+      maxRounds: toolBudgetLimit,
+      forceFinal: !mainToolsAllowedThisRound
+    }));
+  }
+  if (options.extraSystemPrompt) mainToolBudgetPromptParts.push(options.extraSystemPrompt);
+  const mainToolBudgetPrompt = mainToolBudgetPromptParts.filter(Boolean).join('\n\n');
   
   const task = (typeof beginChatTask === 'function')
     ? beginChatTask(taskChatId, null, { resetStop: isFirstCall })
@@ -947,6 +950,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
   const responsesToolBlocks = {};
   let responsesOutput = null;
   let streamUsage = null;
+  let streamFinishedByProtocol = false;
   let rawAccumulated = '';  // ⭐ 累积原始 SSE 文本，用于响应预览
   
   while (true) {
@@ -961,7 +965,10 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
       const t = line.trim();
       if (!t || !t.startsWith('data:')) continue;
       const data = t.slice(5).trim();
-      if (data === '[DONE]') continue;
+      if (data === '[DONE]') {
+        streamFinishedByProtocol = true;
+        break;
+      }
       try {
         const j = JSON.parse(data);
         if (s.apiFormat === 'anthropic') {
@@ -991,6 +998,9 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
           }
           if (j.type === 'message_delta' && j.usage) {
             streamUsage = { ...streamUsage, ...j.usage };
+          }
+          if (j.type === 'message_stop') {
+            streamFinishedByProtocol = true;
           }
         } else if (s.apiFormat === 'responses') {
           if (j.type === 'response.output_text.delta') {
@@ -1029,6 +1039,7 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
               c.messages[lastIdx].content = extractResponsesText(j.response);
               updateLastMsg(c, lastIdx);
             }
+            streamFinishedByProtocol = true;
           }
         } else {
           const delta = j.choices?.[0]?.delta;
@@ -1055,6 +1066,14 @@ async function handleStream(resp, c, lastIdx, reqCtx) {
           }
         }
       } catch (e) {}
+      if (streamFinishedByProtocol) break;
+    }
+    if (streamFinishedByProtocol) {
+      try {
+        const cancelResult = reader.cancel();
+        if (cancelResult && typeof cancelResult.catch === 'function') cancelResult.catch(() => {});
+      } catch (_) {}
+      break;
     }
   }
   
@@ -1618,6 +1637,7 @@ async function runAgentLoop({
       const responsesToolBlocks = {};
       let responsesOutput = null;
       let rawAccumulated = '';
+      let streamFinishedByProtocol = false;
       
       while (true) {
         if (_isAborted()) {
@@ -1635,7 +1655,10 @@ async function runAgentLoop({
           const t = line.trim();
           if (!t || !t.startsWith('data:')) continue;
           const data = t.slice(5).trim();
-          if (data === '[DONE]') continue;
+          if (data === '[DONE]') {
+            streamFinishedByProtocol = true;
+            break;
+          }
           try {
             const j = JSON.parse(data);
             if (s.apiFormat === 'anthropic') {
@@ -1663,6 +1686,9 @@ async function runAgentLoop({
               }
               if (j.type === 'message_delta' && j.usage) {
                 usage = { ...(usage || {}), ...j.usage };
+              }
+              if (j.type === 'message_stop') {
+                streamFinishedByProtocol = true;
               }
             } else if (s.apiFormat === 'responses') {
               if (j.type === 'response.output_text.delta') {
@@ -1700,6 +1726,7 @@ async function runAgentLoop({
                   assistantText = extractResponsesText(j.response);
                   if (assistantText) _emit({ type: 'text_delta', text: assistantText });
                 }
+                streamFinishedByProtocol = true;
               }
             } else {
               const delta = j.choices?.[0]?.delta;
@@ -1721,6 +1748,14 @@ async function runAgentLoop({
               if (j.usage) usage = j.usage;
             }
           } catch (e) {}
+          if (streamFinishedByProtocol) break;
+        }
+        if (streamFinishedByProtocol) {
+          try {
+            const cancelResult = reader.cancel();
+            if (cancelResult && typeof cancelResult.catch === 'function') cancelResult.catch(() => {});
+          } catch (_) {}
+          break;
         }
       }
       

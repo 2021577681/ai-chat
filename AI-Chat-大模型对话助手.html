@@ -233,6 +233,7 @@
       <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
       <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）"><img class="topbar-btn-icon" src="icon/日志_log.png" alt=""><span>日志</span></button>
       <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话"><img class="topbar-btn-icon" src="icon/健康_health.png" alt=""><span>体检</span></button>
+      <button class="topbar-btn" id="remoteControlBtn" onclick="toggleRemoteControl()" title="遥控：轮询微信文件传输助手指令"><img class="topbar-btn-icon" src="icon/遥控器_remote-control.png" alt=""><span>遥控</span></button>
     </div>
     
     <!-- Token + 频率统计栏（合并为单栏，左 Token 右 Rate） -->
@@ -591,12 +592,84 @@
         <span class="slider-val" id="beaconIntervalVal">5</span>
       </div>
       <div class="form-hint">值越小信标越密集（监测越精细，但额外 token 越多）。每个信标约消耗 30-50 tokens。</div>
-    </div>    <div id="testResult" class="test-result"></div>
+    </div>
+
+    <div id="testResult" class="test-result"></div>
     
     <div class="modal-footer">
       <button class="btn" onclick="closeSettings()">取消</button>
       <button class="btn" onclick="testConnection()">测试连接</button>
       <button class="btn btn-primary" onclick="saveAndClose()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 远程遥控设置 -->
+<div class="modal-mask" id="remoteControlSettingsModal">
+  <div class="modal wide">
+    <h2>远程遥控 <button class="modal-close" onclick="closeRemoteControlSettings()">×</button></h2>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <div>
+        <label style="margin:0;">启用遥控</label>
+        <div class="form-hint" style="margin-top:2px;">开启后后台只轮询微信“文件传输助手”，不会读取其他聊天。</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="remoteControlEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group">
+      <label>轮询间隔（秒）</label>
+      <input type="number" id="remoteControlPollInterval" min="1" max="300" step="1">
+      <div class="form-hint">默认 5 秒。设置过短会更频繁操作微信客户端。</div>
+    </div>
+
+    <div class="form-group">
+      <label>每次读取消息条数</label>
+      <input type="number" id="remoteControlPollLimit" min="1" max="50" step="1">
+      <div class="form-hint">默认读取最近 20 条，仅处理新增且非 [Agent] 前缀的消息。</div>
+    </div>
+
+    <div class="form-group">
+      <label>输入操作符前缀</label>
+      <input type="text" id="remoteControlInputPrefix" placeholder="/">
+      <div class="form-hint">默认 <code>/</code>，同时兼容中文斜杠 <code>／</code>。</div>
+    </div>
+
+    <div class="form-group">
+      <label>输入正文分隔符</label>
+      <input type="text" id="remoteControlInputSeparator" placeholder="：">
+      <div class="form-hint">默认 <code>：</code>，同时兼容英文冒号 <code>:</code>。</div>
+    </div>
+
+    <div class="form-group">
+      <label>输出格式模板</label>
+      <input type="text" id="remoteControlOutputTemplate">
+      <div class="form-hint">可用变量：<code>{id}</code> 对话编号，<code>{no}</code> 第几条 AI 回复，<code>{answer}</code> 最终回答。</div>
+    </div>
+
+    <div class="form-group">
+      <label>遥控系统提醒</label>
+      <textarea id="remoteControlShortReplyPrompt" rows="3"></textarea>
+      <div class="form-hint">创建/继续遥控对话时附加给 AI，用于要求微信端简短回复。</div>
+    </div>
+
+    <div class="form-group">
+      <label>最大回复字符数</label>
+      <input type="number" id="remoteControlMaxReplyChars" min="200" max="10000" step="100">
+      <div class="form-hint">超过后会截断再推送到文件传输助手，避免微信消息过长。</div>
+    </div>
+
+    <div class="form-group">
+      <label>已使用遥控序号</label>
+      <div id="remoteControlUsedIdsList" class="form-hint" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-secondary);line-height:1.7;">
+        暂无已绑定的遥控对话。
+      </div>
+      <div class="form-hint">删除对应遥控对话后，该序号会自动释放；重新打开本界面会刷新当前列表。</div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" onclick="closeRemoteControlSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveAndCloseRemoteControlSettings()">保存</button>
     </div>
   </div>
 </div>
@@ -1678,6 +1751,7 @@
       </div>
     </div>
     <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、代理和本地授权。" onclick="openSettingsSection('main')"><span><img class="settings-nav-icon" src="icon/设置_setting-one.png" alt=""></span><span>主设置</span></button>
+    <button class="settings-nav-item" data-settings-section="remoteControl" data-desc="配置微信文件传输助手轮询、指令格式和回复模板。" onclick="openSettingsSection('remoteControl')"><span><img class="settings-nav-icon" src="icon/遥控器_remote-control.png" alt=""></span><span>远程遥控</span></button>
     <button class="settings-nav-item" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。" onclick="openSettingsSection('plan')"><span><img class="settings-nav-icon" src="icon/计划_plan.png" alt=""></span><span>计划模式</span></button>
     <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span><img class="settings-nav-icon" src="icon/大纲视图_mindmap-list.png" alt=""></span><span>大纲模式</span></button>
     <button class="settings-nav-item" data-settings-section="ppt" data-desc="配置图片页 PPT 生成流程、目标页数、视觉偏好和各阶段 Prompt。" onclick="openSettingsSection('ppt')"><span><img class="settings-nav-icon" src="icon/pdf文件_file-pdf-one.png" alt=""></span><span>PPT 模式</span></button>
@@ -1985,6 +2059,7 @@
 <script src="js/chat.js"></script>
 <script src="js/ppt-mode.js"></script>
 <script src="js/scheduled-tasks.js"></script>
+<script src="js/remote-control.js"></script>
 <script src="js/task-queue.js"></script>
 <script src="js/concurrent-requests.js"></script>
 <script src="js/debate-mode.js"></script>

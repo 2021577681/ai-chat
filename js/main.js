@@ -71,6 +71,9 @@ async function init() {
   }
   if (typeof updatePrivacyGuardButton === 'function') updatePrivacyGuardButton();
   if (typeof initScheduledSend === 'function') initScheduledSend();
+  if (typeof initRemoteControl === 'function') {
+    try { initRemoteControl(); } catch (e) { console.warn('[remote-control] init failed:', e); }
+  }
   
   // 6. 更新底部状态信息
   updateSendBtn();

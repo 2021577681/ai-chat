@@ -576,6 +576,9 @@ function deleteTaskQueueGroup(groupId, e) {
       _abortCurrentTaskIfAny(chat.id);
     }
   }
+  if (typeof remoteControlForgetChat === 'function') {
+    for (const chat of chats) remoteControlForgetChat(chat);
+  }
   state.chats = state.chats.filter(c => !ids.has(c.id));
   if (state.currentId && ids.has(state.currentId)) state.currentId = sidebarChats()[0]?.id || null;
   if (state.taskQueue && Array.isArray(state.taskQueue.items)) {
@@ -681,6 +684,8 @@ function deleteChat(id, e) {
   if (typeof isChatGenerating === 'function' && isChatGenerating(id) && typeof _abortCurrentTaskIfAny === 'function') {
     _abortCurrentTaskIfAny(id);
   }
+  const removedChat = chatById(id);
+  if (typeof remoteControlForgetChat === 'function') remoteControlForgetChat(removedChat || id);
   state.chats = state.chats.filter(c => c.id !== id);
   if (state.currentId === id) state.currentId = sidebarChats()[0]?.id || null;
   if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);

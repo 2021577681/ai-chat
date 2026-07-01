@@ -1,0 +1,259 @@
+"""Persistent stdin/stdout bridge for the restricted WeChat filehelper tool.
+
+The line protocol is one JSON object per line:
+  {"id":"...","op":"start|status|read|poll|send|shutdown", ...}
+
+Responses are also one JSON object per line and always include the same id.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import sys
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import wechat_filehelper_agent_tool as core
+
+
+class FileHelperBridge:
+    def __init__(self) -> None:
+        self.backend_name: str | None = None
+        self.wx: Any = None
+        self.started_at: str | None = None
+        self.filehelper_chat: Any = None
+        self.filehelper_ready: bool = False
+
+    def reset(self) -> None:
+        self.backend_name = None
+        self.wx = None
+        self.started_at = None
+        self.filehelper_chat = None
+        self.filehelper_ready = False
+
+    def ensure_open(self) -> tuple[str, Any]:
+        if self.wx is None or not self.backend_name:
+            self.backend_name, self.wx = core.open_wechat()
+            self.started_at = datetime.now().isoformat(timespec="seconds")
+        return self.backend_name, self.wx
+
+    def ensure_filehelper_chat(self) -> tuple[str, Any, Any]:
+        """Open WeChat and switch to 文件传输助手 only once per bridge process.
+
+        The bridge is persistent, so repeated ChatWith/SwitchToChat calls on every
+        poll/send add large UI automation delays. After the first successful
+        switch, keep using the current wx object or a returned chat/session object
+        if the backend provides one.
+        """
+        backend_name, wx = self.ensure_open()
+        if not self.filehelper_ready:
+            with core.redirect_backend_stdout():
+                self.filehelper_chat = core.switch_to_safe_chat(wx, backend_name)
+            self.filehelper_ready = True
+        return backend_name, wx, self.filehelper_chat or wx
+
+    def start(self) -> dict[str, Any]:
+        backend_name, wx, _chat = self.ensure_filehelper_chat()
+        return {
+            "ok": True,
+            "action": "start",
+            "backend": backend_name,
+            "who": core.SAFE_CHAT_NAME,
+            "started_at": self.started_at,
+        }
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "status",
+            "running": True,
+            "initialized": self.wx is not None,
+            "backend": self.backend_name,
+            "who": core.SAFE_CHAT_NAME,
+            "started_at": self.started_at,
+        }
+
+    def read_messages(self, limit: int) -> dict[str, Any]:
+        backend_name, wx, chat = self.ensure_filehelper_chat()
+        limit = max(1, min(50, int(limit or 20)))
+        with core.redirect_backend_stdout():
+            reader = chat if hasattr(chat, "GetAllMessage") else wx
+            messages = reader.GetAllMessage()
+        if isinstance(messages, list):
+            raw_messages = messages[-limit:]
+        elif messages is None:
+            raw_messages = []
+        else:
+            try:
+                raw_messages = list(messages)[-limit:]
+            except TypeError:
+                raw_messages = [messages]
+
+        normalized = [core.normalize_message(m) for m in raw_messages]
+        core.assign_polling_ids(normalized)
+        return {
+            "ok": True,
+            "action": "read",
+            "backend": backend_name,
+            "who": core.SAFE_CHAT_NAME,
+            "count": len(normalized),
+            "messages": normalized,
+            "read_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    @staticmethod
+    def _has_agent_prefix(text: str) -> bool:
+        stripped = str(text or "").lstrip()
+        return stripped.startswith("[Agent]")
+
+    def send_message(self, text: str, prefix: str = "[Agent] ") -> dict[str, Any]:
+        backend_name, wx, chat = self.ensure_filehelper_chat()
+        text = str(text or "")
+        # The remote-control UI already formats replies as "[Agent][id]...".
+        # Treat any leading "[Agent]" marker as already prefixed; otherwise the
+        # default bridge prefix "[Agent] " would produce "[Agent] [Agent]...".
+        if prefix and not text.startswith(prefix) and not self._has_agent_prefix(text):
+            text = prefix + text
+        with core.redirect_backend_stdout():
+            sender = chat if hasattr(chat, "SendMsg") else wx
+            try:
+                result = sender.SendMsg(text)
+            except TypeError:
+                result = sender.SendMsg(text, who=core.SAFE_CHAT_NAME)
+        return {
+            "ok": True,
+            "action": "send",
+            "backend": backend_name,
+            "who": core.SAFE_CHAT_NAME,
+            "result": result,
+            "sent_text": text,
+            "sent_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    def poll_messages(
+        self,
+        limit: int,
+        timeout: float,
+        interval: float,
+        state_file: str,
+        max_seen: int,
+        agent_prefix: str,
+    ) -> dict[str, Any]:
+        state_path = Path(state_file or core.DEFAULT_STATE_FILE)
+        state = core.load_state(state_path)
+        seen_ids = set(str(x) for x in state.get("seen_ids", []))
+
+        deadline = time.time() + max(0.0, float(timeout or 0))
+        last_payload: dict[str, Any] | None = None
+        new_messages: list[dict[str, Any]] = []
+
+        while True:
+            payload = self.read_messages(limit)
+            last_payload = payload
+            new_messages = []
+            candidates = core.new_messages_from_sequence(state, payload.get("messages", []))
+            for msg in candidates:
+                msg_id = str(msg.get("id") or "")
+                if msg_id in seen_ids:
+                    continue
+                if core.is_likely_agent_own_message(msg, agent_prefix):
+                    seen_ids.add(msg_id)
+                    continue
+                new_messages.append(msg)
+
+            if new_messages or time.time() >= deadline:
+                break
+            time.sleep(max(0.2, float(interval or 1)))
+
+        all_current_ids = [m["id"] for m in (last_payload or {}).get("messages", [])]
+        state["seen_ids"] = list(dict.fromkeys([*state.get("seen_ids", []), *all_current_ids]))[-max_seen:]
+        state["last_message_keys"] = [
+            str(m.get("stable_id") or "")
+            for m in (last_payload or {}).get("messages", [])
+            if str(m.get("stable_id") or "")
+        ][-limit:]
+        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        core.save_state(state_path, state)
+
+        return {
+            "ok": True,
+            "action": "poll",
+            "backend": (last_payload or {}).get("backend"),
+            "who": core.SAFE_CHAT_NAME,
+            "count": len(new_messages),
+            "messages": new_messages,
+            "state_file": str(state_path),
+            "polled_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+
+def _decode_text(req: dict[str, Any]) -> str:
+    if req.get("text_base64"):
+        return base64.b64decode(str(req["text_base64"]).encode("ascii"), validate=True).decode("utf-8")
+    return str(req.get("text") or "")
+
+
+def _handle(bridge: FileHelperBridge, req: dict[str, Any]) -> dict[str, Any]:
+    op = str(req.get("op") or "").strip().lower()
+    if op == "start":
+        return bridge.start()
+    if op == "status":
+        return bridge.status()
+    if op == "read":
+        return bridge.read_messages(int(req.get("limit") or 20))
+    if op == "send":
+        return bridge.send_message(_decode_text(req), prefix=str(req.get("prefix", "[Agent] ")))
+    if op == "poll":
+        return bridge.poll_messages(
+            limit=max(1, min(50, int(req.get("limit") or 20))),
+            timeout=max(0.0, min(300.0, float(req.get("timeout") or 0))),
+            interval=max(0.2, min(10.0, float(req.get("interval") or 1))),
+            state_file=str(req.get("state_file") or core.DEFAULT_STATE_FILE),
+            max_seen=max(50, min(5000, int(req.get("max_seen") or 500))),
+            agent_prefix=str(req.get("agent_prefix") or "[Agent] "),
+        )
+    if op == "shutdown":
+        return {"ok": True, "action": "shutdown"}
+    raise ValueError(f"unknown op: {op}")
+
+
+def _emit(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False, default=core._json_default), flush=True)
+
+
+def main() -> int:
+    bridge = FileHelperBridge()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req_id = ""
+        try:
+            req = json.loads(line)
+            if not isinstance(req, dict):
+                raise ValueError("request must be a JSON object")
+            req_id = str(req.get("id") or "")
+            payload = _handle(bridge, req)
+            payload["id"] = req_id
+            _emit(payload)
+            if str(req.get("op") or "").strip().lower() == "shutdown":
+                return 0
+        except Exception as exc:  # noqa: BLE001
+            bridge.reset()
+            _emit(
+                {
+                    "id": req_id,
+                    "ok": False,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

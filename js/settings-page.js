@@ -2,6 +2,7 @@
 
 const SETTINGS_PAGE_SECTIONS = {
   main: { open: 'openSettings', close: 'closeSettings', modalId: 'settingsModal' },
+  remoteControl: { open: 'openRemoteControlSettings', close: 'closeRemoteControlSettings', modalId: 'remoteControlSettingsModal' },
   plan: { open: 'openPlanSettings', close: 'closePlanSettings', modalId: 'planModal' },
   outline: { open: 'openOutlineSettings', close: 'closeOutlineSettings', modalId: 'outlineModal' },
   ppt: { open: 'openPptSettings', close: 'closePptSettings', modalId: 'pptSettingsModal' },
@@ -47,6 +48,7 @@ function initSettingsPage() {
 
   [
     'openSettings',
+    'openRemoteControlSettings',
     'openPlanSettings',
     'openOutlineSettings',
     'openPptSettings',
@@ -70,6 +72,7 @@ function initSettingsPage() {
     'openContextLimitSettings',
     'openGitPanel',
     'closeSettings',
+    'closeRemoteControlSettings',
     'closePlanSettings',
     'closeOutlineSettings',
     'closePptSettings',
@@ -97,6 +100,7 @@ function initSettingsPage() {
   });
 
   window.openSettings = function() { openSettingsPage('main'); };
+  window.openRemoteControlSettings = function() { openSettingsPage('remoteControl'); };
   window.openPlanSettings = function() { openSettingsPage('plan'); };
   window.openOutlineSettings = function() { openSettingsPage('outline'); };
   window.openPptSettings = function() { openSettingsPage('ppt'); };
@@ -121,6 +125,7 @@ function initSettingsPage() {
   window.openGitPanel = function() { openSettingsPage('git'); };
 
   window.closeSettings = function() { closeSettingsProxy('main'); };
+  window.closeRemoteControlSettings = function() { closeSettingsProxy('remoteControl'); };
   window.closePlanSettings = function() { closeSettingsProxy('plan'); };
   window.closeOutlineSettings = function() { closeSettingsProxy('outline'); };
   window.closePptSettings = function() { closeSettingsProxy('ppt'); };

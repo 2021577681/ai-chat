@@ -213,6 +213,19 @@ let state = {
       timelineEnabled: true,
       folders: [],
       prompts: []
+    },
+    remoteControl: {
+      enabled: false,
+      pollIntervalSec: 5,
+      pollLimit: 20,
+      inputPrefix: '/',
+      inputSeparator: '：',
+      outputTemplate: '[Agent][{id}][No{no}]:\n{answer}',
+      agentPrefix: '[Agent]',
+      shortReplyPrompt: '你正通过微信文件传输助手被遥控。请只输出最终答案，不展示工具调用过程或大纲过程；回答要简短，适合微信阅读。',
+      autoSendErrors: true,
+      ignoreAgentMessages: true,
+      maxReplyChars: 3000
     }
   },
   pendingAttachments: [],
@@ -466,8 +479,17 @@ function injectBuiltinTools() {
     state.tools.some(t => String((t && t.name) || '').startsWith(prefix));
 
   let refreshed = 0;
+  const ALWAYS_REFRESH_TOOL_NAMES = new Set([
+    'wechat_filehelper_read',
+    'wechat_filehelper_poll',
+    'wechat_filehelper_send'
+  ]);
+
   state.tools = state.tools.map(tool => {
-    if (!tool || !OPTIONAL_TOOL_PREFIXES.some(p => String(tool.name || '').startsWith(p))) return tool;
+    if (!tool || (
+      !OPTIONAL_TOOL_PREFIXES.some(p => String(tool.name || '').startsWith(p))
+      && !ALWAYS_REFRESH_TOOL_NAMES.has(String(tool.name || ''))
+    )) return tool;
     const builtin = builtinByName.get(tool.name);
     if (!builtin) return tool;
     const next = JSON.parse(JSON.stringify(builtin));
