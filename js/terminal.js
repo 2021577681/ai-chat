@@ -272,6 +272,9 @@ function cancelAutoResendForChat(chatId, clearAttachments = true) {
 let _termConfirmResolve = null;
 let _currentConfirmCategory = '';
 let _currentConfirmChatId = '';
+let _termConfirmQueue = [];
+let _termConfirmActiveRequest = null;
+let _termConfirmRequestSeq = 0;
 let _termConfirmAbortSignal = null;
 let _termConfirmAbortHandler = null;
 let _pendingAutoResend = null;
@@ -338,79 +341,189 @@ function startTermConfirmAutoAllowTimer(context) {
 
 function termAskConfirm(title, detail, command, category, context) {
   return new Promise(resolve => {
-    if (_termConfirmAbortSignal && _termConfirmAbortHandler) {
-      try { _termConfirmAbortSignal.removeEventListener('abort', _termConfirmAbortHandler); } catch (_) {}
-    }
-    cleanupTermConfirmAutoAllowTimer();
-    _termConfirmAbortSignal = null;
-    _termConfirmAbortHandler = null;
-    _termConfirmResolve = resolve;
-    _currentConfirmCategory = category || '';
-    _currentConfirmChatId = resolveToolChatId(context);
-    
-    document.getElementById('termConfirmCmd').textContent = command;
-    document.getElementById('termConfirmCwd').textContent = detail || '(默认目录)';
-    const headerSpan = document.querySelector('.term-confirm-header span:last-child');
-    if (headerSpan) headerSpan.textContent = title;
-    document.getElementById('termAllowSession').checked = false;
-    
-    // ⭐ 动态显示类别名（弹窗里和"任务允许"按钮文字）
-    const catInfo = PERMISSION_CATEGORIES[category];
-    const catLabel = catInfo ? `${catInfo.icon} ${catInfo.label}` : '此类操作';
-    const catLabelEl = document.getElementById('termConfirmCategoryLabel');
-    if (catLabelEl) catLabelEl.textContent = catLabel;
-    const taskBtnEl = document.getElementById('termAllowTaskBtn');
-    if (taskBtnEl) taskBtnEl.textContent = `本任务后续允许「${catInfo ? catInfo.label : '此类'}」`;
-
-    const danger = /\b(rm|del|format|shutdown|reboot|sudo|chmod\s+777|curl.*\|.*sh|delete)\b/i;
-    const warnEl = document.getElementById('termConfirmWarn');
-    const warnText = document.getElementById('termConfirmWarnText');
-    if (danger.test(command)) {
-      warnEl.style.display = 'flex';
-      warnText.textContent = '⚠️ 此操作可能修改或删除文件，请仔细确认！';
-    } else {
-      warnEl.style.display = 'none';
-    }
-
-    document.getElementById('termConfirmMask').classList.add('show');
-    startTermConfirmAutoAllowTimer(context);
-
-    let secs = 3;
-    const countEl = document.getElementById('termCountdown');
-    const btn = document.getElementById('termAllowBtn');
-    btn.disabled = true;
-    btn.style.opacity = '0.5';
-    countEl.textContent = `(${secs}s)`;
-    const timer = setInterval(() => {
-      secs--;
-      if (secs <= 0) {
-        clearInterval(timer);
-        countEl.textContent = '';
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      } else countEl.textContent = `(${secs}s)`;
-    }, 1000);
-    btn._timer = timer;
-    const signal = context && context.signal;
-    if (signal) {
-      const abortConfirm = () => {
-        document.getElementById('termConfirmMask').classList.remove('show');
-        if (btn._timer) clearInterval(btn._timer);
-        cleanupTermConfirmAutoAllowTimer();
-        if (_termConfirmResolve) {
-          _termConfirmResolve({ allowed: false, rejectAll: false, aborted: true });
-          _termConfirmResolve = null;
-        }
-        _currentConfirmChatId = '';
-        _termConfirmAbortSignal = null;
-        _termConfirmAbortHandler = null;
-      };
-      _termConfirmAbortSignal = signal;
-      _termConfirmAbortHandler = abortConfirm;
-      if (signal.aborted) abortConfirm();
-      else signal.addEventListener('abort', abortConfirm, { once: true });
-    }
+    const request = {
+      id: ++_termConfirmRequestSeq,
+      title,
+      detail,
+      command,
+      category,
+      context,
+      resolve
+    };
+    _termConfirmQueue.push(request);
+    processNextTermConfirmRequest();
   });
+}
+
+function processNextTermConfirmRequest() {
+  if (_termConfirmResolve || _termConfirmActiveRequest) return;
+  const request = _termConfirmQueue.shift();
+  if (!request) return;
+  _termConfirmActiveRequest = request;
+  beginTermConfirmRequest(request);
+}
+
+function resolveTermConfirmRequest(result) {
+  const request = _termConfirmActiveRequest;
+  _termConfirmActiveRequest = null;
+  if (request && typeof request.resolve === 'function') {
+    request.resolve(result || { allowed: false, rejectAll: false });
+  }
+  setTimeout(processNextTermConfirmRequest, 0);
+}
+
+function remotePermissionChatLabel(chatId) {
+  const id = chatId || '';
+  try {
+    const chats = (typeof state !== 'undefined' && Array.isArray(state.chats)) ? state.chats : [];
+    const chat = chats.find(c => c && c.id === id);
+    if (chat && chat.remoteControl && chat.remoteControl.id) return String(chat.remoteControl.id);
+    if (chat && chat.title) return chat.title;
+  } catch (e) {}
+  return id || '当前';
+}
+
+function isRemotePermissionNotifyEnabled() {
+  try {
+    return typeof remoteControlSettings === 'function'
+      && !!remoteControlSettings().enabled
+      && typeof remoteControlSendWechat === 'function';
+  } catch (e) {
+    return false;
+  }
+}
+
+async function notifyRemotePermissionRequest(request) {
+  if (!isRemotePermissionNotifyEnabled()) return;
+  const chatId = resolveToolChatId(request.context);
+  const catInfo = PERMISSION_CATEGORIES[request.category] || null;
+  const label = catInfo ? `${catInfo.icon} ${catInfo.label}` : (request.category || '工具操作');
+  const command = String(request.command || '').trim();
+  const detail = String(request.detail || '').trim();
+  const lines = [
+    `对话 ${remotePermissionChatLabel(chatId)} 正在尝试调用需要授权的工具：${label}`,
+    request.title ? `权限弹窗：${request.title}` : '',
+    detail ? `位置/对象：${detail}` : '',
+    command ? `操作内容：${command.length > 800 ? command.slice(0, 800) + '\n…（已截断）' : command}` : '',
+    '',
+    '请回复以下任一命令处理当前权限请求：',
+    '/允许 - 仅允许本次',
+    '/后续允许 - 本对话后续允许此类操作',
+    '/永久允许 - 永久允许此类操作（可在权限管理撤销）',
+    '/拒绝 - 拒绝本次操作'
+  ].filter(line => line !== '').join('\n');
+  try {
+    await remoteControlSendWechat(remoteControlFormatSystem(lines));
+  } catch (e) {
+    console.warn('[perm] 微信权限提示发送失败:', e);
+  }
+}
+
+function remotePermissionCommandAction(text) {
+  const normalized = String(text || '').replace(/／/g, '/').trim().toLowerCase();
+  if (normalized === '/允许' || normalized === '/allow') return 'allow';
+  if (normalized === '/永久允许' || normalized === '/permanent' || normalized === '/always') return 'permanent';
+  if (normalized === '/后续允许' || normalized === '/本任务允许' || normalized === '/task' || normalized === '/session') return 'task';
+  if (normalized === '/拒绝' || normalized === '/reject' || normalized === '/deny') return 'reject';
+  return '';
+}
+
+function handleRemotePermissionCommand(text) {
+  const action = remotePermissionCommandAction(text);
+  if (!action) return false;
+  if (!_termConfirmActiveRequest || !_termConfirmResolve) {
+    if (isRemotePermissionNotifyEnabled()) {
+      remoteControlSendWechat(remoteControlFormatSystem('当前没有正在等待处理的工具权限请求。')).catch(e => console.warn('[perm] 发送无权限请求提示失败:', e));
+    }
+    return true;
+  }
+  if (action === 'allow') termConfirmAccept({ remoteAllowed: true });
+  else if (action === 'permanent') termConfirmAccept({ remoteAllowed: true, permanentAllowed: true });
+  else if (action === 'task') termConfirmAcceptAll({ remoteAllowed: true });
+  else if (action === 'reject') termConfirmReject({ remoteRejected: true });
+  return true;
+}
+if (typeof window !== 'undefined') window.handleRemotePermissionCommand = handleRemotePermissionCommand;
+
+function beginTermConfirmRequest(request) {
+  const { title, detail, command, category, context } = request;
+  notifyRemotePermissionRequest(request);
+  if (typeof document === 'undefined') {
+    resolveTermConfirmRequest({ allowed: false, rejectAll: false });
+    return;
+  }
+  if (_termConfirmAbortSignal && _termConfirmAbortHandler) {
+    try { _termConfirmAbortSignal.removeEventListener('abort', _termConfirmAbortHandler); } catch (_) {}
+  }
+  cleanupTermConfirmAutoAllowTimer();
+  _termConfirmAbortSignal = null;
+  _termConfirmAbortHandler = null;
+  _termConfirmResolve = resolveTermConfirmRequest;
+  _currentConfirmCategory = category || '';
+  _currentConfirmChatId = resolveToolChatId(context);
+  
+  document.getElementById('termConfirmCmd').textContent = command;
+  document.getElementById('termConfirmCwd').textContent = detail || '(默认目录)';
+  const headerSpan = document.querySelector('.term-confirm-header span:last-child');
+  if (headerSpan) headerSpan.textContent = title;
+  document.getElementById('termAllowSession').checked = false;
+  
+  // ⭐ 动态显示类别名（弹窗里和"任务允许"按钮文字）
+  const catInfo = PERMISSION_CATEGORIES[category];
+  const catLabel = catInfo ? `${catInfo.icon} ${catInfo.label}` : '此类操作';
+  const catLabelEl = document.getElementById('termConfirmCategoryLabel');
+  if (catLabelEl) catLabelEl.textContent = catLabel;
+  const taskBtnEl = document.getElementById('termAllowTaskBtn');
+  if (taskBtnEl) taskBtnEl.textContent = `本任务后续允许「${catInfo ? catInfo.label : '此类'}」`;
+
+  const danger = /\b(rm|del|format|shutdown|reboot|sudo|chmod\s+777|curl.*\|.*sh|delete)\b/i;
+  const warnEl = document.getElementById('termConfirmWarn');
+  const warnText = document.getElementById('termConfirmWarnText');
+  if (danger.test(command)) {
+    warnEl.style.display = 'flex';
+    warnText.textContent = '⚠️ 此操作可能修改或删除文件，请仔细确认！';
+  } else {
+    warnEl.style.display = 'none';
+  }
+
+  document.getElementById('termConfirmMask').classList.add('show');
+  startTermConfirmAutoAllowTimer(context);
+
+  let secs = 3;
+  const countEl = document.getElementById('termCountdown');
+  const btn = document.getElementById('termAllowBtn');
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+  countEl.textContent = `(${secs}s)`;
+  const timer = setInterval(() => {
+    secs--;
+    if (secs <= 0) {
+      clearInterval(timer);
+      countEl.textContent = '';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    } else countEl.textContent = `(${secs}s)`;
+  }, 1000);
+  btn._timer = timer;
+  const signal = context && context.signal;
+  if (signal) {
+    const abortConfirm = () => {
+      document.getElementById('termConfirmMask').classList.remove('show');
+      if (btn._timer) clearInterval(btn._timer);
+      cleanupTermConfirmAutoAllowTimer();
+      if (_termConfirmResolve) {
+        _termConfirmResolve({ allowed: false, rejectAll: false, aborted: true });
+        _termConfirmResolve = null;
+      }
+      _currentConfirmChatId = '';
+      _termConfirmAbortSignal = null;
+      _termConfirmAbortHandler = null;
+    };
+    _termConfirmAbortSignal = signal;
+    _termConfirmAbortHandler = abortConfirm;
+    if (signal.aborted) abortConfirm();
+    else signal.addEventListener('abort', abortConfirm, { once: true });
+  }
 }
 
 function cleanupTermConfirmAbortListener() {
@@ -426,7 +539,8 @@ function termConfirmAccept(options = {}) {
   // ⭐ "永久允许此类"复选框
   const cat = _currentConfirmCategory;
   const autoAllowed = !!(options && options.autoAllowed);
-  if (!autoAllowed && document.getElementById('termAllowSession').checked && cat) {
+  const permanentAllowed = !!(options && options.permanentAllowed);
+  if (!autoAllowed && cat && (permanentAllowed || document.getElementById('termAllowSession').checked)) {
     setPermanentPermission(cat, true);
     const info = PERMISSION_CATEGORIES[cat];
     toast(`✓ 已永久允许「${info ? info.label : cat}」（可在 ⋯ 更多 → 权限管理 撤销）`, 3500);
@@ -442,7 +556,7 @@ function termConfirmAccept(options = {}) {
   _currentConfirmChatId = '';
 }
 
-function termConfirmAcceptAll() {
+function termConfirmAcceptAll(options = {}) {
   document.getElementById('termConfirmMask').classList.remove('show');
   // ⭐ 改为"本任务后续允许此类操作"（按类别）
   const cat = _currentConfirmCategory;
@@ -462,7 +576,7 @@ function termConfirmAcceptAll() {
   _currentConfirmChatId = '';
 }
 
-function termConfirmReject() {
+function termConfirmReject(options = {}) {
   document.getElementById('termConfirmMask').classList.remove('show');
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);

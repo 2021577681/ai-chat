@@ -22,6 +22,12 @@ const REMOTE_CONTROL_SLEEP_INTERVALS_SEC = [0, 15, 30, 60];
 
 const REMOTE_CONTROL_COMMANDS = [
   {
+    name: '权限确认',
+    example: '/允许、/永久允许、/后续允许、/拒绝',
+    desc: '当工具调用弹出权限确认时，用微信处理当前排队中的权限请求。',
+    aliases: 'allow、deny'
+  },
+  {
     name: '帮助',
     example: '/帮助',
     desc: '返回遥控指令用法。',
@@ -169,9 +175,15 @@ function remoteControlClearTimer() {
   remoteControlTimer = null;
 }
 
+function remoteControlResetMessageDedupe() {
+  remoteControlInFlightMessages.clear();
+  remoteControlProcessedMessages.clear();
+}
+
 async function remoteControlStartRuntime() {
   try {
     const generation = ++remoteControlRuntimeGeneration;
+    remoteControlResetMessageDedupe();
     remoteControlMarkActivity();
     await remoteControlStartBridge();
     if (generation !== remoteControlRuntimeGeneration || !remoteControlSettings().enabled) return;
@@ -197,6 +209,7 @@ async function remoteControlStopRuntime() {
     remoteControlPendingSends = 0;
     remoteControlPolling = false;
     remoteControlLastActivityAt = 0;
+    remoteControlResetMessageDedupe();
     await remoteControlStopBridge();
   } catch (e) {
     console.warn('[remote-control] bridge stop failed:', e);
@@ -576,10 +589,16 @@ function remoteControlCanSchedulePoll() {
 }
 
 function remoteControlMessageKey(msg) {
-  if (msg && msg.id) return `id:${String(msg.id)}`;
+  const delivery = msg && (msg.delivery_id || msg.deliveryId);
+  if (delivery) return `delivery:${String(delivery)}`;
+  const stable = String((msg && (msg.stable_id || msg.stableId)) || '');
+  const id = msg && msg.id ? String(msg.id) : '';
+  const resetWindow = !!(msg && (msg._rcWindowReset || msg.window_reset));
+  const resetPart = resetWindow ? `reset:${String((msg && (msg._rcPollKey || msg.polled_at)) || Date.now())}:` : '';
+  if (id && stable.startsWith('time:')) return `id:${id}`;
+  if (id) return `${resetPart}id:${id}`;
   const content = String((msg && msg.content) || '').trim();
-  const stable = msg && (msg.stable_id || msg.stableId);
-  return `fallback:${stable || ''}:${content}`;
+  return `${resetPart}fallback:${stable}:${content}`;
 }
 
 function remoteControlRememberProcessed(key) {
@@ -812,6 +831,24 @@ async function remoteControlHandleParsed(parsed) {
     await remoteControlRunChat(chat, parsed);
     return;
   }
+
+  // Control/read-only commands must remain available while the target remote id
+  // is running. In particular, /停止/N is the mechanism used to interrupt the
+  // in-flight task, and /统计/N is a read-only query. Do these before acquiring
+  // the per-remote-id execution lock, otherwise they would be rejected as
+  // "正在执行" exactly when they are most needed.
+  if (parsed.id && !parsed.create && (parsed.stats || parsed.stop)) {
+    const existingChat = remoteControlFindChat(parsed.id) || remoteControlDeduplicateRemoteChats(parsed.id);
+    if (!existingChat) {
+      await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${parsed.id} 不存在，请先发送 /新建对话/${parsed.id}：你的问题 来新建对话。`));
+    } else if (parsed.stats) {
+      await remoteControlSendWechat(remoteControlFormatSystem(remoteControlFormatTokenStats(existingChat)));
+    } else if (parsed.stop) {
+      if (typeof requestStopChatTask === 'function') requestStopChatTask(existingChat.id);
+      await remoteControlSendWechat(remoteControlFormatSystem(`已请求停止对话 ${parsed.id} 的生成。`));
+    }
+    return;
+  }
   const lockId = parsed.id ? String(parsed.id) : '';
   if (lockId && !remoteControlAcquireRemoteLock(lockId)) {
     const existingChat = remoteControlFindChat(parsed.id) || remoteControlDeduplicateRemoteChats(parsed.id);
@@ -885,6 +922,16 @@ function remoteControlDispatchParsed(parsed, msg) {
     });
 }
 
+function remoteControlHandlePermissionReply(content) {
+  if (typeof window !== 'undefined' && typeof window.handleRemotePermissionCommand === 'function') {
+    return !!window.handleRemotePermissionCommand(content);
+  }
+  if (typeof handleRemotePermissionCommand === 'function') {
+    return !!handleRemotePermissionCommand(content);
+  }
+  return false;
+}
+
 async function remoteControlPollOnce() {
   if (remoteControlPolling) return;
   if (!remoteControlSettings().enabled) return;
@@ -892,7 +939,12 @@ async function remoteControlPollOnce() {
   remoteControlPolling = true;
   try {
     const cfg = remoteControlSettings();
-    const limit = Math.max(1, Math.min(50, parseInt(cfg.pollLimit || 20, 10) || 20));
+    const userLimit = Math.max(1, Math.min(50, parseInt(cfg.pollLimit || 20, 10) || 20));
+    // The WeChat backend needs a rolling window with enough overlap to decide
+    // what is new. Treat the user setting as preference, but never let the
+    // internal de-duplication window become too small (limit=1 would otherwise
+    // make every newly sent message look like a no-overlap re-baseline).
+    const limit = Math.max(userLimit, 20);
     const pollStartedAt = remoteControlNow();
     let payload;
     if (typeof callAgentBackend === 'function') {
@@ -913,11 +965,16 @@ async function remoteControlPollOnce() {
       payload = result.value && result.value.stdout ? JSON.parse(result.value.stdout) : (typeof result.value === 'string' ? JSON.parse(result.value) : result.value);
     }
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
+    const pollKey = payload.polled_at || String(Date.now());
+    const windowReset = !!(payload.window_reset || payload.no_overlap_reset);
     for (const msg of messages) {
+      if (msg && typeof msg === 'object') msg._rcPollKey = pollKey;
+      if (msg && typeof msg === 'object' && windowReset) msg._rcWindowReset = true;
       const content = String(msg.content || '').trim();
       if (!content) continue;
-      if (cfg.ignoreAgentMessages && content.startsWith(cfg.agentPrefix || '[Agent]')) continue;
+      if (cfg.ignoreAgentMessages && (content.startsWith(cfg.agentPrefix || '[Agent]') || content.startsWith('[System]'))) continue;
       remoteControlMarkActivity();
+      if (remoteControlHandlePermissionReply(content)) continue;
       const parsed = remoteControlParseMessage(content);
       if (!parsed.ok) {
         if (cfg.autoSendErrors && content.startsWith('/')) await remoteControlSendWechat('[Agent][Error]:\n' + parsed.error);

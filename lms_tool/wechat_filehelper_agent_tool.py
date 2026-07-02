@@ -176,6 +176,23 @@ def message_time_key(msg: dict[str, Any]) -> str:
     return text if text and text.lower() not in {"none", "null"} else ""
 
 
+def annotate_context_times(messages: list[dict[str, Any]]) -> None:
+    """Attach the latest WeChat UI time-separator text to following messages.
+
+    wxauto may expose chat time separators as normal-looking ``SYS`` rows such
+    as ``昨天 10:16`` or ``2026年4月25日 11:19`` while individual messages have no
+    ``time`` field.  This separator is only minute-granularity context, not a
+    reliable per-message timestamp, so it must not be treated as a global unique
+    id.  Keep it in the payload for diagnostics, not as part of message identity.
+    """
+    current_context = ""
+    for item in messages:
+        if str(item.get("sender") or "") == "SYS":
+            current_context = str(item.get("content") or "").strip()
+        elif current_context and not message_time_key(item):
+            item["context_time"] = current_context
+
+
 def message_sequence_key(msg: dict[str, Any]) -> str:
     """Stable key used to compare consecutive polling windows.
 
@@ -232,20 +249,101 @@ def assign_polling_ids(normalized: list[dict[str, Any]]) -> None:
         item["id"] = message_id_with_position(item, idx, len(normalized))
 
 
-def new_messages_from_sequence(state: dict[str, Any], messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    previous = [str(x) for x in state.get("last_message_keys", []) if str(x)]
-    current = [str(m.get("stable_id") or message_sequence_key(m)) for m in messages]
-    if not previous:
-        return []
+def message_overlap_key(value: Any) -> str:
+    """Return a stable key for rolling-window overlap detection.
+
+    ``stable_id`` contains an occurrence suffix (``#0``, ``#1``...) so repeated
+    equal messages can be distinguished in a single read window.  That suffix is
+    intentionally *not* stable across sliding windows: when older equal messages
+    fall out of the poll limit, later occurrences are renumbered.  Using it for
+    overlap can make the bridge think every poll has drifted, swallowing fresh
+    commands as a re-baseline.  Strip only the final numeric occurrence suffix
+    for overlap matching; the full ``stable_id`` is still persisted and used for
+    per-window ids.
+    """
+    text = str(value or "")
+    head, sep, tail = text.rpartition("#")
+    if sep and tail.isdigit():
+        return head
+    return text
+
+
+def rolling_window_overlap_count(previous_keys: list[Any], messages: list[dict[str, Any]]) -> int:
+    """Return how many current-window leading messages overlap previous tail."""
+    previous = [message_overlap_key(x) for x in previous_keys if str(x)]
+    current = [message_overlap_key(m.get("stable_id") or message_sequence_key(m)) for m in messages]
+    if not previous or not current:
+        return 0
     max_overlap = min(len(previous), len(current))
-    overlap = 0
     for n in range(max_overlap, 0, -1):
         if previous[-n:] == current[:n]:
-            overlap = n
-            break
-    if overlap == len(current):
+            return n
+    return 0
+
+
+def rolling_window_reverse_overlap_count(previous_keys: list[Any], messages: list[dict[str, Any]]) -> int:
+    """Return overlap for backends that expose newest messages first."""
+    previous = [message_overlap_key(x) for x in previous_keys if str(x)]
+    current = [message_overlap_key(m.get("stable_id") or message_sequence_key(m)) for m in messages]
+    if not previous or not current:
+        return 0
+    max_overlap = min(len(previous), len(current))
+    for n in range(max_overlap, 0, -1):
+        if previous[:n] == current[-n:]:
+            return n
+    return 0
+
+
+def rolling_window_any_overlap_count(previous_keys: list[Any], messages: list[dict[str, Any]]) -> int:
+    return max(
+        rolling_window_overlap_count(previous_keys, messages),
+        rolling_window_reverse_overlap_count(previous_keys, messages),
+    )
+
+
+def new_messages_from_sequence(
+    state: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    no_overlap_behavior: str = "baseline",
+) -> list[dict[str, Any]]:
+    previous = [message_overlap_key(x) for x in state.get("last_message_keys", []) if str(x)]
+    current = [message_overlap_key(m.get("stable_id") or message_sequence_key(m)) for m in messages]
+    if not previous:
         return []
-    return messages[overlap:]
+    if not current:
+        return []
+    forward_overlap = rolling_window_overlap_count(state.get("last_message_keys", []), messages)
+    reverse_overlap = rolling_window_reverse_overlap_count(state.get("last_message_keys", []), messages)
+    if forward_overlap <= 0 and reverse_overlap <= 0:
+        # The persisted rolling window no longer matches the current WeChat
+        # window.  On a cold start this must be treated as a re-baseline,
+        # otherwise old remote-control commands visible in File Transfer
+        # Assistant may be replayed.  However, after the persistent bridge has
+        # already established its startup baseline, a no-overlap window can also
+        # mean the user cleared File Transfer Assistant history and then sent a
+        # fresh command.  In that runtime-reset case, returning [] would swallow
+        # the first command after the clear forever (each new one would again be
+        # the whole window).  Let the persistent bridge opt into accepting the
+        # current window as fresh after its first safe baseline.
+        if no_overlap_behavior == "current":
+            return messages
+        return []
+    if forward_overlap >= reverse_overlap:
+        if forward_overlap == len(current):
+            return []
+        return messages[forward_overlap:]
+    if reverse_overlap == len(current):
+        return []
+    return list(reversed(messages[:len(current) - reverse_overlap]))
+
+
+def assign_delivery_ids(state: dict[str, Any], messages: list[dict[str, Any]]) -> None:
+    counter = int(state.get("delivery_counter") or 0)
+    for msg in messages:
+        counter += 1
+        msg["delivery_id"] = f"d{counter}"
+    state["delivery_counter"] = counter
 
 
 def read_safe_messages(limit: int, debug: bool = False, no_resize: bool = False) -> dict[str, Any]:
@@ -255,6 +353,7 @@ def read_safe_messages(limit: int, debug: bool = False, no_resize: bool = False)
     if isinstance(messages, list):
         messages = messages[-limit:]
     normalized = [normalize_message(m) for m in messages]
+    annotate_context_times(normalized)
     assign_polling_ids(normalized)
     return {
         "ok": True,
@@ -287,9 +386,18 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def has_agent_prefix(text: str, agent_prefix: str = "[Agent]") -> bool:
+    stripped = str(text or "").lstrip()
+    return bool(
+        stripped.startswith("[Agent]")
+        or (agent_prefix and stripped.startswith(agent_prefix))
+        or stripped.startswith("[System]")
+    )
+
+
 def is_likely_agent_own_message(msg: dict[str, Any], agent_prefix: str) -> bool:
     content = msg.get("content", "")
-    if agent_prefix and content.startswith(agent_prefix):
+    if has_agent_prefix(content, agent_prefix):
         return True
     # wxauto often marks non-user system/time separators as SYS.
     if msg.get("sender") == "SYS":
@@ -297,12 +405,12 @@ def is_likely_agent_own_message(msg: dict[str, Any], agent_prefix: str) -> bool:
     return False
 
 
+def has_own_reply(messages: list[dict[str, Any]], agent_prefix: str) -> bool:
+    return any(is_likely_agent_own_message(msg, agent_prefix) for msg in (messages or []))
+
+
 def cmd_read(args: argparse.Namespace) -> int:
     return emit(read_safe_messages(args.limit, debug=args.debug, no_resize=args.no_resize))
-
-
-def has_agent_prefix(text: str) -> bool:
-    return str(text or "").lstrip().startswith("[Agent]")
 
 
 def cmd_send(args: argparse.Namespace) -> int:
@@ -339,22 +447,37 @@ def cmd_poll(args: argparse.Namespace) -> int:
     deadline = time.time() + max(0, args.timeout)
     last_payload: dict[str, Any] | None = None
     new_messages: list[dict[str, Any]] = []
+    window_reset = False
 
     while True:
         payload = read_safe_messages(args.limit, debug=args.debug, no_resize=args.no_resize)
         last_payload = payload
         messages = payload.get("messages", [])
         new_messages = []
-        candidates = new_messages_from_sequence(state, messages)
+        window_reset = False
+        overlap = rolling_window_any_overlap_count(state.get("last_message_keys", []), messages)
+        has_previous = bool(state.get("last_message_keys"))
+        has_current = bool(messages)
+        if has_previous and has_current and overlap <= 0 and not has_own_reply(messages, args.agent_prefix):
+            candidates = messages
+            window_reset = True
+        else:
+            candidates = new_messages_from_sequence(state, messages)
         for msg in candidates:
             msg_id = str(msg.get("id") or "")
             stable_id = str(msg.get("stable_id") or "")
-            if msg_id in seen_ids:
+            # Only globally de-duplicate messages when the backend exposes a
+            # real per-message time.  Without a backend time/id, repeated
+            # identical commands hash to the same id; relying on the rolling
+            # last_message_keys overlap lets a later identical command run again.
+            if stable_id.startswith("time:") and msg_id in seen_ids:
                 continue
             if is_likely_agent_own_message(msg, args.agent_prefix):
-                seen_ids.add(msg_id)
+                if stable_id.startswith("time:"):
+                    seen_ids.add(msg_id)
                 continue
             new_messages.append(msg)
+        assign_delivery_ids(state, new_messages)
 
         if new_messages or time.time() >= deadline:
             break
@@ -376,6 +499,7 @@ def cmd_poll(args: argparse.Namespace) -> int:
             "messages": new_messages,
             "state_file": str(state_path),
             "polled_at": datetime.now().isoformat(timespec="seconds"),
+            "window_reset": window_reset,
         }
     )
 

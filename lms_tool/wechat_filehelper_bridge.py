@@ -27,6 +27,7 @@ class FileHelperBridge:
         self.started_at: str | None = None
         self.filehelper_chat: Any = None
         self.filehelper_ready: bool = False
+        self.poll_baselined: bool = False
 
     def reset(self) -> None:
         self.backend_name = None
@@ -34,6 +35,7 @@ class FileHelperBridge:
         self.started_at = None
         self.filehelper_chat = None
         self.filehelper_ready = False
+        self.poll_baselined = False
 
     @staticmethod
     def _is_cacheable_chat(candidate: Any, wx: Any) -> bool:
@@ -107,6 +109,7 @@ class FileHelperBridge:
                 raw_messages = [messages]
 
         normalized = [core.normalize_message(m) for m in raw_messages]
+        core.annotate_context_times(normalized)
         core.assign_polling_ids(normalized)
         return {
             "ok": True,
@@ -155,6 +158,11 @@ class FileHelperBridge:
             "sent_at": datetime.now().isoformat(timespec="seconds"),
         }
 
+    @staticmethod
+    def _has_own_reply(messages: list[dict[str, Any]], agent_prefix: str) -> bool:
+        """Return whether the visible window already contains Agent/System output."""
+        return any(core.is_likely_agent_own_message(msg, agent_prefix) for msg in (messages or []))
+
     def poll_messages(
         self,
         limit: int,
@@ -171,22 +179,66 @@ class FileHelperBridge:
         deadline = time.time() + max(0.0, float(timeout or 0))
         last_payload: dict[str, Any] | None = None
         new_messages: list[dict[str, Any]] = []
+        first_poll_baseline = not self.poll_baselined
+        window_reset = False
 
         while True:
             payload = self.read_messages(limit)
             last_payload = payload
             new_messages = []
-            candidates = core.new_messages_from_sequence(state, payload.get("messages", []))
+            first_poll_baseline = not self.poll_baselined
+            window_reset = False
+            messages = payload.get("messages", [])
+            overlap = core.rolling_window_any_overlap_count(state.get("last_message_keys", []), messages)
+            has_previous = bool(state.get("last_message_keys"))
+            has_current = bool(messages)
+            if first_poll_baseline:
+                # A newly started persistent bridge normally treats the first
+                # visible File Transfer Assistant window as history and only
+                # establishes a fresh baseline. However, if the user deleted the
+                # chat history before starting remote control, the current window
+                # may contain only commands sent after that deletion/start while
+                # the persisted state still points at old, now-invisible messages.
+                # In that case there is no rolling-window overlap with the saved
+                # state; accept the current window instead of swallowing the first
+                # post-clear command. When there is overlap, baseline remains the
+                # safe cold-start behavior and prevents replaying old history.
+                if has_previous and has_current and overlap <= 0 and not self._has_own_reply(messages, agent_prefix):
+                    candidates = messages
+                    window_reset = True
+                else:
+                    candidates = []
+                self.poll_baselined = True
+            else:
+                candidates = core.new_messages_from_sequence(
+                    state,
+                    messages,
+                    # After startup has been safely baselined, no overlap most
+                    # likely means the user cleared File Transfer Assistant and
+                    # the current visible messages are fresh runtime commands.
+                    no_overlap_behavior="current",
+                )
+                window_reset = has_previous and has_current and overlap <= 0
+                if window_reset and self._has_own_reply(messages, agent_prefix):
+                    candidates = []
+                    window_reset = False
             for msg in candidates:
                 msg_id = str(msg.get("id") or "")
-                if msg_id in seen_ids:
+                stable_id = str(msg.get("stable_id") or "")
+                # Only globally de-duplicate messages when the backend exposes a
+                # real per-message time.  Some wxauto backends expose no time/id;
+                # then identical user commands such as "/新建对话/1：..." sent on
+                # different occasions would otherwise hash to the same id forever.
+                if stable_id.startswith("time:") and msg_id in seen_ids:
                     continue
                 if core.is_likely_agent_own_message(msg, agent_prefix):
-                    seen_ids.add(msg_id)
+                    if stable_id.startswith("time:"):
+                        seen_ids.add(msg_id)
                     continue
                 new_messages.append(msg)
+            core.assign_delivery_ids(state, new_messages)
 
-            if new_messages or time.time() >= deadline:
+            if first_poll_baseline or new_messages or time.time() >= deadline:
                 break
             time.sleep(max(0.2, float(interval or 1)))
 
@@ -209,6 +261,8 @@ class FileHelperBridge:
             "messages": new_messages,
             "state_file": str(state_path),
             "polled_at": datetime.now().isoformat(timespec="seconds"),
+            "baselined": first_poll_baseline,
+            "window_reset": window_reset,
         }
 
 
