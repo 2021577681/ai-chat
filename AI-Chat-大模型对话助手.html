@@ -620,7 +620,7 @@
     <div class="form-group">
       <label>轮询间隔（秒）</label>
       <input type="number" id="remoteControlPollInterval" min="1" max="300" step="1">
-      <div class="form-hint">默认 5 秒。设置过短会更频繁操作微信客户端。</div>
+      <div class="form-hint">默认 5 秒。开启后或最近一次收发消息后的 5 分钟内使用该间隔；之后自动降频到 15 秒、30 秒、60 秒，且不会短于你设置的间隔。</div>
     </div>
 
     <div class="form-group">

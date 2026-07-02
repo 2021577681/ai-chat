@@ -1031,6 +1031,9 @@ function dialogExplorerDeleteFolder(folderId) {
 
   // Delete chats in all affected folders (manual, no per-chat confirm)
   const deleteIds = new Set(affectedChats.map(c => c.id));
+  if (typeof remoteControlForgetChat === 'function') {
+    for (const chat of affectedChats) remoteControlForgetChat(chat);
+  }
   state.chats = (state.chats || []).filter(c => !deleteIds.has(c.id));
   if (deleteIds.has(state.currentId)) {
     state.currentId = ((state.chats || []).find(c => c && !c._hiddenFromUI) || {}).id || null;

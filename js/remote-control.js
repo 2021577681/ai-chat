@@ -1,6 +1,8 @@
 // ============ 🎮 微信文件传输助手遥控 Agent ============
 // 隐私边界：本模块只调用 wechat_filehelper_poll / wechat_filehelper_send，底层工具硬编码为“文件传输助手”。
 
+const REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT = '你正通过微信文件传输助手被遥控。请只输出最终答案，不展示工具调用过程或大纲过程；回答要简短，适合微信阅读。';
+
 const REMOTE_CONTROL_DEFAULTS = {
   enabled: false,
   pollIntervalSec: 5,
@@ -9,11 +11,14 @@ const REMOTE_CONTROL_DEFAULTS = {
   inputSeparator: '：',
   outputTemplate: '[Agent][{id}][No{no}]:\n{answer}',
   agentPrefix: '[Agent]',
-  shortReplyPrompt: '你正通过微信文件传输助手被遥控。请只输出最终答案，不展示工具调用过程或大纲过程；回答要简短，适合微信阅读。',
+  shortReplyPrompt: '你正通过微信文件传输助手被遥控。请回答简短、直接，适合微信阅读。',
   autoSendErrors: true,
   ignoreAgentMessages: true,
   maxReplyChars: 3000
 };
+
+const REMOTE_CONTROL_SLEEP_STEP_MS = 5 * 60 * 1000;
+const REMOTE_CONTROL_SLEEP_INTERVALS_SEC = [0, 15, 30, 60];
 
 const REMOTE_CONTROL_COMMANDS = [
   {
@@ -65,12 +70,6 @@ const REMOTE_CONTROL_COMMANDS = [
     aliases: 'outline'
   },
   {
-    name: '计划模式',
-    example: '/新建对话/1/计划：拆解任务',
-    desc: '用计划模式规划、执行和验证。',
-    aliases: 'plan'
-  },
-  {
     name: '普通模式',
     example: '/1/普通：直接回答',
     desc: '关闭该序号默认工具偏好，按普通对话路径处理。',
@@ -97,6 +96,7 @@ const remoteControlKnownChats = new Map(); // remoteId -> chatId
 let remoteControlRuntimeGeneration = 0;
 let remoteControlActiveCommands = 0;
 let remoteControlPendingSends = 0;
+let remoteControlLastActivityAt = 0;
 const remoteControlInFlightMessages = new Set();
 const remoteControlProcessedMessages = new Map();
 const remoteControlRemoteLocks = new Set();
@@ -108,6 +108,26 @@ function remoteControlNow() {
 function remoteControlLogTiming(label, startedAt, extra = '') {
   const elapsed = Math.round(remoteControlNow() - startedAt);
   console.info(`[remote-control] ${label} ${elapsed}ms${extra ? ' ' + extra : ''}`);
+}
+
+function remoteControlMarkActivity() {
+  remoteControlLastActivityAt = remoteControlNow();
+}
+
+function remoteControlBasePollIntervalSec(cfg = remoteControlSettings()) {
+  return Math.max(1, parseFloat(cfg.pollIntervalSec || 5) || 5);
+}
+
+function remoteControlEffectivePollIntervalSec(cfg = remoteControlSettings()) {
+  const baseSec = remoteControlBasePollIntervalSec(cfg);
+  const lastActive = remoteControlLastActivityAt || remoteControlNow();
+  const idleMs = Math.max(0, remoteControlNow() - lastActive);
+  const step = Math.min(
+    REMOTE_CONTROL_SLEEP_INTERVALS_SEC.length - 1,
+    Math.floor(idleMs / REMOTE_CONTROL_SLEEP_STEP_MS)
+  );
+  const sleepSec = REMOTE_CONTROL_SLEEP_INTERVALS_SEC[step] || 0;
+  return Math.max(baseSec, sleepSec);
 }
 
 async function remoteControlStartBridge() {
@@ -152,6 +172,7 @@ function remoteControlClearTimer() {
 async function remoteControlStartRuntime() {
   try {
     const generation = ++remoteControlRuntimeGeneration;
+    remoteControlMarkActivity();
     await remoteControlStartBridge();
     if (generation !== remoteControlRuntimeGeneration || !remoteControlSettings().enabled) return;
     remoteControlPollOnce();
@@ -175,6 +196,7 @@ async function remoteControlStopRuntime() {
     remoteControlActiveCommands = 0;
     remoteControlPendingSends = 0;
     remoteControlPolling = false;
+    remoteControlLastActivityAt = 0;
     await remoteControlStopBridge();
   } catch (e) {
     console.warn('[remote-control] bridge stop failed:', e);
@@ -186,6 +208,9 @@ function remoteControlSettings() {
     state.settings.remoteControl = {};
   }
   state.settings.remoteControl = { ...REMOTE_CONTROL_DEFAULTS, ...state.settings.remoteControl };
+  if (state.settings.remoteControl.shortReplyPrompt === REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT) {
+    state.settings.remoteControl.shortReplyPrompt = REMOTE_CONTROL_DEFAULTS.shortReplyPrompt;
+  }
   return state.settings.remoteControl;
 }
 
@@ -205,7 +230,7 @@ function remoteControlNormalizeCommandTokens(tokens) {
   for (const rawToken of tokens || []) {
     const token = String(rawToken || '').trim();
     if (!token) continue;
-    const glued = token.match(/^(新建对话|新建|临时对话|临时|大纲|计划|工具|普通|状态|停止|帮助|统计|重新生成|重生成|regen|regenerate)(\d+)$/);
+    const glued = token.match(/^(新建对话|新建|临时对话|临时|大纲|计划|plan|师生模式|师生|反思|reflection|工具|普通|状态|停止|帮助|统计|重新生成|重生成|regen|regenerate)(\d+)$/);
     if (glued) {
       normalized.push(glued[1], glued[2]);
     } else {
@@ -221,9 +246,18 @@ function remoteControlParseMessage(text) {
   const tokens = remoteControlNormalizeCommandTokens(opPart.split('/').map(s => s.trim()).filter(Boolean));
   if (!tokens.length) return { ok: false, error: '缺少遥控操作符' };
 
+  const unsupported = {
+    '计划': '计划模式需要前端审核，远程遥控暂不支持。请改用普通、工具或大纲模式。',
+    'plan': '计划模式需要前端审核，远程遥控暂不支持。请改用普通、工具或大纲模式。',
+    '师生': '师生模式暂不支持远程遥控。请改用普通、工具或大纲模式。',
+    '师生模式': '师生模式暂不支持远程遥控。请改用普通、工具或大纲模式。',
+    '反思': '师生模式暂不支持远程遥控。请改用普通、工具或大纲模式。',
+    'reflection': '师生模式暂不支持远程遥控。请改用普通、工具或大纲模式。'
+  };
+
   const aliases = {
     '新建对话': 'new', '新建': 'new', 'new': 'new', '临时对话': 'temporary', '临时': 'temporary', 'tmp': 'temporary',
-    '大纲': 'outline', 'outline': 'outline', '计划': 'plan', 'plan': 'plan',
+    '大纲': 'outline', 'outline': 'outline',
     '工具': 'tools', 'tool': 'tools', 'tools': 'tools',
     '普通': 'normal', 'normal': 'normal', '帮助': 'help', 'help': 'help',
     '状态': 'status', 'status': 'status', '停止': 'stop', 'stop': 'stop',
@@ -238,7 +272,6 @@ function remoteControlParseMessage(text) {
     create: false,
     temporary: false,
     outline: false,
-    plan: false,
     tools: false,
     normal: false,
     help: false,
@@ -254,11 +287,11 @@ function remoteControlParseMessage(text) {
       result.id = token;
       continue;
     }
+    if (unsupported[token]) return { ok: false, error: unsupported[token] };
     const op = aliases[token] || token;
     if (op === 'new') result.create = true;
     else if (op === 'temporary') result.temporary = true;
     else if (op === 'outline') result.outline = true;
-    else if (op === 'plan') result.plan = true;
     else if (op === 'tools') result.tools = true;
     else if (op === 'normal') result.normal = true;
     else if (op === 'help') result.help = true;
@@ -517,12 +550,14 @@ async function remoteControlSendWechat(text) {
       }, undefined, undefined, { skipConfirm: true });
       remoteControlLogTiming('wechat send', startedAt, `chars=${String(text || '').length}`);
       if (!r || !r.ok) throw new Error((r && r.error) || JSON.stringify(r));
+      remoteControlMarkActivity();
       return r;
     }
 
     const result = await executeTool('wechat_filehelper_send', { text }, { skipConfirm: true });
     remoteControlLogTiming('wechat send', startedAt, `chars=${String(text || '').length}`);
     if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
+    remoteControlMarkActivity();
     return result.value;
   } finally {
     remoteControlPendingSends = Math.max(0, remoteControlPendingSends - 1);
@@ -699,6 +734,10 @@ async function remoteControlRegenerateChat(chat, parsed) {
   }
   const reply = chat.messages[idx] || {};
   const mode = reply.pptMode ? 'ppt' : (reply.outline ? 'outline' : (reply.plan ? 'plan' : (reply.reflection ? 'reflection' : 'normal')));
+  if (mode === 'plan' || mode === 'reflection') {
+    await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 的上一条回复属于${mode === 'plan' ? '计划模式' : '师生模式'}，远程遥控不支持重新生成，请在前端操作。`));
+    return;
+  }
   chat.messages = chat.messages.slice(0, idx);
   while (chat.messages.length && chat.messages[chat.messages.length - 1].role === 'tool') chat.messages.pop();
   saveData();
@@ -707,9 +746,7 @@ async function remoteControlRegenerateChat(chat, parsed) {
   try {
     const useTools = !!(chat.remoteControl && chat.remoteControl.useToolsDefault);
     if (mode === 'outline') await callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
-    else if (mode === 'plan') await callAPIWithPlan({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
     else if (mode === 'ppt' && typeof callAPIWithPptMode === 'function') await callAPIWithPptMode({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
-    else if (mode === 'reflection' && typeof callAPIWithReflection === 'function') await callAPIWithReflection({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
     else await callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
   } catch (e) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 重新生成失败：${e.message || e}`));
@@ -737,7 +774,6 @@ async function remoteControlRunChat(chat, parsed) {
   try {
     const apiStartedAt = remoteControlNow();
     if (parsed.outline) await callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
-    else if (parsed.plan) await callAPIWithPlan({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
     else await callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
     remoteControlLogTiming('api complete', apiStartedAt, `chat=${chat.id}`);
   } catch (e) {
@@ -756,7 +792,7 @@ async function remoteControlRunChat(chat, parsed) {
 
 async function remoteControlHandleParsed(parsed) {
   if (parsed.help) {
-    await remoteControlSendWechat('[Agent][Help]:\n用法：/新建对话/1/大纲/工具：任务；继续：/1：追加指令；临时：/临时：任务。支持 /工具、/大纲、/计划、/状态、/统计/1、/停止/1、/重新生成/1、/停止。');
+    await remoteControlSendWechat('[Agent][Help]:\n用法：/新建对话/1/大纲/工具：任务；继续：/1：追加指令；临时：/临时：任务。支持 /工具、/大纲、/状态、/统计/1、/停止/1、/重新生成/1、/停止。计划模式和师生模式需要前端交互审核，远程遥控不支持。');
     return;
   }
   if (parsed.status) {
@@ -881,6 +917,7 @@ async function remoteControlPollOnce() {
       const content = String(msg.content || '').trim();
       if (!content) continue;
       if (cfg.ignoreAgentMessages && content.startsWith(cfg.agentPrefix || '[Agent]')) continue;
+      remoteControlMarkActivity();
       const parsed = remoteControlParseMessage(content);
       if (!parsed.ok) {
         if (cfg.autoSendErrors && content.startsWith('/')) await remoteControlSendWechat('[Agent][Error]:\n' + parsed.error);
@@ -905,7 +942,7 @@ function remoteControlScheduleNext() {
   const cfg = remoteControlSettings();
   if (!cfg.enabled) return;
   if (remoteControlPendingSends > 0) return;
-  const ms = Math.max(1, parseFloat(cfg.pollIntervalSec || 5) || 5) * 1000;
+  const ms = remoteControlEffectivePollIntervalSec(cfg) * 1000;
   remoteControlTimer = setTimeout(remoteControlPollOnce, ms);
 }
 
