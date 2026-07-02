@@ -666,7 +666,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
 
   const skipShellAudit = action === 'execute'
     && skipConfirm
-    && /^python\s+lms_tool[\\\/]wechat_filehelper_agent_tool\.py\s+(read|poll|send)\b/i.test(String(requestParams.command || params.command || ''));
+    && /^python\s+lms_tool[\\\/]wechat_filehelper_agent_tool\.py\s+(read|send)\b/i.test(String(requestParams.command || params.command || ''));
 
   if (action === 'execute' && !skipShellAudit && typeof reviewShellCommandWithAI === 'function') {
     const auditCommand = requestParams.command || params.command || confirmCommand || '';

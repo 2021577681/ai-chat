@@ -23,11 +23,11 @@ class _WechatBridgeManager:
 
         # Request scheduler for the single WeChat UI automation bridge.
         # Only one request is written to the child process at a time.
-        # send has priority; poll/read are low-priority and do not pile up.
+        # send has priority; read requests are low-priority and do not pile up.
         self._active_req_id = None
         self._active_op = None
         self._send_queue = deque()
-        self._poll_queued = None
+        self._read_queued = None
         self._consecutive_sends = 0
 
     def _script_path(self):
@@ -45,7 +45,7 @@ class _WechatBridgeManager:
             'started_at': self._started_at or None,
             'active_op': self._active_op,
             'queued_sends': len(self._send_queue),
-            'queued_poll': bool(self._poll_queued),
+            'queued_read': bool(self._read_queued),
             'consecutive_sends': self._consecutive_sends,
         }
 
@@ -55,7 +55,7 @@ class _WechatBridgeManager:
         self._active_req_id = None
         self._active_op = None
         self._send_queue.clear()
-        self._poll_queued = None
+        self._read_queued = None
         self._consecutive_sends = 0
         for q in pending:
             try:
@@ -85,15 +85,15 @@ class _WechatBridgeManager:
             return
         if not self._is_running_locked():
             return
-        force_poll_after = 5
-        if self._poll_queued is not None:
+        force_read_after = 5
+        if self._read_queued is not None:
             try:
-                force_poll_after = max(1, int((self._poll_queued[2] or {}).get('max_consecutive_sends_before_poll') or 5))
+                force_read_after = max(1, int((self._read_queued[2] or {}).get('max_consecutive_sends_before_read') or 5))
             except Exception:
-                force_poll_after = 5
-        if self._poll_queued is not None and self._send_queue and self._consecutive_sends >= force_poll_after:
-            item = self._poll_queued
-            self._poll_queued = None
+                force_read_after = 5
+        if self._read_queued is not None and self._send_queue and self._consecutive_sends >= force_read_after:
+            item = self._read_queued
+            self._read_queued = None
             self._consecutive_sends = 0
             self._write_payload_locked(item)
             return
@@ -101,16 +101,16 @@ class _WechatBridgeManager:
             self._consecutive_sends += 1
             self._write_payload_locked(self._send_queue.popleft())
             return
-        if self._poll_queued is not None:
-            item = self._poll_queued
-            self._poll_queued = None
+        if self._read_queued is not None:
+            item = self._read_queued
+            self._read_queued = None
             self._consecutive_sends = 0
             self._write_payload_locked(item)
 
     def _remove_queued_locked(self, req_id):
         removed = False
-        if self._poll_queued and self._poll_queued[0] == req_id:
-            self._poll_queued = None
+        if self._read_queued and self._read_queued[0] == req_id:
+            self._read_queued = None
             removed = True
         if self._send_queue:
             kept = deque()
@@ -128,11 +128,11 @@ class _WechatBridgeManager:
         item = (req_id, op, payload)
         if op == 'send':
             self._send_queue.append(item)
-        elif op in ('poll', 'read'):
+        elif op == 'read':
             # Low-priority reads are intentionally coalesced. At most one pending
-            # poll/read waits behind the active request. If one is already active
+            # read waits behind the active request. If one is already active
             # or queued, return a quick empty/busy response instead of piling up.
-            if self._active_op in ('poll', 'read') or self._poll_queued is not None:
+            if self._active_op == 'read' or self._read_queued is not None:
                 self._pending.pop(req_id, None)
                 try:
                     response_q.put_nowait({
@@ -147,11 +147,11 @@ class _WechatBridgeManager:
                     pass
                 return
             # If send is waiting, this one low-priority request may sit behind it;
-            # any later poll/read will be coalesced by the condition above.
-            self._poll_queued = item
+            # any later read will be coalesced by the condition above.
+            self._read_queued = item
         else:
             # start/shutdown/status requests are rare; keep them behind sends but
-            # ahead of poll by treating them like send-priority control requests.
+            # ahead of reads by treating them like send-priority control requests.
             self._send_queue.append(item)
         self._dispatch_next_locked()
 
@@ -229,7 +229,7 @@ class _WechatBridgeManager:
         self._active_req_id = None
         self._active_op = None
         self._send_queue.clear()
-        self._poll_queued = None
+        self._read_queued = None
 
     def _close_log_locked(self):
         if self._log_handle:
@@ -349,12 +349,8 @@ class WechatBridgeMixin:
                 payload = _BRIDGE.stop()
             elif op == 'status':
                 payload = _BRIDGE.status()
-            elif op in ('read', 'poll', 'send'):
-                if op == 'poll':
-                    op_timeout = float(body.get('timeout') or 0)
-                    bridge_timeout = max(30.0, min(360.0, op_timeout + 60.0))
-                else:
-                    bridge_timeout = float(body.get('bridge_timeout') or 90)
+            elif op in ('read', 'send'):
+                bridge_timeout = float(body.get('bridge_timeout') or 90)
                 payload = _BRIDGE.request(op, params=body, timeout=bridge_timeout, start_if_needed=True)
                 with _BRIDGE._lock:
                     if isinstance(payload, dict) and payload.get('ok') and not payload.get('busy'):

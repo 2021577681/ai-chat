@@ -457,6 +457,17 @@ function injectBuiltinTools() {
     const raw = storage.get(BUILTIN_TOOLS_LOADED_KEY);
     if (raw) loadedSignatures = JSON.parse(raw);
   } catch (e) {}
+  const DEPRECATED_BUILTIN_TOOL_NAMES = new Set([
+    'wechat_filehelper_read',
+    'wechat_filehelper_poll',
+    'wechat_filehelper_send'
+  ]);
+  const beforeDeprecated = state.tools.length;
+  state.tools = state.tools.filter(tool =>
+    !DEPRECATED_BUILTIN_TOOL_NAMES.has(String((tool && tool.name) || ''))
+  );
+  const removedDeprecated = beforeDeprecated - state.tools.length;
+
   const existingNames = new Set(state.tools.map(t => t.name));
   const currentSignatures = BUILTIN_TOOLS.map(t => t.name);
   const builtinByName = new Map(BUILTIN_TOOLS.map(t => [t.name, t]));
@@ -479,16 +490,10 @@ function injectBuiltinTools() {
     state.tools.some(t => String((t && t.name) || '').startsWith(prefix));
 
   let refreshed = 0;
-  const ALWAYS_REFRESH_TOOL_NAMES = new Set([
-    'wechat_filehelper_read',
-    'wechat_filehelper_poll',
-    'wechat_filehelper_send'
-  ]);
 
   state.tools = state.tools.map(tool => {
     if (!tool || (
       !OPTIONAL_TOOL_PREFIXES.some(p => String(tool.name || '').startsWith(p))
-      && !ALWAYS_REFRESH_TOOL_NAMES.has(String(tool.name || ''))
     )) return tool;
     const builtin = builtinByName.get(tool.name);
     if (!builtin) return tool;
@@ -514,8 +519,9 @@ function injectBuiltinTools() {
       }
     }
   }
-  if (added > 0 || refreshed > 0) {
+  if (added > 0 || refreshed > 0 || removedDeprecated > 0) {
     persistTools();
+    if (removedDeprecated > 0) console.log(`[builtin tools] removed ${removedDeprecated} deprecated WeChat tool(s)`);
     if (added > 0) console.log(`[内置工具] 自动加载了 ${added} 个工具`);
     if (refreshed > 0) console.log(`[内置工具] 刷新了 ${refreshed} 个 LMS 工具`);
   }

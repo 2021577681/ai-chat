@@ -1,5 +1,5 @@
 // ============ 🎮 微信文件传输助手遥控 Agent ============
-// 隐私边界：本模块只调用 wechat_filehelper_poll / wechat_filehelper_send，底层工具硬编码为“文件传输助手”。
+// Privacy boundary: remote control uses only the private wechat_bridge read/send path for File Transfer Assistant.
 
 const REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT = '你正通过微信文件传输助手被遥控。请只输出最终答案，不展示工具调用过程或大纲过程；回答要简短，适合微信阅读。';
 
@@ -108,6 +108,7 @@ let remoteControlStartupMarker = '';
 let remoteControlStartupMarkerFound = false;
 let remoteControlStartupMarkerPollAttempts = 0;
 let remoteControlLastUserWindowKeys = [];
+let remoteControlNewestFirstWindow = false;
 let remoteControlDeliverySeq = 0;
 const remoteControlInFlightMessages = new Set();
 const remoteControlProcessedMessages = new Map();
@@ -188,6 +189,7 @@ function remoteControlResetMessageDedupe() {
   remoteControlStartupMarkerFound = false;
   remoteControlStartupMarkerPollAttempts = 0;
   remoteControlLastUserWindowKeys = [];
+  remoteControlNewestFirstWindow = false;
   remoteControlDeliverySeq = 0;
 }
 
@@ -587,26 +589,21 @@ async function remoteControlSendWechat(text) {
   remoteControlPendingSends++;
   remoteControlClearTimer();
   try {
-    if (typeof callAgentBackend === 'function') {
-      const b64 = btoa(unescape(encodeURIComponent(String(text || ''))));
-      const r = await callAgentBackend('wechat_bridge', {
-        op: 'send',
-        text_base64: b64,
-        prefix: '',
-        requestTimeoutMs: 90000,
-        bridge_timeout: 90
-      }, undefined, undefined, { skipConfirm: true });
-      remoteControlLogTiming('wechat send', startedAt, `chars=${String(text || '').length}`);
-      if (!r || !r.ok) throw new Error((r && r.error) || JSON.stringify(r));
-      remoteControlMarkActivity();
-      return r;
+    if (typeof callAgentBackend !== 'function') {
+      throw new Error('local backend is not available');
     }
-
-    const result = await executeTool('wechat_filehelper_send', { text }, { skipConfirm: true });
+    const b64 = btoa(unescape(encodeURIComponent(String(text || ''))));
+    const result = await callAgentBackend('wechat_bridge', {
+      op: 'send',
+      text_base64: b64,
+      prefix: '',
+      requestTimeoutMs: 90000,
+      bridge_timeout: 90
+    }, undefined, undefined, { skipConfirm: true });
     remoteControlLogTiming('wechat send', startedAt, `chars=${String(text || '').length}`);
-    if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
+    if (!result || !result.ok) throw new Error((result && result.error) || JSON.stringify(result));
     remoteControlMarkActivity();
-    return result.value;
+    return result;
   } finally {
     remoteControlPendingSends = Math.max(0, remoteControlPendingSends - 1);
     if (remoteControlCanSchedulePoll()) {
@@ -616,8 +613,8 @@ async function remoteControlSendWechat(text) {
 }
 
 function remoteControlCanSchedulePoll() {
-  // The backend bridge serializes WeChat UI access. Keep scheduling poll/read
-  // even while sends are queued so the backend can force one poll after the
+  // The backend bridge serializes WeChat UI access. Keep scheduling reads
+  // even while sends are queued so the backend can force one read after the
   // configured number of consecutive sends.
   return remoteControlSettings().enabled;
 }
@@ -633,42 +630,86 @@ function remoteControlMessageWindowKey(msg, index = 0) {
   return `${index}:${sender}:${time}:${type}:${content}`;
 }
 
-function remoteControlNewItemsBySlidingWindow(previousKeys, currentItems, keyFn) {
-  const prev = Array.isArray(previousKeys) ? previousKeys.map(String) : [];
-  const currKeys = (currentItems || []).map((item, idx) => String(keyFn(item, idx)));
-  if (!prev.length) return { overlap: 0, keys: currKeys, items: currentItems || [] };
-  if (!currKeys.length) return { overlap: 0, keys: currKeys, items: [] };
-  const maxOverlap = Math.min(prev.length, currKeys.length);
+function remoteControlMessageOverlapKey(key) {
+  const text = String(key || '');
+  const hashPos = text.lastIndexOf('#');
+  if (hashPos > 0 && /^\d+$/.test(text.slice(hashPos + 1))) {
+    return text.slice(0, hashPos);
+  }
+  return text;
+}
+
+function remoteControlForwardOverlapCount(previousKeys, currentKeys) {
+  const maxOverlap = Math.min(previousKeys.length, currentKeys.length);
   for (let n = maxOverlap; n > 0; n--) {
     let ok = true;
     for (let i = 0; i < n; i++) {
-      if (prev[prev.length - n + i] !== currKeys[i]) { ok = false; break; }
+      if (previousKeys[previousKeys.length - n + i] !== currentKeys[i]) { ok = false; break; }
     }
-    if (ok) return { overlap: n, keys: currKeys, items: (currentItems || []).slice(n) };
+    if (ok) return n;
   }
-  return { overlap: 0, keys: currKeys, items: currentItems || [] };
+  return 0;
+}
+
+function remoteControlReverseOverlapCount(previousKeys, currentKeys) {
+  const maxOverlap = Math.min(previousKeys.length, currentKeys.length);
+  for (let n = maxOverlap; n > 0; n--) {
+    let ok = true;
+    for (let i = 0; i < n; i++) {
+      if (previousKeys[i] !== currentKeys[currentKeys.length - n + i]) { ok = false; break; }
+    }
+    if (ok) return n;
+  }
+  return 0;
+}
+
+function remoteControlNewItemsBySlidingWindow(previousKeys, currentItems, keyFn) {
+  const prev = Array.isArray(previousKeys) ? previousKeys.map(remoteControlMessageOverlapKey) : [];
+  const currKeys = (currentItems || []).map((item, idx) => String(keyFn(item, idx)));
+  const curr = currKeys.map(remoteControlMessageOverlapKey);
+  if (!prev.length) return { overlap: 0, keys: currKeys, items: currentItems || [] };
+  if (!curr.length) return { overlap: 0, keys: currKeys, items: [] };
+  const forwardOverlap = remoteControlForwardOverlapCount(prev, curr);
+  const reverseOverlap = remoteControlReverseOverlapCount(prev, curr);
+  if (forwardOverlap <= 0 && reverseOverlap <= 0) return { overlap: 0, keys: currKeys, items: currentItems || [] };
+  if (forwardOverlap >= reverseOverlap) {
+    return { overlap: forwardOverlap, keys: currKeys, items: (currentItems || []).slice(forwardOverlap) };
+  }
+  const newestFirstItems = (currentItems || []).slice(0, Math.max(0, currentItems.length - reverseOverlap));
+  return { overlap: reverseOverlap, keys: currKeys, items: newestFirstItems.reverse() };
+}
+
+function remoteControlFindStartupMarkerIndex(messages) {
+  const marker = String(remoteControlStartupMarker || '').trim();
+  if (!marker) return -1;
+  return (messages || []).findIndex(msg => String((msg && msg.content) || '').trim() === marker);
+}
+
+function remoteControlUpdateWindowDirectionFromMarker(markerIndex, messages) {
+  if (markerIndex === 0 && (messages || []).length > 1) remoteControlNewestFirstWindow = true;
+  else if (markerIndex === (messages || []).length - 1) remoteControlNewestFirstWindow = false;
+}
+
+function remoteControlRawMessagesAfterStartupMarker(messages, markerIndex) {
+  if (markerIndex < 0) return null;
+  return remoteControlNewestFirstWindow ? (messages || []).slice(0, markerIndex) : (messages || []).slice(markerIndex + 1);
 }
 
 async function remoteControlReadWechat(limit) {
   const safeLimit = Math.max(1, Math.min(50, parseInt(limit || 20, 10) || 20));
   const startedAt = remoteControlNow();
-  let payload;
-  if (typeof callAgentBackend === 'function') {
-    payload = await callAgentBackend('wechat_bridge', {
-      op: 'read',
-      limit: safeLimit,
-      requestTimeoutMs: 90000,
-      bridge_timeout: 90,
-      max_consecutive_sends_before_poll: Math.max(1, parseInt(remoteControlSettings().maxConsecutiveSendsBeforePoll || 5, 10) || 5)
-    }, undefined, undefined, { skipConfirm: true });
-    remoteControlLogTiming('wechat read', startedAt, `limit=${safeLimit}`);
-    if (!payload || !payload.ok) throw new Error((payload && payload.error) || JSON.stringify(payload));
-  } else {
-    const result = await executeTool('wechat_filehelper_read', { limit: safeLimit }, { skipConfirm: true });
-    remoteControlLogTiming('wechat read', startedAt, `limit=${safeLimit}`);
-    if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
-    payload = result.value && result.value.stdout ? JSON.parse(result.value.stdout) : (typeof result.value === 'string' ? JSON.parse(result.value) : result.value);
+  if (typeof callAgentBackend !== 'function') {
+    throw new Error('local backend is not available');
   }
+  const payload = await callAgentBackend('wechat_bridge', {
+    op: 'read',
+    limit: safeLimit,
+    requestTimeoutMs: 90000,
+    bridge_timeout: 90,
+    max_consecutive_sends_before_read: Math.max(1, parseInt(remoteControlSettings().maxConsecutiveSendsBeforePoll || 5, 10) || 5)
+  }, undefined, undefined, { skipConfirm: true });
+  remoteControlLogTiming('wechat read', startedAt, `limit=${safeLimit}`);
+  if (!payload || !payload.ok) throw new Error((payload && payload.error) || JSON.stringify(payload));
   return payload;
 }
 
@@ -691,7 +732,8 @@ function remoteControlUserMessagesFromRaw(messages, maxUserMessages, cfg = remot
     if (remoteControlIsOwnMessageContent(content, cfg)) continue;
     users.push(msg);
   }
-  return users.slice(-Math.max(2, Math.min(50, parseInt(maxUserMessages || 20, 10) || 20)));
+  const limit = Math.max(2, Math.min(50, parseInt(maxUserMessages || 20, 10) || 20));
+  return remoteControlNewestFirstWindow ? users.slice(0, limit).reverse() : users.slice(-limit);
 }
 
 function remoteControlDispatchMessages(messages, cfg = remoteControlSettings()) {
@@ -1070,17 +1112,26 @@ async function remoteControlPollOnce() {
     cfg.pollLimit = userLimit;
     const payload = await remoteControlReadWechat(limit);
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
+    const markerIndex = remoteControlFindStartupMarkerIndex(messages);
+    if (markerIndex >= 0) {
+      remoteControlUpdateWindowDirectionFromMarker(markerIndex, messages);
+      remoteControlStartupMarkerFound = true;
+      const afterMarkerRaw = remoteControlRawMessagesAfterStartupMarker(messages, markerIndex);
+      const afterMarkerUsers = remoteControlUserMessagesFromRaw(afterMarkerRaw, userLimit, cfg);
+      const diff = remoteControlNewItemsBySlidingWindow(remoteControlLastUserWindowKeys, afterMarkerUsers, remoteControlMessageWindowKey);
+      remoteControlLastUserWindowKeys = diff.keys;
+      remoteControlDispatchMessages(diff.items, cfg);
+      return;
+    }
     if (!remoteControlStartupMarkerFound) {
       remoteControlStartupMarkerPollAttempts++;
-      const markerIndex = messages.findIndex(msg => String((msg && msg.content) || '').trim() === String(remoteControlStartupMarker || '').trim());
-      if (markerIndex < 0) {
-        if (remoteControlStartupMarkerPollAttempts >= 2) await remoteControlDisableAfterStartupMarkerError();
-        return;
-      }
-      remoteControlStartupMarkerFound = true;
-      const afterMarkerUsers = remoteControlUserMessagesFromRaw(messages.slice(markerIndex + 1), userLimit, cfg);
-      remoteControlLastUserWindowKeys = afterMarkerUsers.map((msg, idx) => remoteControlMessageWindowKey(msg, idx));
-      remoteControlDispatchMessages(afterMarkerUsers, cfg);
+      if (remoteControlStartupMarkerPollAttempts >= 2) await remoteControlDisableAfterStartupMarkerError();
+      return;
+    }
+    if (!remoteControlLastUserWindowKeys.length) {
+      const userMessages = remoteControlUserMessagesFromRaw(messages, userLimit, cfg);
+      remoteControlLastUserWindowKeys = userMessages.map((msg, idx) => remoteControlMessageWindowKey(msg, idx));
+      console.warn('[remote-control] startup marker fell out of read window before any post-marker user message; current window baselined without dispatch.');
       return;
     }
     const userMessages = remoteControlUserMessagesFromRaw(messages, userLimit, cfg);
