@@ -87,6 +87,42 @@ def _decode_process_output(raw):
 class ExecMixin:
     """Handler mixin：handle_execute"""
 
+    def handle_remote_execute(self, body):
+        """微信遥控 /终端 专用执行入口。
+
+        这是用户直接通过文件传输助手发起的终端行为，不套用 AI 工具的
+        沙箱路径/危险命令拦截；默认 cwd 是当前沙箱根目录，但命令文本本身
+        可以访问沙箱外路径。
+        """
+        command = body.get('command', '').strip()
+        timeout = min(int(body.get('timeout', 60)), 300)
+        cwd = body.get('cwd') or config.WORKSPACE_ROOT
+        cwd_abs = os.path.realpath(os.path.expanduser(str(cwd)))
+        if not command:
+            return self._send_json(400, {'ok': False, 'error': '命令为空'})
+        if not os.path.isdir(cwd_abs):
+            return self._send_json(200, {'ok': False, 'error': f'工作目录不存在: {cwd_abs}'})
+        print(f'💻 [遥控终端] cwd={cwd_abs}\n   $ {command}')
+        try:
+            proc = subprocess.run(
+                command, shell=True, capture_output=True,
+                timeout=timeout, cwd=cwd_abs
+            )
+            stdout = _decode_process_output(proc.stdout)
+            stderr = _decode_process_output(proc.stderr)
+            return self._send_json(200, {
+                'ok': True,
+                'stdout': stdout[-12000:],
+                'stderr': stderr[-6000:],
+                'returncode': proc.returncode,
+                'cwd': cwd_abs,
+                'workspace': config.WORKSPACE_ROOT
+            })
+        except subprocess.TimeoutExpired:
+            return self._send_json(200, {'ok': False, 'error': f'命令超时（{timeout}秒）', 'cwd': cwd_abs, 'workspace': config.WORKSPACE_ROOT})
+        except Exception as e:
+            return self._send_json(200, {'ok': False, 'error': str(e), 'cwd': cwd_abs, 'workspace': config.WORKSPACE_ROOT})
+
     def handle_open_terminal(self, body):
         """打开系统终端窗口，工作目录为当前沙箱目录。"""
         try:

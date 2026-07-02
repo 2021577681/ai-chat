@@ -207,6 +207,10 @@ class Handler(BaseHTTPRequestHandler,
         try:
             if action == 'execute':
                 self.handle_execute(body)
+            elif action == 'remote_execute':
+                self.handle_remote_execute(body)
+            elif action == 'workspace_info':
+                self.handle_workspace_info()
             elif action == 'open_terminal':
                 self.handle_open_terminal(body)
             elif action == 'read_file':

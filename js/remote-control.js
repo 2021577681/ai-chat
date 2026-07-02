@@ -77,6 +77,24 @@ const REMOTE_CONTROL_COMMANDS = [
     aliases: '数字序号、对话名称前五字'
   },
   {
+    name: '终端',
+    example: '/终端：dir',
+    desc: '在当前沙箱目录直接执行冒号后的终端命令并返回 stdout/stderr；这是用户主动行为，不走 AI 工具权限确认，命令本身可访问沙箱外路径；空输出返回 NULL。',
+    aliases: 'terminal、shell'
+  },
+  {
+    name: '沙箱目录',
+    example: '/沙箱目录',
+    desc: '列出当前沙箱根目录和当前工作目录。',
+    aliases: 'pwd、workspace'
+  },
+  {
+    name: '切换目录',
+    example: '/切换目录：D:\\Projects',
+    desc: '把当前沙箱目录切换到冒号后的路径；成功和失败都会通过微信反馈。',
+    aliases: 'cd、set workspace'
+  },
+  {
     name: '工具模式',
     example: '/1/工具：查资料后回答',
     desc: '本次对话启用工具，并记为该遥控序号默认工具偏好。',
@@ -287,7 +305,7 @@ function remoteControlNormalizeCommandTokens(tokens) {
   for (const rawToken of tokens || []) {
     const token = String(rawToken || '').trim();
     if (!token) continue;
-    const glued = token.match(/^(新建对话|新建|临时对话|临时|列举对话|列举|大纲|计划|plan|师生模式|师生|反思|reflection|工具|普通|状态|停止|帮助|统计|重新生成|重生成|regen|regenerate)(\d+)$/);
+    const glued = token.match(/^(新建对话|新建|临时对话|临时|列举对话|列举|沙箱目录|切换目录|终端|大纲|计划|plan|师生模式|师生|反思|reflection|工具|普通|状态|停止|帮助|统计|重新生成|重生成|regen|regenerate)(\d+)$/);
     if (glued) {
       normalized.push(glued[1], glued[2]);
     } else {
@@ -318,6 +336,9 @@ function remoteControlParseMessage(text) {
     '工具': 'tools', 'tool': 'tools', 'tools': 'tools',
     '普通': 'normal', 'normal': 'normal', '帮助': 'help', 'help': 'help',
     '列举对话': 'listRemoteChats', '列举': 'listSidebarChats', 'list': 'listSidebarChats',
+    '终端': 'terminal', 'terminal': 'terminal', 'shell': 'terminal',
+    '沙箱目录': 'sandboxDir', 'pwd': 'sandboxDir', 'workspace': 'sandboxDir',
+    '切换目录': 'switchDir', 'cd': 'switchDir',
     '状态': 'status', 'status': 'status', '停止': 'stop', 'stop': 'stop',
     '统计': 'stats', 'stats': 'stats', 'token': 'stats', 'tokens': 'stats',
     '重新生成': 'regenerate', '重生成': 'regenerate', 'regen': 'regenerate', 'regenerate': 'regenerate'
@@ -337,6 +358,9 @@ function remoteControlParseMessage(text) {
     stop: false,
     listRemoteChats: false,
     listSidebarChats: false,
+    terminal: false,
+    sandboxDir: false,
+    switchDir: false,
     stats: false,
     regenerate: false,
     nameRef: '',
@@ -360,6 +384,9 @@ function remoteControlParseMessage(text) {
     else if (op === 'stop') result.stop = true;
     else if (op === 'listRemoteChats') result.listRemoteChats = true;
     else if (op === 'listSidebarChats') result.listSidebarChats = true;
+    else if (op === 'terminal') result.terminal = true;
+    else if (op === 'sandboxDir') result.sandboxDir = true;
+    else if (op === 'switchDir') result.switchDir = true;
     else if (op === 'stats') result.stats = true;
     else if (op === 'regenerate') result.regenerate = true;
     else if (!result.create && !result.temporary && !result.listRemoteChats && !result.listSidebarChats && !result.id && !result.nameRef) result.nameRef = token;
@@ -368,6 +395,17 @@ function remoteControlParseMessage(text) {
   if (result.listRemoteChats) return result;
   if (result.listSidebarChats) {
     if (!result.id) return { ok: false, error: '缺少列举数量，例如 /列举/10' };
+    return result;
+  }
+  if (result.terminal) {
+    if (!result.body) return { ok: false, error: '缺少终端指令，请发送 /终端：你的命令' };
+    return result;
+  }
+  if (result.sandboxDir) {
+    return result;
+  }
+  if (result.switchDir) {
+    if (!result.body) return { ok: false, error: '缺少目录路径，请发送 /切换目录：目标路径' };
     return result;
   }
   if (result.help || result.status || (result.stop && !result.id && !result.nameRef)) return result;
@@ -688,6 +726,60 @@ function remoteControlFormatSystem(message) {
 function remoteControlIsOwnMessageContent(content, cfg = remoteControlSettings()) {
   const text = String(content || '').trim();
   return !!(text && (text.startsWith(cfg.agentPrefix || '[Agent]') || text.startsWith('[System]')));
+}
+
+function remoteControlFormatTerminalResult(result, command) {
+  if (typeof result === 'string') return result.trim() || 'NULL';
+  if (!result || typeof result !== 'object') return 'NULL';
+  if (!result.ok) return `执行失败：${result.error || '未知错误'}`;
+  const stdout = String(result.stdout || '').trimEnd();
+  const stderr = String(result.stderr || '').trimEnd();
+  const chunks = [];
+  chunks.push(`目录：${result.cwd || ''}`);
+  chunks.push(`指令：${command}`);
+  if (typeof result.returncode !== 'undefined') chunks.push(`退出码：${result.returncode}`);
+  if (stdout) chunks.push(`[STDOUT]\n${stdout}`);
+  if (stderr) chunks.push(`[STDERR]\n${stderr}`);
+  if (!stdout && !stderr) chunks.push('NULL');
+  return chunks.join('\n');
+}
+
+async function remoteControlRunTerminalCommand(command) {
+  if (typeof callAgentBackend !== 'function') {
+    throw new Error('local backend is not available');
+  }
+  const result = await callAgentBackend('remote_execute', {
+    command,
+    timeout: 60,
+    requestTimeoutMs: 75000
+  }, undefined, undefined, { skipConfirm: true });
+  await remoteControlSendWechat(remoteControlFormatSystem(remoteControlFormatTerminalResult(result, command)));
+}
+
+async function remoteControlSendSandboxDirectory() {
+  if (typeof callAgentBackend !== 'function') {
+    throw new Error('local backend is not available');
+  }
+  const result = await callAgentBackend('workspace_info', {
+    requestTimeoutMs: 15000
+  }, undefined, undefined, { skipConfirm: true });
+  if (!result || !result.ok) {
+    await remoteControlSendWechat(remoteControlFormatSystem(`获取沙箱目录失败：${(result && result.error) || '未知错误'}`));
+    return;
+  }
+  await remoteControlSendWechat(remoteControlFormatSystem(`沙箱根目录：${result.workspace || ''}\n当前工作目录：${result.cwd || result.workspace || ''}`));
+}
+
+async function remoteControlSwitchSandboxDirectory(path) {
+  if (typeof callAgentBackend !== 'function') {
+    throw new Error('local backend is not available');
+  }
+  const result = await callAgentBackend('set_workspace', {
+    path,
+    requestTimeoutMs: 15000
+  }, undefined, undefined, { skipConfirm: true });
+  if (result && result.ok) await remoteControlSendWechat(remoteControlFormatSystem(`切换沙箱目录成功：${result.workspace || path}`));
+  else await remoteControlSendWechat(remoteControlFormatSystem(`切换沙箱目录失败：${(result && result.error) || '未知错误'}`));
 }
 
 async function remoteControlSendWechat(text) {
@@ -1103,6 +1195,18 @@ async function remoteControlHandleParsed(parsed) {
   }
   if (parsed.listSidebarChats) {
     await remoteControlSendWechat(remoteControlFormatSystem(remoteControlFormatSidebarChatList(parsed.id)));
+    return;
+  }
+  if (parsed.terminal) {
+    await remoteControlRunTerminalCommand(parsed.body);
+    return;
+  }
+  if (parsed.sandboxDir) {
+    await remoteControlSendSandboxDirectory();
+    return;
+  }
+  if (parsed.switchDir) {
+    await remoteControlSwitchSandboxDirectory(parsed.body);
     return;
   }
   if (parsed.stop && !parsed.id) {
