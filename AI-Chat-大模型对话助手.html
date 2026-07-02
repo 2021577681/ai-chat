@@ -625,8 +625,14 @@
 
     <div class="form-group">
       <label>每次读取消息条数</label>
-      <input type="number" id="remoteControlPollLimit" min="1" max="50" step="1">
-      <div class="form-hint">默认读取最近 20 条，仅处理新增且非 [Agent] 前缀的消息。</div>
+      <input type="number" id="remoteControlPollLimit" min="2" max="50" step="1">
+      <div class="form-hint">默认 20，最小 2。启动后前两次固定读取最近 20 条原始消息查找启动标识；找到后按该值读取用户消息，实际原始读取数为该值 × 2，再过滤 AI/System 回复。</div>
+    </div>
+
+    <div class="form-group">
+      <label>连续发送后强制轮询</label>
+      <input type="number" id="remoteControlMaxConsecutiveSendsBeforePoll" min="1" max="100" step="1">
+      <div class="form-hint">默认 5，最小 1。send 队列连续执行到该数量后，如已有 poll/read 等待，下一次会先执行一次轮询，避免用户指令长期得不到响应。</div>
     </div>
 
     <div class="form-group">

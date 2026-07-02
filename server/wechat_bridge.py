@@ -28,6 +28,7 @@ class _WechatBridgeManager:
         self._active_op = None
         self._send_queue = deque()
         self._poll_queued = None
+        self._consecutive_sends = 0
 
     def _script_path(self):
         return os.path.join(config.AGENT_HOME, 'lms_tool', 'wechat_filehelper_bridge.py')
@@ -45,6 +46,7 @@ class _WechatBridgeManager:
             'active_op': self._active_op,
             'queued_sends': len(self._send_queue),
             'queued_poll': bool(self._poll_queued),
+            'consecutive_sends': self._consecutive_sends,
         }
 
     def _fail_pending_locked(self, message):
@@ -54,6 +56,7 @@ class _WechatBridgeManager:
         self._active_op = None
         self._send_queue.clear()
         self._poll_queued = None
+        self._consecutive_sends = 0
         for q in pending:
             try:
                 q.put_nowait({'ok': False, 'error': message})
@@ -82,12 +85,26 @@ class _WechatBridgeManager:
             return
         if not self._is_running_locked():
             return
+        force_poll_after = 5
+        if self._poll_queued is not None:
+            try:
+                force_poll_after = max(1, int((self._poll_queued[2] or {}).get('max_consecutive_sends_before_poll') or 5))
+            except Exception:
+                force_poll_after = 5
+        if self._poll_queued is not None and self._send_queue and self._consecutive_sends >= force_poll_after:
+            item = self._poll_queued
+            self._poll_queued = None
+            self._consecutive_sends = 0
+            self._write_payload_locked(item)
+            return
         if self._send_queue:
+            self._consecutive_sends += 1
             self._write_payload_locked(self._send_queue.popleft())
             return
         if self._poll_queued is not None:
             item = self._poll_queued
             self._poll_queued = None
+            self._consecutive_sends = 0
             self._write_payload_locked(item)
 
     def _remove_queued_locked(self, req_id):
@@ -153,6 +170,8 @@ class _WechatBridgeManager:
                 with self._lock:
                     q = self._pending.pop(req_id, None)
                     if self._active_req_id == req_id:
+                        if self._active_op != 'send':
+                            self._consecutive_sends = 0
                         self._active_req_id = None
                         self._active_op = None
                     self._dispatch_next_locked()

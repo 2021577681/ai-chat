@@ -7,6 +7,7 @@ const REMOTE_CONTROL_DEFAULTS = {
   enabled: false,
   pollIntervalSec: 5,
   pollLimit: 20,
+  maxConsecutiveSendsBeforePoll: 5,
   inputPrefix: '/',
   inputSeparator: '：',
   outputTemplate: '[Agent][{id}][No{no}]:\n{answer}',
@@ -103,6 +104,11 @@ let remoteControlRuntimeGeneration = 0;
 let remoteControlActiveCommands = 0;
 let remoteControlPendingSends = 0;
 let remoteControlLastActivityAt = 0;
+let remoteControlStartupMarker = '';
+let remoteControlStartupMarkerFound = false;
+let remoteControlStartupMarkerPollAttempts = 0;
+let remoteControlLastUserWindowKeys = [];
+let remoteControlDeliverySeq = 0;
 const remoteControlInFlightMessages = new Set();
 const remoteControlProcessedMessages = new Map();
 const remoteControlRemoteLocks = new Set();
@@ -178,6 +184,27 @@ function remoteControlClearTimer() {
 function remoteControlResetMessageDedupe() {
   remoteControlInFlightMessages.clear();
   remoteControlProcessedMessages.clear();
+  remoteControlStartupMarker = '';
+  remoteControlStartupMarkerFound = false;
+  remoteControlStartupMarkerPollAttempts = 0;
+  remoteControlLastUserWindowKeys = [];
+  remoteControlDeliverySeq = 0;
+}
+
+function remoteControlStartupId() {
+  try {
+    const bytes = new Uint8Array(3);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+  } catch (e) {
+    return Math.random().toString(16).slice(2, 8).toUpperCase();
+  }
+}
+
+function remoteControlStartupText() {
+  const time = new Date().toLocaleString('zh-CN', { hour12: false });
+  return remoteControlFormatSystem(`${time} 远程遥控已启动 #${remoteControlStartupId()}`);
 }
 
 async function remoteControlStartRuntime() {
@@ -186,6 +213,9 @@ async function remoteControlStartRuntime() {
     remoteControlResetMessageDedupe();
     remoteControlMarkActivity();
     await remoteControlStartBridge();
+    if (generation !== remoteControlRuntimeGeneration || !remoteControlSettings().enabled) return;
+    remoteControlStartupMarker = remoteControlStartupText();
+    await remoteControlSendWechat(remoteControlStartupMarker);
     if (generation !== remoteControlRuntimeGeneration || !remoteControlSettings().enabled) return;
     remoteControlPollOnce();
     if (generation === remoteControlRuntimeGeneration && remoteControlSettings().enabled && typeof toast === 'function') toast('微信遥控 bridge 已启动');
@@ -547,6 +577,11 @@ function remoteControlFormatSystem(message) {
   return `[System]\n${String(message || '').trim()}`;
 }
 
+function remoteControlIsOwnMessageContent(content, cfg = remoteControlSettings()) {
+  const text = String(content || '').trim();
+  return !!(text && (text.startsWith(cfg.agentPrefix || '[Agent]') || text.startsWith('[System]')));
+}
+
 async function remoteControlSendWechat(text) {
   const startedAt = remoteControlNow();
   remoteControlPendingSends++;
@@ -581,11 +616,100 @@ async function remoteControlSendWechat(text) {
 }
 
 function remoteControlCanSchedulePoll() {
-  // AI generation should not block polling anymore. The backend bridge now
-  // serializes WeChat UI access and gives send higher priority than poll/read.
-  // Locally pause only while a send request is being submitted, so the reply can
-  // enter the backend priority queue immediately.
-  return remoteControlSettings().enabled && remoteControlPendingSends <= 0;
+  // The backend bridge serializes WeChat UI access. Keep scheduling poll/read
+  // even while sends are queued so the backend can force one poll after the
+  // configured number of consecutive sends.
+  return remoteControlSettings().enabled;
+}
+
+function remoteControlMessageWindowKey(msg, index = 0) {
+  if (!msg || typeof msg !== 'object') return `empty:${index}`;
+  const stable = String(msg.stable_id || msg.stableId || msg.id || '').trim();
+  if (stable) return stable;
+  const content = String(msg.content || '').trim();
+  const sender = String(msg.sender || '').trim();
+  const time = String(msg.time || msg.context_time || '').trim();
+  const type = String(msg.type || '').trim();
+  return `${index}:${sender}:${time}:${type}:${content}`;
+}
+
+function remoteControlNewItemsBySlidingWindow(previousKeys, currentItems, keyFn) {
+  const prev = Array.isArray(previousKeys) ? previousKeys.map(String) : [];
+  const currKeys = (currentItems || []).map((item, idx) => String(keyFn(item, idx)));
+  if (!prev.length) return { overlap: 0, keys: currKeys, items: currentItems || [] };
+  if (!currKeys.length) return { overlap: 0, keys: currKeys, items: [] };
+  const maxOverlap = Math.min(prev.length, currKeys.length);
+  for (let n = maxOverlap; n > 0; n--) {
+    let ok = true;
+    for (let i = 0; i < n; i++) {
+      if (prev[prev.length - n + i] !== currKeys[i]) { ok = false; break; }
+    }
+    if (ok) return { overlap: n, keys: currKeys, items: (currentItems || []).slice(n) };
+  }
+  return { overlap: 0, keys: currKeys, items: currentItems || [] };
+}
+
+async function remoteControlReadWechat(limit) {
+  const safeLimit = Math.max(1, Math.min(50, parseInt(limit || 20, 10) || 20));
+  const startedAt = remoteControlNow();
+  let payload;
+  if (typeof callAgentBackend === 'function') {
+    payload = await callAgentBackend('wechat_bridge', {
+      op: 'read',
+      limit: safeLimit,
+      requestTimeoutMs: 90000,
+      bridge_timeout: 90,
+      max_consecutive_sends_before_poll: Math.max(1, parseInt(remoteControlSettings().maxConsecutiveSendsBeforePoll || 5, 10) || 5)
+    }, undefined, undefined, { skipConfirm: true });
+    remoteControlLogTiming('wechat read', startedAt, `limit=${safeLimit}`);
+    if (!payload || !payload.ok) throw new Error((payload && payload.error) || JSON.stringify(payload));
+  } else {
+    const result = await executeTool('wechat_filehelper_read', { limit: safeLimit }, { skipConfirm: true });
+    remoteControlLogTiming('wechat read', startedAt, `limit=${safeLimit}`);
+    if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
+    payload = result.value && result.value.stdout ? JSON.parse(result.value.stdout) : (typeof result.value === 'string' ? JSON.parse(result.value) : result.value);
+  }
+  return payload;
+}
+
+async function remoteControlDisableAfterStartupMarkerError() {
+  const message = remoteControlFormatSystem('远程遥控启动失败：连续两次轮询未找到本次启动标识，无法可靠区分历史消息，已自动退出。');
+  try { await remoteControlSendWechat(message); } catch (e) { console.error('[remote-control] startup marker error send failed:', e); }
+  const cfg = remoteControlSettings();
+  cfg.enabled = false;
+  remoteControlClearTimer();
+  persistSettings();
+  syncRemoteControlButton();
+  await remoteControlStopRuntime();
+}
+
+function remoteControlUserMessagesFromRaw(messages, maxUserMessages, cfg = remoteControlSettings()) {
+  const users = [];
+  for (const msg of messages || []) {
+    const content = String((msg && msg.content) || '').trim();
+    if (!content) continue;
+    if (remoteControlIsOwnMessageContent(content, cfg)) continue;
+    users.push(msg);
+  }
+  return users.slice(-Math.max(2, Math.min(50, parseInt(maxUserMessages || 20, 10) || 20)));
+}
+
+function remoteControlDispatchMessages(messages, cfg = remoteControlSettings()) {
+  for (const msg of messages || []) {
+    const content = String((msg && msg.content) || '').trim();
+    if (!content) continue;
+    remoteControlMarkActivity();
+    if (remoteControlHandlePermissionReply(content)) continue;
+    if (msg && typeof msg === 'object' && !msg.delivery_id && !msg.deliveryId) {
+      msg.delivery_id = `runtime:${remoteControlRuntimeGeneration}:${++remoteControlDeliverySeq}`;
+    }
+    const parsed = remoteControlParseMessage(content);
+    if (!parsed.ok) {
+      if (cfg.autoSendErrors && content.startsWith('/')) remoteControlSendWechat('[Agent][Error]:\n' + parsed.error).catch(e => console.error('[remote-control] error reply failed:', e));
+      continue;
+    }
+    remoteControlDispatchParsed(parsed, msg);
+  }
 }
 
 function remoteControlMessageKey(msg) {
@@ -788,6 +912,9 @@ async function remoteControlRunChat(chat, parsed) {
   }
 
   const before = chat.messages.length;
+  remoteControlSendWechat(remoteControlFormatSystem('已收到消息并执行。')).catch(e => {
+    console.error('[remote-control] chat ack send failed:', e);
+  });
   remoteControlAppendUser(chat, remoteControlUserContent(parsed));
   const useTools = parsed.normal && !parsed.tools ? false : !!(parsed.tools || (chat.remoteControl && chat.remoteControl.useToolsDefault));
   try {
@@ -935,53 +1062,31 @@ function remoteControlHandlePermissionReply(content) {
 async function remoteControlPollOnce() {
   if (remoteControlPolling) return;
   if (!remoteControlSettings().enabled) return;
-  if (remoteControlPendingSends > 0) return;
   remoteControlPolling = true;
   try {
     const cfg = remoteControlSettings();
-    const userLimit = Math.max(1, Math.min(50, parseInt(cfg.pollLimit || 20, 10) || 20));
-    // The WeChat backend needs a rolling window with enough overlap to decide
-    // what is new. Treat the user setting as preference, but never let the
-    // internal de-duplication window become too small (limit=1 would otherwise
-    // make every newly sent message look like a no-overlap re-baseline).
-    const limit = Math.max(userLimit, 20);
-    const pollStartedAt = remoteControlNow();
-    let payload;
-    if (typeof callAgentBackend === 'function') {
-      payload = await callAgentBackend('wechat_bridge', {
-        op: 'poll',
-        limit,
-        timeout: 0,
-        interval: 1,
-        requestTimeoutMs: 90000,
-        bridge_timeout: 90
-      }, undefined, undefined, { skipConfirm: true });
-      remoteControlLogTiming('wechat poll', pollStartedAt, `limit=${limit}${payload && payload.busy ? ' busy' : ''}`);
-      if (!payload || !payload.ok) throw new Error((payload && payload.error) || JSON.stringify(payload));
-    } else {
-      const result = await executeTool('wechat_filehelper_poll', { limit, timeout: 0, interval: 1 }, { skipConfirm: true });
-      remoteControlLogTiming('wechat poll', pollStartedAt, `limit=${limit}`);
-      if (!result.ok) throw new Error(typeof result.value === 'string' ? result.value : JSON.stringify(result.value));
-      payload = result.value && result.value.stdout ? JSON.parse(result.value.stdout) : (typeof result.value === 'string' ? JSON.parse(result.value) : result.value);
-    }
+    const userLimit = Math.max(2, Math.min(50, parseInt(cfg.pollLimit || 20, 10) || 20));
+    const limit = remoteControlStartupMarkerFound ? Math.max(2, Math.min(50, userLimit * 2)) : 20;
+    cfg.pollLimit = userLimit;
+    const payload = await remoteControlReadWechat(limit);
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
-    const pollKey = payload.polled_at || String(Date.now());
-    const windowReset = !!(payload.window_reset || payload.no_overlap_reset);
-    for (const msg of messages) {
-      if (msg && typeof msg === 'object') msg._rcPollKey = pollKey;
-      if (msg && typeof msg === 'object' && windowReset) msg._rcWindowReset = true;
-      const content = String(msg.content || '').trim();
-      if (!content) continue;
-      if (cfg.ignoreAgentMessages && (content.startsWith(cfg.agentPrefix || '[Agent]') || content.startsWith('[System]'))) continue;
-      remoteControlMarkActivity();
-      if (remoteControlHandlePermissionReply(content)) continue;
-      const parsed = remoteControlParseMessage(content);
-      if (!parsed.ok) {
-        if (cfg.autoSendErrors && content.startsWith('/')) await remoteControlSendWechat('[Agent][Error]:\n' + parsed.error);
-        continue;
+    if (!remoteControlStartupMarkerFound) {
+      remoteControlStartupMarkerPollAttempts++;
+      const markerIndex = messages.findIndex(msg => String((msg && msg.content) || '').trim() === String(remoteControlStartupMarker || '').trim());
+      if (markerIndex < 0) {
+        if (remoteControlStartupMarkerPollAttempts >= 2) await remoteControlDisableAfterStartupMarkerError();
+        return;
       }
-      remoteControlDispatchParsed(parsed, msg);
+      remoteControlStartupMarkerFound = true;
+      const afterMarkerUsers = remoteControlUserMessagesFromRaw(messages.slice(markerIndex + 1), userLimit, cfg);
+      remoteControlLastUserWindowKeys = afterMarkerUsers.map((msg, idx) => remoteControlMessageWindowKey(msg, idx));
+      remoteControlDispatchMessages(afterMarkerUsers, cfg);
+      return;
     }
+    const userMessages = remoteControlUserMessagesFromRaw(messages, userLimit, cfg);
+    const diff = remoteControlNewItemsBySlidingWindow(remoteControlLastUserWindowKeys, userMessages, remoteControlMessageWindowKey);
+    remoteControlLastUserWindowKeys = diff.keys;
+    remoteControlDispatchMessages(diff.items, cfg);
   } catch (e) {
     console.error('[remote-control] poll failed:', e);
     if (typeof toast === 'function') toast('遥控轮询失败：' + (e.message || e), 3000);
@@ -998,7 +1103,6 @@ function remoteControlScheduleNext() {
   }
   const cfg = remoteControlSettings();
   if (!cfg.enabled) return;
-  if (remoteControlPendingSends > 0) return;
   const ms = remoteControlEffectivePollIntervalSec(cfg) * 1000;
   remoteControlTimer = setTimeout(remoteControlPollOnce, ms);
 }
@@ -1045,6 +1149,7 @@ function loadRemoteControlSettingsToModal() {
   _rcSetValue('remoteControlEnabled', !!cfg.enabled, 'checked');
   _rcSetValue('remoteControlPollInterval', cfg.pollIntervalSec || 5);
   _rcSetValue('remoteControlPollLimit', cfg.pollLimit || 20);
+  _rcSetValue('remoteControlMaxConsecutiveSendsBeforePoll', cfg.maxConsecutiveSendsBeforePoll || 5);
   _rcSetValue('remoteControlInputPrefix', cfg.inputPrefix || '/');
   _rcSetValue('remoteControlInputSeparator', cfg.inputSeparator || '：');
   _rcSetValue('remoteControlOutputTemplate', cfg.outputTemplate || REMOTE_CONTROL_DEFAULTS.outputTemplate);
@@ -1062,7 +1167,9 @@ async function saveRemoteControlSettingsFromModal() {
   const intervalEl = document.getElementById('remoteControlPollInterval');
   if (intervalEl) cfg.pollIntervalSec = Math.max(1, Math.min(300, parseInt(intervalEl.value || '5', 10) || 5));
   const limitEl = document.getElementById('remoteControlPollLimit');
-  if (limitEl) cfg.pollLimit = Math.max(1, Math.min(50, parseInt(limitEl.value || '20', 10) || 20));
+  if (limitEl) cfg.pollLimit = Math.max(2, Math.min(50, parseInt(limitEl.value || '20', 10) || 20));
+  const maxSendsEl = document.getElementById('remoteControlMaxConsecutiveSendsBeforePoll');
+  if (maxSendsEl) cfg.maxConsecutiveSendsBeforePoll = Math.max(1, Math.min(100, parseInt(maxSendsEl.value || '5', 10) || 5));
   const prefixEl = document.getElementById('remoteControlInputPrefix');
   if (prefixEl) cfg.inputPrefix = prefixEl.value || '/';
   const sepEl = document.getElementById('remoteControlInputSeparator');
