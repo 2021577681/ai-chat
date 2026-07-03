@@ -611,7 +611,6 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .remote-control-command-title strong{min-width:0;color:var(--text);font-size:12.5px;font-weight:700;line-height:1.45}
 .remote-control-command-title code{display:block;min-width:0;padding:0;border-radius:0;background:transparent;color:var(--primary);font-size:12px;line-height:1.45;font-family:var(--font-mono);white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .remote-control-command-desc{color:var(--text-secondary);font-size:11.5px;line-height:1.55}
-.remote-control-command-alias{margin-top:4px;color:var(--text-secondary);font-size:11px;line-height:1.45;opacity:.82}
 @media (max-width:768px){.remote-control-command-list{grid-template-columns:1fr}.remote-control-command-title{grid-template-columns:1fr;gap:2px}}
 .form-row{display:grid;gap:12px;margin-bottom:16px}
 .form-row label{display:block;margin-bottom:6px;font-size:13px;font-weight:500}

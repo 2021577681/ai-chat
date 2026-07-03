@@ -613,7 +613,7 @@ async function resumeOutline(msgIdx) {
 // 🏁 立即收尾（执行中 / 暂停中 都可用）
 // ⭐ 第一次点击发出收尾请求；请求后再次点击会触发"硬中断"，不再等 fetch 响应 abort。
 
-async function finishOutlineNow(msgIdx) {
+async function finishOutlineNow(msgIdx, options = {}) {
   const c = currentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].outline) return;
   const taskChatId = c.id;
@@ -624,7 +624,7 @@ async function finishOutlineNow(msgIdx) {
   // 用于网络层卡死、abort 信号被忽略等极端情况
   const outlineRunning = (typeof isChatTaskMode === 'function') ? isChatTaskMode(taskChatId, 'outline') : !!state._outlineExecuting;
   if (aiMsg.outline.finishRequested && outlineRunning) {
-    if (confirm('⚠️ 检测到任务似乎卡住了。\n\n是否强制中断？\n（将丢弃当前轮的回复，但保留已完成的大纲条目）')) {
+    if (options.skipConfirm || confirm('⚠️ 检测到任务似乎卡住了。\n\n是否强制中断？\n（将丢弃当前轮的回复，但保留已完成的大纲条目）')) {
       return _hardAbortOutline(msgIdx);
     }
     return;
@@ -634,7 +634,7 @@ async function finishOutlineNow(msgIdx) {
     // ⭐ 执行中 / 正在收尾：都允许触发"再来一次收尾"
     // truncated 状态下如果保底收尾 fetch 卡住，也走这里
     if (status === 'running') {
-      if (!confirm('立即停止当前轮并要求 AI 直接给出最终回答？\n\n（请求后再次点击此按钮，将强制中断）')) {
+      if (!options.skipConfirm && !confirm('立即停止当前轮并要求 AI 直接给出最终回答？\n\n（请求后再次点击此按钮，将强制中断）')) {
         return;
       }
     }
@@ -668,7 +668,7 @@ async function finishOutlineNow(msgIdx) {
   
   if (status === 'paused' || status === 'error') {
     // 暂停 / 出错中：直接发起一次保底收尾调用
-    if (!confirm('要求 AI 基于已有信息直接给出最终回答？')) {
+    if (!options.skipConfirm && !confirm('要求 AI 基于已有信息直接给出最终回答？')) {
       return;
     }
     if (!aiMsg.outline._snap) {
