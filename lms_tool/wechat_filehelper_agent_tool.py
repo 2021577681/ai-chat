@@ -36,7 +36,7 @@ def _json_default(obj: Any) -> Any:
         return {str(k): _json_default(v) for k, v in obj.items()}
 
     result: dict[str, Any] = {"type": type(obj).__name__, "repr": repr(obj)}
-    for attr in ("sender", "content", "time", "type", "name", "text"):
+    for attr in ("sender", "content", "time", "type", "name", "text", "id"):
         if hasattr(obj, attr):
             try:
                 result[attr] = _json_default(getattr(obj, attr))
@@ -116,29 +116,36 @@ def switch_to_safe_chat(wx: Any, backend_name: str) -> None:
 
 def normalize_message(msg: Any) -> dict[str, Any]:
     data = _json_default(msg)
+    backend_id = None
     if isinstance(data, dict):
         sender = data.get("sender") or data.get("name") or ""
         content = data.get("content") or data.get("text") or data.get("repr") or ""
         msg_time = data.get("time")
         msg_type = data.get("type")
+        backend_id = data.get("id") or data.get("message_id") or data.get("msg_id")
     elif isinstance(data, (list, tuple)):
         sender = str(data[0]) if len(data) > 0 else ""
         content = str(data[1]) if len(data) > 1 else str(data)
         msg_time = None
         msg_type = None
+        backend_id = data[2] if len(data) > 2 else None
     else:
         sender = ""
         content = str(data)
         msg_time = None
         msg_type = None
 
-    return {
+    normalized = {
         "sender": str(sender),
         "content": str(content),
         "time": msg_time,
         "type": msg_type,
         "raw": data,
     }
+    backend_id_text = str(backend_id or "").strip()
+    if backend_id_text and backend_id_text.lower() not in {"none", "null"}:
+        normalized["backend_id"] = backend_id_text
+    return normalized
 
 
 def message_id(msg: dict[str, Any]) -> str:
@@ -186,10 +193,12 @@ def annotate_context_times(messages: list[dict[str, Any]]) -> None:
 def message_sequence_key(msg: dict[str, Any]) -> str:
     """Stable key used to compare consecutive read windows.
 
-    Prefer the backend-provided message timestamp when present: if the timestamp
-    is identical, it is the same WeChat message and must not execute again.  Only
-    fall back to content-based hashing for backends that expose no usable time.
+    Prefer a backend-provided per-message id when present. Fall back to the
+    backend timestamp, then content hashing for backends that expose neither.
     """
+    backend_id = str(msg.get("backend_id") or "").strip()
+    if backend_id:
+        return f"backend:{backend_id}"
     content_hash = hashlib.sha256(str(msg.get("content") or "").encode("utf-8")).hexdigest()[:12]
     time_key = message_time_key(msg)
     if time_key:
@@ -233,9 +242,12 @@ def assign_message_ids(normalized: list[dict[str, Any]]) -> None:
     counts: dict[str, int] = {}
     for idx, item in enumerate(normalized):
         base_stable = message_sequence_key(item)
-        occurrence = counts.get(base_stable, 0)
-        counts[base_stable] = occurrence + 1
-        item["stable_id"] = f"{base_stable}#{occurrence}"
+        if base_stable.startswith("backend:"):
+            item["stable_id"] = base_stable
+        else:
+            occurrence = counts.get(base_stable, 0)
+            counts[base_stable] = occurrence + 1
+            item["stable_id"] = f"{base_stable}#{occurrence}"
         item["id"] = message_id_with_position(item, idx, len(normalized))
 
 

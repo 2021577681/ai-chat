@@ -1206,7 +1206,7 @@ function remoteControlDispatchMessages(messages, cfg = remoteControlSettings()) 
     if (remoteControlHandlePermissionReply(content)) continue;
     const parsed = remoteControlParseMessage(content);
     if (!parsed.ok) {
-      if (cfg.autoSendErrors && content.startsWith('/')) remoteControlSendWechat('[Agent][Error]:\n' + parsed.error).catch(e => console.error('[remote-control] error reply failed:', e));
+      if (cfg.autoSendErrors && content.startsWith('/')) remoteControlSendWechat(remoteControlFormatSystem(parsed.error)).catch(e => console.error('[remote-control] error reply failed:', e));
       continue;
     }
     remoteControlDispatchParsed(parsed, msg);
@@ -1311,9 +1311,9 @@ function remoteControlQueueGuidance(chat, parsed) {
 }
 
 function remoteControlGuidanceAck(parsed) {
-  if (parsed && parsed.temporary && !parsed.id) return '[System]已引导临时对话';
+  if (parsed && parsed.temporary && !parsed.id) return remoteControlFormatSystem('已引导临时对话');
   const label = remoteControlParsedLabel(parsed);
-  return '[System]已引导对话' + (label ? ` ${label}` : '');
+  return remoteControlFormatSystem('已引导对话' + (label ? ` ${label}` : ''));
 }
 
 function remoteControlReplyId(parsed) {
@@ -1692,7 +1692,7 @@ async function remoteControlRunChat(chat, parsed) {
 
 async function remoteControlHandleParsed(parsed) {
   if (parsed.help) {
-    await remoteControlSendWechat(remoteControlFormatHelpExamples());
+    await remoteControlSendWechat(remoteControlFormatSystem(remoteControlFormatHelpExamples()));
     return;
   }
   if (parsed.shutdownRemote) {
