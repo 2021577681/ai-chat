@@ -26,6 +26,9 @@ const DEFAULT_PRICING = [
 const DEFAULT_FALLBACK = { input: 1.0, output: 3.0, cacheRead: 0.1 };  // 没匹配上时用
 const DEFAULT_CONFIG = { rate: 7.2, showCny: true };
 const PRICING_CURRENCIES = ['USD', 'CNY'];
+const PricingStateModule = window.AgentApp.require('state');
+const pricingState = PricingStateModule.state;
+const PricingUiService = window.AgentApp.require('uiService');
 
 // ============ 读写工具 ============
 
@@ -195,7 +198,7 @@ function _buildPricingModal() {
   wrap.id = 'pricingModal';
   wrap.innerHTML = `
     <div class="modal wide">
-      <h2>💰 定价管理 <button class="modal-close" onclick="closePricingManager()">×</button></h2>
+      <h2>💰 定价管理 <button class="modal-close" data-action="closePricingManager">×</button></h2>
 
       <div class="json-help">
         💡 在这里配置各模型的 token 单价，用于 Token 统计弹窗里的费用估算。<br>
@@ -216,7 +219,7 @@ function _buildPricingModal() {
           <input type="checkbox" id="pricingShowCny" />
           <span>同时显示人民币（¥）</span>
         </label>
-        <button class="pricing-btn pricing-btn-primary" onclick="savePricingConfigFromUI()" style="margin-left:auto;">
+        <button class="pricing-btn pricing-btn-primary" data-action="savePricingConfigFromUI" style="margin-left:auto;">
           <span>💾</span><span>保存设置</span>
         </button>
       </div>
@@ -244,17 +247,17 @@ function _buildPricingModal() {
       </div>
 
       <div class="pricing-toolbar">
-        <button class="pricing-btn pricing-btn-primary" onclick="addPricingRow()">
+        <button class="pricing-btn pricing-btn-primary" data-action="addPricingRow">
           <span>➕</span><span>添加价格</span>
         </button>
-        <button class="pricing-btn pricing-btn-success" onclick="savePricingListFromUI()">
+        <button class="pricing-btn pricing-btn-success" data-action="savePricingListFromUI">
           <span>💾</span><span>保存价格表</span>
         </button>
-        <button class="pricing-btn" onclick="testPricingMatch()">
+        <button class="pricing-btn" data-action="testPricingMatch">
           <span>🔍</span><span>测试匹配</span>
         </button>
         <div class="pricing-btn-spacer"></div>
-        <button class="pricing-btn pricing-btn-warning" onclick="resetPricingToDefault()">
+        <button class="pricing-btn pricing-btn-warning" data-action="resetPricingToDefault">
           <span>↩</span><span>恢复默认</span>
         </button>
       </div>
@@ -262,7 +265,7 @@ function _buildPricingModal() {
       <div id="pricingTestResult" class="pricing-test-result"></div>
 
       <div class="modal-footer">
-        <button class="btn" onclick="closePricingManager()">关闭</button>
+        <button class="btn" data-action="closePricingManager">关闭</button>
       </div>
     </div>
   `;
@@ -296,7 +299,7 @@ function _renderPricingRow(p, i) {
       <td><input type="number" class="pricing-input pricing-cache" value="${formatPriceNumber(row.cacheRead)}" step="0.001" min="0" /></td>
       <td><input type="text"   class="pricing-input pricing-note"  value="${escapeHtml(row.note || '')}" placeholder="可选" /></td>
       <td style="text-align:center;">
-        <button class="pricing-row-del" onclick="removePricingRow(${i})" title="删除此行">×</button>
+        <button class="pricing-row-del" data-action="valueClick" data-handler="removePricingRow" data-value="${i}" data-value-type="number" title="删除此行">×</button>
       </td>
     </tr>
   `;
@@ -307,8 +310,8 @@ function renderCurrencyField(currency) {
   return `
     <div class="pricing-currency-segment" role="group" aria-label="价格单位">
       <input type="hidden" class="pricing-currency-value pricing-currency" value="${normalizedCurrency}" />
-      <button type="button" class="pricing-currency-option${normalizedCurrency === 'USD' ? ' active' : ''}" aria-pressed="${normalizedCurrency === 'USD'}" onclick="setPricingCurrency(this,'USD')">USD</button>
-      <button type="button" class="pricing-currency-option${normalizedCurrency === 'CNY' ? ' active' : ''}" aria-pressed="${normalizedCurrency === 'CNY'}" onclick="setPricingCurrency(this,'CNY')">CNY</button>
+      <button type="button" class="pricing-currency-option${normalizedCurrency === 'USD' ? ' active' : ''}" aria-pressed="${normalizedCurrency === 'USD'}" data-action="setPricingCurrency" data-value="USD">USD</button>
+      <button type="button" class="pricing-currency-option${normalizedCurrency === 'CNY' ? ' active' : ''}" aria-pressed="${normalizedCurrency === 'CNY'}" data-action="setPricingCurrency" data-value="CNY">CNY</button>
     </div>
   `;
 }
@@ -391,7 +394,7 @@ function _renderListInMemory(list) {
 function savePricingListFromUI() {
   const list = _collectPricingFromUI();
   savePricingList(list);
-  if (typeof toast === 'function') toast(`✓ 已保存 ${list.length} 条价格`);
+  PricingUiService.toast(`✓ 已保存 ${list.length} 条价格`);
   renderPricingTable();
 }
 
@@ -403,18 +406,18 @@ function savePricingConfigFromUI() {
   if (!isNaN(r) && r > 0) cfg.rate = r;
   if (showCnyEl) cfg.showCny = !!showCnyEl.checked;
   savePricingConfig(cfg);
-  if (typeof toast === 'function') toast('✓ 已保存显示设置');
+  PricingUiService.toast('✓ 已保存显示设置');
 }
 
 function resetPricingToDefault() {
   if (!confirm('确定恢复为默认价格表？\n\n你当前的自定义价格会被覆盖（汇率设置不受影响）。')) return;
   savePricingList(DEFAULT_PRICING.map(x => ({ ...x })));
   renderPricingTable();
-  if (typeof toast === 'function') toast('↩ 已恢复默认价格');
+  PricingUiService.toast('↩ 已恢复默认价格');
 }
 
 function testPricingMatch() {
-  const model = prompt('输入一个模型名测试匹配结果：', state.settings.currentModel || 'gpt-4o-mini');
+  const model = prompt('输入一个模型名测试匹配结果：', pricingState.settings.currentModel || 'gpt-4o-mini');
   if (model === null) return;
   const result = getPricing(model.trim());
   const el = document.getElementById('pricingTestResult');
@@ -447,3 +450,18 @@ window.savePricingConfigFromUI = savePricingConfigFromUI;
 window.resetPricingToDefault = resetPricingToDefault;
 window.testPricingMatch = testPricingMatch;
 window.setPricingCurrency = setPricingCurrency;
+
+window.AgentApp.define('pricing', {
+  getPricing,
+  getExchangeRate,
+  shouldShowCny,
+  openPricingManager,
+  closePricingManager,
+  addPricingRow,
+  removePricingRow,
+  savePricingListFromUI,
+  savePricingConfigFromUI,
+  resetPricingToDefault,
+  testPricingMatch,
+  setPricingCurrency
+});

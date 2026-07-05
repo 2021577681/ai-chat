@@ -59,7 +59,7 @@ class ScreenshotMixin:
             'is_image': True,
             'data': 'data:image/png;base64,' + b64
         }
-        self._send_json(200, payload)
+        self.response.json(200, payload)
 
     def _grab_fullscreen(self, body):
         try:
@@ -281,7 +281,7 @@ class ScreenshotMixin:
                     source = 'window'
                 except Exception as e:
                     if mode == 'window':
-                        return self._send_json(200, {'ok': False, 'error': f'指定窗口截图失败：{e}', 'source': 'window'})
+                        return self.response.json(200, {'ok': False, 'error': f'指定窗口截图失败：{e}', 'source': 'window'})
                     warnings.append(f'优先级 1 指定窗口截图失败：{e}；已进入优先级 2 全屏截图。')
 
             if img is None:
@@ -297,7 +297,7 @@ class ScreenshotMixin:
                 warnings=warnings
             )
         except Exception as e:
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': False,
                 'error': f'截图失败：{e}',
                 'fallback': '请将目标窗口置于前台后重试，或改用全屏截图。'
@@ -308,6 +308,6 @@ class ScreenshotMixin:
             title = body.get('window_title') or body.get('title')
             process_name = body.get('process_name')
             wins = self._find_windows_win32(title=title, process_name=process_name)
-            self._send_json(200, {'ok': True, 'windows': wins, 'count': len(wins), 'platform': sys.platform})
+            self.response.json(200, {'ok': True, 'windows': wins, 'count': len(wins), 'platform': sys.platform})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': f'列出窗口失败：{e}', 'platform': sys.platform})
+            self.response.json(200, {'ok': False, 'error': f'列出窗口失败：{e}', 'platform': sys.platform})

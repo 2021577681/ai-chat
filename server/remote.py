@@ -408,16 +408,16 @@ class RemoteMixin:
         try:
             ssh_parts = _split_cmd(ssh_command)
             data = _list_remote_dirs(ssh_parts, path=path, password=password, show_hidden=show_hidden)
-            self._send_json(200, data)
+            self.response.json(200, data)
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e), 'path': path})
+            self.response.json(200, {'ok': False, 'error': str(e), 'path': path})
 
     def handle_remote_status(self, body):
         proc = _REMOTE_STATE.get('tunnel_process')
         connected = bool(proc and proc.poll() is None and _REMOTE_STATE.get('server_url'))
         _REMOTE_STATE['connected'] = connected
         hidden = {'tunnel_process', 'heartbeat_thread', 'heartbeat_stop'}
-        self._send_json(200, {k: v for k, v in _REMOTE_STATE.items() if k not in hidden})
+        self.response.json(200, {k: v for k, v in _REMOTE_STATE.items() if k not in hidden})
 
     def handle_remote_disconnect(self, body):
         stop_remote = bool(body.get('stop_remote'))
@@ -437,7 +437,7 @@ class RemoteMixin:
             except Exception as e:
                 _REMOTE_STATE['last_error'] = str(e)
         _REMOTE_STATE.update({'connected': False, 'server_url': '', 'tunnel_pid': None, 'tunnel_process': None})
-        self._send_json(200, {'ok': True, 'message': '已断开远程隧道'})
+        self.response.json(200, {'ok': True, 'message': '已断开远程隧道'})
 
     def handle_remote_connect(self, body):
         ssh_command = (body.get('ssh_command') or '').strip()
@@ -562,7 +562,7 @@ class RemoteMixin:
                 'started_at': _now_stamp(),
                 'last_error': '',
             })
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'server_url': server_url,
                 'local_port': local_port,
@@ -575,7 +575,7 @@ class RemoteMixin:
             })
         except Exception as e:
             _REMOTE_STATE['last_error'] = str(e)
-            self._send_json(200, {'ok': False, 'error': str(e), 'logs': logs})
+            self.response.json(200, {'ok': False, 'error': str(e), 'logs': logs})
         finally:
             if tmp_dir:
                 shutil.rmtree(tmp_dir, ignore_errors=True)

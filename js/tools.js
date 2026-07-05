@@ -1,3 +1,16 @@
+const ToolsConfig = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('config')
+  : null;
+const ToolsStateModule = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('state')
+  : null;
+const ToolsUiService = window.AgentApp.require('uiService');
+const toolsState = ToolsStateModule ? ToolsStateModule.state : state;
+const toolsPersistTools = ToolsStateModule ? ToolsStateModule.persistTools : persistTools;
+const toolsPersistSettings = ToolsStateModule ? ToolsStateModule.persistSettings : persistSettings;
+const builtinToolDefs = ToolsConfig ? ToolsConfig.BUILTIN_TOOLS : (typeof BUILTIN_TOOLS !== 'undefined' ? BUILTIN_TOOLS : []);
+const presetToolDefs = ToolsConfig ? ToolsConfig.PRESET_TOOLS : (typeof PRESET_TOOLS !== 'undefined' ? PRESET_TOOLS : {});
+
 // ============ 工具管理 ============
 
 function openTools() {
@@ -7,23 +20,23 @@ function openTools() {
 
 function closeTools() {
   document.getElementById('toolsModal').classList.remove('show');
-  persistTools();
-  updateSendBtn();
+  toolsPersistTools();
+  ToolsUiService.updateSendBtn();
 }
 
 function renderToolList() {
   const el = document.getElementById('toolList');
-  if (!state.tools.length) {
-    el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;font-size:13px;">还没有工具<br><button class="btn btn-primary" style="margin-top:10px;" onclick="resetBuiltinTools()">🔄 加载内置工具</button></div>';
+  if (!toolsState.tools.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:20px;font-size:13px;">还没有工具<br><button class="btn btn-primary" style="margin-top:10px;" data-action="resetBuiltinTools">🔄 加载内置工具</button></div>';
     updateLmsToggleBtn();
     updateGitToggleBtn();
     updatePaperToggleBtn();
     return;
   }
   
-  const builtinNames = new Set((typeof BUILTIN_TOOLS !== 'undefined' ? BUILTIN_TOOLS : []).map(t => t.name));
+  const builtinNames = new Set(builtinToolDefs.map(t => t.name));
   
-  el.innerHTML = state.tools.map((t, i) => {
+  el.innerHTML = toolsState.tools.map((t, i) => {
     const isBuiltin = builtinNames.has(t.name);
     const isLms = isLmsTool(t.name);
     const isGit = isGitTool(t.name);
@@ -43,12 +56,12 @@ function renderToolList() {
               : (isBuiltin ? '<span style="background:var(--primary);color:white;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">内置</span>' : '')))));
     return `
     <div class="tool-item">
-      <div class="tool-item-header" onclick="this.parentElement.classList.toggle('expanded')">
+      <div class="tool-item-header" data-action="toggleParentCollapsed">
         <span style="font-size:18px;">🔧</span>
         <span class="tool-item-name">${escapeHtml(t.name)}${badge}</span>
         <span class="tool-item-desc">${escapeHtml(t.description || '')}</span>
-        <button class="tool-toggle-btn" onclick="event.stopPropagation();editTool(${i})">✏️</button>
-        <button class="tool-toggle-btn" onclick="event.stopPropagation();deleteTool(${i})">×</button>
+        <button class="tool-toggle-btn" data-action="valueClick" data-handler="editTool" data-value="${i}" data-value-type="number" data-stop-propagation="true">✏️</button>
+        <button class="tool-toggle-btn" data-action="valueClick" data-handler="deleteTool" data-value="${i}" data-value-type="number" data-stop-propagation="true">×</button>
       </div>
       <div class="tool-item-body">
         <pre style="background:var(--bg-input);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;">${escapeHtml(JSON.stringify(t.parameters, null, 2))}</pre>
@@ -66,40 +79,40 @@ function isLmsTool(name) {
 }
 
 function lmsToolsEnabled() {
-  return state.tools.some(t => isLmsTool(t.name));
+  return toolsState.tools.some(t => isLmsTool(t.name));
 }
 
 function lmsToolCount() {
-  // BUILTIN_TOOLS 中总共有多少个 LMS 工具
-  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
-  return BUILTIN_TOOLS.filter(t => isLmsTool(t.name)).length;
+  // builtinToolDefs 中总共有多少个 LMS 工具
+  if (!Array.isArray(builtinToolDefs)) return 0;
+  return builtinToolDefs.filter(t => isLmsTool(t.name)).length;
 }
 
 function toggleLmsTools() {
   if (lmsToolsEnabled()) {
-    // 禁用：从 state.tools 移除所有 lms_* 工具
-    const removed = state.tools.filter(t => isLmsTool(t.name)).length;
-    state.tools = state.tools.filter(t => !isLmsTool(t.name));
-    persistTools();
+    // 禁用：从 toolsState.tools 移除所有 lms_* 工具
+    const removed = toolsState.tools.filter(t => isLmsTool(t.name)).length;
+    toolsState.tools = toolsState.tools.filter(t => !isLmsTool(t.name));
+    toolsPersistTools();
     renderToolList();
-    toast(`🔕 已禁用 ${removed} 个 LMS 工具`);
+    ToolsUiService.toast(`🔕 已禁用 ${removed} 个 LMS 工具`);
   } else {
-    // 启用：从 BUILTIN_TOOLS 中把 lms_* 工具加回来
-    if (typeof BUILTIN_TOOLS === 'undefined') {
-      toast('未找到内置工具定义');
+    // 启用：从 builtinToolDefs 中把 lms_* 工具加回来
+    if (!Array.isArray(builtinToolDefs)) {
+      ToolsUiService.toast('未找到内置工具定义');
       return;
     }
-    const lmsTools = BUILTIN_TOOLS.filter(t => isLmsTool(t.name));
+    const lmsTools = builtinToolDefs.filter(t => isLmsTool(t.name));
     let added = 0;
     for (const tool of lmsTools) {
-      if (!state.tools.some(t => t.name === tool.name)) {
-        state.tools.push(JSON.parse(JSON.stringify(tool)));
+      if (!toolsState.tools.some(t => t.name === tool.name)) {
+        toolsState.tools.push(JSON.parse(JSON.stringify(tool)));
         added++;
       }
     }
-    persistTools();
+    toolsPersistTools();
     renderToolList();
-    toast(`🎓 已启用 ${added} 个 LMS 工具`);
+    ToolsUiService.toast(`🎓 已启用 ${added} 个 LMS 工具`);
   }
 }
 
@@ -109,7 +122,7 @@ function updateLmsToggleBtn() {
   const enabled = lmsToolsEnabled();
   const total = lmsToolCount();
   if (enabled) {
-    const cur = state.tools.filter(t => isLmsTool(t.name)).length;
+    const cur = toolsState.tools.filter(t => isLmsTool(t.name)).length;
     btn.textContent = `禁用 LMS 工具 (${cur})`;
     btn.classList.remove('btn-primary');
     btn.title = '当前 LMS 工具已启用，点击全部移除';
@@ -130,39 +143,39 @@ function isGitTool(name) {
 }
 
 function gitToolsEnabled() {
-  return state.tools.some(t => isGitTool(t.name));
+  return toolsState.tools.some(t => isGitTool(t.name));
 }
 
 function gitToolCount() {
-  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
-  return BUILTIN_TOOLS.filter(t => isGitTool(t.name)).length;
+  if (!Array.isArray(builtinToolDefs)) return 0;
+  return builtinToolDefs.filter(t => isGitTool(t.name)).length;
 }
 
 function toggleGitTools() {
   if (gitToolsEnabled()) {
-    // 禁用：从 state.tools 移除所有 Git 工具
-    const removed = state.tools.filter(t => isGitTool(t.name)).length;
-    state.tools = state.tools.filter(t => !isGitTool(t.name));
-    persistTools();
+    // 禁用：从 toolsState.tools 移除所有 Git 工具
+    const removed = toolsState.tools.filter(t => isGitTool(t.name)).length;
+    toolsState.tools = toolsState.tools.filter(t => !isGitTool(t.name));
+    toolsPersistTools();
     renderToolList();
-    toast(`🔕 已禁用 ${removed} 个版本快照工具`);
+    ToolsUiService.toast(`🔕 已禁用 ${removed} 个版本快照工具`);
   } else {
-    // 启用：从 BUILTIN_TOOLS 中把 Git 工具加回来
-    if (typeof BUILTIN_TOOLS === 'undefined') {
-      toast('未找到内置工具定义');
+    // 启用：从 builtinToolDefs 中把 Git 工具加回来
+    if (!Array.isArray(builtinToolDefs)) {
+      ToolsUiService.toast('未找到内置工具定义');
       return;
     }
-    const gitTools = BUILTIN_TOOLS.filter(t => isGitTool(t.name));
+    const gitTools = builtinToolDefs.filter(t => isGitTool(t.name));
     let added = 0;
     for (const tool of gitTools) {
-      if (!state.tools.some(t => t.name === tool.name)) {
-        state.tools.push(JSON.parse(JSON.stringify(tool)));
+      if (!toolsState.tools.some(t => t.name === tool.name)) {
+        toolsState.tools.push(JSON.parse(JSON.stringify(tool)));
         added++;
       }
     }
-    persistTools();
+    toolsPersistTools();
     renderToolList();
-    toast(`💾 已启用 ${added} 个版本快照工具`);
+    ToolsUiService.toast(`💾 已启用 ${added} 个版本快照工具`);
   }
 }
 
@@ -172,7 +185,7 @@ function updateGitToggleBtn() {
   const enabled = gitToolsEnabled();
   const total = gitToolCount();
   if (enabled) {
-    const cur = state.tools.filter(t => isGitTool(t.name)).length;
+    const cur = toolsState.tools.filter(t => isGitTool(t.name)).length;
     btn.textContent = `禁用快照工具 (${cur})`;
     btn.classList.remove('btn-primary');
     btn.title = '当前版本快照工具已启用，点击全部移除';
@@ -190,12 +203,13 @@ function isPptTool(name) {
   return typeof name === 'string' && PPT_TOOL_NAMES.includes(name);
 }
 
+
 function ensurePptToolsEnabled() {
-  if (typeof BUILTIN_TOOLS === 'undefined' || !Array.isArray(BUILTIN_TOOLS)) return 0;
+  if (!Array.isArray(builtinToolDefs)) return 0;
   let added = 0;
-  for (const tool of BUILTIN_TOOLS.filter(t => PPT_TOOL_NAMES.includes(t.name))) {
-    if (!state.tools.some(t => t.name === tool.name)) {
-      state.tools.push(JSON.parse(JSON.stringify(tool)));
+  for (const tool of builtinToolDefs.filter(t => PPT_TOOL_NAMES.includes(t.name))) {
+    if (!toolsState.tools.some(t => t.name === tool.name)) {
+      toolsState.tools.push(JSON.parse(JSON.stringify(tool)));
       added++;
     }
   }
@@ -203,17 +217,17 @@ function ensurePptToolsEnabled() {
 }
 
 function ensurePptToolsDisabled() {
-  const before = state.tools.length;
-  state.tools = state.tools.filter(t => !isPptTool(t.name));
-  return before - state.tools.length;
+  const before = toolsState.tools.length;
+  toolsState.tools = toolsState.tools.filter(t => !isPptTool(t.name));
+  return before - toolsState.tools.length;
 }
 
-function syncPptToolsWithMode(enabled = !!(state.settings && state.settings.usePpt), options = {}) {
-  const before = state.tools.length;
+function syncPptToolsWithMode(enabled = !!(toolsState.settings && toolsState.settings.usePpt), options = {}) {
+  const before = toolsState.tools.length;
   if (enabled) ensurePptToolsEnabled();
   else ensurePptToolsDisabled();
-  if (state.tools.length !== before) {
-    persistTools();
+  if (toolsState.tools.length !== before) {
+    toolsPersistTools();
     if (options.render !== false && typeof renderToolList === 'function') renderToolList();
   }
 }
@@ -233,40 +247,40 @@ function isPaperTool(name) {
 }
 
 function paperToolsEnabled() {
-  return state.tools.some(t => isPaperTool(t.name));
+  return toolsState.tools.some(t => isPaperTool(t.name));
 }
 
 function paperToolCount() {
-  if (typeof BUILTIN_TOOLS === 'undefined') return 0;
-  return BUILTIN_TOOLS.filter(t => isPaperTool(t.name)).length;
+  if (!Array.isArray(builtinToolDefs)) return 0;
+  return builtinToolDefs.filter(t => isPaperTool(t.name)).length;
 }
 
 function togglePaperTools() {
-  if (typeof BUILTIN_TOOLS === 'undefined') {
-    toast('未找到内置工具定义');
+  if (!Array.isArray(builtinToolDefs)) {
+    ToolsUiService.toast('未找到内置工具定义');
     return;
   }
-  const paperTools = BUILTIN_TOOLS.filter(t => isPaperTool(t.name));
-  const enabledCount = state.tools.filter(t => isPaperTool(t.name)).length;
+  const paperTools = builtinToolDefs.filter(t => isPaperTool(t.name));
+  const enabledCount = toolsState.tools.filter(t => isPaperTool(t.name)).length;
   if (enabledCount > 0 && enabledCount >= paperTools.length) {
-    // 禁用：从 state.tools 移除所有论文工具
+    // 禁用：从 toolsState.tools 移除所有论文工具
     const removed = enabledCount;
-    state.tools = state.tools.filter(t => !isPaperTool(t.name));
-    persistTools();
+    toolsState.tools = toolsState.tools.filter(t => !isPaperTool(t.name));
+    toolsPersistTools();
     renderToolList();
-    toast(`🔕 已禁用 ${removed} 个论文工具`);
+    ToolsUiService.toast(`🔕 已禁用 ${removed} 个论文工具`);
   } else {
-    // 启用/补全：从 BUILTIN_TOOLS 中把论文工具加回来
+    // 启用/补全：从 builtinToolDefs 中把论文工具加回来
     let added = 0;
     for (const tool of paperTools) {
-      if (!state.tools.some(t => t.name === tool.name)) {
-        state.tools.push(JSON.parse(JSON.stringify(tool)));
+      if (!toolsState.tools.some(t => t.name === tool.name)) {
+        toolsState.tools.push(JSON.parse(JSON.stringify(tool)));
         added++;
       }
     }
-    persistTools();
+    toolsPersistTools();
     renderToolList();
-    toast(added ? `📚 已启用 ${added} 个论文工具` : '📚 论文工具已全部启用');
+    ToolsUiService.toast(added ? `📚 已启用 ${added} 个论文工具` : '📚 论文工具已全部启用');
   }
 }
 
@@ -276,7 +290,7 @@ function updatePaperToggleBtn() {
   const enabled = paperToolsEnabled();
   const total = paperToolCount();
   if (enabled) {
-    const cur = state.tools.filter(t => isPaperTool(t.name)).length;
+    const cur = toolsState.tools.filter(t => isPaperTool(t.name)).length;
     if (cur < total) {
       btn.textContent = `补全论文工具 (${cur}/${total})`;
       btn.classList.add('btn-primary');
@@ -294,20 +308,20 @@ function updatePaperToggleBtn() {
 }
 
 function addPresetTool(key) {
-  const p = PRESET_TOOLS[key];
+  const p = presetToolDefs[key];
   if (!p) return;
-  if (state.tools.some(t => t.name === p.name)) {
-    toast('已存在');
+  if (toolsState.tools.some(t => t.name === p.name)) {
+    ToolsUiService.toast('已存在');
     return;
   }
-  state.tools.push(JSON.parse(JSON.stringify(p)));
-  persistTools();
+  toolsState.tools.push(JSON.parse(JSON.stringify(p)));
+  toolsPersistTools();
   renderToolList();
-  toast('✓ 已添加');
+  ToolsUiService.toast('✓ 已添加');
 }
 
 function addCustomTool() {
-  state.editingToolIdx = -1;
+  toolsState.editingToolIdx = -1;
   document.getElementById('te_name').value = '';
   document.getElementById('te_desc').value = '';
   document.getElementById('te_params').value = JSON.stringify({ type: 'object', properties: { input: { type: 'string' } }, required: ['input'] }, null, 2);
@@ -316,8 +330,8 @@ function addCustomTool() {
 }
 
 function editTool(i) {
-  state.editingToolIdx = i;
-  const t = state.tools[i];
+  toolsState.editingToolIdx = i;
+  const t = toolsState.tools[i];
   document.getElementById('te_name').value = t.name;
   document.getElementById('te_desc').value = t.description;
   document.getElementById('te_params').value = JSON.stringify(t.parameters, null, 2);
@@ -341,62 +355,62 @@ function saveToolEdit() {
     return;
   }
   const tool = { name, description: desc, parameters: params, code };
-  if (state.editingToolIdx >= 0) state.tools[state.editingToolIdx] = tool;
+  if (toolsState.editingToolIdx >= 0) toolsState.tools[toolsState.editingToolIdx] = tool;
   else {
-    if (state.tools.some(t => t.name === name)) {
+    if (toolsState.tools.some(t => t.name === name)) {
       alert('已存在');
       return;
     }
-    state.tools.push(tool);
+    toolsState.tools.push(tool);
   }
-  persistTools();
+  toolsPersistTools();
   renderToolList();
   document.getElementById('toolEditModal').classList.remove('show');
-  toast('✓ 已保存');
+  ToolsUiService.toast('✓ 已保存');
 }
 
 function deleteTool(i) {
   if (!confirm('删除？')) return;
-  state.tools.splice(i, 1);
-  persistTools();
+  toolsState.tools.splice(i, 1);
+  toolsPersistTools();
   renderToolList();
 }
 
 function clearAllTools() {
-  if (!state.tools.length) return;
+  if (!toolsState.tools.length) return;
   if (!confirm('清空所有工具？')) return;
-  state.tools = [];
-  persistTools();
+  toolsState.tools = [];
+  toolsPersistTools();
   renderToolList();
 }
 
 function toggleTools() {
-  if (!state.tools.length) {
-    toast('请先添加工具');
+  if (!toolsState.tools.length) {
+    ToolsUiService.toast('请先添加工具');
     openTools();
     return;
   }
-  state.settings.useTools = !state.settings.useTools;
+  toolsState.settings.useTools = !toolsState.settings.useTools;
   const btn = document.getElementById('toolsBtn');
-  if (state.settings.useTools) btn.classList.add('tool-active');
+  if (toolsState.settings.useTools) btn.classList.add('tool-active');
   else btn.classList.remove('tool-active');
-  persistSettings();
-  updateSendBtn();
+  toolsPersistSettings();
+  ToolsUiService.updateSendBtn();
 }
 
 function buildToolsArray(options = {}) {
   const force = !!(options && options.force);
-  if ((!force && !state.settings.useTools) || !state.tools.length) return null;
-  const availableTools = state.tools.filter(t => !isPptTool(t.name) || !!state.settings.usePpt);
+  if ((!force && !toolsState.settings.useTools) || !toolsState.tools.length) return null;
+  const availableTools = toolsState.tools.filter(t => !isPptTool(t.name) || !!toolsState.settings.usePpt);
   if (!availableTools.length) return null;
   
-  if (state.settings.apiFormat === 'anthropic') {
+  if (toolsState.settings.apiFormat === 'anthropic') {
     return availableTools.map(t => ({
       name: t.name,
       description: t.description,
       input_schema: t.parameters
     }));
-  } else if (state.settings.apiFormat === 'responses') {
+  } else if (toolsState.settings.apiFormat === 'responses') {
     return availableTools.map(t => ({
       type: 'function',
       name: t.name,
@@ -781,7 +795,7 @@ function _toolContextChatId(context = {}) {
   if (typeof context === 'string') return context;
   if (context && context.chatId) return context.chatId;
   if (context && context.chat && context.chat.id) return context.chat.id;
-  return (state && (state.activeTaskChatId || state.currentId)) || '';
+  return (toolsState && (toolsState.activeTaskChatId || toolsState.currentId)) || '';
 }
 
 function _ctxToolFn(name, context) {
@@ -794,9 +808,9 @@ function _ctxToolFn(name, context) {
 }
 
 async function executeTool(name, args, context = {}) {
-  const tool = state.tools.find(t => t.name === name);
+  const tool = toolsState.tools.find(t => t.name === name);
   if (!tool) return { ok: false, value: `未找到工具：${name}` };
-  if (isPptTool(name) && !(state.settings && state.settings.usePpt)) {
+  if (isPptTool(name) && !(toolsState.settings && toolsState.settings.usePpt)) {
     return { ok: false, value: 'PPT 工具只能在顶栏 PPT 模式开启时使用。' };
   }
   const toolContext = {
@@ -823,4 +837,31 @@ async function executeTool(name, args, context = {}) {
     if (typeof window !== 'undefined' && window.__currentToolContext === toolContext) delete window.__currentToolContext;
     return { ok: false, value: `工具出错：${e.message}` };
   }
+}
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('tools', {
+    openTools,
+    closeTools,
+    renderToolList,
+    buildToolsArray,
+    executeTool,
+    readToolArtifact,
+    saveToolArtifact,
+    exportToolArtifactsForBackup,
+    importToolArtifactsFromBackup,
+    prepareToolResultForContext,
+    formatArchivedToolResult,
+    isLmsTool,
+    isGitTool,
+    isPptTool,
+    isPaperTool,
+    toggleTools,
+    toggleLmsTools,
+    toggleGitTools,
+    togglePaperTools,
+    ensurePptToolsEnabled,
+    ensurePptToolsDisabled,
+    syncPptToolsWithMode
+  });
 }

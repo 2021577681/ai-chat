@@ -16,11 +16,20 @@ const PROJECT_MEMORY_RUNTIME = {
   lastError: ''
 };
 
+const ProjectMemoryStateModule = window.AgentApp.require('state');
+const ProjectMemoryUiService = window.AgentApp.require('uiService');
+const projectMemoryState = ProjectMemoryStateModule.state;
+const projectMemoryPersistSettings = ProjectMemoryStateModule.persistSettings;
+
+function projectMemoryApiCore() {
+  return window.AgentApp.require('apiCore');
+}
+
 function ensureProjectMemorySettings() {
-  if (!state.settings.projectMemory || typeof state.settings.projectMemory !== 'object') {
-    state.settings.projectMemory = {};
+  if (!projectMemoryState.settings.projectMemory || typeof projectMemoryState.settings.projectMemory !== 'object') {
+    projectMemoryState.settings.projectMemory = {};
   }
-  const cfg = state.settings.projectMemory;
+  const cfg = projectMemoryState.settings.projectMemory;
   if (cfg.enabled === undefined) cfg.enabled = PROJECT_MEMORY_DEFAULTS.enabled;
   if (!cfg.path) cfg.path = PROJECT_MEMORY_DEFAULTS.path;
   if (!Number.isFinite(Number(cfg.maxChars)) || Number(cfg.maxChars) < 1000) {
@@ -83,7 +92,7 @@ function _pmMarkDeclinedWorkspace(workspace) {
   if (!cfg.declinedWorkspaces.includes(workspace)) {
     cfg.declinedWorkspaces.push(workspace);
     if (cfg.declinedWorkspaces.length > 50) cfg.declinedWorkspaces = cfg.declinedWorkspaces.slice(-50);
-    persistSettings();
+    projectMemoryPersistSettings();
   }
 }
 
@@ -91,7 +100,7 @@ function _pmClearDeclinedWorkspace(workspace) {
   if (!workspace) return;
   const cfg = ensureProjectMemorySettings();
   cfg.declinedWorkspaces = cfg.declinedWorkspaces.filter(x => x !== workspace);
-  persistSettings();
+  projectMemoryPersistSettings();
 }
 
 function withProjectMemoryPrompt(basePrompt) {
@@ -120,7 +129,7 @@ function openProjectMemorySettings() {
   if (!modal) return;
   modal.classList.add('show');
   renderProjectMemorySettings();
-  if (state.settings.projectMemory.enabled) {
+  if (projectMemoryState.settings.projectMemory.enabled) {
     initProjectMemory(false);
   }
 }
@@ -161,7 +170,7 @@ function saveProjectMemorySettingsFromUi() {
     PROJECT_MEMORY_RUNTIME.loadedPath = '';
     _pmSetTextarea('');
   }
-  persistSettings();
+  projectMemoryPersistSettings();
   if (!cfg.enabled) {
     PROJECT_MEMORY_RUNTIME.content = '';
     PROJECT_MEMORY_RUNTIME.exists = false;
@@ -169,10 +178,10 @@ function saveProjectMemorySettingsFromUi() {
     _pmSetTextarea('');
     _pmStatus('项目记忆已关闭。AI 不会主动读取或生成项目记忆。');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-    toast('项目记忆已关闭');
+    ProjectMemoryUiService.toast('项目记忆已关闭');
     return;
   }
-  toast('项目记忆已开启');
+  ProjectMemoryUiService.toast('项目记忆已开启');
   if (!wasEnabled || previousPath !== cfg.path || !PROJECT_MEMORY_RUNTIME.content) {
     initProjectMemory(true);
   } else {
@@ -241,12 +250,12 @@ async function loadProjectMemoryFile(showToast = true) {
     PROJECT_MEMORY_RUNTIME.loadedPath = cfg.path;
     _pmSetTextarea(PROJECT_MEMORY_RUNTIME.content);
     _pmClearDeclinedWorkspace(PROJECT_MEMORY_RUNTIME.workspace);
-    if (showToast) toast('已读取项目记忆');
+    if (showToast) ProjectMemoryUiService.toast('已读取项目记忆');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
     return true;
   } catch (e) {
     _pmStatus('读取项目记忆失败：' + e.message, 'error');
-    if (showToast) toast('读取项目记忆失败：' + e.message, 3500);
+    if (showToast) ProjectMemoryUiService.toast('读取项目记忆失败：' + e.message, 3500);
     return false;
   }
 }
@@ -337,11 +346,11 @@ function _pmCleanDraft(text) {
 async function generateProjectMemoryDraft() {
   const cfg = ensureProjectMemorySettings();
   if (!cfg.enabled) {
-    toast('请先开启项目记忆');
+    ProjectMemoryUiService.toast('请先开启项目记忆');
     return;
   }
-  if (!state.settings.apiKey) {
-    toast('请先配置 API Key，才能让 AI 生成项目记忆草稿', 4500);
+  if (!projectMemoryState.settings.apiKey) {
+    ProjectMemoryUiService.toast('请先配置 API Key，才能让 AI 生成项目记忆草稿', 4500);
     return;
   }
   try {
@@ -361,9 +370,9 @@ async function generateProjectMemoryDraft() {
       '5. 对不确定的信息明确写“待确认”，不要编造。',
       '6. 如果项目里没有测试命令，请写“待确认”。'
     ].join('\n');
-    const raw = await callOnceWithRole([
+    const raw = await projectMemoryApiCore().callOnceWithRole([
       { role: 'user', content: `请为这个项目生成项目级记忆。\n\n${context}` }
-    ], state.settings.currentModel, rolePrompt);
+    ], projectMemoryState.settings.currentModel, rolePrompt);
     const draft = _pmCleanDraft(raw);
     _pmSetTextarea(draft);
     _pmStatus('草稿已生成。请检查内容，确认后点击“保存到项目”。');
@@ -371,19 +380,19 @@ async function generateProjectMemoryDraft() {
     if (modal) modal.classList.add('show');
   } catch (e) {
     _pmStatus('生成项目记忆草稿失败：' + e.message, 'error');
-    toast('生成项目记忆失败：' + e.message, 5000);
+    ProjectMemoryUiService.toast('生成项目记忆失败：' + e.message, 5000);
   }
 }
 
 async function saveProjectMemoryFromUi() {
   const cfg = ensureProjectMemorySettings();
   if (!cfg.enabled) {
-    toast('请先开启项目记忆');
+    ProjectMemoryUiService.toast('请先开启项目记忆');
     return;
   }
   const content = _pmGetTextarea().trim();
   if (!content) {
-    toast('项目记忆内容为空');
+    ProjectMemoryUiService.toast('项目记忆内容为空');
     return;
   }
   try {
@@ -395,11 +404,11 @@ async function saveProjectMemoryFromUi() {
     PROJECT_MEMORY_RUNTIME.loadedPath = cfg.path;
     _pmClearDeclinedWorkspace(PROJECT_MEMORY_RUNTIME.workspace);
     _pmStatus(`已保存：${cfg.path}`);
-    toast('项目记忆已保存');
+    ProjectMemoryUiService.toast('项目记忆已保存');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   } catch (e) {
     _pmStatus('保存项目记忆失败：' + e.message, 'error');
-    toast('保存项目记忆失败：' + e.message, 5000);
+    ProjectMemoryUiService.toast('保存项目记忆失败：' + e.message, 5000);
   }
 }
 
@@ -422,3 +431,17 @@ window.generateProjectMemoryDraft = generateProjectMemoryDraft;
 window.saveProjectMemoryFromUi = saveProjectMemoryFromUi;
 window.clearLoadedProjectMemory = clearLoadedProjectMemory;
 window.withProjectMemoryPrompt = withProjectMemoryPrompt;
+
+window.AgentApp.define('projectMemory', {
+  ensureProjectMemorySettings,
+  openProjectMemorySettings,
+  closeProjectMemorySettings,
+  renderProjectMemorySettings,
+  saveProjectMemorySettingsFromUi,
+  initProjectMemory,
+  loadProjectMemoryFile,
+  generateProjectMemoryDraft,
+  saveProjectMemoryFromUi,
+  clearLoadedProjectMemory,
+  withProjectMemoryPrompt
+});

@@ -1,12 +1,34 @@
 // ============ 备份与恢复 ============
 
+const BackupStateModule = window.AgentApp.require('state');
+const BackupUiService = window.AgentApp.require('uiService');
+const backupState = BackupStateModule.state;
+const backupSaveData = BackupStateModule.saveData;
+const backupPersistSettings = BackupStateModule.persistSettings;
+const backupPersistTools = BackupStateModule.persistTools;
+const BackupConfigModule = window.AgentApp.require('config');
+const BackupApiProfilesModule = window.AgentApp.require('apiProfiles');
+const backupLoadApiProfiles = BackupApiProfilesModule.loadApiProfiles;
+const backupSaveApiProfiles = BackupApiProfilesModule.saveApiProfiles;
+const backupGetActiveProfileId = BackupApiProfilesModule.getActiveProfileId;
+const backupSetActiveProfileId = BackupApiProfilesModule.setActiveProfileId;
+const backupRenderApiProfileSelect = BackupApiProfilesModule.renderApiProfileSelect;
+
+function backupSetPendingImportData(value) {
+  BackupStateModule.pendingImportData = value;
+}
+
+function backupGetPendingImportData() {
+  return BackupStateModule.pendingImportData;
+}
+
 function openBackup() {
   document.getElementById('backupModal').classList.add('show');
   document.getElementById('importText').value = '';
   document.getElementById('importFile').value = '';
   document.getElementById('importPreview').className = 'test-result';
   document.getElementById('importPreview').textContent = '';
-  pendingImportData = null;
+  backupSetPendingImportData(null);
 }
 
 function closeBackup() {
@@ -28,7 +50,7 @@ function backupSettingsKeysByPrefixFrom(source, prefixes) {
 }
 
 function backupSettingsKeysByPrefix(prefixes) {
-  return backupSettingsKeysByPrefixFrom(state && state.settings ? state.settings : {}, prefixes);
+  return backupSettingsKeysByPrefixFrom(backupState.settings || {}, prefixes);
 }
 
 function backupOutlineSettingKeys() {
@@ -177,7 +199,7 @@ function backupChatOptionLabel(chat, index) {
 function renderExportTxtChatSelect() {
   const select = document.getElementById('exportTxtChatSelect');
   if (!select) return;
-  const chats = Array.isArray(state && state.chats) ? state.chats : [];
+  const chats = Array.isArray(backupState.chats) ? backupState.chats : [];
   if (!chats.length) {
     select.innerHTML = '<option value="">暂无对话</option>';
     select.disabled = true;
@@ -185,7 +207,7 @@ function renderExportTxtChatSelect() {
   }
   select.disabled = false;
   const previousIndex = select.value !== '' ? Number(select.value) : NaN;
-  const currentIndex = chats.findIndex(chat => chat && chat.id === state.currentId);
+  const currentIndex = chats.findIndex(chat => chat && chat.id === backupState.currentId);
   const selectedIndex = Number.isInteger(previousIndex) && chats[previousIndex]
     ? previousIndex
     : (currentIndex >= 0 ? currentIndex : 0);
@@ -275,9 +297,9 @@ function backupRenderChatForTxt(chat) {
   holder.style.width = '900px';
   holder.style.visibility = 'hidden';
   document.body.appendChild(holder);
-  const oldCurrentId = state.currentId;
+  const oldCurrentId = backupState.currentId;
   try {
-    if (chat && chat.id) state.currentId = chat.id;
+    if (chat && chat.id) backupState.currentId = chat.id;
     const messages = Array.isArray(chat && chat.messages) ? chat.messages : [];
     if (chat && chat.debate && chat.debate.type === 'debate_mode' && chat.debate.status === 'completed' && typeof renderDebateCompletedChat === 'function') {
       holder.innerHTML = renderDebateCompletedChat(chat);
@@ -295,7 +317,7 @@ function backupRenderChatForTxt(chat) {
     holder.remove();
     throw e;
   } finally {
-    state.currentId = oldCurrentId;
+    backupState.currentId = oldCurrentId;
   }
 }
 
@@ -400,7 +422,7 @@ function selectedExportChat() {
   renderExportTxtChatSelect();
   const select = document.getElementById('exportTxtChatSelect');
   const chatIndex = select ? parseInt(select.value, 10) : -1;
-  return Array.isArray(state && state.chats) ? state.chats[chatIndex] : null;
+  return Array.isArray(backupState.chats) ? backupState.chats[chatIndex] : null;
 }
 
 function buildChatDocExport(chat) {
@@ -455,7 +477,7 @@ function exportSelectedChatTxt() {
   const text = buildChatTxtExport(chat);
   const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   backupDownloadText(`aichat-${backupSafeFilename(backupChatTitle(chat))}-${ts}.txt`, text + '\n');
-  toast('✓ 对话 TXT 已下载');
+  BackupUiService.toast('✓ 对话 TXT 已下载');
 }
 
 function exportSelectedChatDoc() {
@@ -465,20 +487,17 @@ function exportSelectedChatDoc() {
   const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
   backupDownloadBlob(`aichat-${backupSafeFilename(backupChatTitle(chat))}-${ts}.doc`, blob);
-  toast('✓ 对话 DOC 已下载');
+  BackupUiService.toast('✓ 对话 DOC 已下载');
 }
 
 function buildApiProfilesBackup(includeApiKey) {
-  if (typeof loadApiProfiles !== 'function') {
-    return { version: 1, activeProfileId: '', profiles: [] };
-  }
-  const profiles = backupJsonClone(loadApiProfiles()) || [];
+  const profiles = backupJsonClone(backupLoadApiProfiles()) || [];
   for (const p of profiles) {
     if (!includeApiKey && p && p.settings) p.settings.apiKey = '';
   }
   return {
     version: 1,
-    activeProfileId: typeof getActiveProfileId === 'function' ? getActiveProfileId() : '',
+    activeProfileId: backupGetActiveProfileId(),
     profiles
   };
 }
@@ -495,11 +514,7 @@ function importApiProfilesFromBackup(payload) {
   const incoming = Array.isArray(payload)
     ? payload
     : (Array.isArray(payload?.profiles) ? payload.profiles : []);
-  if (typeof loadApiProfiles !== 'function' || typeof saveApiProfiles !== 'function') {
-    return { imported: 0, skipped: 0, renamed: 0, invalid: incoming.length, activated: false };
-  }
-  
-  const profiles = loadApiProfiles();
+  const profiles = backupLoadApiProfiles();
   const existingIds = new Set(profiles.map(p => p && p.id).filter(Boolean));
   const usedNames = new Set(profiles.map(p => p && p.name).filter(Boolean));
   let imported = 0;
@@ -530,15 +545,15 @@ function importApiProfilesFromBackup(payload) {
     imported++;
   }
   
-  saveApiProfiles(profiles);
+  backupSaveApiProfiles(profiles);
   
   let activated = false;
   const activeId = payload && !Array.isArray(payload) ? payload.activeProfileId : '';
-  if (activeId && typeof setActiveProfileId === 'function' && profiles.some(p => p && p.id === activeId)) {
-    setActiveProfileId(activeId);
+  if (activeId && profiles.some(p => p && p.id === activeId)) {
+    backupSetActiveProfileId(activeId);
     activated = true;
   }
-  if (typeof renderApiProfileSelect === 'function') renderApiProfileSelect();
+  backupRenderApiProfileSelect();
   return { imported, skipped, renamed, invalid, activated };
 }
 
@@ -565,25 +580,25 @@ function buildExportData() {
   };
   
   if (inc.settings) {
-    const settings = JSON.parse(JSON.stringify(state.settings));
+    const settings = JSON.parse(JSON.stringify(backupState.settings));
     if (!inc.apiKey) settings.apiKey = '';
     data.settings = settings;
     const extraSettings = backupBuildExtraSettings();
     if (Object.keys(extraSettings).length) data.extraSettings = extraSettings;
   } else {
     const ds = {};
-    if (inc.reflection) backupApplySettingsSubset(ds, state.settings, backupReflectionSettingKeys());
-    if (inc.plan) backupApplySettingsSubset(ds, state.settings, backupPlanSettingKeys());
-    if (inc.outline) backupApplySettingsSubset(ds, state.settings, backupOutlineSettingKeys());
+    if (inc.reflection) backupApplySettingsSubset(ds, backupState.settings, backupReflectionSettingKeys());
+    if (inc.plan) backupApplySettingsSubset(ds, backupState.settings, backupPlanSettingKeys());
+    if (inc.outline) backupApplySettingsSubset(ds, backupState.settings, backupOutlineSettingKeys());
     if (Object.keys(ds).length) data.settings = ds;
   }
   
-  if (inc.tools) data.tools = state.tools;
+  if (inc.tools) data.tools = backupState.tools;
   if (inc.apiProfiles) data.apiProfiles = buildApiProfilesBackup(inc.apiKey);
   if (inc.toolArtifacts && typeof exportToolArtifactsForBackup === 'function') {
     data.toolArtifacts = exportToolArtifactsForBackup();
   }
-  if (inc.chats) data.chats = state.chats;
+  if (inc.chats) data.chats = backupState.chats;
   
   return data;
 }
@@ -601,13 +616,13 @@ function exportConfig() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('✓ 配置已下载');
+  BackupUiService.toast('✓ 配置已下载');
 }
 
 function copyConfigToClipboard() {
   const data = buildExportData();
   navigator.clipboard.writeText(JSON.stringify(data, null, 2))
-    .then(() => toast('✓ 已复制到剪贴板'))
+    .then(() => BackupUiService.toast('✓ 已复制到剪贴板'))
     .catch(e => alert('复制失败：' + e.message));
 }
 
@@ -628,12 +643,12 @@ function parseAndPreviewImport() {
   if (!text) {
     preview.className = 'test-result';
     preview.textContent = '';
-    pendingImportData = null;
+    backupSetPendingImportData(null);
     return;
   }
   try {
     const data = JSON.parse(text);
-    pendingImportData = data;
+    backupSetPendingImportData(data);
     let summary = '<strong>📦 待导入：</strong><br>';
     if (data._meta) summary += `- 导出时间：${data._meta.exportedAt || '未知'}<br>`;
     if (data.settings) {
@@ -651,7 +666,7 @@ function parseAndPreviewImport() {
       if (names.length) summary += `- ⚙️ 独立设置 ${names.length} 项：${names.map(escapeHtml).join('、')}<br>`;
     }
     if (data.tools && Array.isArray(data.tools)) {
-      const newTools = data.tools.filter(t => !state.tools.some(et => et.name === t.name));
+      const newTools = data.tools.filter(t => !backupState.tools.some(et => et.name === t.name));
       summary += `- 🛠 工具 ${data.tools.length} 个`;
       if (newTools.length) summary += `（其中 ${newTools.length} 个为新增）`;
       summary += '<br>';
@@ -668,9 +683,7 @@ function parseAndPreviewImport() {
       const profiles = Array.isArray(data.apiProfiles)
         ? data.apiProfiles
         : (Array.isArray(data.apiProfiles.profiles) ? data.apiProfiles.profiles : []);
-      const existingIds = typeof loadApiProfiles === 'function'
-        ? new Set(loadApiProfiles().map(p => p && p.id).filter(Boolean))
-        : new Set();
+      const existingIds = new Set(backupLoadApiProfiles().map(p => p && p.id).filter(Boolean));
       const newCount = profiles.filter(p => p && p.id && !existingIds.has(p.id)).length;
       summary += `- 🗂️ API 配置档案 ${profiles.length} 个`;
       if (newCount) summary += `（其中 ${newCount} 个为新增）`;
@@ -691,16 +704,16 @@ function parseAndPreviewImport() {
   } catch (e) {
     preview.className = 'test-result error';
     preview.textContent = '❌ JSON 格式错误：' + e.message;
-    pendingImportData = null;
+    backupSetPendingImportData(null);
   }
 }
 
 function applyImport() {
   const text = document.getElementById('importText').value.trim();
-  if (text && !pendingImportData) parseAndPreviewImport();
-  if (!pendingImportData) { alert('请先选择文件或粘贴 JSON'); return; }
+  if (text && !backupGetPendingImportData()) parseAndPreviewImport();
+  if (!backupGetPendingImportData()) { alert('请先选择文件或粘贴 JSON'); return; }
 
-  const data = pendingImportData;
+  const data = backupGetPendingImportData();
   const opts = {
     settings: backupReadChecked('imp_settings', true),
     apiProfiles: backupReadChecked('imp_apiProfiles', true),
@@ -717,19 +730,19 @@ function applyImport() {
   if (data.settings) {
     if (opts.settings) {
       const incoming = { ...data.settings };
-      state.settings = { ...state.settings, ...backupJsonClone(incoming) };
+      backupState.settings = { ...backupState.settings, ...backupJsonClone(incoming) };
       imported.push('设置');
     } else {
       if (opts.reflection) {
-        backupApplySettingsSubset(state.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['useReflection', 'ref']));
+        backupApplySettingsSubset(backupState.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['useReflection', 'ref']));
         imported.push('师生');
       }
       if (opts.plan) {
-        backupApplySettingsSubset(state.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['usePlan', 'plan']));
+        backupApplySettingsSubset(backupState.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['usePlan', 'plan']));
         imported.push('计划模式');
       }
       if (opts.outline) {
-        backupApplySettingsSubset(state.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['useOutline', 'outline']));
+        backupApplySettingsSubset(backupState.settings, data.settings, backupSettingsKeysByPrefixFrom(data.settings, ['useOutline', 'outline']));
         imported.push('大纲');
       }
     }
@@ -746,7 +759,7 @@ function applyImport() {
   }
   
   if (opts.tools && Array.isArray(data.tools)) {
-    const existing = new Set(state.tools.map(t => t.name));
+    const existing = new Set(backupState.tools.map(t => t.name));
     const incoming = data.tools.filter(t => !existing.has(t.name));
     const conflicting = data.tools.filter(t => existing.has(t.name));
 
@@ -767,7 +780,7 @@ function applyImport() {
         `确认导入？`
       );
       if (ok) {
-        for (const t of incoming) state.tools.push(t);
+        for (const t of incoming) backupState.tools.push(t);
         imported.push(`${incoming.length} 新工具`);
       } else {
         imported.push('0 新工具(已取消)');
@@ -793,8 +806,8 @@ function applyImport() {
       let skipCount = 0;
       if (choice === '1') {
         for (const t of conflicting) {
-          const idx = state.tools.findIndex(x => x.name === t.name);
-          if (idx >= 0) state.tools[idx] = t;
+          const idx = backupState.tools.findIndex(x => x.name === t.name);
+          if (idx >= 0) backupState.tools[idx] = t;
           overwriteCount++;
         }
       } else if (choice === '3') {
@@ -807,8 +820,8 @@ function applyImport() {
             `[确定] = 覆盖     [取消] = 跳过`
           );
           if (yes) {
-            const idx = state.tools.findIndex(x => x.name === t.name);
-            if (idx >= 0) state.tools[idx] = t;
+            const idx = backupState.tools.findIndex(x => x.name === t.name);
+            if (idx >= 0) backupState.tools[idx] = t;
             overwriteCount++;
           } else {
             skipCount++;
@@ -833,43 +846,43 @@ function applyImport() {
   }
   
   if (opts.chats && Array.isArray(data.chats)) {
-    state.chats = [...data.chats, ...state.chats];
+    backupState.chats = [...data.chats, ...backupState.chats];
     imported.push(`${data.chats.length} 对话`);
   }
   
-  persistSettings();
-  persistTools();
-  saveData();
+  backupPersistSettings();
+  backupPersistTools();
+  backupSaveData();
   refreshModelSelect();
   applyTheme();
   updateTopUrlPreview();
-  if (typeof renderApiProfileSelect === 'function') renderApiProfileSelect();
-  renderChatList();
-  renderMessages();
-  updateSendBtn();
+  backupRenderApiProfileSelect();
+  BackupUiService.renderChatList();
+  BackupUiService.renderMessages();
+  BackupUiService.updateSendBtn();
   
   const reflectBtn = document.getElementById('reflectBtn');
   if (reflectBtn) {
-    if (state.settings.useReflection) reflectBtn.classList.add('reflect-active');
+    if (backupState.settings.useReflection) reflectBtn.classList.add('reflect-active');
     else reflectBtn.classList.remove('reflect-active');
   }
   const toolsBtn = document.getElementById('toolsBtn');
   if (toolsBtn) {
-    if (state.settings.useTools) toolsBtn.classList.add('tool-active');
+    if (backupState.settings.useTools) toolsBtn.classList.add('tool-active');
     else toolsBtn.classList.remove('tool-active');
   }
   const planBtn = document.getElementById('planBtn');
   if (planBtn) {
-    if (state.settings.usePlan) planBtn.classList.add('plan-active');
+    if (backupState.settings.usePlan) planBtn.classList.add('plan-active');
     else planBtn.classList.remove('plan-active');
   }
   const outlineBtn = document.getElementById('outlineBtn');
   if (outlineBtn) {
-    if (state.settings.useOutline) outlineBtn.classList.add('outline-active');
+    if (backupState.settings.useOutline) outlineBtn.classList.add('outline-active');
     else outlineBtn.classList.remove('outline-active');
   }
   
-  toast(`✓ 已导入：${imported.join('、') || '（无）'}`);
+  BackupUiService.toast(`✓ 已导入：${imported.join('、') || '（无）'}`);
   closeBackup();
 }
 
@@ -881,11 +894,49 @@ function resetAllData() {
     storage.clearAll();
   } else {
     // 兜底
-    localStorage.removeItem(STORE_KEY);
-    localStorage.removeItem(SETTINGS_KEY);
-    localStorage.removeItem(TOOLS_KEY);
-    localStorage.removeItem(BUILTIN_TOOLS_LOADED_KEY);
+    localStorage.removeItem(BackupConfigModule.STORE_KEY);
+    localStorage.removeItem(BackupConfigModule.SETTINGS_KEY);
+    localStorage.removeItem(BackupConfigModule.TOOLS_KEY);
+    localStorage.removeItem(BackupConfigModule.BUILTIN_TOOLS_LOADED_KEY);
     if (typeof REQUEST_HISTORY_KEY !== 'undefined') localStorage.removeItem(REQUEST_HISTORY_KEY);
   }
   location.reload();
 }
+window.openBackup = openBackup;
+window.closeBackup = closeBackup;
+window.renderExportTxtChatSelect = renderExportTxtChatSelect;
+window.exportSelectedChatTxt = exportSelectedChatTxt;
+window.exportSelectedChatDoc = exportSelectedChatDoc;
+window.buildExportData = buildExportData;
+window.exportConfig = exportConfig;
+window.copyConfigToClipboard = copyConfigToClipboard;
+window.importFromFile = importFromFile;
+window.parseAndPreviewImport = parseAndPreviewImport;
+window.applyImport = applyImport;
+window.resetAllData = resetAllData;
+
+window.AgentApp.define('backup', {
+  openBackup,
+  closeBackup,
+  backupJsonClone,
+  backupSettingsKeysByPrefixFrom,
+  backupSettingsKeysByPrefix,
+  backupOutlineSettingKeys,
+  backupReflectionSettingKeys,
+  backupPlanSettingKeys,
+  buildApiProfilesBackup,
+  importApiProfilesFromBackup,
+  renderExportTxtChatSelect,
+  selectedExportChat,
+  buildChatTxtExport,
+  buildChatDocExport,
+  exportSelectedChatTxt,
+  exportSelectedChatDoc,
+  buildExportData,
+  exportConfig,
+  copyConfigToClipboard,
+  importFromFile,
+  parseAndPreviewImport,
+  applyImport,
+  resetAllData
+});

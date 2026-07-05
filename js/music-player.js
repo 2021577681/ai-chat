@@ -4,6 +4,12 @@ const MUSIC_SETTINGS_KEY = 'aichat_music_player_v1';
 const MUSIC_AUDIO_EXTS = ['.mp3', '.wav', '.ogg', '.oga', '.m4a', '.aac', '.flac', '.webm', '.opus'];
 const MUSIC_COMPLETION_MAX_SECONDS = 3;
 
+const MusicStateModule = window.AgentApp.require('state');
+const MusicUiService = window.AgentApp.require('uiService');
+const musicAppState = MusicStateModule.state;
+const musicPersistSettings = MusicStateModule.persistSettings;
+const musicIsAnyChatGenerating = MusicStateModule.isAnyChatGenerating;
+
 let musicPlayerState = {
   tracks: [],
   currentIndex: -1,
@@ -63,8 +69,8 @@ function musicDefaultSettings() {
 }
 
 function loadMusicSettings() {
-  const stateSettings = state && state.settings && state.settings.musicPlayer
-    ? state.settings.musicPlayer
+  const stateSettings = musicAppState.settings && musicAppState.settings.musicPlayer
+    ? musicAppState.settings.musicPlayer
     : {};
   try {
     const raw = storage.get(MUSIC_SETTINGS_KEY);
@@ -76,9 +82,9 @@ function loadMusicSettings() {
 }
 
 function saveMusicSettings() {
-  if (state && state.settings) {
-    state.settings.musicPlayer = { ...musicPlayerState.settings };
-    if (typeof persistSettings === 'function') persistSettings();
+  if (musicAppState.settings) {
+    musicAppState.settings.musicPlayer = { ...musicPlayerState.settings };
+    musicPersistSettings();
   }
   try { storage.set(MUSIC_SETTINGS_KEY, JSON.stringify(musicPlayerState.settings)); } catch (e) {}
 }
@@ -236,7 +242,7 @@ function ensureMusicModal() {
   mask.id = 'musicModal';
   mask.innerHTML = `
     <div class="modal wide">
-      <h2>🎵 音乐播放 <button class="modal-close" onclick="closeMusicPlayer()">×</button></h2>
+      <h2>🎵 音乐播放 <button class="modal-close" data-action="closeMusicPlayer">×</button></h2>
       <div class="music-player" id="musicPlayerRoot"></div>
     </div>`;
   document.body.appendChild(mask);
@@ -260,76 +266,76 @@ function renderMusicPlayer() {
             <span id="musicStatusText">${musicPlayerState.tracks.length} 首</span>
           </div>
           <div class="music-controls">
-            <button class="btn" onclick="musicPrevTrack()">⏮ 上一首</button>
-            <button class="btn btn-primary" onclick="musicTogglePlay()">▶/⏸ 播放</button>
-            <button class="btn" onclick="musicNextTrack()">⏭ 下一首</button>
-            <button class="btn" onclick="refreshMusicLibrary(true)">刷新 music</button>
+            <button class="btn" data-action="musicPrevTrack">⏮ 上一首</button>
+            <button class="btn btn-primary" data-action="musicTogglePlay">▶/⏸ 播放</button>
+            <button class="btn" data-action="musicNextTrack">⏭ 下一首</button>
+            <button class="btn" data-action="valueClick" data-handler="refreshMusicLibrary" data-value="true" data-value-type="boolean">刷新 music</button>
           </div>
         </div>
       </section>
 
       <section class="music-toolbar">
-        <input type="file" id="musicImportInput" accept="audio/*" multiple hidden onchange="musicImportFiles(event)">
-        <input type="file" id="musicOpenInput" accept="audio/*" multiple hidden onchange="musicOpenLocalFiles(event)">
-        <input type="file" id="musicFolderInput" accept="audio/*" multiple webkitdirectory hidden onchange="musicOpenLocalFiles(event)">
-        <button class="btn btn-primary" onclick="document.getElementById('musicImportInput').click()">导入到 music 文件夹</button>
-        <button class="btn" onclick="document.getElementById('musicOpenInput').click()">打开本机音乐</button>
-        <button class="btn" onclick="document.getElementById('musicFolderInput').click()">打开本机文件夹</button>
+        <input type="file" id="musicImportInput" accept="audio/*" multiple hidden data-change-action="musicImportFiles">
+        <input type="file" id="musicOpenInput" accept="audio/*" multiple hidden data-change-action="musicOpenLocalFiles">
+        <input type="file" id="musicFolderInput" accept="audio/*" multiple webkitdirectory hidden data-change-action="musicOpenLocalFiles">
+        <button class="btn btn-primary" data-action="openFilePicker" data-target="musicImportInput">导入到 music 文件夹</button>
+        <button class="btn" data-action="openFilePicker" data-target="musicOpenInput">打开本机音乐</button>
+        <button class="btn" data-action="openFilePicker" data-target="musicFolderInput">打开本机文件夹</button>
         <span class="music-dir" id="musicDirText">music/</span>
       </section>
 
       <section class="music-settings-grid">
         <label class="music-setting">音量
-          <input type="range" min="0" max="100" value="${Number(s.volume || 0)}" oninput="musicSetVolume(this.value)">
+          <input type="range" min="0" max="100" value="${Number(s.volume || 0)}" data-input-action="valueInput" data-handler="musicSetVolume">
         </label>
         <label class="music-setting">倍速
-          <select onchange="musicSetPlaybackRate(this.value)">
+          <select data-change-action="valueChange" data-handler="musicSetPlaybackRate">
             ${[0.75, 1, 1.25, 1.5, 2].map(v => `<option value="${v}" ${Number(s.playbackRate) === v ? 'selected' : ''}>${v}x</option>`).join('')}
           </select>
         </label>
         <label class="music-setting">循环
-          <select onchange="musicSetLoopMode(this.value)">
+          <select data-change-action="valueChange" data-handler="musicSetLoopMode">
             <option value="list" ${s.loopMode === 'list' ? 'selected' : ''}>列表循环</option>
             <option value="one" ${s.loopMode === 'one' ? 'selected' : ''}>单曲循环</option>
             <option value="none" ${s.loopMode === 'none' ? 'selected' : ''}>不循环</option>
           </select>
         </label>
-        <label class="music-check"><input type="checkbox" ${s.shuffle ? 'checked' : ''} onchange="musicSetShuffle(this.checked)"> 随机播放</label>
-        <label class="music-check"><input type="checkbox" ${s.muted ? 'checked' : ''} onchange="musicSetMuted(this.checked)"> 静音</label>
-        <label class="music-check"><input type="checkbox" ${s.autoplayNext ? 'checked' : ''} onchange="musicSetAutoplayNext(this.checked)"> 自动下一首</label>
-        <label class="music-check"><input type="checkbox" ${s.rememberPosition ? 'checked' : ''} onchange="musicSetRememberPosition(this.checked)"> 记住播放位置</label>
+        <label class="music-check"><input type="checkbox" ${s.shuffle ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetShuffle"> 随机播放</label>
+        <label class="music-check"><input type="checkbox" ${s.muted ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetMuted"> 静音</label>
+        <label class="music-check"><input type="checkbox" ${s.autoplayNext ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetAutoplayNext"> 自动下一首</label>
+        <label class="music-check"><input type="checkbox" ${s.rememberPosition ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetRememberPosition"> 记住播放位置</label>
       </section>
 
       <section class="music-extra-settings">
         <div class="music-extra-head">
           <div class="music-extra-title">AI 音频提示</div>
-          <button class="btn" onclick="refreshMusicLibrary(true)">刷新曲库</button>
+          <button class="btn" data-action="valueClick" data-handler="refreshMusicLibrary" data-value="true" data-value-type="boolean">刷新曲库</button>
         </div>
         <div class="music-extra-grid">
-          <label class="music-check"><input type="checkbox" ${state.settings.completionSoundEnabled ? 'checked' : ''} onchange="musicSetCompletionEnabled(this.checked)"> AI 完成提示音</label>
+          <label class="music-check"><input type="checkbox" ${musicAppState.settings.completionSoundEnabled ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetCompletionEnabled"> AI 完成提示音</label>
           <label class="music-setting">提示音来源
-            <select onchange="musicSetCompletionMode(this.value)">
+            <select id="musicCompletionModeSelect" data-change-action="valueChange" data-handler="musicSetCompletionMode">
               <option value="default" ${s.completionSoundMode !== 'music' ? 'selected' : ''}>默认提示音</option>
               <option value="music" ${s.completionSoundMode === 'music' ? 'selected' : ''}>music 文件夹曲目</option>
             </select>
           </label>
           <label class="music-setting">提示音曲目
-            <select id="musicCompletionTrackSelect" onchange="musicSetCompletionTrack(this.value)">
+            <select id="musicCompletionTrackSelect" data-change-action="valueChange" data-handler="musicSetCompletionTrack">
               ${musicTrackOptions(s.completionTrackPath, '使用默认提示音')}
             </select>
           </label>
-          <label class="music-check"><input type="checkbox" ${s.generationBgmEnabled ? 'checked' : ''} onchange="musicSetGenerationBgmEnabled(this.checked)"> AI 生成过程 BGM</label>
+          <label class="music-check"><input type="checkbox" ${s.generationBgmEnabled ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetGenerationBgmEnabled"> AI 生成过程 BGM</label>
           <label class="music-setting">BGM 曲目
-            <select id="musicBgmTrackSelect" onchange="musicSetGenerationBgmTrack(this.value)">
+            <select id="musicBgmTrackSelect" data-change-action="valueChange" data-handler="musicSetGenerationBgmTrack">
               ${musicTrackOptions(s.generationBgmTrackPath, '未选择 BGM')}
             </select>
           </label>
           <label class="music-setting">BGM 音量
-            <input type="range" min="0" max="100" value="${Number(s.generationBgmVolume || 0)}" oninput="musicSetGenerationBgmVolume(this.value)">
+            <input type="range" min="0" max="100" value="${Number(s.generationBgmVolume || 0)}" data-input-action="valueInput" data-handler="musicSetGenerationBgmVolume">
           </label>
-          <label class="music-check"><input type="checkbox" ${s.generationBgmLoop ? 'checked' : ''} onchange="musicSetGenerationBgmLoop(this.checked)"> BGM 循环播放</label>
-          <button class="btn" onclick="musicPreviewCompletionSound()">试听提示音</button>
-          <button class="btn" onclick="musicPreviewGenerationBgm()">试听 BGM</button>
+          <label class="music-check"><input type="checkbox" ${s.generationBgmLoop ? 'checked' : ''} data-change-action="valueChange" data-handler="musicSetGenerationBgmLoop"> BGM 循环播放</label>
+          <button class="btn" data-action="musicPreviewCompletionSound">试听提示音</button>
+          <button class="btn" data-action="musicPreviewGenerationBgm">试听 BGM</button>
         </div>
         <div class="form-hint">自定义完成提示音最多播放 3 秒；AI 生成开始时播放 BGM，完成、停止或报错后自动停止。</div>
       </section>
@@ -341,8 +347,8 @@ function renderMusicPlayer() {
             <div class="music-library-summary" id="musicLibrarySummary">0 首</div>
           </div>
           <div class="music-library-tools">
-            <input type="search" id="musicTrackSearch" value="${escapeHtml(musicPlayerState.listSearch)}" placeholder="搜索音乐" oninput="musicSetTrackSearch(this.value)">
-            <button class="btn" id="musicCollapseBtn" onclick="musicToggleTrackList()">${s.listCollapsed ? '展开' : '折叠'}</button>
+            <input type="search" id="musicTrackSearch" value="${escapeHtml(musicPlayerState.listSearch)}" placeholder="搜索音乐" data-input-action="valueInput" data-handler="musicSetTrackSearch">
+            <button class="btn" id="musicCollapseBtn" data-action="musicToggleTrackList">${s.listCollapsed ? '展开' : '折叠'}</button>
           </div>
         </div>
         <section class="music-list ${s.listCollapsed ? 'collapsed' : ''}" id="musicTrackList"></section>
@@ -411,7 +417,7 @@ async function refreshMusicLibrary(showToast) {
     if (!audio || audio.src !== nextSrc) loadMusicCurrent(false);
     else updateMusicNowDisplay();
   }
-  if (showToast && typeof toast === 'function') toast('音乐库已刷新');
+  if (showToast) MusicUiService.toast('音乐库已刷新');
 }
 
 function restoreMusicSelection(preferredKey = '') {
@@ -479,7 +485,7 @@ function renderMusicTrackList() {
     return;
   }
   list.innerHTML = visibleTracks.map(({ track, idx }) => `
-    <button class="music-track ${idx === musicPlayerState.currentIndex ? 'active' : ''}" onclick="musicPlayIndex(${idx})">
+    <button class="music-track ${idx === musicPlayerState.currentIndex ? 'active' : ''}" data-action="valueClick" data-handler="musicPlayIndex" data-value="${idx}" data-value-type="number">
       <span class="music-track-name">${escapeHtml(musicTrackDisplayName(track) || '未知曲目')}</span>
       <span class="music-track-meta">${escapeHtml(track.sourceLabel || '')} · ${musicFormatSize(track.size)}</span>
     </button>
@@ -644,9 +650,9 @@ function musicToggleTrackList() {
 }
 
 function musicSetCompletionEnabled(value) {
-  if (state && state.settings) {
-    state.settings.completionSoundEnabled = !!value;
-    if (typeof persistSettings === 'function') persistSettings();
+  if (musicAppState.settings) {
+    musicAppState.settings.completionSoundEnabled = !!value;
+    musicPersistSettings();
   }
   if (value && typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
 }
@@ -660,7 +666,7 @@ function musicSetCompletionTrack(value) {
   musicPlayerState.settings.completionTrackPath = String(value || '');
   if (musicPlayerState.settings.completionTrackPath) musicPlayerState.settings.completionSoundMode = 'music';
   saveMusicSettings();
-  const modeSelect = document.querySelector('.music-extra-settings select[onchange="musicSetCompletionMode(this.value)"]');
+  const modeSelect = document.getElementById('musicCompletionModeSelect');
   if (modeSelect) modeSelect.value = musicPlayerState.settings.completionSoundMode;
 }
 
@@ -705,8 +711,7 @@ function musicStopManagedAudio(audio, timerKey) {
 }
 
 function musicAnyGenerating() {
-  if (typeof isAnyChatGenerating === 'function') return isAnyChatGenerating();
-  return !!(state && state.isGenerating);
+  return musicIsAnyChatGenerating();
 }
 
 function playMusicCompletionSound() {
@@ -718,7 +723,7 @@ function playMusicCompletionSound() {
   if (!musicHasBackendToken() && musicEnsureTokenThen(() => playMusicCompletionSound())) return true;
   musicStopManagedAudio(musicPlayerState.completionAudio, 'completionTimer');
   const audio = new Audio(musicTrackUrl(track));
-  const rawVolume = parseInt(state.settings.completionSoundVolume);
+  const rawVolume = parseInt(musicAppState.settings.completionSoundVolume);
   const volumePct = isNaN(rawVolume) ? 80 : Math.max(0, Math.min(100, rawVolume));
   audio.volume = volumePct / 100;
   audio.preload = 'auto';
@@ -737,7 +742,7 @@ function startMusicGenerationBgm() {
   const track = musicTrackByPath(s.generationBgmTrackPath);
   if (!track) return false;
   if (!musicHasBackendToken() && musicEnsureTokenThen(() => {
-    const stillGenerating = typeof isAnyChatGenerating === 'function' ? isAnyChatGenerating() : !!(state && state.isGenerating);
+    const stillGenerating = musicIsAnyChatGenerating();
     if (stillGenerating) startMusicGenerationBgm();
   })) return true;
   if (musicPlayerState.bgmAudio && musicPlayerState.bgmTrackPath === s.generationBgmTrackPath) {
@@ -794,9 +799,9 @@ function musicPreviewGenerationBgm() {
     return;
   }
   musicPlayerState.previewBgmRequested = true;
-  if (!playMusicGenerationBgmPreview() && typeof toast === 'function') {
+  if (!playMusicGenerationBgmPreview()) {
     musicPlayerState.previewBgmRequested = false;
-    toast('请先从 music 文件夹选择 BGM 曲目');
+    MusicUiService.toast('请先从 music 文件夹选择 BGM 曲目');
   }
 }
 
@@ -804,7 +809,7 @@ async function musicImportFiles(event) {
   const files = Array.from(event.target.files || []).filter(musicIsAudioFile);
   event.target.value = '';
   if (!files.length) {
-    if (typeof toast === 'function') toast('没有可导入的音频文件');
+    MusicUiService.toast('没有可导入的音频文件');
     return;
   }
   updateMusicStatus(`正在导入 ${files.length} 首...`);
@@ -816,7 +821,7 @@ async function musicImportFiles(event) {
     else console.warn('[music] import failed:', file.name, result && result.error);
   }
   await refreshMusicLibrary(false);
-  if (typeof toast === 'function') toast(`已导入 ${okCount}/${files.length} 首到 music 文件夹`);
+  MusicUiService.toast(`已导入 ${okCount}/${files.length} 首到 music 文件夹`);
 }
 
 function musicReadFileAsDataUrl(file) {
@@ -833,7 +838,7 @@ function musicOpenLocalFiles(event) {
   const fromFolder = event.target && event.target.id === 'musicFolderInput';
   event.target.value = '';
   if (!files.length) {
-    if (typeof toast === 'function') toast('没有可播放的音频文件');
+    MusicUiService.toast('没有可播放的音频文件');
     return;
   }
   musicPlayerState.objectUrls.forEach(url => URL.revokeObjectURL(url));
@@ -887,3 +892,36 @@ window.startMusicGenerationBgm = startMusicGenerationBgm;
 window.stopMusicGenerationBgm = stopMusicGenerationBgm;
 window.musicPreviewCompletionSound = musicPreviewCompletionSound;
 window.musicPreviewGenerationBgm = musicPreviewGenerationBgm;
+
+window.AgentApp.define('musicPlayer', {
+  openMusicPlayer,
+  closeMusicPlayer,
+  refreshMusicLibrary,
+  musicImportFiles,
+  musicOpenLocalFiles,
+  musicPlayIndex,
+  musicTogglePlay,
+  musicNextTrack,
+  musicPrevTrack,
+  musicSetVolume,
+  musicSetPlaybackRate,
+  musicSetLoopMode,
+  musicSetShuffle,
+  musicSetMuted,
+  musicSetAutoplayNext,
+  musicSetRememberPosition,
+  musicSetTrackSearch,
+  musicToggleTrackList,
+  musicSetCompletionEnabled,
+  musicSetCompletionMode,
+  musicSetCompletionTrack,
+  musicSetGenerationBgmEnabled,
+  musicSetGenerationBgmTrack,
+  musicSetGenerationBgmVolume,
+  musicSetGenerationBgmLoop,
+  playMusicCompletionSound,
+  startMusicGenerationBgm,
+  stopMusicGenerationBgm,
+  musicPreviewCompletionSound,
+  musicPreviewGenerationBgm
+});

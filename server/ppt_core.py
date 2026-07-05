@@ -27,11 +27,11 @@ class PptMixin:
         task_id = _as_text(body.get("task_id") or data.get("task_id") or "", "")
 
         if command == "start":
-            return self._send_json(200, start_ppt_task(data.get("payload") or data.get("data") or data))
+            return self.response.json(200, start_ppt_task(data.get("payload") or data.get("data") or data))
 
         if command in ("status", "poll", "get"):
             since = body.get("since") if body.get("since") is not None else data.get("since")
-            return self._send_json(200, get_ppt_task(task_id, since or 0))
+            return self.response.json(200, get_ppt_task(task_id, since or 0))
 
         if command in (
             "pause",
@@ -50,13 +50,13 @@ class PptMixin:
             for key, value in body.items():
                 if key != "data":
                     control_payload[key] = value
-            return self._send_json(200, control_ppt_task(task_id, command, control_payload))
+            return self.response.json(200, control_ppt_task(task_id, command, control_payload))
 
-        return self._send_json(200, {"ok": False, "error": f"未知 PPT 任务命令: {command}"})
+        return self.response.json(200, {"ok": False, "error": f"未知 PPT 任务命令: {command}"})
 
     def handle_generate_ppt(self, body):
         data = body.get("data") or {}
         if not isinstance(data, dict):
-            return self._send_json(200, {"ok": False, "error": "data 必须是对象"})
+            return self.response.json(200, {"ok": False, "error": "data 必须是对象"})
 
-        return self._send_json(200, generate_html_image_ppt(data))
+        return self.response.json(200, generate_html_image_ppt(data))

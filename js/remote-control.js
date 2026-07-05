@@ -1,5 +1,20 @@
-// ============ 🎮 微信文件传输助手遥控 Agent ============
+﻿// ============ 🎮 微信文件传输助手遥控 Agent ============
 // Privacy boundary: remote control uses only the private wechat_bridge read/send path for File Transfer Assistant.
+
+const RemoteControlStateModule = window.AgentApp.require('state');
+const remoteControlState = RemoteControlStateModule.state;
+const remoteControlSaveData = RemoteControlStateModule.saveData;
+const remoteControlPersistSettings = RemoteControlStateModule.persistSettings;
+const remoteControlChatById = RemoteControlStateModule.chatById;
+const remoteControlIsCurrentChat = RemoteControlStateModule.isCurrentChat;
+const remoteControlChatTaskById = RemoteControlStateModule.chatTaskById;
+const remoteControlIsChatGenerating = RemoteControlStateModule.isChatGenerating;
+const remoteControlIsChatTaskMode = RemoteControlStateModule.isChatTaskMode;
+const remoteControlRequestStopChatTask = RemoteControlStateModule.requestStopChatTask;
+const remoteControlSyncGlobalTaskState = RemoteControlStateModule.syncGlobalTaskState;
+const remoteControlEnsureChatTasks = RemoteControlStateModule.ensureChatTasks;
+const remoteControlSetChatTaskGuidance = RemoteControlStateModule.setChatTaskGuidance;
+const RemoteControlOrchestrationService = window.AgentApp.require('orchestrationService');
 
 const REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT = '你正通过微信文件传输助手被遥控。请只输出最终答案，不展示工具调用过程或大纲过程；回答要简短，适合微信阅读。';
 
@@ -297,7 +312,7 @@ async function remoteControlStartRuntime() {
     const cfg = remoteControlSettings();
     cfg.enabled = false;
     remoteControlClearTimer();
-    persistSettings();
+    remoteControlPersistSettings();
     syncRemoteControlButton();
     if (typeof toast === 'function') toast('微信遥控 bridge 启动失败：' + (e.message || e), 4000);
   }
@@ -319,14 +334,14 @@ async function remoteControlStopRuntime() {
 }
 
 function remoteControlSettings() {
-  if (!state.settings.remoteControl || typeof state.settings.remoteControl !== 'object') {
-    state.settings.remoteControl = {};
+  if (!remoteControlState.settings.remoteControl || typeof remoteControlState.settings.remoteControl !== 'object') {
+    remoteControlState.settings.remoteControl = {};
   }
-  state.settings.remoteControl = { ...REMOTE_CONTROL_DEFAULTS, ...state.settings.remoteControl };
-  if (state.settings.remoteControl.shortReplyPrompt === REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT) {
-    state.settings.remoteControl.shortReplyPrompt = REMOTE_CONTROL_DEFAULTS.shortReplyPrompt;
+  remoteControlState.settings.remoteControl = { ...REMOTE_CONTROL_DEFAULTS, ...remoteControlState.settings.remoteControl };
+  if (remoteControlState.settings.remoteControl.shortReplyPrompt === REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT) {
+    remoteControlState.settings.remoteControl.shortReplyPrompt = REMOTE_CONTROL_DEFAULTS.shortReplyPrompt;
   }
-  return state.settings.remoteControl;
+  return remoteControlState.settings.remoteControl;
 }
 
 function remoteControlNormalizeText(text) {
@@ -528,11 +543,11 @@ function remoteControlParseMessage(text) {
 function remoteControlFindChat(remoteId) {
   const cached = remoteControlKnownChats.get(String(remoteId));
   if (cached) {
-    const c = chatById(cached);
+    const c = remoteControlChatById(cached);
     if (c) return c;
     remoteControlKnownChats.delete(String(remoteId));
   }
-  const c = (state.chats || []).find(chat => chat && chat.remoteControl && String(chat.remoteControl.id) === String(remoteId));
+  const c = (remoteControlState.chats || []).find(chat => chat && chat.remoteControl && String(chat.remoteControl.id) === String(remoteId));
   if (c) remoteControlKnownChats.set(String(remoteId), c.id);
   return c || null;
 }
@@ -540,7 +555,7 @@ function remoteControlFindChat(remoteId) {
 function remoteControlForgetChat(chatOrId) {
   const chat = (chatOrId && typeof chatOrId === 'object')
     ? chatOrId
-    : (typeof chatById === 'function' ? chatById(chatOrId) : null);
+    : remoteControlChatById(chatOrId);
   if (!chat || !chat.remoteControl || !chat.remoteControl.id) return false;
   const remoteId = String(chat.remoteControl.id);
   const cachedChatId = remoteControlKnownChats.get(remoteId);
@@ -552,7 +567,7 @@ function remoteControlForgetChat(chatOrId) {
 
 function remoteControlPruneKnownChats() {
   for (const [remoteId, chatId] of remoteControlKnownChats.entries()) {
-    const c = typeof chatById === 'function' ? chatById(chatId) : null;
+    const c = remoteControlChatById(chatId);
     if (!c || !c.remoteControl || String(c.remoteControl.id) !== String(remoteId)) {
       remoteControlKnownChats.delete(remoteId);
     }
@@ -561,7 +576,7 @@ function remoteControlPruneKnownChats() {
 
 function remoteControlSidebarChats() {
   if (typeof sidebarChats === 'function') return sidebarChats().filter(chat => chat && !chat._hiddenFromUI);
-  return (state.chats || [])
+  return (remoteControlState.chats || [])
     .filter(chat => chat && !chat._hiddenFromUI)
     .map((chat, index) => ({ chat, index }))
     .sort((a, b) => {
@@ -612,7 +627,7 @@ function remoteControlParsedLabel(parsed) {
 function remoteControlUsedIdEntries() {
   const rows = [];
   const seen = new Set();
-  for (const chat of state.chats || []) {
+  for (const chat of remoteControlState.chats || []) {
     if (!chat || !chat.remoteControl || !chat.remoteControl.id) continue;
     if (chat.remoteControl.nameRef) continue;
     const remoteId = String(chat.remoteControl.id);
@@ -640,7 +655,7 @@ function remoteControlBoundChatStatusEntries() {
   remoteControlPruneKnownChats();
   const rows = [];
   const seen = new Set();
-  for (const chat of state.chats || []) {
+  for (const chat of remoteControlState.chats || []) {
     if (!chat || !chat.remoteControl) continue;
     const rc = chat.remoteControl || {};
     const nameRef = String(rc.nameRef || '').trim();
@@ -677,8 +692,8 @@ function remoteControlBoundChatStatusEntries() {
 
 function remoteControlFormatSingleChatStatus(row) {
   const chat = row && row.chat;
-  const task = (chat && typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
-  const running = !!(task && task.isGenerating) || !!(chat && typeof isChatGenerating === 'function' && isChatGenerating(chat.id));
+  const task = chat ? remoteControlChatTaskById(chat.id) : null;
+  const running = !!(task && task.isGenerating) || !!(chat && remoteControlIsChatGenerating(chat.id));
   const latestOutlineIdx = remoteControlLatestOutlineIndex(chat);
   const latestOutlineMsg = latestOutlineIdx >= 0 ? chat.messages[latestOutlineIdx] : null;
   const outline = latestOutlineMsg && latestOutlineMsg.outline;
@@ -796,38 +811,38 @@ function remoteControlCreateChat(remoteId, opts = {}) {
       temporary: !!opts.temporary
     }
   };
-  state.chats.unshift(chat);
-  state.currentId = id;
+  remoteControlState.chats.unshift(chat);
+  remoteControlState.currentId = id;
   remoteControlKnownChats.set(String(remoteId), id);
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
+  remoteControlSyncGlobalTaskState(id);
   return chat;
 }
 
 function remoteControlEnsureTemporaryChat(parsed) {
-  let chat = state.temporaryChat && state.temporaryChat.temporary ? state.temporaryChat : null;
+  let chat = remoteControlState.temporaryChat && remoteControlState.temporaryChat.temporary ? remoteControlState.temporaryChat : null;
   if (!chat) {
     chat = typeof createTemporaryChat === 'function'
       ? createTemporaryChat()
       : { id: 'tmp_' + Date.now(), title: '临时会话', messages: [], createdAt: Date.now(), temporary: true };
-    state.temporaryChat = chat;
+    remoteControlState.temporaryChat = chat;
   }
-  state.currentId = chat.id;
+  remoteControlState.currentId = chat.id;
   chat.remoteControl = chat.remoteControl || { id: '临时', replyNo: 0 };
   chat.remoteControl.id = '临时';
   chat.remoteControl.temporary = true;
   chat.remoteControl.ephemeral = true;
   if (parsed && parsed.tools) chat.remoteControl.useToolsDefault = true;
   if (parsed && parsed.normal && !parsed.tools) chat.remoteControl.useToolsDefault = false;
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  remoteControlSyncGlobalTaskState(chat.id);
   if (typeof updateTemporaryChatButton === 'function') updateTemporaryChatButton();
-  saveData();
+  remoteControlSaveData();
   renderChatList();
-  if (isCurrentChat(chat)) renderMessages();
+  if (remoteControlIsCurrentChat(chat)) renderMessages();
   return chat;
 }
 
 function remoteControlDeduplicateRemoteChats(remoteId) {
-  const matches = (state.chats || []).filter(chat => chat && chat.remoteControl && String(chat.remoteControl.id) === String(remoteId));
+  const matches = (remoteControlState.chats || []).filter(chat => chat && chat.remoteControl && String(chat.remoteControl.id) === String(remoteId));
   if (!matches.length) return null;
   matches.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   const keeper = matches[0];
@@ -863,9 +878,9 @@ function remoteControlAppendUser(chat, content) {
   if (typeof maybeInsertBeacon === 'function') {
     try { maybeInsertBeacon(chat); } catch (e) { console.warn('[remote-control] beacon failed:', e); }
   }
-  saveData();
+  remoteControlSaveData();
   renderChatList();
-  if (isCurrentChat(chat)) renderMessages();
+  if (remoteControlIsCurrentChat(chat)) renderMessages();
 }
 
 function remoteControlStripInternalPromptText(text) {
@@ -1006,7 +1021,7 @@ async function remoteControlShutdownFromCommand() {
   const cfg = remoteControlSettings();
   cfg.enabled = false;
   remoteControlClearTimer();
-  persistSettings();
+  remoteControlPersistSettings();
   syncRemoteControlButton();
   await remoteControlStopRuntime();
 }
@@ -1019,7 +1034,7 @@ async function remoteControlRestartFromCommand() {
   try { await remoteControlStopBridge(); } catch (e) { console.warn('[remote-control] restart stop bridge failed:', e); }
   remoteControlResetMessageDedupe();
   remoteControlMarkActivity();
-  persistSettings();
+  remoteControlPersistSettings();
   syncRemoteControlButton();
   try {
     await remoteControlStartBridge();
@@ -1172,7 +1187,7 @@ async function remoteControlDisableAfterStartupMarkerError() {
   const cfg = remoteControlSettings();
   cfg.enabled = false;
   remoteControlClearTimer();
-  persistSettings();
+  remoteControlPersistSettings();
   syncRemoteControlButton();
   await remoteControlStopRuntime();
 }
@@ -1258,8 +1273,8 @@ function remoteControlIsGuidanceCandidate(parsed) {
 }
 
 function remoteControlCanGuideChat(chat) {
-  if (!chat || typeof chatTaskById !== 'function') return false;
-  const task = chatTaskById(chat.id);
+  if (!chat) return false;
+  const task = remoteControlChatTaskById(chat.id);
   if (!task || !task.isGenerating) return false;
   if (task.mode && task.mode !== 'chat') return false;
   return true;
@@ -1273,27 +1288,27 @@ function remoteControlQueueGuidance(chat, parsed) {
     _midrunGuidance: true,
     _queuedAt: Date.now()
   };
-  const task = chatTaskById(chat.id);
+  const task = remoteControlChatTaskById(chat.id);
   if (task && task.pendingGuidance) {
     task.pendingGuidance.content = [task.pendingGuidance.content || '', userMsg.content || ''].filter(Boolean).join('\n\n');
     task.pendingGuidance._queuedAt = Date.now();
     task.guidanceRequested = true;
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
-  } else if (typeof setChatTaskGuidance === 'function') {
-    setChatTaskGuidance(chat.id, userMsg);
+    remoteControlSyncGlobalTaskState(chat.id);
+  } else if (remoteControlSetChatTaskGuidance) {
+    remoteControlSetChatTaskGuidance(chat.id, userMsg);
   } else if (task) {
     task.pendingGuidance = userMsg;
     task.guidanceRequested = true;
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+    remoteControlSyncGlobalTaskState(chat.id);
   }
 
-  const runningTask = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
-  const ctrl = runningTask ? (runningTask.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  const runningTask = remoteControlChatTaskById(chat.id);
+  const ctrl = runningTask ? (runningTask.abortCtrl || remoteControlState.abortCtrl) : remoteControlState.abortCtrl;
   if (runningTask) {
     runningTask.stopRequested = true;
     runningTask.guidanceRequested = true;
   }
-  state.stopRequested = true;
+  remoteControlState.stopRequested = true;
   if (ctrl) {
     try { ctrl.abort(); } catch (e) { console.error('[remote-control] guidance abort failed:', e); }
   }
@@ -1305,7 +1320,7 @@ function remoteControlQueueGuidance(chat, parsed) {
   }
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
   if (typeof traceUserMessage === 'function') traceUserMessage(parsed.body || userMsg.content);
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  remoteControlSyncGlobalTaskState(chat.id);
   if (typeof updateSendBtn === 'function') updateSendBtn();
   return true;
 }
@@ -1380,8 +1395,8 @@ function remoteControlEnsureOutlineTarget(chat, label) {
 
 function remoteControlIsOutlineRunning(chat) {
   if (!chat) return false;
-  const task = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
-  return !!((task && task.isGenerating && task.mode === 'outline') || (typeof isChatTaskMode === 'function' && isChatTaskMode(chat.id, 'outline')));
+  const task = remoteControlChatTaskById(chat.id);
+  return !!((task && task.isGenerating && task.mode === 'outline') || remoteControlIsChatTaskMode(chat.id, 'outline'));
 }
 
 function remoteControlOutlineStatusLabel(status, outline) {
@@ -1448,15 +1463,11 @@ async function remoteControlSendOutlineStatus(chat, parsed) {
 }
 
 function remoteControlStopAllGeneratingChats() {
-  const tasks = (typeof ensureChatTasks === 'function') ? ensureChatTasks() : {};
+  const tasks = remoteControlEnsureChatTasks();
   const ids = Object.values(tasks).filter(t => t && t.isGenerating && t.chatId).map(t => t.chatId);
   let stopped = 0;
   for (const chatId of ids) {
-    if (typeof requestStopChatTask === 'function') {
-      if (requestStopChatTask(chatId)) stopped++;
-    } else {
-      stopped++;
-    }
+    if (remoteControlRequestStopChatTask(chatId)) stopped++;
   }
   return stopped;
 }
@@ -1467,8 +1478,8 @@ async function remoteControlRegenerateChat(chat, parsed) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 不存在。`));
     return;
   }
-  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) {
-    if (typeof requestStopChatTask === 'function') requestStopChatTask(chat.id);
+  if (remoteControlIsChatGenerating(chat.id)) {
+    remoteControlRequestStopChatTask(chat.id);
     await new Promise(r => setTimeout(r, 200));
   }
   let idx = -1;
@@ -1488,21 +1499,21 @@ async function remoteControlRegenerateChat(chat, parsed) {
   }
   chat.messages = chat.messages.slice(0, idx);
   while (chat.messages.length && chat.messages[chat.messages.length - 1].role === 'tool') chat.messages.pop();
-  saveData();
-  if (isCurrentChat(chat)) renderMessages();
+  remoteControlSaveData();
+  if (remoteControlIsCurrentChat(chat)) renderMessages();
   const before = chat.messages.length;
   try {
     const useTools = !!(chat.remoteControl && chat.remoteControl.useToolsDefault);
-    if (mode === 'outline') await callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
-    else if (mode === 'ppt' && typeof callAPIWithPptMode === 'function') await callAPIWithPptMode({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
-    else await callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
+    if (mode === 'outline') await RemoteControlOrchestrationService.callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else if (mode === 'ppt') await RemoteControlOrchestrationService.callAPIWithPptMode({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else await RemoteControlOrchestrationService.callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
   } catch (e) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 重新生成失败：${e.message || e}`));
     return;
   }
   const answer = remoteControlLatestAssistantText(chat, before);
   await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${remoteId} 已重新生成。\n${answer || '（无文本回复）'}`));
-  saveData();
+  remoteControlSaveData();
 }
 
 async function remoteControlCompressChat(chat, parsed) {
@@ -1511,7 +1522,7 @@ async function remoteControlCompressChat(chat, parsed) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 不存在。`));
     return;
   }
-  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) {
+  if (remoteControlIsChatGenerating(chat.id)) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 正在运行中，无法压缩。`));
     return;
   }
@@ -1523,7 +1534,7 @@ async function remoteControlCompressChat(chat, parsed) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 是辩论模式，远程遥控暂不支持压缩。`));
     return;
   }
-  if (!state.settings.apiKey) {
+  if (!remoteControlState.settings.apiKey) {
     await remoteControlSendWechat(remoteControlFormatSystem('压缩失败：请先配置 API Key。'));
     return;
   }
@@ -1559,7 +1570,7 @@ async function remoteControlOutlineInject(chat, parsed) {
   const target = remoteControlEnsureOutlineTarget(chat, label);
   const waitUntilIdle = async (timeoutMs = 15000) => {
     const start = Date.now();
-    while (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) {
+    while (remoteControlIsChatGenerating(chat.id)) {
       if (Date.now() - start > timeoutMs) throw new Error('等待大纲任务暂停超时');
       await new Promise(r => setTimeout(r, 150));
     }
@@ -1570,24 +1581,24 @@ async function remoteControlOutlineInject(chat, parsed) {
     _midrunGuidance: true,
     _queuedAt: Date.now()
   };
-  const task = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
+  const task = remoteControlChatTaskById(chat.id);
   if (task && task.pendingGuidance) {
     task.pendingGuidance.content = [task.pendingGuidance.content || '', userMsg.content || ''].filter(Boolean).join('\n\n');
     task.pendingGuidance._queuedAt = Date.now();
     task.guidanceRequested = true;
-  } else if (typeof setChatTaskGuidance === 'function') {
-    setChatTaskGuidance(chat.id, userMsg);
+  } else if (remoteControlSetChatTaskGuidance) {
+    remoteControlSetChatTaskGuidance(chat.id, userMsg);
   } else if (task) {
     task.pendingGuidance = userMsg;
     task.guidanceRequested = true;
   }
-  const runningTask = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
-  const ctrl = runningTask ? (runningTask.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  const runningTask = remoteControlChatTaskById(chat.id);
+  const ctrl = runningTask ? (runningTask.abortCtrl || remoteControlState.abortCtrl) : remoteControlState.abortCtrl;
   if (runningTask) {
     runningTask.stopRequested = true;
     runningTask.guidanceRequested = true;
   }
-  state.stopRequested = true;
+  remoteControlState.stopRequested = true;
   if (ctrl) {
     try { ctrl.abort(); } catch (e) { console.error('[remote-control] outline inject abort failed:', e); }
   }
@@ -1602,7 +1613,7 @@ async function remoteControlOutlineInject(chat, parsed) {
       await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 已暂停，但当前状态无法继续补充执行。`));
       return;
     }
-    await callAPIWithOutline({ chatId: chat.id, resumeFromMsgIdx: latest.msgIdx, userInjection: String(parsed.body || '').trim(), suppressCompletionSound: true });
+    await RemoteControlOrchestrationService.callAPIWithOutline({ chatId: chat.id, resumeFromMsgIdx: latest.msgIdx, userInjection: String(parsed.body || '').trim(), suppressCompletionSound: true });
     const answer = remoteControlLatestAssistantText(chat, target.msgIdx);
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 已补充并继续执行。\n${answer || '（无文本回复）'}`));
   } catch (e) {
@@ -1619,15 +1630,15 @@ async function remoteControlOutlineFinish(chat, parsed) {
     await remoteControlSendWechat(remoteControlFormatSystem('收尾失败：当前页面未加载大纲收尾功能。'));
     return;
   }
-  const previousCurrentId = state.currentId;
-  state.currentId = chat.id;
+  const previousCurrentId = remoteControlState.currentId;
+  remoteControlState.currentId = chat.id;
   try {
     await finishOutlineNow(target.msgIdx, { skipConfirm: true });
     await remoteControlSendWechat(remoteControlFormatSystem(`已请求对话 ${label} 收尾。`));
   } catch (e) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 收尾失败：${e.message || e}`));
   } finally {
-    state.currentId = previousCurrentId;
+    remoteControlState.currentId = previousCurrentId;
   }
 }
 
@@ -1636,7 +1647,7 @@ async function remoteControlOutlineContinue(chat, parsed) {
   let target;
   try { target = remoteControlEnsureOutlineTarget(chat, label); }
   catch (e) { await remoteControlSendWechat(remoteControlFormatSystem(e.message || e)); return; }
-  if (remoteControlIsOutlineRunning(chat) || (typeof isChatGenerating === 'function' && isChatGenerating(chat.id))) {
+  if (remoteControlIsOutlineRunning(chat) || remoteControlIsChatGenerating(chat.id)) {
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 当前正在运行中，无法继续。`));
     return;
   }
@@ -1646,7 +1657,7 @@ async function remoteControlOutlineContinue(chat, parsed) {
     return;
   }
   try {
-    await callAPIWithOutline({ chatId: chat.id, resumeFromMsgIdx: target.msgIdx, suppressCompletionSound: true });
+    await RemoteControlOrchestrationService.callAPIWithOutline({ chatId: chat.id, resumeFromMsgIdx: target.msgIdx, suppressCompletionSound: true });
     const answer = remoteControlLatestAssistantText(chat, target.msgIdx);
     await remoteControlSendWechat(remoteControlFormatSystem(`对话 ${label} 已继续执行。\n${answer || '（无文本回复）'}`));
   } catch (e) {
@@ -1656,11 +1667,11 @@ async function remoteControlOutlineContinue(chat, parsed) {
 
 async function remoteControlRunChat(chat, parsed) {
   const remoteId = remoteControlReplyId(parsed);
-  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id) && remoteControlQueueGuidance(chat, parsed)) {
+  if (remoteControlIsChatGenerating(chat.id) && remoteControlQueueGuidance(chat, parsed)) {
     await remoteControlSendWechat(remoteControlGuidanceAck(parsed));
     return;
   }
-  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) {
+  if (remoteControlIsChatGenerating(chat.id)) {
     await remoteControlSendWechat(remoteControlFormatReply(remoteId, (chat.remoteControl.replyNo || 0) + 1, '该对话正在生成中，请稍后再发。你也可以用其他编号新建并行对话。'));
     return;
   }
@@ -1673,8 +1684,8 @@ async function remoteControlRunChat(chat, parsed) {
   const useTools = parsed.normal && !parsed.tools ? false : !!(parsed.tools || (chat.remoteControl && chat.remoteControl.useToolsDefault));
   try {
     const apiStartedAt = remoteControlNow();
-    if (parsed.outline) await callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
-    else await callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
+    if (parsed.outline) await RemoteControlOrchestrationService.callAPIWithOutline({ chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true });
+    else await RemoteControlOrchestrationService.callAPI(undefined, { chatId: chat.id, useTools, suppressCompletionSound: true, contextChecked: true, extraSystemPrompt: (remoteControlSettings().shortReplyPrompt || '') });
     remoteControlLogTiming('api complete', apiStartedAt, `chat=${chat.id}`);
   } catch (e) {
     console.error('[remote-control] run failed:', e);
@@ -1687,7 +1698,7 @@ async function remoteControlRunChat(chat, parsed) {
   chat.remoteControl.replyNo = (chat.remoteControl.replyNo || 0) + 1;
   const answer = remoteControlLatestAssistantText(chat, before);
   await remoteControlSendWechat(remoteControlFormatReply(remoteId, chat.remoteControl.replyNo, answer));
-  saveData();
+  remoteControlSaveData();
 }
 
 async function remoteControlHandleParsed(parsed) {
@@ -1704,7 +1715,7 @@ async function remoteControlHandleParsed(parsed) {
     return;
   }
   if (parsed.status) {
-    const tasks = (typeof ensureChatTasks === 'function') ? ensureChatTasks() : {};
+    const tasks = remoteControlEnsureChatTasks();
     const running = Object.values(tasks).filter(t => t && t.isGenerating).map(t => t.chatId).length;
     await remoteControlSendWechat(remoteControlFormatSystem(remoteControlFormatStatusOverview(running)));
     return;
@@ -1766,7 +1777,7 @@ async function remoteControlHandleParsed(parsed) {
     } else if (parsed.outlineContinue) {
       await remoteControlOutlineContinue(existingChat, parsed);
     } else if (parsed.stop) {
-      if (typeof requestStopChatTask === 'function') requestStopChatTask(existingChat.id);
+      remoteControlRequestStopChatTask(existingChat.id);
       await remoteControlSendWechat(remoteControlFormatSystem(`已请求停止对话 ${label} 的生成。`));
     }
     return;
@@ -1833,7 +1844,7 @@ async function remoteControlHandleParsed(parsed) {
       return;
     }
     if (parsed.stop) {
-      if (typeof requestStopChatTask === 'function') requestStopChatTask(chat.id);
+      remoteControlRequestStopChatTask(chat.id);
       await remoteControlSendWechat(remoteControlFormatSystem(`已请求停止对话 ${remoteControlParsedLabel(parsed)} 的生成。`));
       return;
     }
@@ -1948,7 +1959,7 @@ function syncRemoteControlButton() {
 async function toggleRemoteControl(force) {
   const cfg = remoteControlSettings();
   cfg.enabled = typeof force === 'boolean' ? force : !cfg.enabled;
-  persistSettings();
+  remoteControlPersistSettings();
   syncRemoteControlButton();
   if (cfg.enabled) {
     if (typeof toast === 'function') toast('✓ 已开启微信遥控');
@@ -1961,7 +1972,7 @@ async function toggleRemoteControl(force) {
 
 function initRemoteControl() {
   const cfg = remoteControlSettings();
-  for (const c of state.chats || []) {
+  for (const c of remoteControlState.chats || []) {
     if (c && c.remoteControl && c.remoteControl.id) remoteControlKnownChats.set(String(c.remoteControl.id), c.id);
   }
   remoteControlPruneKnownChats();
@@ -2031,7 +2042,7 @@ function closeRemoteControlSettings() {
 
 async function saveAndCloseRemoteControlSettings() {
   await saveRemoteControlSettingsFromModal();
-  if (typeof persistSettings === 'function') persistSettings();
+  remoteControlPersistSettings();
   if (typeof window !== 'undefined' && typeof window.closeRemoteControlSettings === 'function' && window.closeRemoteControlSettings !== closeRemoteControlSettings) {
     window.closeRemoteControlSettings();
   } else {
@@ -2056,3 +2067,71 @@ if (typeof window !== 'undefined') {
   window.remoteControlRenderUsedIdsList = remoteControlRenderUsedIdsList;
   window.remoteControlRenderCommandList = remoteControlRenderCommandList;
 }
+
+window.AgentApp.define('remoteControl', {
+  REMOTE_CONTROL_DEFAULTS,
+  REMOTE_CONTROL_COMMANDS,
+  remoteControlFormatHelpExamples,
+  remoteControlStartBridge,
+  remoteControlStopBridge,
+  remoteControlClearTimer,
+  remoteControlResetMessageDedupe,
+  remoteControlStartRuntime,
+  remoteControlStopRuntime,
+  remoteControlSettings,
+  remoteControlNormalizeText,
+  remoteControlSplitCommand,
+  remoteControlParseMessage,
+  remoteControlFindChat,
+  remoteControlForgetChat,
+  remoteControlPruneKnownChats,
+  remoteControlSidebarChats,
+  remoteControlChatTitle,
+  remoteControlFindChatByNameRef,
+  remoteControlResolveParsedChat,
+  remoteControlParsedLabel,
+  remoteControlUsedIdEntries,
+  remoteControlBoundChatStatusEntries,
+  remoteControlFormatStatusOverview,
+  remoteControlFormatRemoteChatList,
+  remoteControlFormatSidebarChatList,
+  remoteControlRenderUsedIdsList,
+  remoteControlRenderCommandList,
+  remoteControlCreateChat,
+  remoteControlEnsureTemporaryChat,
+  remoteControlDeduplicateRemoteChats,
+  remoteControlEnsureChat,
+  remoteControlAppendUser,
+  remoteControlLatestAssistantText,
+  remoteControlRunTerminalCommand,
+  remoteControlSendSandboxDirectory,
+  remoteControlSwitchSandboxDirectory,
+  remoteControlShutdownFromCommand,
+  remoteControlRestartFromCommand,
+  remoteControlSendWechat,
+  remoteControlReadWechat,
+  remoteControlDispatchMessages,
+  remoteControlIsGuidanceCandidate,
+  remoteControlCanGuideChat,
+  remoteControlQueueGuidance,
+  remoteControlStopAllGeneratingChats,
+  remoteControlRegenerateChat,
+  remoteControlCompressChat,
+  remoteControlOutlineInject,
+  remoteControlOutlineFinish,
+  remoteControlOutlineContinue,
+  remoteControlRunChat,
+  remoteControlHandleParsed,
+  remoteControlDispatchParsed,
+  remoteControlHandlePermissionReply,
+  remoteControlPollOnce,
+  remoteControlScheduleNext,
+  syncRemoteControlButton,
+  toggleRemoteControl,
+  initRemoteControl,
+  loadRemoteControlSettingsToModal,
+  saveRemoteControlSettingsFromModal,
+  openRemoteControlSettings,
+  closeRemoteControlSettings,
+  saveAndCloseRemoteControlSettings
+});

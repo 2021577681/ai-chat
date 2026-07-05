@@ -1,5 +1,13 @@
 // ============ 工具权限管理面板 ============
 
+const PermissionsConfigModule = window.AgentApp.require('config');
+const PermissionsStateModule = window.AgentApp.require('state');
+const PermissionsUiService = window.AgentApp.require('uiService');
+const permissionsSecretRegistry = PermissionsConfigModule.SECRET_REGISTRY;
+const permissionsClearAllSecrets = PermissionsConfigModule.clearAllSecrets;
+const permissionsState = PermissionsStateModule.state;
+const permissionsPersistSettings = PermissionsStateModule.persistSettings;
+
 function openPermissions() {
   document.getElementById('permissionsModal').classList.add('show');
   renderPermissionsList();
@@ -24,8 +32,8 @@ function renderPermissionsList() {
     const granted = !!perms[key];
     return `
       <label class="perm-item">
-        <input type="checkbox" ${granted ? 'checked' : ''} 
-               onchange="onTogglePermission('${key}', this.checked)">
+        <input type="checkbox" ${granted ? 'checked' : ''}
+               data-change-action="valueChange" data-handler="onTogglePermission" data-value="${key}" data-checked-arg="true">
         <div class="perm-item-info">
           <div class="perm-item-title">${info.label}</div>
           <div class="perm-item-desc">${info.desc}</div>
@@ -42,7 +50,7 @@ function renderTaskPermissionsList() {
   const container = document.getElementById('taskPermissionsList');
   if (!container) return;
   const taskAllow = (typeof getTaskAllowForChat === 'function')
-    ? getTaskAllowForChat(state.currentId)
+    ? getTaskAllowForChat(permissionsState.currentId)
     : ((TERMINAL_CONFIG && TERMINAL_CONFIG.taskAllow) || {});
   const keys = Object.keys(taskAllow);
   
@@ -54,7 +62,7 @@ function renderTaskPermissionsList() {
   container.innerHTML = keys.map(k => {
     const info = PERMISSION_CATEGORIES[k];
     return `<span class="perm-task-chip">${info ? info.label : k}</span>`;
-  }).join('') + ' <button class="btn" style="padding:2px 10px;font-size:11px;margin-left:4px;" onclick="onClearTaskPerms()">清除</button>';
+  }).join('') + ' <button class="btn" style="padding:2px 10px;font-size:11px;margin-left:4px;" data-action="onClearTaskPerms">清除</button>';
 }
 
 function onTogglePermission(category, checked) {
@@ -62,7 +70,7 @@ function onTogglePermission(category, checked) {
   setPermanentPermission(category, checked);
   const info = PERMISSION_CATEGORIES[category];
   const name = info ? info.label : category;
-  toast(checked
+  PermissionsUiService.toast(checked
     ? `✓ 已永久允许「${name}」`
     : `🗑️ 已撤销「${name}」的永久授权`, 2000);
   renderPermissionsList();
@@ -72,12 +80,12 @@ function onClearAllPerms() {
   const perms = (TERMINAL_CONFIG && TERMINAL_CONFIG.permanentAllow) || {};
   const count = Object.keys(perms).length;
   if (count === 0) {
-    toast('当前没有任何永久授权', 1800);
+    PermissionsUiService.toast('当前没有任何永久授权', 1800);
     return;
   }
   if (!confirm(`确认撤销全部 ${count} 项永久授权？\n下次调用相应工具会重新弹窗。`)) return;
   clearAllPermanentPermissions();
-  toast(`🗑️ 已清空全部 ${count} 项永久授权`, 2500);
+  PermissionsUiService.toast(`🗑️ 已清空全部 ${count} 项永久授权`, 2500);
   renderPermissionsList();
 }
 
@@ -85,32 +93,46 @@ function onClearTaskPerms() {
   if (typeof TERMINAL_CONFIG === 'undefined') return;
   if (typeof clearTaskPermissions === 'function') clearTaskPermissions();
   else TERMINAL_CONFIG.taskAllow = {};
-  toast('🗑️ 任务级授权已清除', 1800);
+  PermissionsUiService.toast('🗑️ 任务级授权已清除', 1800);
   renderTaskPermissionsList();
 }
 
 // ============ 🛡️ 一键清除所有敏感凭证 ============
 function onClearAllSecrets() {
-  if (typeof SECRET_REGISTRY === 'undefined') {
+  if (!permissionsSecretRegistry) {
     alert('配置未加载');
     return;
   }
-  const list = SECRET_REGISTRY.map(s => '  • ' + s.label).join('\n');
+  const list = permissionsSecretRegistry.map(s => '  • ' + s.label).join('\n');
   const ok = confirm(
     '⚠️ 即将清除以下所有本地凭证：\n\n' + list +
     '\n\n清除后需要重新输入 API Key / LMS Cookie / 重新授权本地终端。\n\n' +
     '本操作不会删除聊天记录和工具配置。确认继续？'
   );
   if (!ok) return;
-  const cleared = clearAllSecrets();
+  const cleared = permissionsClearAllSecrets({
+    settings: permissionsState.settings,
+    persistSettings: permissionsPersistSettings
+  });
   // 同步刷新设置面板（如果开着）
   try {
     const apiInput = document.getElementById('apiKey');
     if (apiInput) apiInput.value = '';
   } catch (e) {}
   if (cleared.length === 0) {
-    toast('✓ 没有需要清除的凭证（当前已是干净状态）', 2500);
+    PermissionsUiService.toast('✓ 没有需要清除的凭证（当前已是干净状态）', 2500);
   } else {
-    toast(`🗑️ 已清除 ${cleared.length} 项凭证：\n` + cleared.join('、'), 3500);
+    PermissionsUiService.toast(`🗑️ 已清除 ${cleared.length} 项凭证：\n` + cleared.join('、'), 3500);
   }
 }
+
+window.AgentApp.define('permissions', {
+  openPermissions,
+  closePermissions,
+  renderPermissionsList,
+  renderTaskPermissionsList,
+  onTogglePermission,
+  onClearAllPerms,
+  onClearTaskPerms,
+  onClearAllSecrets
+});

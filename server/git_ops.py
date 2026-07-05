@@ -61,15 +61,15 @@ class GitMixin:
             'scan_diff',
         }
         if sub not in ALLOWED:
-            return self._send_json(200, {'ok': False, 'error': f'未知 git 子命令: {sub}'})
+            return self.response.json(200, {'ok': False, 'error': f'未知 git 子命令: {sub}'})
 
         # 工作目录：默认沙箱根
         cwd_param = body.get('cwd') or config.WORKSPACE_ROOT
         cwd_abs = resolve_path(cwd_param) if not os.path.isabs(cwd_param) else os.path.expanduser(cwd_param)
         if not is_inside_workspace(cwd_abs):
-            return self._send_json(200, {'ok': False, 'error': f'🚫 cwd 越界：{cwd_abs}\n沙箱根: {config.WORKSPACE_ROOT}'})
+            return self.response.json(200, {'ok': False, 'error': f'🚫 cwd 越界：{cwd_abs}\n沙箱根: {config.WORKSPACE_ROOT}'})
         if not os.path.isdir(cwd_abs):
-            return self._send_json(200, {'ok': False, 'error': f'目录不存在: {cwd_abs}'})
+            return self.response.json(200, {'ok': False, 'error': f'目录不存在: {cwd_abs}'})
 
         try:
             # ===== check =====
@@ -84,31 +84,31 @@ class GitMixin:
             if sub == 'config_get':
                 key = body.get('key', '')
                 if not key:
-                    return self._send_json(200, {'ok': False, 'error': '缺少 key'})
+                    return self.response.json(200, {'ok': False, 'error': '缺少 key'})
                 r = self._git_run(['git', 'config', '--get', key], cwd_abs, timeout=5)
-                return self._send_json(200, {'ok': True, 'value': r['stdout'].strip() if r['ok'] else ''})
+                return self.response.json(200, {'ok': True, 'value': r['stdout'].strip() if r['ok'] else ''})
             if sub == 'config_set':
                 key = body.get('key', '')
                 value = body.get('value', '')
                 if not key:
-                    return self._send_json(200, {'ok': False, 'error': '缺少 key'})
+                    return self.response.json(200, {'ok': False, 'error': '缺少 key'})
                 r = self._git_run(['git', 'config', key, value], cwd_abs, timeout=5)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
             if sub == 'config_unset':
                 key = body.get('key', '')
                 if not key:
-                    return self._send_json(200, {'ok': False, 'error': '缺少 key'})
+                    return self.response.json(200, {'ok': False, 'error': '缺少 key'})
                 r = self._git_run(['git', 'config', '--unset-all', key], cwd_abs, timeout=5)
                 if not r['ok'] and r.get('returncode') != 5:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             # —— 以下子命令都要求已在仓库内 ——
             in_repo = self._git_run(['git', 'rev-parse', '--is-inside-work-tree'], cwd_abs, timeout=5)
             if not (in_repo['ok'] and in_repo['stdout'].strip() == 'true'):
-                return self._send_json(200, {'ok': False, 'error': '当前目录不是 Git 仓库（请先初始化）'})
+                return self.response.json(200, {'ok': False, 'error': '当前目录不是 Git 仓库（请先初始化）'})
 
             # ===== status =====
             if sub == 'status':
@@ -130,67 +130,67 @@ class GitMixin:
             if sub == 'add':
                 files = body.get('files') or []
                 if not isinstance(files, list) or not files:
-                    return self._send_json(200, {'ok': False, 'error': '需要 files 数组'})
+                    return self.response.json(200, {'ok': False, 'error': '需要 files 数组'})
                 cmd = ['git', 'add', '--'] + files
                 r = self._git_run(cmd, cwd_abs, timeout=30)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
             if sub == 'unstage':
                 files = body.get('files') or []
                 if not isinstance(files, list) or not files:
-                    return self._send_json(200, {'ok': False, 'error': '需要 files 数组'})
+                    return self.response.json(200, {'ok': False, 'error': '需要 files 数组'})
                 cmd = ['git', 'reset', 'HEAD', '--'] + files
                 r = self._git_run(cmd, cwd_abs, timeout=15)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             # ===== commit =====
             if sub == 'commit':
                 msg = (body.get('message') or '').strip()
                 if not msg:
-                    return self._send_json(200, {'ok': False, 'error': '提交信息不能为空'})
+                    return self.response.json(200, {'ok': False, 'error': '提交信息不能为空'})
                 cmd = ['git', 'commit', '-m', msg]
                 if body.get('all'):
                     cmd.insert(2, '-a')
                 r = self._git_run(cmd, cwd_abs, timeout=20)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout']})
 
             # ===== checkout_file =====
             if sub == 'checkout_file':
                 files = body.get('files') or []
                 if not isinstance(files, list) or not files:
-                    return self._send_json(200, {'ok': False, 'error': '需要 files 数组'})
+                    return self.response.json(200, {'ok': False, 'error': '需要 files 数组'})
                 commit = body.get('commit') or 'HEAD'
                 if commit != 'HEAD' and not re.match(r'^[0-9a-f]{4,40}$', commit):
-                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
                 cmd = ['git', 'checkout', commit, '--'] + files
                 r = self._git_run(cmd, cwd_abs, timeout=15)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             # ===== show_file =====
             if sub == 'show_file':
                 commit = body.get('commit') or 'HEAD'
                 path = body.get('path') or ''
                 if commit != 'HEAD' and not re.match(r'^[0-9a-f]{4,40}$', commit):
-                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
                 if not path or '..' in path.split('/') or path.startswith('/'):
-                    return self._send_json(200, {'ok': False, 'error': '无效的文件路径'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的文件路径'})
                 r = self._git_run(['git', 'cat-file', '-e', f'{commit}:{path}'], cwd_abs, timeout=5)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': '在指定快照中找不到该文件'})
-                return self._send_json(200, {'ok': True, 'exists': True})
+                    return self.response.json(200, {'ok': False, 'error': '在指定快照中找不到该文件'})
+                return self.response.json(200, {'ok': True, 'exists': True})
 
             # ===== 分支 =====
             if sub == 'branch_list':
                 r = self._git_run(['git', 'branch', '--list', '--format=%(refname:short)|%(HEAD)|%(upstream:short)'], cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
                 branches = []
                 for line in r['stdout'].splitlines():
                     parts = line.split('|')
@@ -200,101 +200,101 @@ class GitMixin:
                         'current': len(parts) > 1 and parts[1].strip() == '*',
                         'upstream': parts[2] if len(parts) > 2 else '',
                     })
-                return self._send_json(200, {'ok': True, 'branches': branches})
+                return self.response.json(200, {'ok': True, 'branches': branches})
 
             if sub == 'branch_create':
                 name = (body.get('name') or '').strip()
                 if not name or not re.match(r'^[A-Za-z0-9_\-./]+$', name):
-                    return self._send_json(200, {'ok': False, 'error': '分支名只能包含字母数字 _ - . /'})
+                    return self.response.json(200, {'ok': False, 'error': '分支名只能包含字母数字 _ - . /'})
                 r = self._git_run(['git', 'checkout', '-b', name], cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             if sub == 'branch_switch':
                 name = (body.get('name') or '').strip()
                 if not name or not re.match(r'^[A-Za-z0-9_\-./]+$', name):
-                    return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的分支名'})
                 r = self._git_run(['git', 'checkout', name], cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             # ========== Phase 2：版本回退 ==========
             if sub == 'revert':
                 commit = (body.get('commit') or '').strip()
                 if not re.match(r'^[0-9a-f]{4,40}$', commit):
-                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
                 r = self._git_run(['git', 'revert', '--no-edit', commit], cwd_abs, timeout=20)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout']})
 
             if sub == 'reset_mixed':
                 commit = (body.get('commit') or '').strip()
                 if not re.match(r'^[0-9a-f]{4,40}$', commit):
-                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
                 r = self._git_run(['git', 'reset', '--mixed', commit], cwd_abs, timeout=20)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout']})
 
             if sub == 'reset_hard':
                 commit = (body.get('commit') or '').strip()
                 if not re.match(r'^[0-9a-f]{4,40}$', commit):
-                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
                 if body.get('confirm') != '我确定':
-                    return self._send_json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
+                    return self.response.json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
                 r = self._git_run(['git', 'reset', '--hard', commit], cwd_abs, timeout=20)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout']})
 
             if sub == 'reset_to_ref':
                 commit = (body.get('commit') or body.get('hash') or '').strip()
                 if not re.match(r'^[0-9a-f]{4,40}$', commit):
-                    return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
                 if body.get('confirm') != '我确定':
-                    return self._send_json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
+                    return self.response.json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
                 r = self._git_run(['git', 'reset', '--hard', commit], cwd_abs, timeout=20)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout'], 'target': commit})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout'], 'target': commit})
 
             if sub == 'reset_orig_head':
                 if body.get('confirm') != '我确定':
-                    return self._send_json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
+                    return self.response.json(200, {'ok': False, 'error': '需要确认（confirm="我确定"）'})
                 commit, err = self._git_resolve_ref_hash('ORIG_HEAD', cwd_abs)
                 if not commit:
-                    return self._send_json(200, {'ok': False, 'error': err or '找不到 ORIG_HEAD，无法撤回上次重置'})
+                    return self.response.json(200, {'ok': False, 'error': err or '找不到 ORIG_HEAD，无法撤回上次重置'})
                 r = self._git_run(['git', 'reset', '--hard', commit], cwd_abs, timeout=20)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout'], 'target': commit})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout'], 'target': commit})
 
             # ========== Phase 2：分支删除/重命名 ==========
             if sub == 'branch_delete':
                 name = (body.get('name') or '').strip()
                 if not name or not re.match(r'^[A-Za-z0-9_\-./]+$', name):
-                    return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的分支名'})
                 force = bool(body.get('force'))
                 if force and body.get('confirm') != '我确定':
-                    return self._send_json(200, {'ok': False, 'error': '强制删除需要确认（confirm="我确定"）'})
+                    return self.response.json(200, {'ok': False, 'error': '强制删除需要确认（confirm="我确定"）'})
                 flag = '-D' if force else '-d'
                 r = self._git_run(['git', 'branch', flag, name], cwd_abs, timeout=10)
                 if not r['ok']:
                     err = r['stderr'] or r['stdout']
                     not_merged = 'not fully merged' in err.lower() or 'is not fully merged' in err.lower()
-                    return self._send_json(200, {'ok': False, 'error': err, 'notMerged': not_merged})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': err, 'notMerged': not_merged})
+                return self.response.json(200, {'ok': True})
 
             if sub == 'branch_rename':
                 old = (body.get('old') or '').strip()
                 new = (body.get('new') or '').strip()
                 if not new or not re.match(r'^[A-Za-z0-9_\-./]+$', new):
-                    return self._send_json(200, {'ok': False, 'error': '新分支名只能包含字母数字 _ - . /'})
+                    return self.response.json(200, {'ok': False, 'error': '新分支名只能包含字母数字 _ - . /'})
                 if old and not re.match(r'^[A-Za-z0-9_\-./]+$', old):
-                    return self._send_json(200, {'ok': False, 'error': '无效的旧分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的旧分支名'})
                 cmd = ['git', 'branch', '-m']
                 if old:
                     cmd += [old, new]
@@ -302,14 +302,14 @@ class GitMixin:
                     cmd += [new]
                 r = self._git_run(cmd, cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             # ========== Phase 2：远程仓库管理 ==========
             if sub == 'remote_list':
                 r = self._git_run(['git', 'remote', '-v'], cwd_abs, timeout=5)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
                 seen = {}
                 for line in r['stdout'].splitlines():
                     parts = line.split()
@@ -318,64 +318,64 @@ class GitMixin:
                     if nm not in seen:
                         seen[nm] = url
                 remotes = [{'name': k, 'url': v} for k, v in seen.items()]
-                return self._send_json(200, {'ok': True, 'remotes': remotes})
+                return self.response.json(200, {'ok': True, 'remotes': remotes})
 
             if sub == 'remote_add':
                 name = (body.get('name') or '').strip()
                 url = (body.get('url') or '').strip()
                 if not name or not re.match(r'^[A-Za-z0-9_\-]+$', name):
-                    return self._send_json(200, {'ok': False, 'error': '远程名只能包含字母数字 _ -'})
+                    return self.response.json(200, {'ok': False, 'error': '远程名只能包含字母数字 _ -'})
                 if not self._is_safe_remote_url(url):
-                    return self._send_json(200, {'ok': False, 'error': '只支持 https:// 或 git@host:path 形式的 URL'})
+                    return self.response.json(200, {'ok': False, 'error': '只支持 https:// 或 git@host:path 形式的 URL'})
                 r = self._git_run(['git', 'remote', 'add', name, url], cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             if sub == 'remote_remove':
                 name = (body.get('name') or '').strip()
                 if not name or not re.match(r'^[A-Za-z0-9_\-]+$', name):
-                    return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的远程名'})
                 r = self._git_run(['git', 'remote', 'remove', name], cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             if sub == 'remote_set_url':
                 name = (body.get('name') or '').strip()
                 url = (body.get('url') or '').strip()
                 if not name or not re.match(r'^[A-Za-z0-9_\-]+$', name):
-                    return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的远程名'})
                 if not self._is_safe_remote_url(url):
-                    return self._send_json(200, {'ok': False, 'error': '只支持 https:// 或 git@host:path 形式的 URL'})
+                    return self.response.json(200, {'ok': False, 'error': '只支持 https:// 或 git@host:path 形式的 URL'})
                 r = self._git_run(['git', 'remote', 'set-url', name, url], cwd_abs, timeout=10)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True})
 
             # ========== Phase 2：推送 / 拉取 / 抓取 ==========
             if sub == 'fetch':
                 remote = (body.get('remote') or 'origin').strip()
                 if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
-                    return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的远程名'})
                 r = self._git_run(['git', 'fetch', remote], cwd_abs, timeout=60)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout'] + r['stderr']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout'] + r['stderr']})
 
             if sub == 'pull':
                 remote = (body.get('remote') or 'origin').strip()
                 branch = self._normalize_branch_name(body.get('branch') or '', remote)
                 if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
-                    return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的远程名'})
                 if branch and not self._is_safe_branch_name(branch):
-                    return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的分支名'})
                 cmd = ['git', 'pull', remote]
                 if branch: cmd.append(branch)
                 r = self._git_run(cmd, cwd_abs, timeout=60)
                 if not r['ok']:
-                    return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-                return self._send_json(200, {'ok': True, 'output': r['stdout'] + r['stderr']})
+                    return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'output': r['stdout'] + r['stderr']})
 
             if sub == 'push':
                 remote = (body.get('remote') or 'origin').strip()
@@ -384,15 +384,15 @@ class GitMixin:
                 target_branch = self._normalize_branch_name(body.get('targetBranch') or '', remote)
                 force_lease = bool(body.get('forceWithLease'))
                 if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
-                    return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的远程名'})
                 if branch and not self._is_safe_branch_name(branch):
-                    return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的分支名'})
                 if source_branch and not self._is_safe_branch_name(source_branch):
-                    return self._send_json(200, {'ok': False, 'error': '无效的本地分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的本地分支名'})
                 if target_branch and not self._is_safe_branch_name(target_branch):
-                    return self._send_json(200, {'ok': False, 'error': '无效的远程分支名'})
+                    return self.response.json(200, {'ok': False, 'error': '无效的远程分支名'})
                 if force_lease and body.get('confirm') != '我确定':
-                    return self._send_json(200, {'ok': False, 'error': '强制推送需要确认（confirm="我确定"）'})
+                    return self.response.json(200, {'ok': False, 'error': '强制推送需要确认（confirm="我确定"）'})
                 cmd = ['git', 'push']
                 if force_lease:
                     cmd.append('--force-with-lease')
@@ -403,9 +403,9 @@ class GitMixin:
                         cur = self._git_run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd_abs, timeout=5)
                         source_branch = self._normalize_branch_name(cur['stdout'], remote, strip_remote=False) if cur['ok'] else ''
                     if not source_branch or source_branch == 'HEAD':
-                        return self._send_json(200, {'ok': False, 'error': '无法确定要推送的本地分支'})
+                        return self.response.json(200, {'ok': False, 'error': '无法确定要推送的本地分支'})
                     if not self._is_safe_branch_name(source_branch):
-                        return self._send_json(200, {'ok': False, 'error': '无效的本地分支名'})
+                        return self.response.json(200, {'ok': False, 'error': '无效的本地分支名'})
                     cmd.append(f'{source_branch}:{target_branch}')
                 elif branch:
                     cmd.append(branch)
@@ -415,21 +415,21 @@ class GitMixin:
                     auth_fail = ('authentication failed' in err.lower()
                                  or 'could not read username' in err.lower()
                                  or 'permission denied' in err.lower())
-                    return self._send_json(200, {'ok': False, 'error': err, 'authFailed': auth_fail})
-                return self._send_json(200, {'ok': True, 'output': r['stdout'] + r['stderr']})
+                    return self.response.json(200, {'ok': False, 'error': err, 'authFailed': auth_fail})
+                return self.response.json(200, {'ok': True, 'output': r['stdout'] + r['stderr']})
 
             # ========== Phase 2：敏感信息扫描 ==========
             if sub == 'scan_diff':
                 return self._git_scan_diff(body, cwd_abs)
 
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': f'git 内部错误: {e}'})
+            return self.response.json(200, {'ok': False, 'error': f'git 内部错误: {e}'})
 
     # ============ 子命令拆出来的辅助 ============
     def _git_check(self, cwd_abs):
         git_ver = self._git_run(['git', '--version'], cwd_abs, timeout=5)
         if not git_ver['ok']:
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'gitInstalled': False,
                 'error': '系统未安装 Git，或不在 PATH 中。请先安装 Git：https://git-scm.com/'
@@ -440,7 +440,7 @@ class GitMixin:
             branch = self._git_run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd_abs, timeout=5)
             user_name = self._git_run(['git', 'config', '--get', 'user.name'], cwd_abs, timeout=5)
             user_email = self._git_run(['git', 'config', '--get', 'user.email'], cwd_abs, timeout=5)
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': True,
                 'gitInstalled': True,
                 'inRepo': True,
@@ -450,7 +450,7 @@ class GitMixin:
                 'userName': user_name['stdout'].strip() if user_name['ok'] else '',
                 'userEmail': user_email['stdout'].strip() if user_email['ok'] else '',
             })
-        return self._send_json(200, {
+        return self.response.json(200, {
             'ok': True,
             'gitInstalled': True,
             'inRepo': False,
@@ -459,10 +459,10 @@ class GitMixin:
 
     def _git_init(self, body, cwd_abs):
         if os.path.isdir(os.path.join(cwd_abs, '.git')):
-            return self._send_json(200, {'ok': False, 'error': '此目录已是 Git 仓库'})
+            return self.response.json(200, {'ok': False, 'error': '此目录已是 Git 仓库'})
         r = self._git_run(['git', 'init'], cwd_abs, timeout=15)
         if not r['ok']:
-            return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+            return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
         uname = (body.get('userName') or '').strip()
         uemail = (body.get('userEmail') or '').strip()
         if uname:
@@ -480,12 +480,12 @@ class GitMixin:
         if body.get('createInitialCommit'):
             self._git_run(['git', 'add', '.'], cwd_abs, timeout=30)
             self._git_run(['git', 'commit', '-m', body.get('initialCommitMessage') or 'Initial commit'], cwd_abs, timeout=15)
-        return self._send_json(200, {'ok': True, 'message': '✅ Git 仓库已初始化'})
+        return self.response.json(200, {'ok': True, 'message': '✅ Git 仓库已初始化'})
 
     def _git_status(self, cwd_abs):
         r = self._git_run(['git', 'status', '--porcelain=v1', '-b', '--untracked-files=all'], cwd_abs, timeout=10)
         if not r['ok']:
-            return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+            return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
         lines = r['stdout'].splitlines()
         branch = ''
         ahead = behind = 0
@@ -517,7 +517,7 @@ class GitMixin:
                     staged.append({'path': path, 'status': x})
                 if y != ' ' and y != '?':
                     unstaged.append({'path': path, 'status': y})
-        return self._send_json(200, {
+        return self.response.json(200, {
             'ok': True,
             'branch': branch, 'ahead': ahead, 'behind': behind,
             'staged': staged, 'unstaged': unstaged, 'untracked': untracked,
@@ -533,8 +533,8 @@ class GitMixin:
         r = self._git_run(cmd, cwd_abs, timeout=15)
         if not r['ok']:
             if 'does not have any commits' in (r['stderr'] or '') or 'bad default revision' in (r['stderr'] or ''):
-                return self._send_json(200, {'ok': True, 'commits': [], 'commitCount': 0})
-            return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'commits': [], 'commitCount': 0})
+            return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
         commit_count = None
         if not body.get('file'):
             count_r = self._git_run(['git', 'rev-list', '--count', 'HEAD'], cwd_abs, timeout=10, max_output=4096)
@@ -558,7 +558,7 @@ class GitMixin:
                 'ts': int(parts[4]) if parts[4].isdigit() else 0,
                 'subject': parts[5],
             })
-        return self._send_json(200, {'ok': True, 'commits': commits, 'commitCount': commit_count if commit_count is not None else len(commits)})
+        return self.response.json(200, {'ok': True, 'commits': commits, 'commitCount': commit_count if commit_count is not None else len(commits)})
 
     def _git_reflog(self, body, cwd_abs):
         limit = max(1, min(int(body.get('limit', 30)), 100))
@@ -567,8 +567,8 @@ class GitMixin:
         if not r['ok']:
             no_commits = 'does not have any commits' in (r['stderr'] or '') or 'bad default revision' in (r['stderr'] or '')
             if no_commits:
-                return self._send_json(200, {'ok': True, 'entries': [], 'origHead': '', 'origHeadShort': ''})
-            return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+                return self.response.json(200, {'ok': True, 'entries': [], 'origHead': '', 'origHeadShort': ''})
+            return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
         entries = []
         for rec in r['stdout'].split('\x1e'):
             rec = rec.strip('\n\r')
@@ -588,7 +588,7 @@ class GitMixin:
                 'date': parts[4].strip(),
             })
         orig_head, _ = self._git_resolve_ref_hash('ORIG_HEAD', cwd_abs)
-        return self._send_json(200, {
+        return self.response.json(200, {
             'ok': True,
             'entries': entries,
             'origHead': orig_head or '',
@@ -601,7 +601,7 @@ class GitMixin:
         if mode == 'commit':
             commit = body.get('commit', '')
             if not commit or not re.match(r'^[0-9a-f]{4,40}$', commit):
-                return self._send_json(200, {'ok': False, 'error': '无效的 commit hash'})
+                return self.response.json(200, {'ok': False, 'error': '无效的 commit hash'})
             cmd = ['git', 'show', '--format=fuller', commit]
             if file:
                 cmd += ['--', file]
@@ -613,8 +613,8 @@ class GitMixin:
             if file: cmd += ['--', file]
         r = self._git_run(cmd, cwd_abs, timeout=15, max_output=2 * 1024 * 1024)
         if not r['ok']:
-            return self._send_json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
-        return self._send_json(200, {'ok': True, 'diff': r['stdout'], 'mode': mode, 'file': file})
+            return self.response.json(200, {'ok': False, 'error': r['stderr'] or r['stdout']})
+        return self.response.json(200, {'ok': True, 'diff': r['stdout'], 'mode': mode, 'file': file})
 
     def _git_resolve_ref_hash(self, ref, cwd_abs):
         r = self._git_run(['git', 'rev-parse', '--verify', ref], cwd_abs, timeout=5)
@@ -629,9 +629,9 @@ class GitMixin:
         remote = (body.get('remote') or 'origin').strip()
         branch = self._normalize_branch_name(body.get('branch') or '', remote)
         if not re.match(r'^[A-Za-z0-9_\-]+$', remote):
-            return self._send_json(200, {'ok': False, 'error': '无效的远程名'})
+            return self.response.json(200, {'ok': False, 'error': '无效的远程名'})
         if branch and not self._is_safe_branch_name(branch):
-            return self._send_json(200, {'ok': False, 'error': '无效的分支名'})
+            return self.response.json(200, {'ok': False, 'error': '无效的分支名'})
         # 先 fetch 一下，确保远程引用是最新的（失败不致命）
         self._git_run(['git', 'fetch', remote], cwd_abs, timeout=30)
         range_ref = f'{remote}/{branch}..HEAD' if branch else f'{remote}/HEAD..HEAD'
@@ -640,7 +640,7 @@ class GitMixin:
         if not r['ok']:
             r2 = self._git_run(['git', 'diff', '--root', 'HEAD'], cwd_abs, timeout=20, max_output=4 * 1024 * 1024)
             if not r2['ok']:
-                return self._send_json(200, {'ok': True, 'findings': [], 'note': '无法获取 diff，跳过扫描'})
+                return self.response.json(200, {'ok': True, 'findings': [], 'note': '无法获取 diff，跳过扫描'})
             diff_text = r2['stdout']
             file_list_cmd = ['git', 'diff', '--root', '--name-only', 'HEAD']
         else:
@@ -648,7 +648,7 @@ class GitMixin:
         fr = self._git_run(file_list_cmd, cwd_abs, timeout=10)
         file_names = [ln.strip() for ln in (fr['stdout'].splitlines() if fr['ok'] else []) if ln.strip()]
         findings = self._scan_sensitive_in_diff(diff_text, file_names)
-        return self._send_json(200, {'ok': True, 'findings': findings})
+        return self.response.json(200, {'ok': True, 'findings': findings})
 
     # ============ 通用工具 ============
     def _git_display_cmd(self, cmd):

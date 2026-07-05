@@ -48,14 +48,14 @@ class WebMixin:
         proxy_url = (body.get('proxy_url') or body.get('proxy') or '').strip()
 
         if not query:
-            return self._send_json(200, {'ok': False, 'error': 'query 不能为空'})
+            return self.response.json(200, {'ok': False, 'error': 'query 不能为空'})
 
         proxies = None
         if proxy_enabled:
             if not proxy_url:
-                return self._send_json(200, {'ok': False, 'error': '已启用搜索代理，但代理地址为空'})
+                return self.response.json(200, {'ok': False, 'error': '已启用搜索代理，但代理地址为空'})
             if not re.match(r'^(https?|socks4|socks5|socks5h)://', proxy_url, flags=re.I):
-                return self._send_json(200, {'ok': False, 'error': '搜索代理地址必须以 http://、https://、socks5:// 或 socks5h:// 开头'})
+                return self.response.json(200, {'ok': False, 'error': '搜索代理地址必须以 http://、https://、socks5:// 或 socks5h:// 开头'})
             proxies = {'http': proxy_url, 'https': proxy_url}
 
         proxy_hint = proxy_url if proxies else 'off'
@@ -64,7 +64,7 @@ class WebMixin:
         try:
             import requests
         except ImportError:
-            return self._send_json(200, {'ok': False, 'error': '后端缺少 requests 模块，请运行：pip install requests'})
+            return self.response.json(200, {'ok': False, 'error': '后端缺少 requests 模块，请运行：pip install requests'})
 
         UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
@@ -345,7 +345,7 @@ class WebMixin:
         if preferred_engine not in ('', 'auto', 'all'):
             fn = engine_map.get(preferred_engine)
             if not fn:
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': False,
                     'error': f'未知搜索源：{preferred_engine}。可选：auto, google, duckduckgo, bing, bing-cn, bing-global, 360, sogou, baidu'
                 })
@@ -378,7 +378,7 @@ class WebMixin:
                 results = _dedupe(fn())
                 if results:
                     print(f'✅ [网络搜索] {name} 命中 {len(results)} 条')
-                    return self._send_json(200, {
+                    return self.response.json(200, {
                         'ok': True,
                         'query': query,
                         'engine': name,
@@ -392,7 +392,7 @@ class WebMixin:
                 errors.append(f'{name}: {type(e).__name__}')
                 print(f'⚠️ [网络搜索] {name} 失败: {e}')
 
-        return self._send_json(200, {
+        return self.response.json(200, {
             'ok': False,
             'error': f'所有搜索引擎都未返回结果。{" | ".join(errors)}'
         })
@@ -405,16 +405,16 @@ class WebMixin:
         max_chars = min(int(body.get('max_chars', 8000)), 50000)
 
         if not url:
-            return self._send_json(200, {'ok': False, 'error': 'url 不能为空'})
+            return self.response.json(200, {'ok': False, 'error': 'url 不能为空'})
         if not (url.startswith('http://') or url.startswith('https://')):
-            return self._send_json(200, {'ok': False, 'error': 'URL 必须以 http:// 或 https:// 开头'})
+            return self.response.json(200, {'ok': False, 'error': 'URL 必须以 http:// 或 https:// 开头'})
 
         print(f'🌐 [抓取] {url}  extract={extract_text}')
 
         try:
             import requests
         except ImportError:
-            return self._send_json(200, {'ok': False, 'error': '后端缺少 requests 模块，请运行：pip install requests'})
+            return self.response.json(200, {'ok': False, 'error': '后端缺少 requests 模块，请运行：pip install requests'})
 
         try:
             headers = {
@@ -430,7 +430,7 @@ class WebMixin:
 
             if not extract_text or 'text/html' not in content_type.lower():
                 truncated = raw[:max_chars]
-                self._send_json(200, {
+                self.response.json(200, {
                     'ok': True,
                     'url': resp.url,
                     'status': resp.status_code,
@@ -455,7 +455,7 @@ class WebMixin:
             text = re.sub(r'\n\s*\n+', '\n\n', text).strip()
 
             truncated_text = text[:max_chars]
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'url': resp.url,
                 'status': resp.status_code,
@@ -465,4 +465,4 @@ class WebMixin:
                 'truncated': len(text) > max_chars
             })
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': f'抓取失败：{e}'})
+            self.response.json(200, {'ok': False, 'error': f'抓取失败：{e}'})

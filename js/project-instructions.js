@@ -16,6 +16,15 @@ const PROJECT_INSTRUCTIONS_RUNTIME = {
   lastError: ''
 };
 
+const ProjectInstructionsStateModule = window.AgentApp.require('state');
+const ProjectInstructionsUiService = window.AgentApp.require('uiService');
+const projectInstructionsState = ProjectInstructionsStateModule.state;
+const projectInstructionsPersistSettings = ProjectInstructionsStateModule.persistSettings;
+
+function projectInstructionsApiCore() {
+  return window.AgentApp.require('apiCore');
+}
+
 function defaultProjectInstructionsContent() {
   return `# AGENTS.md
 
@@ -61,10 +70,10 @@ function defaultProjectInstructionsContent() {
 }
 
 function ensureProjectInstructionsSettings() {
-  if (!state.settings.projectInstructions || typeof state.settings.projectInstructions !== 'object') {
-    state.settings.projectInstructions = {};
+  if (!projectInstructionsState.settings.projectInstructions || typeof projectInstructionsState.settings.projectInstructions !== 'object') {
+    projectInstructionsState.settings.projectInstructions = {};
   }
-  const cfg = state.settings.projectInstructions;
+  const cfg = projectInstructionsState.settings.projectInstructions;
   if (cfg.enabled === undefined) cfg.enabled = PROJECT_INSTRUCTIONS_DEFAULTS.enabled;
   if (!cfg.path) cfg.path = PROJECT_INSTRUCTIONS_DEFAULTS.path;
   if (!Number.isFinite(Number(cfg.maxChars)) || Number(cfg.maxChars) < 1000) {
@@ -151,7 +160,7 @@ function openProjectInstructionsSettings() {
   if (!modal) return;
   modal.classList.add('show');
   renderProjectInstructionsSettings();
-  if (state.settings.projectInstructions.enabled) {
+  if (projectInstructionsState.settings.projectInstructions.enabled) {
     initProjectInstructions(false);
   }
 }
@@ -196,7 +205,7 @@ function saveProjectInstructionsSettingsFromUi() {
     PROJECT_INSTRUCTIONS_RUNTIME.loadedPath = '';
     _piSetTextarea('');
   }
-  persistSettings();
+  projectInstructionsPersistSettings();
 
   if (!cfg.enabled) {
     PROJECT_INSTRUCTIONS_RUNTIME.content = '';
@@ -205,11 +214,11 @@ function saveProjectInstructionsSettingsFromUi() {
     _piSetTextarea('');
     _piStatus('项目指令已关闭。AI 不会读取或注入 AGENTS.md。');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-    toast('项目指令已关闭');
+    ProjectInstructionsUiService.toast('项目指令已关闭');
     return;
   }
 
-  toast('项目指令已开启');
+  ProjectInstructionsUiService.toast('项目指令已开启');
   initProjectInstructions(false);
 }
 
@@ -268,12 +277,12 @@ async function loadProjectInstructionsFile(showToast = true) {
     PROJECT_INSTRUCTIONS_RUNTIME.exists = true;
     PROJECT_INSTRUCTIONS_RUNTIME.loadedPath = cfg.path;
     _piSetTextarea(PROJECT_INSTRUCTIONS_RUNTIME.content);
-    if (showToast) toast('已读取项目指令');
+    if (showToast) ProjectInstructionsUiService.toast('已读取项目指令');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
     return true;
   } catch (e) {
     _piStatus('读取项目指令失败：' + e.message, 'error');
-    if (showToast) toast('读取项目指令失败：' + e.message, 3500);
+    if (showToast) ProjectInstructionsUiService.toast('读取项目指令失败：' + e.message, 3500);
     return false;
   }
 }
@@ -281,7 +290,7 @@ async function loadProjectInstructionsFile(showToast = true) {
 async function createDefaultProjectInstructions(showToast = true) {
   const cfg = ensureProjectInstructionsSettings();
   if (!cfg.enabled) {
-    toast('请先开启项目指令');
+    ProjectInstructionsUiService.toast('请先开启项目指令');
     return false;
   }
   try {
@@ -290,13 +299,13 @@ async function createDefaultProjectInstructions(showToast = true) {
       const loaded = await loadProjectInstructionsFile(false);
       if (!loaded) throw new Error('文件存在，但读取失败');
       _piStatus(`文件已存在，已读取而未覆盖：${cfg.path}`);
-      if (showToast) toast('AGENTS.md 已存在，未覆盖');
+      if (showToast) ProjectInstructionsUiService.toast('AGENTS.md 已存在，未覆盖');
       return false;
     }
     if (!_piIsMissingFileInfo(info)) throw new Error(info.error || '文件信息读取失败');
   } catch (e) {
     _piStatus('检查项目指令失败：' + e.message, 'error');
-    if (showToast) toast('检查项目指令失败：' + e.message, 5000);
+    if (showToast) ProjectInstructionsUiService.toast('检查项目指令失败：' + e.message, 5000);
     return false;
   }
 
@@ -310,12 +319,12 @@ async function createDefaultProjectInstructions(showToast = true) {
     PROJECT_INSTRUCTIONS_RUNTIME.loadedPath = cfg.path;
     _piSetTextarea(content);
     _piStatus(`已创建并加载：${cfg.path}`, 'ok');
-    if (showToast) toast('已创建默认 AGENTS.md');
+    if (showToast) ProjectInstructionsUiService.toast('已创建默认 AGENTS.md');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
     return true;
   } catch (e) {
     _piStatus('创建项目指令失败：' + e.message, 'error');
-    if (showToast) toast('创建项目指令失败：' + e.message, 5000);
+    if (showToast) ProjectInstructionsUiService.toast('创建项目指令失败：' + e.message, 5000);
     return false;
   }
 }
@@ -407,11 +416,11 @@ function _piCleanDraft(text) {
 async function generateProjectInstructionsDraft() {
   const cfg = ensureProjectInstructionsSettings();
   if (!cfg.enabled) {
-    toast('请先开启项目指令');
+    ProjectInstructionsUiService.toast('请先开启项目指令');
     return;
   }
-  if (!state.settings.apiKey) {
-    toast('请先配置 API Key，才能让 AI 生成 AGENTS.md 草稿', 4500);
+  if (!projectInstructionsState.settings.apiKey) {
+    ProjectInstructionsUiService.toast('请先配置 API Key，才能让 AI 生成 AGENTS.md 草稿', 4500);
     return;
   }
   try {
@@ -433,9 +442,9 @@ async function generateProjectInstructionsDraft() {
       '6. 对不确定的信息明确写“待确认”，不要编造。',
       '7. 如果已有 AGENTS.md 或 CLAUDE.md，请保留其中仍然正确的规则，修正明显过时或与当前项目不符的内容。'
     ].join('\n');
-    const raw = await callOnceWithRole([
+    const raw = await projectInstructionsApiCore().callOnceWithRole([
       { role: 'user', content: `请为这个工作区生成 AGENTS.md 项目指令草稿。\n\n${context}` }
-    ], state.settings.currentModel, rolePrompt, {
+    ], projectInstructionsState.settings.currentModel, rolePrompt, {
       sourceLabel: '项目指令 · 生成草稿'
     });
     const draft = _piCleanDraft(raw);
@@ -445,7 +454,7 @@ async function generateProjectInstructionsDraft() {
     if (modal) modal.classList.add('show');
   } catch (e) {
     _piStatus('生成 AGENTS.md 草稿失败：' + e.message, 'error');
-    toast('生成 AGENTS.md 草稿失败：' + e.message, 5000);
+    ProjectInstructionsUiService.toast('生成 AGENTS.md 草稿失败：' + e.message, 5000);
   }
 }
 
@@ -458,12 +467,12 @@ function fillDefaultProjectInstructionsDraft() {
 async function saveProjectInstructionsFromUi() {
   const cfg = ensureProjectInstructionsSettings();
   if (!cfg.enabled) {
-    toast('请先开启项目指令');
+    ProjectInstructionsUiService.toast('请先开启项目指令');
     return;
   }
   const content = _piGetTextarea().trim();
   if (!content) {
-    toast('项目指令内容为空');
+    ProjectInstructionsUiService.toast('项目指令内容为空');
     return;
   }
   try {
@@ -474,11 +483,11 @@ async function saveProjectInstructionsFromUi() {
     PROJECT_INSTRUCTIONS_RUNTIME.exists = true;
     PROJECT_INSTRUCTIONS_RUNTIME.loadedPath = cfg.path;
     _piStatus(`已保存：${cfg.path}`, 'ok');
-    toast('项目指令已保存');
+    ProjectInstructionsUiService.toast('项目指令已保存');
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   } catch (e) {
     _piStatus('保存项目指令失败：' + e.message, 'error');
-    toast('保存项目指令失败：' + e.message, 5000);
+    ProjectInstructionsUiService.toast('保存项目指令失败：' + e.message, 5000);
   }
 }
 
@@ -505,3 +514,20 @@ window.fillDefaultProjectInstructionsDraft = fillDefaultProjectInstructionsDraft
 window.saveProjectInstructionsFromUi = saveProjectInstructionsFromUi;
 window.clearLoadedProjectInstructions = clearLoadedProjectInstructions;
 window.withProjectInstructionsPrompt = withProjectInstructionsPrompt;
+
+window.AgentApp.define('projectInstructions', {
+  defaultProjectInstructionsContent,
+  ensureProjectInstructionsSettings,
+  openProjectInstructionsSettings,
+  closeProjectInstructionsSettings,
+  renderProjectInstructionsSettings,
+  saveProjectInstructionsSettingsFromUi,
+  initProjectInstructions,
+  loadProjectInstructionsFile,
+  createDefaultProjectInstructions,
+  generateProjectInstructionsDraft,
+  fillDefaultProjectInstructionsDraft,
+  saveProjectInstructionsFromUi,
+  clearLoadedProjectInstructions,
+  withProjectInstructionsPrompt
+});

@@ -260,6 +260,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .stats-toggle-btn.collapsed{background:transparent;color:var(--primary);border-color:rgba(79,70,229,.35)}
 .stats-toggle-btn.collapsed::after{content:'+';margin-left:4px;font-weight:700}
 .model-option-empty{padding:9px 10px;color:var(--text-secondary);font-size:12.5px}
+.fetch-model-option:hover,.fetch-model-option:focus-within{background:var(--bg-hover)}
 .topbar-spacer{flex:1}
 .topbar-btn{padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:6px}
 .topbar-btn:hover{background:var(--bg-hover);color:var(--text)}

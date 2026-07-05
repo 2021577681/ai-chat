@@ -1,10 +1,21 @@
+const SettingsConfig = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('config')
+  : null;
+const SettingsStateModule = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('state')
+  : null;
+const SettingsUiService = window.AgentApp.require('uiService');
+const settingsState = SettingsStateModule ? SettingsStateModule.state : state;
+const settingsPersistSettings = SettingsStateModule ? SettingsStateModule.persistSettings : persistSettings;
+const SETTINGS_PROVIDERS = SettingsConfig ? SettingsConfig.PROVIDERS : PROVIDERS;
+
 // ============ 设置面板 ============
 
 function openSettings() {
   document.getElementById('settingsModal').classList.add('show');
   // ⭐ 刷新配置档案下拉（API Profile）
   if (typeof renderApiProfileSelect === 'function') renderApiProfileSelect();
-  const s = state.settings;
+  const s = settingsState.settings;
   document.getElementById('provider').value = s.provider;
   document.getElementById('baseUrl').value = s.baseUrl;
   document.getElementById('apiPath').value = s.apiPath;
@@ -87,9 +98,9 @@ function openSettings() {
 }
 
 function currentSettingsModelName() {
-  const current = state.settings.currentModel || '';
+  const current = settingsState.settings.currentModel || '';
   const modelInput = document.getElementById('modelName');
-  const list = (modelInput?.value || state.settings.modelName || '')
+  const list = (modelInput?.value || settingsState.settings.modelName || '')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);
@@ -133,7 +144,7 @@ function buildContextLimitModal() {
   wrap.id = 'contextLimitModal';
   wrap.innerHTML = `
     <div class="modal wide">
-      <h2>📐 上下文长度 <button class="modal-close" onclick="closeContextLimitSettings()">×</button></h2>
+      <h2>📐 上下文长度 <button class="modal-close" data-action="closeContextLimitSettings">×</button></h2>
 
       <div class="json-help">
         💡 模型名只要 <strong>包含</strong> 关键词（不区分大小写），就按对应上下文长度计算 token 条、自动压缩和长流程上下文检查。<br>
@@ -166,17 +177,17 @@ function buildContextLimitModal() {
       </div>
 
       <div class="pricing-toolbar">
-        <button class="pricing-btn pricing-btn-primary" onclick="addContextLimitRow()">
+        <button class="pricing-btn pricing-btn-primary" data-action="addContextLimitRow">
           <span>➕</span><span>添加规则</span>
         </button>
-        <button class="pricing-btn pricing-btn-success" onclick="saveContextLimitRulesFromUI()">
+        <button class="pricing-btn pricing-btn-success" data-action="saveContextLimitRulesFromUI">
           <span>💾</span><span>保存规则</span>
         </button>
-        <button class="pricing-btn" onclick="testContextLimitMatch()">
+        <button class="pricing-btn" data-action="testContextLimitMatch">
           <span>🔍</span><span>测试匹配</span>
         </button>
         <div class="pricing-btn-spacer"></div>
-        <button class="pricing-btn pricing-btn-warning" onclick="resetContextLimitRulesToDefault()">
+        <button class="pricing-btn pricing-btn-warning" data-action="resetContextLimitRulesToDefault">
           <span>↩</span><span>恢复默认</span>
         </button>
       </div>
@@ -184,7 +195,7 @@ function buildContextLimitModal() {
       <div id="contextLimitTestResult" class="pricing-test-result"></div>
 
       <div class="modal-footer">
-        <button class="btn" onclick="closeContextLimitSettings()">关闭</button>
+        <button class="btn" data-action="closeContextLimitSettings">关闭</button>
       </div>
     </div>
   `;
@@ -197,7 +208,7 @@ function buildContextLimitModal() {
 function renderContextLimitStatus() {
   const el = document.getElementById('contextLimitStatus');
   if (!el) return;
-  const model = state.settings.currentModel || currentSettingsModelName();
+  const model = settingsState.settings.currentModel || currentSettingsModelName();
   const info = typeof getContextLimitInfo === 'function'
     ? getContextLimitInfo(model)
     : { limit: 200000, autoLimit: 200000, mode: 'auto', label: '自动识别' };
@@ -229,7 +240,7 @@ function renderContextLimitRow(rule, i) {
       <td><input type="number" class="pricing-input context-limit-value" value="${rule.limit || 0}" min="1024" max="4000000" step="1000" /></td>
       <td><input type="text" class="pricing-input context-limit-note" value="${escapeHtml(rule.note || '')}" placeholder="可选" /></td>
       <td style="text-align:center;">
-        <button class="pricing-row-del" onclick="removeContextLimitRow(${i})" title="删除此规则">×</button>
+        <button class="pricing-row-del" data-action="valueClick" data-handler="removeContextLimitRow" data-value="${i}" data-value-type="number" title="删除此规则">×</button>
       </td>
     </tr>
   `;
@@ -281,7 +292,7 @@ function removeContextLimitRow(idx) {
 function saveContextLimitRulesFromUI() {
   const list = collectContextLimitRulesFromUI();
   if (typeof saveContextLimitRules === 'function') saveContextLimitRules(list);
-  if (typeof toast === 'function') toast(`✓ 已保存 ${list.length} 条上下文规则`);
+  SettingsUiService.toast(`✓ 已保存 ${list.length} 条上下文规则`);
   renderContextLimitTable();
   renderContextLimitStatus();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
@@ -296,12 +307,12 @@ function resetContextLimitRulesToDefault() {
   if (typeof saveContextLimitRules === 'function') saveContextLimitRules(defaults);
   renderContextLimitTable();
   renderContextLimitStatus();
-  if (typeof toast === 'function') toast('↩ 已恢复默认上下文规则');
+  SettingsUiService.toast('↩ 已恢复默认上下文规则');
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
 function testContextLimitMatch() {
-  const model = prompt('输入一个模型名测试匹配结果：', state.settings.currentModel || 'gpt-4o-mini');
+  const model = prompt('输入一个模型名测试匹配结果：', settingsState.settings.currentModel || 'gpt-4o-mini');
   if (model === null) return;
   const result = typeof getContextLimitInfo === 'function'
     ? getContextLimitInfo(model.trim())
@@ -324,7 +335,7 @@ function closeSettings() {
 }
 
 function saveAndClose() {
-  const s = state.settings;
+  const s = settingsState.settings;
   s.provider = document.getElementById('provider').value;
   s.baseUrl = document.getElementById('baseUrl').value.trim();
   s.apiFormat = document.getElementById('apiFormat').value;
@@ -388,10 +399,10 @@ function saveAndClose() {
   }
   
   refreshModelSelect();
-  persistSettings();
+  settingsPersistSettings();
   closeSettings();
   updateTopUrlPreview();
-  updateSendBtn();
+  SettingsUiService.updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   // ⭐ 切换 apiFormat（OpenAI ↔ Anthropic）会让 count_tokens 的可用性变化，
   // 且不同模型的上下文限制不同 → 立即重新拉一次精确 token 数
@@ -401,11 +412,11 @@ function saveAndClose() {
 
 function saveSettings() {
   const modelSelect = document.getElementById('modelSelect');
-  if (modelSelect) state.settings.currentModel = modelSelect.value;
+  if (modelSelect) settingsState.settings.currentModel = modelSelect.value;
   const effortSelect = document.getElementById('effortSelect');
-  if (effortSelect) state.settings.reasoningEffort = effortSelect.value;
+  if (effortSelect) settingsState.settings.reasoningEffort = effortSelect.value;
   refreshModelPickerState();
-  persistSettings();
+  settingsPersistSettings();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   if (document.getElementById('settingsModal')?.classList.contains('show')) {
     updateContextLimitModeUI();
@@ -669,11 +680,11 @@ if (document.readyState === 'loading') {
 
 function onProviderChange() {
   const p = document.getElementById('provider').value;
-  if (PROVIDERS[p]) {
-    document.getElementById('baseUrl').value = PROVIDERS[p].url;
-    document.getElementById('apiPath').value = PROVIDERS[p].path;
-    document.getElementById('apiFormat').value = PROVIDERS[p].format;
-    document.getElementById('modelName').value = PROVIDERS[p].models;
+  if (SETTINGS_PROVIDERS[p]) {
+    document.getElementById('baseUrl').value = SETTINGS_PROVIDERS[p].url;
+    document.getElementById('apiPath').value = SETTINGS_PROVIDERS[p].path;
+    document.getElementById('apiFormat').value = SETTINGS_PROVIDERS[p].format;
+    document.getElementById('modelName').value = SETTINGS_PROVIDERS[p].models;
     updateUrlPreview();
     updateContextLimitModeUI();
     refreshMainSettingsSelectSkins();
@@ -694,12 +705,12 @@ function toggleKey() {
 
 function refreshModelSelect() {
   const sel = document.getElementById('modelSelect');
-  const list = state.settings.modelName.split(',').map(s => s.trim()).filter(Boolean);
+  const list = settingsState.settings.modelName.split(',').map(s => s.trim()).filter(Boolean);
   sel.innerHTML = list.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
-  if (list.includes(state.settings.currentModel)) sel.value = state.settings.currentModel;
+  if (list.includes(settingsState.settings.currentModel)) sel.value = settingsState.settings.currentModel;
   else if (list[0]) {
     sel.value = list[0];
-    state.settings.currentModel = list[0];
+    settingsState.settings.currentModel = list[0];
   }
   renderModelPickerMenu(list);
   refreshModelPickerState();
@@ -715,7 +726,7 @@ function renderModelPickerMenu(list) {
     return;
   }
   menu.innerHTML = items.map(m => `
-    <button type="button" class="model-option" data-model="${escapeHtml(m)}" onclick="setCurrentModelFromPicker(this.dataset.model, event)" role="option" title="${escapeHtml(m)}">
+    <button type="button" class="model-option" data-model="${escapeHtml(m)}" data-action="setCurrentModelFromPicker" role="option" title="${escapeHtml(m)}">
       <span class="model-option-name">${escapeHtml(m)}</span>
       <span class="model-option-check">✓</span>
     </button>
@@ -724,7 +735,7 @@ function renderModelPickerMenu(list) {
 
 function refreshModelPickerState() {
   const sel = document.getElementById('modelSelect');
-  const value = sel ? (sel.value || state.settings.currentModel || '') : (state.settings.currentModel || '');
+  const value = sel ? (sel.value || settingsState.settings.currentModel || '') : (settingsState.settings.currentModel || '');
   const label = document.getElementById('modelTriggerLabel');
   if (label) label.textContent = value || '选择模型';
   document.querySelectorAll('.model-option').forEach(btn => {
@@ -760,7 +771,7 @@ function setCurrentModelFromPicker(value, event) {
   if (event) event.stopPropagation();
   const sel = document.getElementById('modelSelect');
   if (sel) sel.value = value;
-  state.settings.currentModel = value;
+  settingsState.settings.currentModel = value;
   refreshModelPickerState();
   saveSettings();
   closeModelMenu();
@@ -770,9 +781,9 @@ function refreshReasoningEffortSelect() {
   const sel = document.getElementById('effortSelect');
   if (!sel) return;
   const allowed = ['', 'low', 'medium', 'high', 'xhigh', 'max'];
-  const value = allowed.includes(state.settings.reasoningEffort) ? state.settings.reasoningEffort : '';
+  const value = allowed.includes(settingsState.settings.reasoningEffort) ? settingsState.settings.reasoningEffort : '';
   sel.value = value;
-  state.settings.reasoningEffort = value;
+  settingsState.settings.reasoningEffort = value;
   const label = document.getElementById('effortTriggerLabel');
   if (label) label.textContent = value || '不设置';
   document.querySelectorAll('.effort-option').forEach(btn => {
@@ -808,7 +819,7 @@ function setReasoningEffort(value, event) {
   if (event) event.stopPropagation();
   const sel = document.getElementById('effortSelect');
   if (sel) sel.value = value;
-  state.settings.reasoningEffort = value;
+  settingsState.settings.reasoningEffort = value;
   refreshReasoningEffortSelect();
   saveSettings();
   closeReasoningEffortMenu();
@@ -945,8 +956,8 @@ async function onFetchModels() {
   const apiKey = (document.getElementById('apiKey').value || '').trim();
   const apiFormat = document.getElementById('apiFormat').value;
   
-  if (!baseUrl) { toast('❌ 请先填写 Base URL', 2500); return; }
-  if (!apiKey) { toast('❌ 请先填写 API Key', 2500); return; }
+  if (!baseUrl) { SettingsUiService.toast('❌ 请先填写 Base URL', 2500); return; }
+  if (!apiKey) { SettingsUiService.toast('❌ 请先填写 API Key', 2500); return; }
   
   // 立即打开弹窗，显示加载中
   openFetchModelsModal();
@@ -1129,9 +1140,8 @@ function renderFetchModelsList(models) {
     const checked = exists || _fetchModelsSelected.has(m);
     const safe = escapeHtml(m);
     return `
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:6px;${exists ? 'opacity:.55;' : ''}"
-             onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
-        <input type="checkbox" class="fetchModelItem" value="${safe}" ${checked ? 'checked' : ''} ${exists ? 'disabled' : ''} onchange="onFetchModelItemToggle(this)">
+      <label class="fetch-model-option" style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:6px;${exists ? 'opacity:.55;' : ''}">
+        <input type="checkbox" class="fetchModelItem" value="${safe}" ${checked ? 'checked' : ''} ${exists ? 'disabled' : ''} data-change-action="onFetchModelItemToggle">
         <span style="flex:1;font-family:monospace;font-size:13px;">${safe}</span>
         ${exists ? '<span style="font-size:11px;color:var(--text-secondary);">✓ 已添加</span>' : ''}
       </label>`;
@@ -1191,7 +1201,7 @@ function toggleSelectAllFetchModels() {
 
 function confirmAddFetchedModels() {
   const picked = _fetchModelsBuffer.filter(m => _fetchModelsSelected.has(m) && !_fetchModelsExisting.has(m));
-  if (!picked.length) { toast('未选择任何模型', 2000); return; }
+  if (!picked.length) { SettingsUiService.toast('未选择任何模型', 2000); return; }
   
   const input = document.getElementById('modelName');
   const existing = (input.value || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -1203,7 +1213,7 @@ function confirmAddFetchedModels() {
   input.value = existing.join(', ');
   updateContextLimitModeUI();
   
-  toast(`✅ 已添加 ${added} 个模型（共 ${existing.length} 个）`, 2500);
+  SettingsUiService.toast(`✅ 已添加 ${added} 个模型（共 ${existing.length} 个）`, 2500);
   closeFetchModelsModal();
 }
 
@@ -1237,3 +1247,20 @@ window.removeContextLimitRow = removeContextLimitRow;
 window.saveContextLimitRulesFromUI = saveContextLimitRulesFromUI;
 window.resetContextLimitRulesToDefault = resetContextLimitRulesToDefault;
 window.testContextLimitMatch = testContextLimitMatch;
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('settings', {
+    openSettings,
+    closeSettings,
+    saveAndClose,
+    saveSettings,
+    testConnection,
+    updateUrlPreview,
+    updateTopUrlPreview,
+    currentSettingsModelName,
+    refreshModelSelect,
+    refreshModelPickerState,
+    onProviderChange,
+    onFetchModels
+  });
+}

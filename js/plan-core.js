@@ -1,9 +1,25 @@
-// ============ 📋 计划模式 - 核心执行逻辑 ============
+﻿// ============ 📋 计划模式 - 核心执行逻辑 ============
 // 【模块定位】计划模式主流程 + 步骤执行 + 规划辅助（无 DOM 操作）
-// 依赖：state.js / api.js / tools.js / chat.js
+// 依赖：planCoreState.js / api.js / tools.js / chat.js
 // 加载顺序：在 plan-ui.js 之前
 
 // ============ 计划模式（人在回路 + 完整 Agent 执行）============
+
+const PlanCoreStateModule = window.AgentApp.require('state');
+const planCoreState = PlanCoreStateModule.state;
+const planCoreSaveData = PlanCoreStateModule.saveData;
+const planCoreCurrentChat = PlanCoreStateModule.currentChat;
+const planCoreChatById = PlanCoreStateModule.chatById;
+const planCoreIsCurrentChat = PlanCoreStateModule.isCurrentChat;
+const planCoreIsChatGenerating = PlanCoreStateModule.isChatGenerating;
+const planCoreBeginChatTask = PlanCoreStateModule.beginChatTask;
+const planCoreSetChatTaskMode = PlanCoreStateModule.setChatTaskMode;
+const planCoreUpdateChatTaskController = PlanCoreStateModule.updateChatTaskController;
+const planCoreClearChatTask = PlanCoreStateModule.clearChatTask;
+const planCoreRequestStopChatTask = PlanCoreStateModule.requestStopChatTask;
+const planCoreActiveTaskChat = PlanCoreStateModule.activeTaskChat;
+const PlanCoreOrchestrationService = window.AgentApp.require('orchestrationService');
+const PlanCoreUiService = window.AgentApp.require('uiService');
 
 const PLAN_STEP_STATUSES = new Set(['pending', 'running', 'done', 'failed', 'skipped']);
 
@@ -173,34 +189,24 @@ function planStepsForPrompt(plan) {
 
 async function callAPIWithPlan(options = {}) {
   const requestedChatId = options && options.chatId;
-  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
+  const c = requestedChatId ? planCoreChatById(requestedChatId) : planCoreCurrentChat();
   if (!c) return;
-  const s = state.settings;
+  const s = planCoreState.settings;
   const taskChatId = c.id;
-  const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
+  const renderIfVisible = () => { if (!taskChatId || planCoreIsCurrentChat(taskChatId)) PlanCoreUiService.renderMessages(); };
   // ⭐ 创建 abortCtrl，让用户能中断规划/审批阶段
   const abortCtrl = new AbortController();
-  const task = (typeof beginChatTask === 'function')
-    ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
-    : null;
-  if (task && typeof setChatTaskMode === 'function') {
-    setChatTaskMode(taskChatId, 'plan', { planPhase: 'planning' });
-    if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
-  } else {
-    state.isGenerating = true;
-    state.activeTaskChatId = taskChatId || null;
-    state.abortCtrl = abortCtrl;
-    state._planExecuting = true;
-    state.stopRequested = false;
-  }
+  const task = planCoreBeginChatTask(taskChatId, abortCtrl, { resetStop: true });
+  planCoreSetChatTaskMode(taskChatId, 'plan', { planPhase: 'planning' });
+  planCoreUpdateChatTaskController(taskChatId, abortCtrl);
   const planRunOptions = {
     chat: c,
     chatId: taskChatId,
     signal: abortCtrl.signal,
-    isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+    isStopped: () => !!(task && task.stopRequested)
   };
-  updateSendBtn();
-  if (typeof renderChatList === 'function') renderChatList();
+  PlanCoreUiService.updateSendBtn();
+  PlanCoreUiService.renderChatList();
   
   const aiMsg = {
     role: 'assistant',
@@ -280,9 +286,9 @@ async function callAPIWithPlan(options = {}) {
                     `**步骤概览**：\n` +
                     plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n');
     
-    saveData();
+    planCoreSaveData();
     renderIfVisible();
-    toast('📋 计划已生成，请审批后执行', 3000);
+    PlanCoreUiService.toast('📋 计划已生成，请审批后执行', 3000);
     
   } catch (e) {
     if (e.name === 'AbortError') {
@@ -298,66 +304,49 @@ async function callAPIWithPlan(options = {}) {
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete aiMsg.plan.progressText;
     renderIfVisible();
-    saveData();
+    planCoreSaveData();
   } finally {
-    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-    else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
-      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-      state._planExecuting = false;
-    }
-    updateSendBtn();
-    if (typeof renderChatList === 'function') renderChatList();
+    planCoreClearChatTask(taskChatId);
+    PlanCoreUiService.updateSendBtn();
+    PlanCoreUiService.renderChatList();
   }
 }
 
 // ⭐ 用户审批后执行计划
 async function approveAndExecutePlan(msgIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   const taskChatId = c.id;
-  const renderIfVisible = () => { if (isCurrentChat(taskChatId)) renderMessages(); };
+  const renderIfVisible = () => { if (planCoreIsCurrentChat(taskChatId)) PlanCoreUiService.renderMessages(); };
   
   const aiMsg = c.messages[msgIdx];
   const plan = aiMsg.plan;
   normalizePlanObject(plan, { resetRunning: true });
   
   if (plan.status !== 'pending_approval' && plan.status !== 'paused' && plan.status !== 'error') {
-    toast('此计划不在可执行状态');
+    PlanCoreUiService.toast('此计划不在可执行状态');
     return;
   }
   
-  if ((typeof isChatGenerating === 'function') ? isChatGenerating(taskChatId) : state.isGenerating) {
-    toast('此对话已有任务正在执行，请稍等');
+  if (planCoreIsChatGenerating(taskChatId)) {
+    PlanCoreUiService.toast('此对话已有任务正在执行，请稍等');
     return;
   }
   
   // ⭐ 创建 abortCtrl，让用户能中断执行
   const abortCtrl = new AbortController();
-  const task = (typeof beginChatTask === 'function')
-    ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
-    : null;
-  if (task && typeof setChatTaskMode === 'function') {
-    setChatTaskMode(taskChatId, 'plan', { planPhase: 'executing', planMsgIdx: msgIdx });
-    if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
-  } else {
-    state.isGenerating = true;
-    state.activeTaskChatId = taskChatId;
-    // ⭐ 关键：标记计划模式正在执行，防止 onSend 触发新计划
-    state._planExecuting = true;
-    state.abortCtrl = abortCtrl;
-    state.stopRequested = false;
-  }
+  const task = planCoreBeginChatTask(taskChatId, abortCtrl, { resetStop: true });
+  planCoreSetChatTaskMode(taskChatId, 'plan', { planPhase: 'executing', planMsgIdx: msgIdx });
+  planCoreUpdateChatTaskController(taskChatId, abortCtrl);
   const planRunOptions = {
     chat: c,
     chatId: taskChatId,
     signal: abortCtrl.signal,
-    isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+    isStopped: () => !!(task && task.stopRequested)
   };
-  updateSendBtn();
-  if (typeof renderChatList === 'function') renderChatList();
+  PlanCoreUiService.updateSendBtn();
+  PlanCoreUiService.renderChatList();
   
   // ⭐ 计时：保留暂停/审批前已用耗时，继续执行时从当前时间接着跑。
   if (typeof resumeMsgTimer === 'function') resumeMsgTimer(aiMsg);
@@ -372,7 +361,7 @@ async function approveAndExecutePlan(msgIdx) {
   plan.progressText = '🚀 开始执行计划模式任务...';
   renderIfVisible();
   
-  const s = state.settings;
+  const s = planCoreState.settings;
   const executorModel = s.planExecutorModel.trim() || s.currentModel;
   const userQuestion = plan._userQuestion;
   
@@ -394,7 +383,7 @@ async function approveAndExecutePlan(msgIdx) {
       plan._executionResults = stepResults;
       plan.progressText = `🔨 执行第 ${i + 1}/${plan.steps.length} 步：${step.title}`;
       updatePlanPanel(c.messages.indexOf(aiMsg), c);
-      saveData();
+      planCoreSaveData();
 
       try {
         const result = await executeStepWithTools(
@@ -409,7 +398,7 @@ async function approveAndExecutePlan(msgIdx) {
         stepResults = rebuildPlanExecutionResults(plan);
         plan._executionResults = stepResults;
         updatePlanPanel(c.messages.indexOf(aiMsg), c);
-        saveData();
+        planCoreSaveData();
       } catch (stepErr) {
         if (stepErr.name === 'AbortError') throw stepErr;
         step.status = 'failed';
@@ -423,8 +412,8 @@ async function approveAndExecutePlan(msgIdx) {
         delete plan.progressText;
         updatePlanPanel(c.messages.indexOf(aiMsg), c);
         renderIfVisible();
-        saveData();
-        toast('❌ 当前步骤失败，可重试', 4000);
+        planCoreSaveData();
+        PlanCoreUiService.toast('❌ 当前步骤失败，可重试', 4000);
         return;
       }
     }
@@ -461,7 +450,7 @@ async function approveAndExecutePlan(msgIdx) {
       plan.progressText = `🧑‍🏫 老师验证最终结果（第 ${verifyRound}/${maxVerifyRounds} 轮）...`;
       updatePlanPanel(c.messages.indexOf(aiMsg), c);
       renderIfVisible();
-      saveData();
+      planCoreSaveData();
 
       const verification = await verifyFinalPlanResult(
         userQuestion,
@@ -485,8 +474,8 @@ async function approveAndExecutePlan(msgIdx) {
         if (!aiMsg._endTime) aiMsg._endTime = Date.now();
         delete plan.progressText;
         renderIfVisible();
-        saveData();
-        toast(exhausted ? '⚠️ 验证未通过，已达到验证轮数上限' : '⚠️ 验证未通过，可选择新增改进阶段', 5000);
+        planCoreSaveData();
+        PlanCoreUiService.toast(exhausted ? '⚠️ 验证未通过，已达到验证轮数上限' : '⚠️ 验证未通过，可选择新增改进阶段', 5000);
         return;
       }
     }
@@ -498,8 +487,8 @@ async function approveAndExecutePlan(msgIdx) {
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete plan.progressText;
     renderIfVisible();
-    saveData();
-    toast('✅ 计划执行完成并通过验证', 3000);
+    planCoreSaveData();
+    PlanCoreUiService.toast('✅ 计划执行完成并通过验证', 3000);
     if (typeof playCompletionSound === 'function') playCompletionSound();
     
   } catch (e) {
@@ -522,27 +511,20 @@ async function approveAndExecutePlan(msgIdx) {
     if (!aiMsg._endTime) aiMsg._endTime = Date.now();
     delete plan.progressText;
     renderIfVisible();
-    saveData();
+    planCoreSaveData();
   } finally {
-    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-    else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
-      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-      // ⭐ 关键：无论成功失败都清除执行标记
-      state._planExecuting = false;
-    }
-    updateSendBtn();
-    if (typeof renderChatList === 'function') renderChatList();
+    planCoreClearChatTask(taskChatId);
+    PlanCoreUiService.updateSendBtn();
+    PlanCoreUiService.renderChatList();
   }
 }
 
 function cancelPlan(msgIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx]) return;
   if (!confirm('取消此计划？\n（消息会保留，但状态变为已取消）')) return;
-  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : state.isGenerating) {
-    if (typeof requestStopChatTask === 'function') requestStopChatTask(c.id);
+  if (planCoreIsChatGenerating(c.id)) {
+    planCoreRequestStopChatTask(c.id);
   }
   
   const aiMsg = c.messages[msgIdx];
@@ -554,24 +536,24 @@ function cancelPlan(msgIdx) {
     delete aiMsg.plan.progressText;
     aiMsg.content = '❌ 计划模式任务已被用户取消。';
   }
-  renderMessages();
-  saveData();
-  toast('计划模式任务已取消');
+  PlanCoreUiService.renderMessages();
+  planCoreSaveData();
+  PlanCoreUiService.toast('计划模式任务已取消');
 }
 
 async function regeneratePlan(msgIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx]) return;
-  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : state.isGenerating) { toast('请等此对话当前任务完成'); return; }
+  if (planCoreIsChatGenerating(c.id)) { PlanCoreUiService.toast('请等此对话当前任务完成'); return; }
   
   c.messages = c.messages.slice(0, msgIdx);
-  renderMessages();
-  saveData();
+  PlanCoreUiService.renderMessages();
+  planCoreSaveData();
   await callAPIWithPlan();
 }
 
 function editPlanStep(msgIdx, stepIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   normalizePlanObject(c.messages[msgIdx].plan);
   const step = c.messages[msgIdx].plan.steps[stepIdx];
@@ -587,26 +569,26 @@ function editPlanStep(msgIdx, stepIdx) {
   step.title = newTitle.trim() || step.title;
   step.description = newDesc.trim() || step.description;
   step.successCriteria = newCriteria.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-  saveData();
-  renderMessages();
-  toast('✓ 步骤已修改');
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
+  PlanCoreUiService.toast('✓ 步骤已修改');
 }
 
 function deletePlanStep(msgIdx, stepIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   if (!confirm('删除这一步？')) return;
   c.messages[msgIdx].plan.steps.splice(stepIdx, 1);
   normalizePlanObject(c.messages[msgIdx].plan);
-  saveData();
-  renderMessages();
-  toast('已删除步骤');
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
+  PlanCoreUiService.toast('已删除步骤');
 }
 
 async function retryPlanStep(msgIdx, stepIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
-  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : state.isGenerating) { toast('请等此对话当前任务完成'); return; }
+  if (planCoreIsChatGenerating(c.id)) { PlanCoreUiService.toast('请等此对话当前任务完成'); return; }
   const plan = c.messages[msgIdx].plan;
   normalizePlanObject(plan);
   const step = plan.steps[stepIdx];
@@ -617,13 +599,13 @@ async function retryPlanStep(msgIdx, stepIdx) {
   step.verificationRuns = [];
   step.toolCalls = [];
   plan.status = 'error';
-  saveData();
-  renderMessages();
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
   await approveAndExecutePlan(msgIdx);
 }
 
 function skipPlanStep(msgIdx, stepIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   const plan = c.messages[msgIdx].plan;
   normalizePlanObject(plan);
@@ -636,13 +618,13 @@ function skipPlanStep(msgIdx, stepIdx) {
   step.endedAt = Date.now();
   plan._executionResults = rebuildPlanExecutionResults(plan);
   if (plan.status === 'completed') plan.status = 'paused';
-  saveData();
-  renderMessages();
-  toast('已跳过该步骤');
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
+  PlanCoreUiService.toast('已跳过该步骤');
 }
 
 function markPlanStepDone(msgIdx, stepIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   const plan = c.messages[msgIdx].plan;
   normalizePlanObject(plan);
@@ -655,25 +637,25 @@ function markPlanStepDone(msgIdx, stepIdx) {
   step.endedAt = Date.now();
   plan._executionResults = rebuildPlanExecutionResults(plan);
   if (plan.status === 'completed') plan.status = 'paused';
-  saveData();
-  renderMessages();
-  toast('已标记完成');
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
+  PlanCoreUiService.toast('已标记完成');
 }
 
 async function continuePlanImprovement(msgIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
-  if ((typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : state.isGenerating) { toast('请等此对话当前任务完成'); return; }
+  if (planCoreIsChatGenerating(c.id)) { PlanCoreUiService.toast('请等此对话当前任务完成'); return; }
   const plan = c.messages[msgIdx].plan;
   normalizePlanObject(plan);
   const latest = latestPlanFinalVerification(plan);
   if (!latest || latest.passed) {
-    toast('当前没有需要执行的改进建议');
+    PlanCoreUiService.toast('当前没有需要执行的改进建议');
     return;
   }
-  const maxVerifyRounds = Math.max(1, parseInt(state.settings.planVerifyRounds) || 1);
+  const maxVerifyRounds = Math.max(1, parseInt(planCoreState.settings.planVerifyRounds) || 1);
   if ((plan.finalVerificationTurns || []).length >= maxVerifyRounds) {
-    toast('已达到最终验证轮数上限，不能继续追加验证改进');
+    PlanCoreUiService.toast('已达到最终验证轮数上限，不能继续追加验证改进');
     return;
   }
   const imp = latest.improvement || {};
@@ -701,14 +683,14 @@ async function continuePlanImprovement(msgIdx) {
   plan.expanded = true;
   if (typeof resumeMsgTimer === 'function') resumeMsgTimer(c.messages[msgIdx]);
   else if (c.messages[msgIdx]._endTime) delete c.messages[msgIdx]._endTime;
-  saveData();
-  renderMessages();
-  toast('已新增改进阶段，开始继续执行', 2500);
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
+  PlanCoreUiService.toast('已新增改进阶段，开始继续执行', 2500);
   await approveAndExecutePlan(msgIdx);
 }
 
 function acceptPlanWithFailedVerification(msgIdx) {
-  const c = currentChat();
+  const c = planCoreCurrentChat();
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return;
   const aiMsg = c.messages[msgIdx];
   const plan = aiMsg.plan;
@@ -725,9 +707,9 @@ function acceptPlanWithFailedVerification(msgIdx) {
   plan.pendingImprovement = null;
   if (!aiMsg._endTime) aiMsg._endTime = Date.now();
   delete plan.progressText;
-  saveData();
-  renderMessages();
-  toast('已接受当前结果');
+  planCoreSaveData();
+  PlanCoreUiService.renderMessages();
+  PlanCoreUiService.toast('已接受当前结果');
   if (typeof playCompletionSound === 'function') playCompletionSound();
 }
 
@@ -795,7 +777,7 @@ async function generatePlan(history, model, prompt, maxSteps, planState, onUpdat
 }
 
 不要输出 verification、commands、测试命令或验证手段；验证由最终老师在执行完成后独立完成。`;
-  const toolHint = (state.settings.useTools && state.tools.length)
+  const toolHint = (planCoreState.settings.useTools && planCoreState.tools.length)
     ? '当前规划阶段可以按需调用已启用工具。若需要先了解项目，请先调用目录、文件或搜索类工具，再输出最终 JSON 计划。'
     : '当前未启用工具调用。请仅基于用户问题输出计划。';
   const raw = await callPlannerAgentForJson(
@@ -828,7 +810,7 @@ async function revisePlanWithFeedback(userQuestion, plan, review, model, planner
 }
 
 要求：保留合理步骤，修复评审指出的问题；不要只复述意见。步骤数量不超过 ${maxSteps} 个。不要输出验证命令或验证手段。`;
-  const toolHint = (state.settings.useTools && state.tools.length)
+  const toolHint = (planCoreState.settings.useTools && planCoreState.tools.length)
     ? '如评审意见需要更多项目信息，你可以先调用工具查看目录、文件或搜索内容，再输出最终 JSON。'
     : '当前未启用工具调用，请只基于已有计划和评审意见修改。';
   const raw = await callPlannerAgentForJson(
@@ -849,7 +831,7 @@ async function reviewPlan(userQuestion, plan, model, options = {}) {
     role: 'user',
     content: `【原始任务】\n${userQuestion}\n\n【待评审计划】\n${planJson}\n\n请按 JSON 格式输出评审结果。`
   }];
-  const raw = await callOnceWithRole(msgs, model, PLAN_REVIEWER_PROMPT, {
+  const raw = await PlanCoreOrchestrationService.callOnceWithRole(msgs, model, PLAN_REVIEWER_PROMPT, {
     ...options,
     sourceLabel: '计划模式 · 老师评审计划'
   });
@@ -1006,8 +988,8 @@ async function executeStepWithTools(userQuestion, plan, stepIdx, prevResults, mo
   // ⭐ 把 step 传进去，runMiniAgent 实时写入 step.toolCalls
   // ⭐ 同时传入 onUpdate 回调，触发"只更新当前 plan 面板"的局部渲染
   const c = options.chat
-    || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null)
-    || (typeof activeTaskChat === 'function' ? activeTaskChat() : currentChat());
+    || (options.chatId ? planCoreChatById(options.chatId) : null)
+    || planCoreActiveTaskChat();
   const msgIdx = typeof options.msgIdx === 'number'
     ? options.msgIdx
     : (c ? c.messages.findIndex(m => m.plan === plan) : -1);
@@ -1019,7 +1001,7 @@ async function executeStepWithTools(userQuestion, plan, stepIdx, prevResults, mo
 
 // ⭐ Mini Agent：单步骤的工具循环（独立于主对话）
 async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sourceLabel = '计划模式 · 执行步骤', options = {}) {
-  const s = state.settings;
+  const s = planCoreState.settings;
   const tools = buildToolsArray();
   const effectiveSystemPrompt = typeof withActiveSkillPrompt === 'function'
     ? withActiveSkillPrompt(systemPrompt || '')
@@ -1029,8 +1011,8 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
   const MAX_LOOPS = (isNaN(cfgRounds) || cfgRounds < 1) ? 15 : cfgRounds;
   
   // ⭐ 优先使用任务级 signal；旧路径才回退到全局 abortCtrl。
-  const abortSignal = options.signal || (state.abortCtrl ? state.abortCtrl.signal : null);
-  const isStopped = typeof options.isStopped === 'function' ? options.isStopped : () => !!state.stopRequested;
+  const abortSignal = options.signal || (planCoreState.abortCtrl ? planCoreState.abortCtrl.signal : null);
+  const isStopped = typeof options.isStopped === 'function' ? options.isStopped : () => !!planCoreState.stopRequested;
   const isAborted = () => (abortSignal && abortSignal.aborted) || isStopped();
   const throwIfAborted = () => {
     if (isAborted()) {
@@ -1048,7 +1030,7 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
     // ⭐ 循环开始前主动检查中止信号
     throwIfAborted();
     if (typeof ensureContextBeforeAgentRun === 'function') {
-      const guardChat = options.chat || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null);
+      const guardChat = options.chat || (options.chatId ? planCoreChatById(options.chatId) : null);
       const ok = await ensureContextBeforeAgentRun(guardChat, {
         label: '计划模式',
         extraMessages: [{ role: 'user', content: userPrompt }, ...conversationMessages],
@@ -1182,8 +1164,8 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
     // ⭐ 把计划模式执行步骤的 usage 计入当前对话统计
     if (j.usage && typeof recordUsageFromResponse === 'function') {
       const _c = options.chat
-        || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null)
-        || (typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null));
+        || (options.chatId ? planCoreChatById(options.chatId) : null)
+        || planCoreActiveTaskChat();
       if (_c) recordUsageFromResponse(_c, j.usage, { model });
     }
     
@@ -1241,12 +1223,12 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
       if (step) {
         liveEntry = { name: fname, args: args, result: '', ok: null, _running: true };
         step.toolCalls.push(liveEntry);
-        if (onUpdate) onUpdate(); else renderMessages();
+        if (onUpdate) onUpdate(); else PlanCoreUiService.renderMessages();
       }
       
-      const result = await executeTool(fname, args, {
+      const result = await PlanCoreOrchestrationService.executeTool(fname, args, {
         chatId: options.chatId,
-        chat: options.chat || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null)
+        chat: options.chat || (options.chatId ? planCoreChatById(options.chatId) : null)
       });
       const rawContent = typeof result.value === 'string' ? result.value : JSON.stringify(result.value);
       const preparedToolResult = typeof prepareToolResultForContext === 'function'
@@ -1255,7 +1237,7 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
             toolName: fname,
             toolCallId: tc.id,
             chatId: options.chatId,
-            chat: options.chat || (options.chatId && typeof chatById === 'function' ? chatById(options.chatId) : null),
+            chat: options.chat || (options.chatId ? planCoreChatById(options.chatId) : null),
             status: result.ok ? 'success' : 'error',
             args
           })
@@ -1267,8 +1249,8 @@ async function runMiniAgent(userPrompt, model, systemPrompt, step, onUpdate, sou
         liveEntry.result = content.slice(0, 500);
         liveEntry.ok = result.ok;
         liveEntry._running = false;
-        if (onUpdate) onUpdate(); else renderMessages();
-        saveData();
+        if (onUpdate) onUpdate(); else PlanCoreUiService.renderMessages();
+        planCoreSaveData();
       }
       
       conversationMessages.push({
@@ -1300,7 +1282,7 @@ async function synthesizeResults(userQuestion, plan, stepResults, model, options
     summary += `\n## 步骤 ${i + 1}：${s.title}\n状态：${planStepLabel(s.status)}\n${s.result || s.error || ''}\n`;
   });
   summary += `\n请基于上面所有结果，整合成一个连贯、完整、流畅的最终答案。要求：1.不要简单堆砌 2.保留所有重要信息 3.结构清晰用 Markdown 4.直接输出最终答案。`;
-  return await callOnceWithRole(
+  return await PlanCoreOrchestrationService.callOnceWithRole(
     [{ role: 'user', content: summary }],
     model,
     '你是擅长归纳整合的专家。请把多个片段融合成连贯的整体答案。',
@@ -1310,4 +1292,41 @@ async function synthesizeResults(userQuestion, plan, stepResults, model, options
     }
   );
 }
+
+window.AgentApp.define('planCore', {
+  PLAN_STEP_STATUSES,
+  normalizePlanStep,
+  normalizePlanObject,
+  countFinishedPlanSteps,
+  rebuildPlanExecutionResults,
+  nextPlanStepIndex,
+  planHasRunnableSteps,
+  planStepLabel,
+  normalizePlanFinalVerificationTurn,
+  normalizePlanFinalVerification,
+  latestPlanFinalVerification,
+  planStepsForPrompt,
+  callAPIWithPlan,
+  approveAndExecutePlan,
+  cancelPlan,
+  regeneratePlan,
+  editPlanStep,
+  deletePlanStep,
+  retryPlanStep,
+  skipPlanStep,
+  markPlanStepDone,
+  continuePlanImprovement,
+  acceptPlanWithFailedVerification,
+  parsePlanJson,
+  callPlannerAgentForJson,
+  generatePlan,
+  revisePlanWithFeedback,
+  reviewPlan,
+  buildPlanVerifierSnapshot,
+  parseFinalVerificationJson,
+  verifyFinalPlanResult,
+  executeStepWithTools,
+  runMiniAgent,
+  synthesizeResults
+});
 

@@ -15,30 +15,35 @@ const SECRET_REGISTRY = [
 ];
 
 // 清除所有敏感凭证（返回清除的项数组）
-function clearAllSecrets() {
+function clearAllSecrets(options = {}) {
   const cleared = [];
+  const settings = options.settings || null;
+  const store = options.storage || (typeof storage !== 'undefined' ? storage : {
+    get: k => localStorage.getItem(k),
+    remove: k => localStorage.removeItem(k)
+  });
+  let changedSettings = false;
   for (const item of SECRET_REGISTRY) {
     try {
       if (item.type === 'localStorage') {
         // ⭐ 兼容旧字段名：实际数据在 storage（IndexedDB）里
-        const _store = (typeof storage !== 'undefined') ? storage : {
-          get: k => localStorage.getItem(k),
-          remove: k => localStorage.removeItem(k)
-        };
-        if (_store.get(item.scope) != null) {
-          _store.remove(item.scope);
+        if (store.get(item.scope) != null) {
+          store.remove(item.scope);
           cleared.push(item.label);
         }
       } else if (item.type === 'state') {
-        if (typeof state !== 'undefined' && state.settings && state.settings[item.scope]) {
-          state.settings[item.scope] = '';
+        if (settings && settings[item.scope]) {
+          settings[item.scope] = '';
+          changedSettings = true;
           cleared.push(item.label);
         }
       }
     } catch (e) { /* 忽略单项失败 */ }
   }
   // 持久化 state 改动
-  try { if (typeof persistSettings === 'function') persistSettings(); } catch (e) {}
+  try {
+    if (changedSettings && typeof options.persistSettings === 'function') options.persistSettings();
+  } catch (e) {}
   return cleared;
 }
 
@@ -728,4 +733,22 @@ const BUILTIN_TOOLS = [
     code: 'return await aiGitRestore(args.commit, args.path);'
   }
 ];
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('config', {
+    STORE_KEY,
+    SETTINGS_KEY,
+    TOOLS_KEY,
+    BUILTIN_TOOLS_LOADED_KEY,
+    SECRET_REGISTRY,
+    PROVIDERS,
+    REFLECTION_PRESETS,
+    PLAN_PRESETS,
+    PLAN_REVIEWER_PROMPT,
+    PLAN_RESULT_VERIFIER_PROMPT,
+    PRESET_TOOLS,
+    BUILTIN_TOOLS,
+    clearAllSecrets
+  });
+}
 

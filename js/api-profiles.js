@@ -10,6 +10,13 @@
 //   ]
 //   storage[ACTIVE_PROFILE_ID_KEY] = '<id>'  // 当前激活的 profile id
 
+const ApiProfilesStateModule = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('state')
+  : null;
+const apiProfilesState = ApiProfilesStateModule ? ApiProfilesStateModule.state : state;
+const apiProfilesPersistSettings = ApiProfilesStateModule ? ApiProfilesStateModule.persistSettings : persistSettings;
+const ApiProfilesUiService = window.AgentApp.require('uiService');
+
 const API_PROFILES_KEY = 'aichat_api_profiles_v1';
 const ACTIVE_PROFILE_ID_KEY = 'aichat_active_profile_id_v1';
 
@@ -76,26 +83,26 @@ function _genProfileId() {
   return 'prof_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
-// 从 state.settings 中提取 profile 字段子集
+// 从 apiProfilesState.settings 中提取 profile 字段子集
 function _extractProfileFromSettings() {
   const out = {};
   for (const k of PROFILE_SETTINGS_KEYS) {
-    if (state.settings[k] !== undefined) out[k] = state.settings[k];
+    if (apiProfilesState.settings[k] !== undefined) out[k] = apiProfilesState.settings[k];
   }
   return out;
 }
 
-// 把 profile.settings 写回 state.settings（只覆盖白名单字段）
+// 把 profile.settings 写回 apiProfilesState.settings（只覆盖白名单字段）
 function _applyProfileToSettings(profSettings) {
   if (!profSettings || typeof profSettings !== 'object') return;
   for (const k of PROFILE_SETTINGS_KEYS) {
     if (profSettings[k] !== undefined) {
-      state.settings[k] = profSettings[k];
+      apiProfilesState.settings[k] = profSettings[k];
     }
   }
   // 旧版 profile 没有本地代理字段；切换旧档案时回到默认启用，
   // 避免沿用上一个档案的直连/代理状态。
-  if (profSettings.useLocalProxy === undefined) state.settings.useLocalProxy = true;
+  if (profSettings.useLocalProxy === undefined) apiProfilesState.settings.useLocalProxy = true;
 }
 
 // 摘要：用于触发器和菜单项的小字
@@ -126,7 +133,7 @@ function saveCurrentAsProfile(name) {
     old.updatedAt = Date.now();
     saveApiProfiles(profiles);
     setActiveProfileId(old.id);
-    if (typeof toast === 'function') toast(`✓ 已覆盖配置「${finalName}」`);
+    ApiProfilesUiService.toast(`✓ 已覆盖配置「${finalName}」`);
     return old;
   }
   
@@ -140,7 +147,7 @@ function saveCurrentAsProfile(name) {
   profiles.push(profile);
   saveApiProfiles(profiles);
   setActiveProfileId(profile.id);
-  if (typeof toast === 'function') toast(`✓ 已保存配置「${finalName}」`);
+  ApiProfilesUiService.toast(`✓ 已保存配置「${finalName}」`);
   return profile;
 }
 
@@ -149,13 +156,13 @@ function switchToProfile(id) {
   const profiles = loadApiProfiles();
   const p = profiles.find(x => x.id === id);
   if (!p) {
-    if (typeof toast === 'function') toast('⚠️ 配置不存在或已被删除');
+    ApiProfilesUiService.toast('⚠️ 配置不存在或已被删除');
     return false;
   }
   _applyProfileToSettings(p.settings);
   setActiveProfileId(p.id);
   
-  if (typeof persistSettings === 'function') persistSettings();
+  if (apiProfilesPersistSettings) apiProfilesPersistSettings();
   
   // 刷新 UI。统一设置页会把 settingsModal 停靠到页面内并移除 .show，
   // 因此不能只用 classList.contains('show') 判断是否需要同步表单。
@@ -165,9 +172,9 @@ function switchToProfile(id) {
   // 刷新顶部模型选择和 URL 预览
   if (typeof refreshModelSelect === 'function') refreshModelSelect();
   if (typeof updateTopUrlPreview === 'function') updateTopUrlPreview();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  ApiProfilesUiService.updateSendBtn();
   
-  if (typeof toast === 'function') toast(`✅ 已切换到「${p.name}」`);
+  ApiProfilesUiService.toast(`✅ 已切换到「${p.name}」`);
   
   // 重新渲染 profile 下拉（高亮当前项）
   renderApiProfileSelect();
@@ -184,7 +191,7 @@ function overwriteProfile(id) {
   p.updatedAt = Date.now();
   saveApiProfiles(profiles);
   setActiveProfileId(p.id);
-  if (typeof toast === 'function') toast(`✓ 已更新配置「${p.name}」`);
+  ApiProfilesUiService.toast(`✓ 已更新配置「${p.name}」`);
   renderApiProfileSelect();
   return true;
 }
@@ -205,7 +212,7 @@ function renameProfile(id) {
   p.name = trimmed;
   p.updatedAt = Date.now();
   saveApiProfiles(profiles);
-  if (typeof toast === 'function') toast(`✓ 已重命名为「${trimmed}」`);
+  ApiProfilesUiService.toast(`✓ 已重命名为「${trimmed}」`);
   renderApiProfileSelect();
   return true;
 }
@@ -220,7 +227,7 @@ function deleteProfile(id) {
   profiles.splice(idx, 1);
   saveApiProfiles(profiles);
   if (getActiveProfileId() === id) setActiveProfileId('');
-  if (typeof toast === 'function') toast(`🗑 已删除「${p.name}」`);
+  ApiProfilesUiService.toast(`🗑 已删除「${p.name}」`);
   renderApiProfileSelect();
   return true;
 }
@@ -239,7 +246,7 @@ function duplicateProfile(id) {
   };
   profiles.push(copy);
   saveApiProfiles(profiles);
-  if (typeof toast === 'function') toast(`✓ 已复制为「${copy.name}」`);
+  ApiProfilesUiService.toast(`✓ 已复制为「${copy.name}」`);
   renderApiProfileSelect();
   return true;
 }
@@ -418,10 +425,10 @@ function onDuplicateActiveProfile() {
 
 // ============ 与设置面板的双向同步 ============
 
-// 把当前设置面板的输入框值收集到 state.settings（不持久化、不关闭面板）
+// 把当前设置面板的输入框值收集到 apiProfilesState.settings（不持久化、不关闭面板）
 // 用于"保存为新 profile"前确保改动也被纳入
 function _harvestSettingsModalToState() {
-  const s = state.settings;
+  const s = apiProfilesState.settings;
   const get = id => {
     const el = document.getElementById(id);
     return el ? el.value : undefined;
@@ -439,10 +446,10 @@ function _harvestSettingsModalToState() {
   if (useLocalProxy) s.useLocalProxy = useLocalProxy.checked;
 }
 
-// 把 state.settings 的值写回设置面板的输入框
+// 把 apiProfilesState.settings 的值写回设置面板的输入框
 // 切换 profile 后调用，让用户在 UI 上看到新值
 function _refreshSettingsModalFromState() {
-  const s = state.settings;
+  const s = apiProfilesState.settings;
   const set = (id, v) => {
     const el = document.getElementById(id);
     if (el && v !== undefined) el.value = v;
@@ -563,3 +570,26 @@ window.onOverwriteActiveProfile = onOverwriteActiveProfile;
 window.onRenameActiveProfile = onRenameActiveProfile;
 window.onDeleteActiveProfile = onDeleteActiveProfile;
 window.onDuplicateActiveProfile = onDuplicateActiveProfile;
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('apiProfiles', {
+    loadApiProfiles,
+    saveApiProfiles,
+    getActiveProfileId,
+    setActiveProfileId,
+    saveCurrentAsProfile,
+    switchToProfile,
+    overwriteProfile,
+    renameProfile,
+    deleteProfile,
+    duplicateProfile,
+    renderApiProfileSelect,
+    toggleApiProfileMenu,
+    onApiProfileSelectChange,
+    onSaveAsNewProfile,
+    onOverwriteActiveProfile,
+    onRenameActiveProfile,
+    onDeleteActiveProfile,
+    onDuplicateActiveProfile
+  });
+}

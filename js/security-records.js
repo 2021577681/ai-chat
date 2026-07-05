@@ -8,6 +8,7 @@ const SECURITY_RECORDS_FILTERS = [
   { value: 'privacy', label: '隐私脱敏' },
   { value: 'shell_audit', label: 'Shell 审核' }
 ];
+const SecurityRecordsUiService = window.AgentApp.require('uiService');
 
 function securityRecordsNowId() {
   return 'sec_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -230,7 +231,7 @@ function clearSecurityRecords() {
   if (!confirm('确定清空安全记录吗？\n\n这只会删除本地安全事件账本，不会影响聊天记录、隐私设置或本地还原映射。')) return;
   saveSecurityRecords([]);
   renderSecurityRecords();
-  if (typeof toast === 'function') toast('安全记录已清空', 1800);
+  SecurityRecordsUiService.toast('安全记录已清空', 1800);
 }
 
 function openSecurityRecords() {
@@ -241,23 +242,23 @@ function openSecurityRecords() {
     modal.className = 'modal-mask security-records-modal';
     modal.innerHTML = `
       <div class="modal wide" style="max-width:1120px;">
-        <h2>安全记录 <button class="modal-close" onclick="closeSecurityRecords()">×</button></h2>
+        <h2>安全记录 <button class="modal-close" data-action="closeSecurityRecords">×</button></h2>
         <div class="security-records-toolbar">
           <div class="security-records-note">仅保存在本地浏览器中。隐私记录只保存命中类型和数量；本地还原映射不会列举。</div>
           <div class="security-records-actions">
             <div class="security-records-filter form-group">
               <label for="securityRecordsFilter">记录类型</label>
-              <select id="securityRecordsFilter" onchange="renderSecurityRecords()">
+              <select id="securityRecordsFilter" data-change-action="renderSecurityRecords">
                 ${SECURITY_RECORDS_FILTERS.map(item => `<option value="${item.value}">${securityRecordsEscape(item.label)}</option>`).join('')}
               </select>
             </div>
-            <button class="btn" type="button" onclick="renderSecurityRecords()">刷新</button>
-            <button class="btn btn-warning" type="button" onclick="clearSecurityRecords()">清空</button>
+            <button class="btn" type="button" data-action="renderSecurityRecords">刷新</button>
+            <button class="btn btn-warning" type="button" data-action="clearSecurityRecords">清空</button>
           </div>
         </div>
         <div id="securityRecordsContent"></div>
         <div class="modal-footer">
-          <button class="btn" onclick="closeSecurityRecords()">关闭</button>
+          <button class="btn" data-action="closeSecurityRecords">关闭</button>
         </div>
       </div>`;
     modal.addEventListener('click', event => {

@@ -7,26 +7,29 @@
 const TRACE_KEY = 'aichat_traces_v1';
 const TRACE_MAX = 500; // 上限，超出 FIFO 删除最旧
 
-if (!window.state) window.state = {};
-if (!Array.isArray(state.traces)) state.traces = [];
-state._traceFilter = 'session'; // 'all' | 'session'
-state._traceExpanded = new Set(); // 展开的 trace id 集合
-state._tracePanelOpen = false;
+const TraceStateModule = window.AgentApp.require('state');
+const TraceUiService = window.AgentApp.require('uiService');
+const traceState = TraceStateModule.state;
+
+if (!Array.isArray(traceState.traces)) traceState.traces = [];
+traceState._traceFilter = 'session'; // 'all' | 'session'
+traceState._traceExpanded = new Set(); // 展开的 trace id 集合
+traceState._tracePanelOpen = false;
 
 // ---------- 持久化 ----------
 function loadTraces() {
   try {
     const raw = storage.get(TRACE_KEY);
-    if (raw) state.traces = JSON.parse(raw) || [];
+    if (raw) traceState.traces = JSON.parse(raw) || [];
   } catch (e) {
-    state.traces = [];
+    traceState.traces = [];
   }
 }
 
 function saveTraces() {
   try {
     // 控制单条大小，避免 base64 / 长文本撑爆
-    const trimmed = state.traces.slice(-TRACE_MAX).map(t => {
+    const trimmed = traceState.traces.slice(-TRACE_MAX).map(t => {
       const cp = { ...t };
       // 限制 input/output 字符串长度
       if (typeof cp.input === 'string' && cp.input.length > 4000) {
@@ -40,8 +43,8 @@ function saveTraces() {
     storage.set(TRACE_KEY, JSON.stringify(trimmed));
   } catch (e) {
     // 存储满时尝试丢弃一半
-    state.traces = state.traces.slice(-Math.floor(TRACE_MAX / 2));
-    try { storage.set(TRACE_KEY, JSON.stringify(state.traces)); } catch (_) {}
+    traceState.traces = traceState.traces.slice(-Math.floor(TRACE_MAX / 2));
+    try { storage.set(TRACE_KEY, JSON.stringify(traceState.traces)); } catch (_) {}
   }
 }
 
@@ -90,7 +93,7 @@ function _fmtDur(ms) {
 function traceStart(opts) {
   const t = {
     id: _traceId(),
-    chatId: (typeof state !== 'undefined' && (state.activeTaskChatId || state.currentId)) || null,
+    chatId: (traceState.activeTaskChatId || traceState.currentId) || null,
     type: opts.type || 'misc',       // api | tool | plan | reflection | user | system
     role: opts.role || '',
     title: opts.title || '(untitled)',
@@ -103,16 +106,16 @@ function traceStart(opts) {
     error: null,
     meta: opts.meta || {}
   };
-  state.traces.push(t);
-  if (state.traces.length > TRACE_MAX) state.traces.splice(0, state.traces.length - TRACE_MAX);
+  traceState.traces.push(t);
+  if (traceState.traces.length > TRACE_MAX) traceState.traces.splice(0, traceState.traces.length - TRACE_MAX);
   saveTraces();
-  if (state._tracePanelOpen) renderTracePanel();
+  if (traceState._tracePanelOpen) renderTracePanel();
   _updateTraceBadge();
   return t.id;
 }
 
 function traceEnd(id, patch) {
-  const t = state.traces.find(x => x.id === id);
+  const t = traceState.traces.find(x => x.id === id);
   if (!t) return;
   t.endAt = Date.now();
   t.duration = t.endAt - t.startAt;
@@ -122,7 +125,7 @@ function traceEnd(id, patch) {
   if (patch.meta) t.meta = { ...t.meta, ...patch.meta };
   if (patch.title) t.title = patch.title;
   saveTraces();
-  if (state._tracePanelOpen) renderTracePanel();
+  if (traceState._tracePanelOpen) renderTracePanel();
   _updateTraceBadge();
 }
 
@@ -143,7 +146,7 @@ function installTraceHooks() {
   const _origFetch = window.fetch.bind(window);
   window.fetch = async function(url, init) {
     const urlStr = typeof url === 'string' ? url : (url && url.url) || '';
-    const baseUrl = (state.settings && state.settings.baseUrl) || '';
+    const baseUrl = (traceState.settings && traceState.settings.baseUrl) || '';
     const isApiCall = baseUrl && urlStr.startsWith(baseUrl);
     if (!isApiCall) return _origFetch(url, init);
 
@@ -274,7 +277,7 @@ function openTracePanel() {
   const el = document.getElementById('tracePanel');
   if (!el) return;
   el.classList.add('show');
-  state._tracePanelOpen = true;
+  traceState._tracePanelOpen = true;
   renderTracePanel();
   _updateTraceBadge();
 }
@@ -283,18 +286,18 @@ function closeTracePanel() {
   const el = document.getElementById('tracePanel');
   if (!el) return;
   el.classList.remove('show');
-  state._tracePanelOpen = false;
+  traceState._tracePanelOpen = false;
 }
 
 function toggleTracePanel() {
-  if (state._tracePanelOpen) closeTracePanel();
+  if (traceState._tracePanelOpen) closeTracePanel();
   else openTracePanel();
 }
 
 function _getFilteredTraces() {
-  let arr = state.traces.slice();
-  if (state._traceFilter === 'session' && state.currentId) {
-    arr = arr.filter(t => t.chatId === state.currentId);
+  let arr = traceState.traces.slice();
+  if (traceState._traceFilter === 'session' && traceState.currentId) {
+    arr = arr.filter(t => t.chatId === traceState.currentId);
   }
   const q = (document.getElementById('traceSearchInput')?.value || '').trim().toLowerCase();
   if (q) {
@@ -336,8 +339,8 @@ function _statusBadge(t) {
 function renderTracePanel() {
   const body = document.getElementById('traceBody');
   if (!body) return;
-  const all = state.traces.length;
-  const sessionCount = state.currentId ? state.traces.filter(t => t.chatId === state.currentId).length : 0;
+  const all = traceState.traces.length;
+  const sessionCount = traceState.currentId ? traceState.traces.filter(t => t.chatId === traceState.currentId).length : 0;
   const list = _getFilteredTraces();
 
   // 头部统计
@@ -354,8 +357,8 @@ function renderTracePanel() {
   if (tabAll) tabAll.textContent = `All (${all})`;
   if (tabSess) tabSess.textContent = `Session (${sessionCount})`;
   if (tabAll && tabSess) {
-    tabAll.classList.toggle('active', state._traceFilter === 'all');
-    tabSess.classList.toggle('active', state._traceFilter === 'session');
+    tabAll.classList.toggle('active', traceState._traceFilter === 'all');
+    tabSess.classList.toggle('active', traceState._traceFilter === 'session');
   }
 
   if (!list.length) {
@@ -368,7 +371,7 @@ function renderTracePanel() {
   }
 
   body.innerHTML = list.map(t => {
-    const expanded = state._traceExpanded.has(t.id);
+    const expanded = traceState._traceExpanded.has(t.id);
     const short = t.id.replace('tr_', '');
     const dur = t.duration != null ? _fmtDur(t.duration) : (t.status === 'running' ? '…' : '-');
     const usage = t.meta && t.meta.usage;
@@ -383,8 +386,8 @@ function renderTracePanel() {
         ${t.output != null ? `<div class="tr-section"><div class="tr-section-head">▼ output</div><pre>${_escapeHtml(_safeStringify(t.output))}</pre></div>` : ''}
         ${t.error ? `<div class="tr-section"><div class="tr-section-head tr-section-err">▼ error</div><pre>${_escapeHtml(_safeStringify(t.error))}</pre></div>` : ''}
         <div class="tr-actions">
-          <button class="tr-mini-btn" onclick="copyTraceJson('${t.id}')">📋 Copy JSON</button>
-          <button class="tr-mini-btn" onclick="deleteTrace('${t.id}')">🗑 Delete</button>
+          <button class="tr-mini-btn" data-action="valueClick" data-handler="copyTraceJson" data-value="${t.id}" data-stop-propagation="true">📋 Copy JSON</button>
+          <button class="tr-mini-btn" data-action="valueClick" data-handler="deleteTrace" data-value="${t.id}" data-stop-propagation="true">🗑 Delete</button>
         </div>
       </div>
     ` : '';
@@ -392,7 +395,7 @@ function renderTracePanel() {
     return `
       <div class="trace-entry${runningCls}${failCls}" data-id="${t.id}">
         <div class="tr-graph"><div class="tr-dot tr-dot-${t.type}"></div><div class="tr-line"></div></div>
-        <div class="tr-body" onclick="toggleTraceExpand('${t.id}')">
+        <div class="tr-body" data-action="valueClick" data-handler="toggleTraceExpand" data-value="${t.id}">
           <div class="tr-row1">
             <span class="tr-hash">${short}</span>
             <span class="tr-icon">${_typeIcon(t)}</span>
@@ -419,47 +422,47 @@ function _escapeHtml(s) {
 }
 
 function toggleTraceExpand(id) {
-  if (state._traceExpanded.has(id)) state._traceExpanded.delete(id);
-  else state._traceExpanded.add(id);
+  if (traceState._traceExpanded.has(id)) traceState._traceExpanded.delete(id);
+  else traceState._traceExpanded.add(id);
   renderTracePanel();
 }
 
 function setTraceFilter(mode) {
-  state._traceFilter = mode;
+  traceState._traceFilter = mode;
   renderTracePanel();
 }
 
 function clearAllTraces() {
   if (!confirm('清空所有 Trace 记录？此操作不可恢复。')) return;
-  state.traces = [];
-  state._traceExpanded.clear();
+  traceState.traces = [];
+  traceState._traceExpanded.clear();
   saveTraces();
   renderTracePanel();
   _updateTraceBadge();
 }
 
 function clearSessionTraces() {
-  if (!state.currentId) return;
+  if (!traceState.currentId) return;
   if (!confirm('清空当前会话的 Trace？')) return;
-  state.traces = state.traces.filter(t => t.chatId !== state.currentId);
+  traceState.traces = traceState.traces.filter(t => t.chatId !== traceState.currentId);
   saveTraces();
   renderTracePanel();
   _updateTraceBadge();
 }
 
 function deleteTrace(id) {
-  state.traces = state.traces.filter(t => t.id !== id);
-  state._traceExpanded.delete(id);
+  traceState.traces = traceState.traces.filter(t => t.id !== id);
+  traceState._traceExpanded.delete(id);
   saveTraces();
   renderTracePanel();
   _updateTraceBadge();
 }
 
 function copyTraceJson(id) {
-  const t = state.traces.find(x => x.id === id);
+  const t = traceState.traces.find(x => x.id === id);
   if (!t) return;
   navigator.clipboard.writeText(JSON.stringify(t, null, 2)).then(() => {
-    if (typeof toast === 'function') toast('✓ 已复制 Trace JSON');
+    TraceUiService.toast('✓ 已复制 Trace JSON');
   });
 }
 
@@ -467,8 +470,8 @@ function exportTraces() {
   const list = _getFilteredTraces().slice().reverse();
   const data = {
     exportedAt: new Date().toISOString(),
-    filter: state._traceFilter,
-    chatId: state.currentId,
+    filter: traceState._traceFilter,
+    chatId: traceState.currentId,
     count: list.length,
     traces: list
   };
@@ -507,3 +510,22 @@ window.clearSessionTraces = clearSessionTraces;
 window.deleteTrace = deleteTrace;
 window.copyTraceJson = copyTraceJson;
 window.exportTraces = exportTraces;
+
+window.AgentApp.define('trace', {
+  traceStart,
+  traceEnd,
+  traceLog,
+  traceUserMessage,
+  installTraceHooks,
+  openTracePanel,
+  closeTracePanel,
+  toggleTracePanel,
+  renderTracePanel,
+  toggleTraceExpand,
+  setTraceFilter,
+  clearAllTraces,
+  clearSessionTraces,
+  deleteTrace,
+  copyTraceJson,
+  exportTraces
+});

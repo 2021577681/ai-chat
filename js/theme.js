@@ -1,25 +1,30 @@
 // ============ Theme switching ============
 
+const ThemeStateModule = window.AgentApp.require('state');
+const ThemeUiService = window.AgentApp.require('uiService');
+const themeState = ThemeStateModule.state;
+const themePersistSettings = ThemeStateModule.persistSettings;
+
 function toggleTheme() {
-  state.settings.theme = state.settings.theme === 'dark' ? 'light' : 'dark';
-  if (state.settings.theme !== 'dark') state.settings.coolMode = false;
-  if (state.settings.securityMode && state.settings.theme !== 'dark') disableSecurityMode({ restore: true, persist: false });
+  themeState.settings.theme = themeState.settings.theme === 'dark' ? 'light' : 'dark';
+  if (themeState.settings.theme !== 'dark') themeState.settings.coolMode = false;
+  if (themeState.settings.securityMode && themeState.settings.theme !== 'dark') disableSecurityMode({ restore: true, persist: false });
   applyTheme();
-  persistSettings();
+  themePersistSettings();
 }
 
 function toggleCoolMode() {
-  const enabled = !state.settings.coolMode;
-  state.settings.coolMode = enabled;
-  if (enabled) state.settings.theme = 'dark';
-  if (enabled && state.settings.securityMode) disableSecurityMode({ restore: true, persist: false });
+  const enabled = !themeState.settings.coolMode;
+  themeState.settings.coolMode = enabled;
+  if (enabled) themeState.settings.theme = 'dark';
+  if (enabled && themeState.settings.securityMode) disableSecurityMode({ restore: true, persist: false });
   applyTheme();
-  persistSettings();
+  themePersistSettings();
 }
 
 function toggleSecurityMode() {
   ensureSecurityModeSettings();
-  if (state.settings.securityMode) disableSecurityMode({ restore: true, persist: true });
+  if (themeState.settings.securityMode) disableSecurityMode({ restore: true, persist: true });
   else enableSecurityMode();
 }
 
@@ -27,67 +32,67 @@ function enableSecurityMode() {
   ensureSecurityModeSettings();
   const privacy = typeof getPrivacyGuardSettings === 'function'
     ? getPrivacyGuardSettings()
-    : (state.settings.privacyGuard || (state.settings.privacyGuard = {}));
+    : (themeState.settings.privacyGuard || (themeState.settings.privacyGuard = {}));
   const shellAudit = typeof getShellAuditSettings === 'function'
     ? getShellAuditSettings()
-    : (state.settings.shellAudit || (state.settings.shellAudit = {}));
+    : (themeState.settings.shellAudit || (themeState.settings.shellAudit = {}));
 
-  state.settings.securityModeSnapshot = {
-    theme: state.settings.theme || 'light',
-    coolMode: !!state.settings.coolMode,
+  themeState.settings.securityModeSnapshot = {
+    theme: themeState.settings.theme || 'light',
+    coolMode: !!themeState.settings.coolMode,
     privacyEnabled: !!privacy.enabled,
     shellAuditEnabled: !!shellAudit.enabled
   };
 
-  state.settings.securityMode = true;
-  state.settings.theme = 'dark';
-  state.settings.coolMode = false;
+  themeState.settings.securityMode = true;
+  themeState.settings.theme = 'dark';
+  themeState.settings.coolMode = false;
   enforceSecurityModeProtections();
   applyTheme();
   refreshSecurityModeDependentUi();
-  persistSettings();
-  if (typeof toast === 'function') toast('安全模式已开启：隐私模式和 Shell 审核已启用', 2200);
+  themePersistSettings();
+  ThemeUiService.toast('安全模式已开启：隐私模式和 Shell 审核已启用', 2200);
 }
 
 function disableSecurityMode(options = {}) {
   ensureSecurityModeSettings();
   const restore = options.restore !== false;
-  const snap = state.settings.securityModeSnapshot || {};
+  const snap = themeState.settings.securityModeSnapshot || {};
   const privacy = typeof getPrivacyGuardSettings === 'function'
     ? getPrivacyGuardSettings()
-    : (state.settings.privacyGuard || (state.settings.privacyGuard = {}));
+    : (themeState.settings.privacyGuard || (themeState.settings.privacyGuard = {}));
   const shellAudit = typeof getShellAuditSettings === 'function'
     ? getShellAuditSettings()
-    : (state.settings.shellAudit || (state.settings.shellAudit = {}));
+    : (themeState.settings.shellAudit || (themeState.settings.shellAudit = {}));
 
-  state.settings.securityMode = false;
-  state.settings.securityModeSnapshot = null;
+  themeState.settings.securityMode = false;
+  themeState.settings.securityModeSnapshot = null;
   if (restore) {
-    state.settings.theme = snap.theme || 'light';
-    state.settings.coolMode = !!snap.coolMode && state.settings.theme === 'dark';
+    themeState.settings.theme = snap.theme || 'light';
+    themeState.settings.coolMode = !!snap.coolMode && themeState.settings.theme === 'dark';
     privacy.enabled = !!snap.privacyEnabled;
     shellAudit.enabled = !!snap.shellAuditEnabled;
   }
   applyTheme();
   refreshSecurityModeDependentUi();
-  if (options.persist !== false) persistSettings();
-  if (options.persist !== false && typeof toast === 'function') toast('安全模式已关闭，已恢复原设置', 1800);
+  if (options.persist !== false) themePersistSettings();
+  if (options.persist !== false) ThemeUiService.toast('安全模式已关闭，已恢复原设置', 1800);
 }
 
 function ensureSecurityModeSettings() {
-  if (!state.settings) return;
-  if (typeof state.settings.securityMode !== 'boolean') state.settings.securityMode = false;
-  if (!state.settings.securityMode && state.settings.securityModeSnapshot) state.settings.securityModeSnapshot = null;
+  if (!themeState.settings) return;
+  if (typeof themeState.settings.securityMode !== 'boolean') themeState.settings.securityMode = false;
+  if (!themeState.settings.securityMode && themeState.settings.securityModeSnapshot) themeState.settings.securityModeSnapshot = null;
 }
 
 function enforceSecurityModeProtections() {
-  if (!state.settings || !state.settings.securityMode) return;
+  if (!themeState.settings || !themeState.settings.securityMode) return;
   const privacy = typeof getPrivacyGuardSettings === 'function'
     ? getPrivacyGuardSettings()
-    : (state.settings.privacyGuard || (state.settings.privacyGuard = {}));
+    : (themeState.settings.privacyGuard || (themeState.settings.privacyGuard = {}));
   const shellAudit = typeof getShellAuditSettings === 'function'
     ? getShellAuditSettings()
-    : (state.settings.shellAudit || (state.settings.shellAudit = {}));
+    : (themeState.settings.shellAudit || (themeState.settings.shellAudit = {}));
   privacy.enabled = true;
   shellAudit.enabled = true;
 }
@@ -95,30 +100,30 @@ function enforceSecurityModeProtections() {
 function refreshSecurityModeDependentUi() {
   if (typeof updatePrivacyGuardButton === 'function') updatePrivacyGuardButton();
   if (typeof renderShellAuditSettings === 'function' && document.getElementById('shellAuditSettings')) renderShellAuditSettings();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  ThemeUiService.updateSendBtn();
 }
 
 function applyTheme() {
-  if (!state.settings) return;
+  if (!themeState.settings) return;
   ensureSecurityModeSettings();
-  if (state.settings.securityMode) {
-    state.settings.theme = 'dark';
-    state.settings.coolMode = false;
+  if (themeState.settings.securityMode) {
+    themeState.settings.theme = 'dark';
+    themeState.settings.coolMode = false;
     enforceSecurityModeProtections();
   }
-  const coolMode = !!state.settings.coolMode && state.settings.theme === 'dark';
-  state.settings.coolMode = coolMode;
-  const securityMode = !!state.settings.securityMode && state.settings.theme === 'dark';
+  const coolMode = !!themeState.settings.coolMode && themeState.settings.theme === 'dark';
+  themeState.settings.coolMode = coolMode;
+  const securityMode = !!themeState.settings.securityMode && themeState.settings.theme === 'dark';
 
-  document.documentElement.setAttribute('data-theme', state.settings.theme);
+  document.documentElement.setAttribute('data-theme', themeState.settings.theme);
   document.documentElement.toggleAttribute('data-cool-mode', coolMode);
   document.documentElement.toggleAttribute('data-security-mode', securityMode);
 
   const btn = document.getElementById('themeBtn');
   if (btn) {
-    btn.classList.toggle('active', state.settings.theme === 'dark');
-    btn.setAttribute('aria-pressed', state.settings.theme === 'dark' ? 'true' : 'false');
-    btn.title = state.settings.theme === 'dark' ? '黑暗模式已开启，点击切换到浅色' : '浅色模式已开启，点击切换到黑暗';
+    btn.classList.toggle('active', themeState.settings.theme === 'dark');
+    btn.setAttribute('aria-pressed', themeState.settings.theme === 'dark' ? 'true' : 'false');
+    btn.title = themeState.settings.theme === 'dark' ? '黑暗模式已开启，点击切换到浅色' : '浅色模式已开启，点击切换到黑暗';
   }
 
   const coolBtn = document.getElementById('coolModeBtn');
@@ -138,3 +143,15 @@ function applyTheme() {
 
 window.toggleSecurityMode = toggleSecurityMode;
 window.enforceSecurityModeProtections = enforceSecurityModeProtections;
+
+window.AgentApp.define('theme', {
+  toggleTheme,
+  toggleCoolMode,
+  toggleSecurityMode,
+  enableSecurityMode,
+  disableSecurityMode,
+  ensureSecurityModeSettings,
+  enforceSecurityModeProtections,
+  refreshSecurityModeDependentUi,
+  applyTheme
+});

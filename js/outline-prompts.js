@@ -7,6 +7,9 @@
 // 本文件导出全局：OUTLINE_TOOLS、OUTLINE_TOOL_NAMES、DEFAULT_OUTLINE_SYSTEM_PROMPT
 // 加载顺序：必须先于 outline-core.js 和 outline-render.js
 
+const OutlinePromptsStateModule = window.AgentApp.require('state');
+const outlinePromptsState = OutlinePromptsStateModule.state;
+
 // ============ 隐藏工具定义（不进 state.tools，仅大纲模式下注入到 tools 字段）============
 
 const OUTLINE_TOOLS = [
@@ -146,11 +149,36 @@ function outlineTemplate(template, vars = {}) {
 }
 
 function outlinePromptSetting(key, fallback) {
-  if (typeof state === 'undefined' || !state.settings) return fallback;
-  const value = state.settings[key];
+  if (!outlinePromptsState.settings) return fallback;
+  const value = outlinePromptsState.settings[key];
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
 function outlinePromptText(key, fallback, vars = {}) {
   return outlineTemplate(outlinePromptSetting(key, fallback), vars);
 }
+
+window.AgentApp.define('outlinePrompts', {
+  OUTLINE_TOOLS,
+  OUTLINE_TOOL_NAMES,
+  DEFAULT_OUTLINE_SYSTEM_PROMPT,
+  CODE_TASK_OUTLINE_PROFILE_PROMPT,
+  DEFAULT_OUTLINE_CLASSIFIER_PROMPT,
+  DEFAULT_OUTLINE_BUDGET_HALF_PROMPT,
+  DEFAULT_OUTLINE_BUDGET_LOW_PROMPT,
+  DEFAULT_OUTLINE_BUDGET_CRITICAL_PROMPT,
+  DEFAULT_OUTLINE_GATE_NO_VERIFY_PROMPT,
+  DEFAULT_OUTLINE_GATE_STALE_VERIFY_PROMPT,
+  DEFAULT_OUTLINE_GATE_FAILED_VERIFY_PROMPT,
+  DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT,
+  DEFAULT_OUTLINE_FORCE_FINAL_USER_PROMPT,
+  DEFAULT_OUTLINE_USER_INJECTION_PROMPT,
+  DEFAULT_OUTLINE_FRESH_TASK_PROMPT,
+  DEFAULT_OUTLINE_REQUIRE_START_PROMPT,
+  DEFAULT_OUTLINE_TOOL_REJECT_STOP_PROMPT,
+  DEFAULT_OUTLINE_TOOL_REJECT_ONCE_PROMPT,
+  DEFAULT_OUTLINE_STALLED_PROMPT,
+  outlineTemplate,
+  outlinePromptSetting,
+  outlinePromptText
+});

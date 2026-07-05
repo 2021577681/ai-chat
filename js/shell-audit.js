@@ -11,6 +11,34 @@ const SHELL_AUDIT_DEFAULT_PROMPT = [
   '只输出严格 JSON，不要输出 Markdown，不要解释 JSON 外的内容。格式：{"allow":true|false,"risk":"low|medium|high","necessary":true|false,"reason":"一句话理由","concerns":["风险点1"]}'
 ].join('\n');
 
+const ShellAuditStateModule = window.AgentApp.require('state');
+const ShellAuditUiService = window.AgentApp.require('uiService');
+const shellAuditState = ShellAuditStateModule.state;
+const shellAuditChatById = ShellAuditStateModule.chatById;
+const shellAuditCurrentChat = ShellAuditStateModule.currentChat;
+const shellAuditPersistSettings = ShellAuditStateModule.persistSettings;
+const ShellAuditApiProfilesModule = window.AgentApp.require('apiProfiles');
+const shellAuditLoadApiProfiles = ShellAuditApiProfilesModule.loadApiProfiles;
+const ShellAuditApiCoreModule = window.AgentApp.require('apiCore');
+const shellAuditExtractResponsesText = ShellAuditApiCoreModule.extractResponsesText;
+const ShellAuditUtilsModule = window.AgentApp.require('utils');
+const shellAuditBuildFullUrl = ShellAuditUtilsModule.buildFullUrl;
+const ShellAuditRateLimiterModule = window.AgentApp.require('rateLimiter');
+const shellAuditRecordRequest = ShellAuditRateLimiterModule.recordRequest;
+const ShellAuditTokensModule = window.AgentApp.require('tokens');
+const shellAuditRecordUsage = ShellAuditTokensModule.recordUsageFromResponse;
+
+function shellAuditRecordRawResponse(entry) {
+  const jsonEditor = window.AgentApp.optional('jsonEditor');
+  if (jsonEditor && typeof jsonEditor.recordRawResponse === 'function') {
+    jsonEditor.recordRawResponse(entry);
+  }
+}
+
+function shellAuditRecordUsageFromResponse(chat, usage, meta) {
+  shellAuditRecordUsage(chat, usage, meta);
+}
+
 function cloneShellAuditDefaults() {
   return {
     enabled: false,
@@ -21,15 +49,14 @@ function cloneShellAuditDefaults() {
 }
 
 function ensureShellAuditSettings() {
-  if (typeof state === 'undefined') return cloneShellAuditDefaults();
-  const existing = state.settings.shellAudit || {};
-  state.settings.shellAudit = {
+  const existing = shellAuditState.settings.shellAudit || {};
+  shellAuditState.settings.shellAudit = {
     ...cloneShellAuditDefaults(),
     ...existing
   };
-  if (!state.settings.shellAudit.profileId) state.settings.shellAudit.profileId = SHELL_AUDIT_CURRENT_PROFILE;
-  if (!state.settings.shellAudit.prompt) state.settings.shellAudit.prompt = SHELL_AUDIT_DEFAULT_PROMPT;
-  return state.settings.shellAudit;
+  if (!shellAuditState.settings.shellAudit.profileId) shellAuditState.settings.shellAudit.profileId = SHELL_AUDIT_CURRENT_PROFILE;
+  if (!shellAuditState.settings.shellAudit.prompt) shellAuditState.settings.shellAudit.prompt = SHELL_AUDIT_DEFAULT_PROMPT;
+  return shellAuditState.settings.shellAudit;
 }
 
 function getShellAuditSettings() {
@@ -49,7 +76,7 @@ function shellAuditEscape(value) {
 
 function shellAuditFindProfile(profileId) {
   if (!profileId || profileId === SHELL_AUDIT_CURRENT_PROFILE) return null;
-  const profiles = typeof loadApiProfiles === 'function' ? loadApiProfiles() : [];
+  const profiles = shellAuditLoadApiProfiles();
   return profiles.find(p => p && p.id === profileId) || null;
 }
 
@@ -57,7 +84,7 @@ function shellAuditGetApiSettings(profileId) {
   const prof = shellAuditFindProfile(profileId);
   const out = prof && prof.settings
     ? { ...(prof.settings || {}) }
-    : { ...((typeof state !== 'undefined' && state.settings) || {}) };
+    : { ...(shellAuditState.settings || {}) };
   if (out.useLocalProxy === undefined) out.useLocalProxy = true;
   return out;
 }
@@ -253,7 +280,7 @@ function shellAuditExtractResponseText(parsed, apiFormat) {
       .join('');
   }
   if (apiFormat === 'responses') {
-    if (typeof extractResponsesText === 'function') return extractResponsesText(parsed) || '';
+    if (typeof shellAuditExtractResponsesText === 'function') return shellAuditExtractResponsesText(parsed) || '';
     return parsed.output_text || '';
   }
   return parsed.choices?.[0]?.message?.content || '';
@@ -333,8 +360,8 @@ function getCurrentUserPromptForShellAudit(context) {
     if (typeof context.userPrompt === 'string' && context.userPrompt.trim()) return context.userPrompt;
   }
   const chat = (context && context.chat)
-    || (context && context.chatId && typeof chatById === 'function' ? chatById(context.chatId) : null)
-    || (typeof currentChat === 'function' ? currentChat() : null);
+    || (context && context.chatId ? shellAuditChatById(context.chatId) : null)
+    || shellAuditCurrentChat();
   const messages = Array.isArray(chat?.messages) ? chat.messages : [];
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -488,9 +515,7 @@ async function callShellAuditModel({ command, userPrompt, workspaceRoot, context
   const body = typeof withPrivacyGuardRequest === 'function'
     ? withPrivacyGuardRequest(bodyBuilder, { source: 'shell-audit', silentReport: true })
     : bodyBuilder();
-  const url = typeof buildFullUrl === 'function'
-    ? buildFullUrl(apiSettings.baseUrl, apiSettings.apiPath)
-    : String(apiSettings.baseUrl || '').replace(/\/+$/, '') + '/' + String(apiSettings.apiPath || '').replace(/^\/+/, '');
+  const url = shellAuditBuildFullUrl(apiSettings.baseUrl, apiSettings.apiPath);
   const headers = shellAuditBuildHeaders(apiSettings);
   const signal = context && context.signal ? context.signal : undefined;
   const resp = await shellAuditFetch(url, {
@@ -498,7 +523,7 @@ async function callShellAuditModel({ command, userPrompt, workspaceRoot, context
     headers,
     body: JSON.stringify(body)
   }, apiSettings, signal);
-  if (typeof recordRequest === 'function') recordRequest();
+  shellAuditRecordRequest();
   const contentType = resp.headers.get('content-type') || '';
   const raw = await resp.text();
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${raw.slice(0, 300)}`);
@@ -509,8 +534,7 @@ async function callShellAuditModel({ command, userPrompt, workspaceRoot, context
   }
   const parsedResponse = JSON.parse(trimmed);
   if (parsedResponse.error) throw new Error(parsedResponse.error.message || JSON.stringify(parsedResponse.error));
-  if (typeof recordRawResponse === 'function') {
-    recordRawResponse({
+  shellAuditRecordRawResponse({
       ts: Date.now(),
       isStream: false,
       contentType,
@@ -519,11 +543,10 @@ async function callShellAuditModel({ command, userPrompt, workspaceRoot, context
       usage: parsedResponse.usage || null,
       request: { url, method: 'POST', headers: shellAuditRedactHeaders(headers), body: shellAuditRedactedRecordBody(body) },
       _source: 'Shell 命令审核'
-    });
-  }
-  if (parsedResponse.usage && typeof recordUsageFromResponse === 'function') {
-    const chat = context?.chat || (context?.chatId && typeof chatById === 'function' ? chatById(context.chatId) : null);
-    if (chat) recordUsageFromResponse(chat, parsedResponse.usage, { model });
+  });
+  if (parsedResponse.usage) {
+    const chat = context?.chat || (context?.chatId ? shellAuditChatById(context.chatId) : null);
+    if (chat) shellAuditRecordUsageFromResponse(chat, parsedResponse.usage, { model });
   }
   let text = shellAuditExtractResponseText(parsedResponse, apiSettings.apiFormat);
   if (typeof privacyGuardFinalizeText === 'function') {
@@ -661,7 +684,7 @@ function renderShellAuditSettings() {
   const container = document.getElementById('shellAuditSettings');
   if (!container) return;
   const cfg = getShellAuditSettings();
-  const profiles = typeof loadApiProfiles === 'function' ? loadApiProfiles() : [];
+  const profiles = shellAuditLoadApiProfiles();
   const models = shellAuditModelList(cfg.profileId);
   const selectedModel = shellAuditResolveModel(cfg);
   if (selectedModel && !models.includes(selectedModel)) models.unshift(selectedModel);
@@ -676,7 +699,7 @@ function renderShellAuditSettings() {
   container.innerHTML = `
     <div class="shell-audit-panel">
       <label class="shell-audit-toggle">
-        <input type="checkbox" id="shellAuditEnabled" ${cfg.enabled ? 'checked' : ''} onchange="saveShellAuditSettingsFromUi()">
+        <input type="checkbox" id="shellAuditEnabled" ${cfg.enabled ? 'checked' : ''} data-change-action="saveShellAuditSettingsFromUi">
         <span>
           <strong>Shell 命令 AI 审核</strong>
           <em>只审核 execute_action。权限放行后仍会检查当前用户请求与命令是否匹配。</em>
@@ -686,22 +709,22 @@ function renderShellAuditSettings() {
       <div class="shell-audit-grid">
         <div class="form-group">
           <label for="shellAuditProfile">审核 API Profile</label>
-          <select id="shellAuditProfile" onchange="onShellAuditProfileChange()">${profileOptions}</select>
+          <select id="shellAuditProfile" data-change-action="onShellAuditProfileChange">${profileOptions}</select>
         </div>
         <div class="form-group">
           <label for="shellAuditModel">审核模型</label>
-          <select id="shellAuditModel" onchange="saveShellAuditSettingsFromUi()">${modelOptions}</select>
+          <select id="shellAuditModel" data-change-action="saveShellAuditSettingsFromUi">${modelOptions}</select>
         </div>
       </div>
 
       <div class="form-group">
         <label for="shellAuditPrompt">注入给审核 AI 的 Prompt</label>
-        <textarea id="shellAuditPrompt" rows="8" oninput="saveShellAuditSettingsFromUi()">${shellAuditEscape(cfg.prompt || SHELL_AUDIT_DEFAULT_PROMPT)}</textarea>
+        <textarea id="shellAuditPrompt" rows="8" data-input-action="saveShellAuditSettingsFromUi">${shellAuditEscape(cfg.prompt || SHELL_AUDIT_DEFAULT_PROMPT)}</textarea>
         <div class="form-hint shell-audit-hint">审核 AI 只会收到当前轮用户消息、待执行命令和工作区根目录，不会收到完整上下文、工具结果或当前工作目录。</div>
       </div>
 
       <div class="shell-audit-actions">
-        <button class="btn" type="button" onclick="resetShellAuditPrompt()">恢复默认 Prompt</button>
+        <button class="btn" type="button" data-action="resetShellAuditPrompt">恢复默认 Prompt</button>
       </div>
     </div>
   `;
@@ -714,15 +737,15 @@ function saveShellAuditSettingsFromUi() {
   const model = document.getElementById('shellAuditModel');
   const prompt = document.getElementById('shellAuditPrompt');
   if (enabled) cfg.enabled = !!enabled.checked;
-  if (typeof state !== 'undefined' && state.settings?.securityMode) {
+  if (shellAuditState.settings?.securityMode) {
     cfg.enabled = true;
     if (enabled) enabled.checked = true;
-    if (typeof toast === 'function') toast('安全模式已开启，Shell 审核会保持启用', 1800);
+    ShellAuditUiService.toast('安全模式已开启，Shell 审核会保持启用', 1800);
   }
   if (profile) cfg.profileId = profile.value || SHELL_AUDIT_CURRENT_PROFILE;
   if (model) cfg.model = model.value || '';
   if (prompt) cfg.prompt = prompt.value || SHELL_AUDIT_DEFAULT_PROMPT;
-  if (typeof persistSettings === 'function') persistSettings();
+  shellAuditPersistSettings();
 }
 
 function onShellAuditProfileChange() {
@@ -731,16 +754,16 @@ function onShellAuditProfileChange() {
   if (profile) cfg.profileId = profile.value || SHELL_AUDIT_CURRENT_PROFILE;
   const models = shellAuditModelList(cfg.profileId);
   cfg.model = models[0] || '';
-  if (typeof persistSettings === 'function') persistSettings();
+  shellAuditPersistSettings();
   renderShellAuditSettings();
 }
 
 function resetShellAuditPrompt() {
   const cfg = getShellAuditSettings();
   cfg.prompt = SHELL_AUDIT_DEFAULT_PROMPT;
-  if (typeof persistSettings === 'function') persistSettings();
+  shellAuditPersistSettings();
   renderShellAuditSettings();
-  if (typeof toast === 'function') toast('已恢复 Shell 审核默认 Prompt', 1800);
+  ShellAuditUiService.toast('已恢复 Shell 审核默认 Prompt', 1800);
 }
 
 window.ensureShellAuditSettings = ensureShellAuditSettings;
@@ -754,4 +777,17 @@ window.saveShellAuditSettingsFromUi = saveShellAuditSettingsFromUi;
 window.onShellAuditProfileChange = onShellAuditProfileChange;
 window.resetShellAuditPrompt = resetShellAuditPrompt;
 
-if (typeof state !== 'undefined') ensureShellAuditSettings();
+window.AgentApp.define('shellAudit', {
+  ensureShellAuditSettings,
+  getShellAuditSettings,
+  reviewShellCommandWithAI,
+  shellAuditConfirmRisk,
+  shellAuditConfirmAccept,
+  shellAuditConfirmReject,
+  renderShellAuditSettings,
+  saveShellAuditSettingsFromUi,
+  onShellAuditProfileChange,
+  resetShellAuditPrompt
+});
+
+ensureShellAuditSettings();

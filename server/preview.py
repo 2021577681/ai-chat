@@ -9,35 +9,28 @@
 
 import mimetypes
 import os
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import quote
 
 from .sandbox import check_path_or_error
 
 
 class PreviewMixin:
     def _send_preview_cors(self):
-        origin = self.headers.get('Origin', '')
-        self.send_header('Access-Control-Allow-Origin', origin or '*')
-        self.send_header('Vary', 'Origin')
-        self.send_header('Access-Control-Allow-Headers', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        self.send_header('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Type')
+        self.response.cors_headers(
+            origin=self.request_context.origin,
+            expose_headers='Content-Length, Content-Range, Accept-Ranges, Content-Type',
+        )
 
     def _send_preview_error(self, code, message):
-        body = str(message or '').encode('utf-8', errors='replace')
-        self.send_response(code)
-        self._send_preview_cors()
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
+        self.response.text(
+            code,
+            message,
+            headers={'Cache-Control': 'no-cache, no-store, must-revalidate'},
+            expose_headers='Content-Length, Content-Range, Accept-Ranges, Content-Type',
+        )
 
     def handle_preview_file_get(self):
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self.request_context.query
 
         rel = (qs.get('path') or [''])[0]
         path, err = check_path_or_error(rel, must_exist=True)
@@ -55,13 +48,13 @@ class PreviewMixin:
             return
 
         if size <= 0:
-            self.send_response(200)
+            self.response.status(200)
             self._send_preview_cors()
-            self.send_header('Content-Type', 'application/octet-stream')
-            self.send_header('Accept-Ranges', 'bytes')
-            self.send_header('Content-Length', '0')
-            self.send_header('Cache-Control', 'no-cache')
-            self.end_headers()
+            self.response.header('Content-Type', 'application/octet-stream')
+            self.response.header('Accept-Ranges', 'bytes')
+            self.response.header('Content-Length', '0')
+            self.response.header('Cache-Control', 'no-cache')
+            self.response.end()
             return
 
         ctype, _ = mimetypes.guess_type(path)
@@ -85,7 +78,7 @@ class PreviewMixin:
 
         start, end = 0, size - 1
         status = 200
-        range_header = self.headers.get('Range', '')
+        range_header = self.request_context.header('Range', '')
         if range_header.startswith('bytes='):
             try:
                 spec = range_header.split('=', 1)[1].split(',', 1)[0].strip()
@@ -101,11 +94,11 @@ class PreviewMixin:
                     raise ValueError()
                 status = 206
             except Exception:
-                self.send_response(416)
+                self.response.status(416)
                 self._send_preview_cors()
-                self.send_header('Content-Range', f'bytes */{size}')
-                self.send_header('Content-Length', '0')
-                self.end_headers()
+                self.response.header('Content-Range', f'bytes */{size}')
+                self.response.header('Content-Length', '0')
+                self.response.end()
                 return
 
         length = end - start + 1
@@ -115,17 +108,17 @@ class PreviewMixin:
         print(f'👁️ [预览文件] {path}')
         print(f'   📦 Range: {start}-{end}/{size} | MIME: {ctype}')
 
-        self.send_response(status)
+        self.response.status(status)
         self._send_preview_cors()
-        self.send_header('Content-Type', ctype)
-        self.send_header('Accept-Ranges', 'bytes')
-        self.send_header('Content-Length', str(length))
+        self.response.header('Content-Type', ctype)
+        self.response.header('Accept-Ranges', 'bytes')
+        self.response.header('Content-Length', str(length))
         if status == 206:
-            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
-        self.send_header('Content-Disposition', f"inline; filename*=UTF-8''{quoted_name}")
-        self.send_header('Cache-Control', 'no-cache')
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.end_headers()
+            self.response.header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.response.header('Content-Disposition', f"inline; filename*=UTF-8''{quoted_name}")
+        self.response.header('Cache-Control', 'no-cache')
+        self.response.header('X-Content-Type-Options', 'nosniff')
+        self.response.end()
 
         try:
             with open(path, 'rb') as f:
@@ -136,7 +129,7 @@ class PreviewMixin:
                     chunk = f.read(min(chunk_size, remaining))
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    self.response.write(chunk)
                     remaining -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             pass

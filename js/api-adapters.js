@@ -1,3 +1,8 @@
+const ApiAdapterStateModule = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('state')
+  : null;
+const apiAdapterState = ApiAdapterStateModule ? ApiAdapterStateModule.state : state;
+
 // ============ 🔌 API - 消息格式适配器（OpenAI / Anthropic）============
 // 【模块定位】将 chats[].messages 转换成各家 API 要求的格式
 // 依赖：state.js / utils.js
@@ -15,7 +20,7 @@ function buildOpenAIMessages(history, options = {}) {
   const out = [];
   let systemPrompt = typeof getEffectiveSystemPrompt === 'function'
     ? getEffectiveSystemPrompt()
-    : state.settings.systemPrompt;
+    : apiAdapterState.settings.systemPrompt;
   if (options.extraSystemPrompt) {
     systemPrompt = [systemPrompt, options.extraSystemPrompt].filter(Boolean).join('\n\n');
   }
@@ -388,6 +393,16 @@ function fixAnthropicMessageSequence(messages) {
       return false;
     }
     return true;
+  });
+}
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('apiAdapters', {
+    buildOpenAIMessages,
+    fixOpenAIMessageSequence,
+    buildOpenAIResponsesInput,
+    buildAnthropicMessages,
+    fixAnthropicMessageSequence
   });
 }
 

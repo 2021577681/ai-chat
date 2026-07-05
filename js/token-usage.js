@@ -2,6 +2,8 @@
 // 【模块定位】汇总所有对话中的 chat.tokenStats，按模型统计 token / 费用 / 请求数趋势
 // 数据来源：tokens.js 的 recordUsageFromResponse()，与对话顶部 Token 统计一致。
 
+const TokenUsageUiService = window.AgentApp.require('uiService');
+
 function openTokenUsageStats() {
   let modal = document.getElementById('tokenUsageModal');
   if (!modal) {
@@ -10,12 +12,12 @@ function openTokenUsageStats() {
     modal.className = 'modal-mask token-usage-modal';
     modal.innerHTML = `
       <div class="modal wide" style="max-width:980px;">
-        <h2>📊 Token 使用统计 <button class="modal-close" onclick="closeTokenUsageStats()">×</button></h2>
+        <h2>📊 Token 使用统计 <button class="modal-close" data-action="closeTokenUsageStats">×</button></h2>
         <div id="tokenUsageContent"></div>
         <div class="modal-footer">
-          <button class="btn" onclick="renderTokenUsageStats()">🔄 刷新</button>
-          <button class="btn btn-warning" onclick="resetTokenUsageLedger()">🗑 清空统计账本</button>
-          <button class="btn" onclick="closeTokenUsageStats()">关闭</button>
+          <button class="btn" data-action="renderTokenUsageStats">🔄 刷新</button>
+          <button class="btn btn-warning" data-action="resetTokenUsageLedger">🗑 清空统计账本</button>
+          <button class="btn" data-action="closeTokenUsageStats">关闭</button>
         </div>
       </div>`;
     modal.addEventListener('click', (e) => {
@@ -36,7 +38,7 @@ function resetTokenUsageLedger() {
   if (!confirm('确定清空独立 Token 使用账本吗？\n\n这不会删除对话内容，也不会影响每个对话自身的 tokenStats。')) return;
   if (typeof saveTokenUsageLedger === 'function') saveTokenUsageLedger([]);
   renderTokenUsageStats();
-  if (typeof toast === 'function') toast('✓ Token 使用账本已清空');
+  TokenUsageUiService.toast('✓ Token 使用账本已清空');
 }
 
 function _collectTokenUsageEvents() {
@@ -238,7 +240,7 @@ function _renderRequestCurve(events, dateStr) {
       </div>
       <label class="token-usage-date-picker">
         <span>选择日期</span>
-        <input type="date" value="${escapeHtml(dateStr)}" onchange="onTokenUsageDateChange(this.value)">
+        <input type="date" value="${escapeHtml(dateStr)}" data-change-action="tokenUsageDateChange">
       </label>
     </div>
     <div class="token-usage-chart-wrap">
@@ -349,17 +351,17 @@ function renderTokenUsageStats() {
           <span class="token-usage-range-summary">范围：${escapeHtml(_tokenUsageRangeLabel(range))}</span>
           <label class="token-usage-date-picker token-usage-range-picker">
             <span>开始</span>
-            <input type="date" value="${escapeHtml(range.start || '')}" onchange="onTokenUsageRangeChange('start', this.value)">
+            <input type="date" value="${escapeHtml(range.start || '')}" data-change-action="tokenUsageRangeChange" data-field="start">
           </label>
           <label class="token-usage-date-picker token-usage-range-picker">
             <span>结束</span>
-            <input type="date" value="${escapeHtml(range.end || '')}" onchange="onTokenUsageRangeChange('end', this.value)">
+            <input type="date" value="${escapeHtml(range.end || '')}" data-change-action="tokenUsageRangeChange" data-field="end">
           </label>
           <div class="token-usage-quick-ranges">
-            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('today')">今天</button>
-            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('7d')">近 7 天</button>
-            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('30d')">近 30 天</button>
-            <button type="button" class="btn mini" onclick="setTokenUsageQuickRange('all')">全部</button>
+            <button type="button" class="btn mini" data-action="valueClick" data-handler="setTokenUsageQuickRange" data-value="today">今天</button>
+            <button type="button" class="btn mini" data-action="valueClick" data-handler="setTokenUsageQuickRange" data-value="7d">近 7 天</button>
+            <button type="button" class="btn mini" data-action="valueClick" data-handler="setTokenUsageQuickRange" data-value="30d">近 30 天</button>
+            <button type="button" class="btn mini" data-action="valueClick" data-handler="setTokenUsageQuickRange" data-value="all">全部</button>
           </div>
         </div>
       </div>
@@ -404,3 +406,21 @@ function renderTokenUsageStats() {
     </div>
   `;
 }
+
+window.openTokenUsageStats = openTokenUsageStats;
+window.closeTokenUsageStats = closeTokenUsageStats;
+window.resetTokenUsageLedger = resetTokenUsageLedger;
+window.onTokenUsageRangeChange = onTokenUsageRangeChange;
+window.setTokenUsageQuickRange = setTokenUsageQuickRange;
+window.onTokenUsageDateChange = onTokenUsageDateChange;
+window.renderTokenUsageStats = renderTokenUsageStats;
+
+window.AgentApp.define('tokenUsage', {
+  openTokenUsageStats,
+  closeTokenUsageStats,
+  resetTokenUsageLedger,
+  onTokenUsageRangeChange,
+  setTokenUsageQuickRange,
+  onTokenUsageDateChange,
+  renderTokenUsageStats
+});

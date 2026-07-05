@@ -4,6 +4,17 @@
 const MAX_RAW_RESPONSES = 10;
 let _rawResponses = [];
 
+const JsonEditorStateModule = window.AgentApp.require('state');
+const JsonEditorUiService = window.AgentApp.require('uiService');
+const jsonEditorState = JsonEditorStateModule.state;
+const jsonEditorCurrentChat = JsonEditorStateModule.currentChat;
+const jsonEditorPersistSettings = JsonEditorStateModule.persistSettings;
+const JsonEditorApiCoreModule = window.AgentApp.require('apiCore');
+const jsonEditorBuildRequestBody = JsonEditorApiCoreModule.buildRequestBody;
+const jsonEditorBuildHeaders = JsonEditorApiCoreModule.buildHeaders;
+const JsonEditorUtilsModule = window.AgentApp.require('utils');
+const jsonEditorBuildFullUrl = JsonEditorUtilsModule.buildFullUrl;
+
 // 对请求头里的敏感字段做脱敏
 function _sanitizeReqHeaders(headers) {
   if (!headers || typeof headers !== 'object') return {};
@@ -101,7 +112,7 @@ function openJsonEditor() {
   switchJsonTab('preview', document.querySelector('[data-jsontab="preview"]'));
   refreshJsonPreview();
   
-  const s = state.settings;
+  const s = jsonEditorState.settings;
   document.getElementById('jsonTemplate').value = s.jsonTemplate ||
     (s.apiFormat === 'anthropic' ? DEFAULT_JSON_TEMPLATE_ANTHROPIC : DEFAULT_JSON_TEMPLATE_OPENAI);
   document.getElementById('jsonHeaders').value = s.jsonHeaders || '{}';
@@ -128,15 +139,15 @@ function refreshJsonPreview() {
   const previewEl = document.getElementById('jsonPreview');
   if (!previewEl) return;
   try {
-    const c = currentChat();
+    const c = jsonEditorCurrentChat();
     if (!c || !c.messages.length) {
       previewEl.value = '// 当前没有对话，请先发送一条消息';
       updateJsonStats(0, 0);
       return;
     }
-    const body = buildRequestBody(c.messages);
-    const url = buildFullUrl(state.settings.baseUrl, state.settings.apiPath);
-    const headers = buildHeaders();
+    const body = jsonEditorBuildRequestBody(c.messages);
+    const url = jsonEditorBuildFullUrl(jsonEditorState.settings.baseUrl, jsonEditorState.settings.apiPath);
+    const headers = jsonEditorBuildHeaders();
     const safeHeaders = { ...headers };
     if (safeHeaders.Authorization) safeHeaders.Authorization = 'Bearer sk-***隐藏***';
     if (safeHeaders['x-api-key']) safeHeaders['x-api-key'] = '***隐藏***';
@@ -145,8 +156,8 @@ function refreshJsonPreview() {
       _meta: {
         url: url,
         method: 'POST',
-        format: state.settings.apiFormat,
-        model: state.settings.currentModel,
+        format: jsonEditorState.settings.apiFormat,
+        model: jsonEditorState.settings.currentModel,
         '注意': '_meta 字段仅用于展示，不会真的发送'
       },
       _headers: safeHeaders,
@@ -194,7 +205,7 @@ function refreshJsonResponse() {
       ? `<div class="resp-list-source">${escapeHtml(r._source)}</div>`
       : '';
     return `
-      <div class="resp-list-item ${i === 0 ? 'active' : ''}" data-resp-idx="${i}" onclick="selectJsonResponse(${i})">
+      <div class="resp-list-item ${i === 0 ? 'active' : ''}" data-resp-idx="${i}" data-action="valueClick" data-handler="selectJsonResponse" data-value="${i}" data-value-type="number">
         <div class="resp-list-head">
           <span class="resp-list-time">${dateStr}${time}</span>
           ${typeBadge}
@@ -300,10 +311,10 @@ function selectJsonResponse(idx) {
 function copyJsonResponse() {
   const el = document.getElementById('jsonResponseDetail');
   if (!el || !el.value || el.value.startsWith('//')) {
-    toast('暂无响应可复制');
+    JsonEditorUiService.toast('暂无响应可复制');
     return;
   }
-  navigator.clipboard.writeText(el.value).then(() => toast('✓ 响应已复制'));
+  navigator.clipboard.writeText(el.value).then(() => JsonEditorUiService.toast('✓ 响应已复制'));
 }
 
 function clearJsonResponses() {
@@ -311,7 +322,7 @@ function clearJsonResponses() {
   if (!confirm('清空当前会话的响应记录？')) return;
   _rawResponses = [];
   refreshJsonResponse();
-  toast('✓ 已清空');
+  JsonEditorUiService.toast('✓ 已清空');
 }
 
 function updateJsonStats(tokens, msgs, bytes) {
@@ -326,35 +337,35 @@ function updateJsonStats(tokens, msgs, bytes) {
 
 function copyJsonPreview() {
   const txt = document.getElementById('jsonPreview').value;
-  navigator.clipboard.writeText(txt).then(() => toast('✓ JSON 已复制到剪贴板'));
+  navigator.clipboard.writeText(txt).then(() => JsonEditorUiService.toast('✓ JSON 已复制到剪贴板'));
 }
 
 function copyJsonBodyOnly() {
   try {
-    const c = currentChat();
-    if (!c || !c.messages.length) { toast('当前没有对话'); return; }
-    const body = buildRequestBody(c.messages);
-    navigator.clipboard.writeText(JSON.stringify(body, null, 2)).then(() => toast('✓ 请求体已复制'));
+    const c = jsonEditorCurrentChat();
+    if (!c || !c.messages.length) { JsonEditorUiService.toast('当前没有对话'); return; }
+    const body = jsonEditorBuildRequestBody(c.messages);
+    navigator.clipboard.writeText(JSON.stringify(body, null, 2)).then(() => JsonEditorUiService.toast('✓ 请求体已复制'));
   } catch (e) {
-    toast('❌ ' + e.message);
+    JsonEditorUiService.toast('❌ ' + e.message);
   }
 }
 
 function copyAsCurl() {
   try {
-    const c = currentChat();
-    if (!c || !c.messages.length) { toast('当前没有对话'); return; }
-    const body = buildRequestBody(c.messages);
-    const url = buildFullUrl(state.settings.baseUrl, state.settings.apiPath);
-    const headers = buildHeaders();
+    const c = jsonEditorCurrentChat();
+    if (!c || !c.messages.length) { JsonEditorUiService.toast('当前没有对话'); return; }
+    const body = jsonEditorBuildRequestBody(c.messages);
+    const url = jsonEditorBuildFullUrl(jsonEditorState.settings.baseUrl, jsonEditorState.settings.apiPath);
+    const headers = jsonEditorBuildHeaders();
     let curl = `curl -X POST '${url}' \\\n`;
     for (const [k, v] of Object.entries(headers)) {
       curl += `  -H '${k}: ${v}' \\\n`;
     }
     curl += `  -d '${JSON.stringify(body).replace(/'/g, "'\\''")}'`;
-    navigator.clipboard.writeText(curl).then(() => toast('✓ cURL 命令已复制（⚠️ 包含 API Key）'));
+    navigator.clipboard.writeText(curl).then(() => JsonEditorUiService.toast('✓ cURL 命令已复制（⚠️ 包含 API Key）'));
   } catch (e) {
-    toast('❌ ' + e.message);
+    JsonEditorUiService.toast('❌ ' + e.message);
   }
 }
 
@@ -365,11 +376,11 @@ function saveJsonTemplate() {
     try { JSON.parse(headers); }
     catch (e) { alert('请求头 JSON 格式错误：' + e.message); return; }
   }
-  state.settings.jsonTemplate = tpl;
-  state.settings.jsonHeaders = headers;
-  state.settings.useCustomJson = document.getElementById('jsonUseCustom').checked;
-  persistSettings();
-  toast('✓ JSON 模板已保存');
+  jsonEditorState.settings.jsonTemplate = tpl;
+  jsonEditorState.settings.jsonHeaders = headers;
+  jsonEditorState.settings.useCustomJson = document.getElementById('jsonUseCustom').checked;
+  jsonEditorPersistSettings();
+  JsonEditorUiService.toast('✓ JSON 模板已保存');
   refreshJsonPreview();
 }
 
@@ -391,13 +402,13 @@ function setCodexUserAgentHeader() {
   }
   headers['User-Agent'] = 'codex-tui/0.118.0 (Mac OS 26.3.1; arm64)';
   ta.value = JSON.stringify(headers, null, 2);
-  toast('✓ 已填入 Codex User-Agent，点击保存后生效');
+  JsonEditorUiService.toast('✓ 已填入 Codex User-Agent，点击保存后生效');
   refreshJsonPreview();
 }
 
 function resetJsonTemplate() {
   if (!confirm('恢复默认模板？')) return;
-  const s = state.settings;
+  const s = jsonEditorState.settings;
   document.getElementById('jsonTemplate').value =
     (s.apiFormat === 'anthropic' ? DEFAULT_JSON_TEMPLATE_ANTHROPIC : DEFAULT_JSON_TEMPLATE_OPENAI);
 }
@@ -423,7 +434,7 @@ function formatJsonTemplate() {
              .replace(/("stream":\s*)false/, '$1{{stream}}')
              .replace(/("tools":\s*)null/, '$1{{tools}}');
     ta.value = out;
-    toast('✓ 已格式化');
+    JsonEditorUiService.toast('✓ 已格式化');
   } catch (e) {
     alert('JSON 格式有误：' + e.message);
   }
@@ -468,7 +479,7 @@ function refreshJsonHistory() {
         : `<span style="color:var(--success);">✅ 成功</span>`;
       return `
         <div class="json-history-item">
-          <div class="json-history-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <div class="json-history-header" data-action="toggleParentCollapsed">
             <span class="json-history-time">${date}</span>
             <span class="json-history-status">${status}</span>
             <span style="margin-left:auto;font-size:11px;color:var(--text-secondary);">点击展开</span>
@@ -483,7 +494,7 @@ function refreshJsonHistory() {
               <pre>${escapeHtml(JSON.stringify(h.body, null, 2).slice(0, 1500))}${JSON.stringify(h.body).length > 1500 ? '\n...(已截断)' : ''}</pre>
             </div>
             ${h.response ? `<div class="json-history-section"><div class="json-history-label">📥 响应（前 2000 字符）</div><pre>${escapeHtml(h.response)}</pre></div>` : ''}
-            <button class="btn" onclick="copyHistoryRequest(${i})" style="margin-top:8px;font-size:12px;padding:4px 10px;">📋 复制此请求</button>
+            <button class="btn" data-action="valueClick" data-handler="copyHistoryRequest" data-value="${i}" data-value-type="number" style="margin-top:8px;font-size:12px;padding:4px 10px;">📋 复制此请求</button>
           </div>
         </div>`;
     }).join('');
@@ -496,9 +507,9 @@ function copyHistoryRequest(i) {
   try {
     const history = JSON.parse(storage.get(REQUEST_HISTORY_KEY) || '[]');
     if (!history[i]) return;
-    navigator.clipboard.writeText(JSON.stringify(history[i].body, null, 2)).then(() => toast('✓ 已复制'));
+    navigator.clipboard.writeText(JSON.stringify(history[i].body, null, 2)).then(() => JsonEditorUiService.toast('✓ 已复制'));
   } catch (e) {
-    toast('❌ ' + e.message);
+    JsonEditorUiService.toast('❌ ' + e.message);
   }
 }
 
@@ -506,5 +517,29 @@ function clearJsonHistory() {
   if (!confirm('清空所有请求历史？')) return;
   storage.remove(REQUEST_HISTORY_KEY);
   refreshJsonHistory();
-  toast('✓ 已清空');
+  JsonEditorUiService.toast('✓ 已清空');
 }
+
+window.AgentApp.define('jsonEditor', {
+  recordRawResponse,
+  openJsonEditor,
+  closeJsonEditor,
+  switchJsonTab,
+  refreshJsonPreview,
+  refreshJsonResponse,
+  selectJsonResponse,
+  copyJsonResponse,
+  clearJsonResponses,
+  updateJsonStats,
+  copyJsonPreview,
+  copyJsonBodyOnly,
+  copyAsCurl,
+  saveJsonTemplate,
+  setCodexUserAgentHeader,
+  resetJsonTemplate,
+  formatJsonTemplate,
+  saveRequestToHistory,
+  refreshJsonHistory,
+  copyHistoryRequest,
+  clearJsonHistory
+});

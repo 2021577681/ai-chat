@@ -1,21 +1,39 @@
-// ============ 初始化入口 ============
+﻿// ============ 鍒濆鍖栧叆鍙?============
+
+const MainStateModule = window.AgentApp.require('state');
+const MainUiService = window.AgentApp.require('uiService');
+const mainStateRef = MainStateModule.state;
+const mainLoadDataFromState = MainStateModule.loadData;
+const mainSaveDataFromState = MainStateModule.saveData;
+
+function mainState() {
+  return mainStateRef;
+}
+
+function mainLoadData() {
+  return mainLoadDataFromState();
+}
+
+function mainSaveData() {
+  return mainSaveDataFromState();
+}
 
 async function init() {
-  // ⭐ 0. 先把 IndexedDB 灌入内存缓存（含 localStorage 旧数据自动迁移）
-  //    所有后续 storage.get/set 都是同步走内存，但必须等这次异步加载完成
+  // 猸?0. 鍏堟妸 IndexedDB 鐏屽叆鍐呭瓨缂撳瓨锛堝惈 localStorage 鏃ф暟鎹嚜鍔ㄨ縼绉伙級
+  //    鎵€鏈夊悗缁?storage.get/set 閮芥槸鍚屾璧板唴瀛橈紝浣嗗繀椤荤瓑杩欐寮傛鍔犺浇瀹屾垚
   if (typeof idbInit === 'function') {
     try { await idbInit(); }
-    catch (e) { console.error('[init] idbInit 失败，将继续使用 localStorage 兜底', e); }
+    catch (e) { console.error('[init] idbInit 澶辫触锛屽皢缁х画浣跨敤 localStorage 鍏滃簳', e); }
   }
 
-  // ⭐ 0.1 trace.js 在模块加载时已 loadTraces() 过一次（那时 IDB 还没就绪），
-  //       这里 IDB 就绪后再 load 一次，确保拿到 IndexedDB 里的真实数据
+  // 猸?0.1 trace.js 鍦ㄦā鍧楀姞杞芥椂宸?loadTraces() 杩囦竴娆★紙閭ｆ椂 IDB 杩樻病灏辩华锛夛紝
+  //       杩欓噷 IDB 灏辩华鍚庡啀 load 涓€娆★紝纭繚鎷垮埌 IndexedDB 閲岀殑鐪熷疄鏁版嵁
   if (typeof loadTraces === 'function') {
     try { loadTraces(); } catch (e) {}
   }
 
-  // ⭐ 0.2 terminal.js 在模块加载时已读过 token/perms（同样在 IDB 就绪前），
-  //       这里 IDB 就绪后强制刷一遍
+  // 猸?0.2 terminal.js 鍦ㄦā鍧楀姞杞芥椂宸茶杩?token/perms锛堝悓鏍峰湪 IDB 灏辩华鍓嶏級锛?
+  //       杩欓噷 IDB 灏辩华鍚庡己鍒跺埛涓€閬?
   if (typeof TERMINAL_CONFIG !== 'undefined' && typeof storage !== 'undefined') {
     try {
       const permsRaw = storage.get('aichat_terminal_perms_v1');
@@ -25,46 +43,47 @@ async function init() {
     } catch (e) {}
   }
 
-  // 1. 加载本地数据
-  loadData();
+  // 1. 鍔犺浇鏈湴鏁版嵁
+  mainLoadData();
   const recoveredTimers = (typeof recoverInterruptedMsgTimers === 'function') ? recoverInterruptedMsgTimers() : false;
   const recoveredConcurrent = (typeof recoverInterruptedConcurrentRequests === 'function') ? recoverInterruptedConcurrentRequests() : false;
   const recoveredDebates = (typeof recoverInterruptedDebates === 'function') ? recoverInterruptedDebates() : false;
   if (typeof registerMsgTimerExitRecovery === 'function') registerMsgTimerExitRecovery();
-  if ((recoveredTimers || recoveredConcurrent || recoveredDebates) && typeof saveData === 'function') saveData();
+  if (recoveredTimers || recoveredConcurrent || recoveredDebates) mainSaveData();
   if (typeof loadTaskQueue === 'function') {
     loadTaskQueue();
   }
   
-  // 2. 应用主题
+  // 2. 搴旂敤涓婚
   applyTheme();
   
-  // 3. 刷新模型下拉框
+  // 3. 鍒锋柊妯″瀷涓嬫媺妗?
   refreshModelSelect();
   
-  // 4. 渲染聊天列表和消息
-  renderChatList();
-  renderMessages();
+  // 4. 娓叉煋鑱婂ぉ鍒楄〃鍜屾秷鎭?
+  MainUiService.renderChatList();
+  MainUiService.renderMessages();
   if (typeof initDialogManager === 'function') initDialogManager();
   
-  // 5. 恢复各按钮的激活状态
-  if (state.settings.useTools) {
+  // 5. 鎭㈠鍚勬寜閽殑婵€娲荤姸鎬?
+  const appState = mainState();
+  if (appState.settings.useTools) {
     const btn = document.getElementById('toolsBtn');
     if (btn) btn.classList.add('tool-active');
   }
-  if (state.settings.useReflection) {
+  if (appState.settings.useReflection) {
     const btn = document.getElementById('reflectBtn');
     if (btn) btn.classList.add('reflect-active');
   }
-  if (state.settings.usePlan) {
+  if (appState.settings.usePlan) {
     const btn = document.getElementById('planBtn');
     if (btn) btn.classList.add('plan-active');
   }
-  if (state.settings.useOutline) {
+  if (appState.settings.useOutline) {
     const btn = document.getElementById('outlineBtn');
     if (btn) btn.classList.add('outline-active');
   }
-  if (state.settings.usePpt) {
+  if (appState.settings.usePpt) {
     const btn = document.getElementById('pptModeBtn');
     if (btn) btn.classList.add('ppt-active');
     if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(true, { render: false });
@@ -75,84 +94,84 @@ async function init() {
     try { initRemoteControl(); } catch (e) { console.warn('[remote-control] init failed:', e); }
   }
   
-  // 6. 更新底部状态信息
-  updateSendBtn();
+  // 6. 鏇存柊搴曢儴鐘舵€佷俊鎭?
+  MainUiService.updateSendBtn();
   
-  // 7. 更新 URL 预览
+  // 7. 鏇存柊 URL 棰勮
   updateTopUrlPreview();
   
-  // ⭐ 7.5 启动时检测沙箱目录，并每 30s 心跳一次
+  // 猸?7.5 鍚姩鏃舵娴嬫矙绠辩洰褰曪紝骞舵瘡 30s 蹇冭烦涓€娆?
   if (typeof refreshWorkspaceInfo === 'function') {
     refreshWorkspaceInfo();
     setInterval(refreshWorkspaceInfo, 30000);
   }
 
-  // 7.6 恢复 Token / 请求速度统计栏收起状态
+  // 7.6 鎭㈠ Token / 璇锋眰閫熷害缁熻鏍忔敹璧风姸鎬?
   if (typeof initStatsBarToggle === 'function') initStatsBarToggle();
   
-  // ⭐ 7.5.1 本地代理自检：双击 HTML 打开（file://）时，浏览器对 https 跨域几乎必死
-  //         → 启动时主动测一下：① 本地服务在不在？② 有没有 token？③ 代理开关有没有开？
-  //         三样齐全才能保证 fetch 真的不会撞 CORS。任何一项缺失都直接帮用户补上。
+  // 猸?7.5.1 鏈湴浠ｇ悊鑷锛氬弻鍑?HTML 鎵撳紑锛坒ile://锛夋椂锛屾祻瑙堝櫒瀵?https 璺ㄥ煙鍑犱箮蹇呮
+  //         鈫?鍚姩鏃朵富鍔ㄦ祴涓€涓嬶細鈶?鏈湴鏈嶅姟鍦ㄤ笉鍦紵鈶?鏈夋病鏈?token锛熲憿 浠ｇ悊寮€鍏虫湁娌℃湁寮€锛?
+  //         涓夋牱榻愬叏鎵嶈兘淇濊瘉 fetch 鐪熺殑涓嶄細鎾?CORS銆備换浣曚竴椤圭己澶遍兘鐩存帴甯敤鎴疯ˉ涓娿€?
   (async function autoSetupLocalProxy() {
     try {
       const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
       if (!tc || !tc.serverUrl) return;
-      // ① 服务在不在
+      // 鈶?鏈嶅姟鍦ㄤ笉鍦?
       let serverAlive = false;
       try {
         const r = await fetch(tc.serverUrl + '/workspace', { method: 'GET' });
         serverAlive = r.ok;
       } catch (e) { serverAlive = false; }
       if (!serverAlive) {
-        console.warn('[自检] 本地服务未启动（http://localhost:8765），LLM 请求若遇 CORS 将无法绕过');
-        if (typeof toast === 'function') toast('⚠️ 本地服务未启动，遇到 CORS 时无法绕过\n请运行 python local_terminal_server.py', 5000);
+        console.warn('[self-check] Local service is not running; LLM CORS fallback will be unavailable.');
+        MainUiService.toast('本地服务未启动，遇到 CORS 时无法绕过\n请运行 python local_terminal_server.py', 5000);
         return;
       }
-      // ③ 代理开关默认开启（state.js 里默认就是 true，但用户可能手动关过 → 不强改）
-      if (state.settings.useLocalProxy) {
-        console.log('[自检] ✅ 本地代理已就绪');
-      } else if (!state.settings.useLocalProxy) {
-        console.log('[自检] ℹ️ 本地代理开关未开启（设置面板里可打开）');
+      // 鈶?浠ｇ悊寮€鍏抽粯璁ゅ紑鍚紙state.js 閲岄粯璁ゅ氨鏄?true锛屼絾鐢ㄦ埛鍙兘鎵嬪姩鍏宠繃 鈫?涓嶅己鏀癸級
+      if (mainState().settings.useLocalProxy) {
+        console.log('[self-check] Local proxy is ready');
+      } else if (!mainState().settings.useLocalProxy) {
+        console.log('[self-check] Local proxy is disabled in settings');
       } else if (!tc.token) {
-        console.warn('[自检] ⚠️ 本地代理开启了但 token 没拿到');
+        console.warn('[self-check] Local proxy is enabled but token is missing');
       }
     } catch (e) {
-      console.warn('[自检] 异常:', e);
+      console.warn('[鑷] 寮傚父:', e);
     }
   })();
   
-  // ⭐ 7.6 消息计时器心跳：每 250ms 刷新一次进行中消息的等待/耗时显示
-  // 只改 timer 节点的 textContent，不重渲染整条消息，零卡顿
+  // 猸?7.6 娑堟伅璁℃椂鍣ㄥ績璺筹細姣?250ms 鍒锋柊涓€娆¤繘琛屼腑娑堟伅鐨勭瓑寰?鑰楁椂鏄剧ず
+  // 鍙敼 timer 鑺傜偣鐨?textContent锛屼笉閲嶆覆鏌撴暣鏉℃秷鎭紝闆跺崱椤?
   if (typeof tickMsgTimers === 'function') {
     setInterval(tickMsgTimers, 250);
   }
   
-  // 8. 更新 Token 显示
+  // 8. 鏇存柊 Token 鏄剧ず
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 
-  // ⭐ 8.4 项目指令：默认读取已存在的 AGENTS.md，并作为人工维护规则注入
+  // 猸?8.4 椤圭洰鎸囦护锛氶粯璁よ鍙栧凡瀛樺湪鐨?AGENTS.md锛屽苟浣滀负浜哄伐缁存姢瑙勫垯娉ㄥ叆
   if (typeof initProjectInstructions === 'function') {
     setTimeout(() => initProjectInstructions(false), 500);
   }
 
-  // ⭐ 8.5 项目记忆：只有显式开启后才检测/读取/生成
+  // 猸?8.5 椤圭洰璁板繂锛氬彧鏈夋樉寮忓紑鍚悗鎵嶆娴?璇诲彇/鐢熸垚
   if (typeof initProjectMemory === 'function') {
     setTimeout(() => initProjectMemory(false), 800);
   }
   
-  // ⭐ 9. 初始化请求频率管理
+  // 猸?9. 鍒濆鍖栬姹傞鐜囩鐞?
   if (typeof loadRateLimiter === 'function') {
     loadRateLimiter();
     updateRateDisplay();
   }
   
-  // 10. 输入框自适应高度
+  // 10. 杈撳叆妗嗚嚜閫傚簲楂樺害
   const input = document.getElementById('input');
   if (input) {
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 100) + 'px';
-      if (typeof updateSendBtn === 'function') updateSendBtn();
+      MainUiService.updateSendBtn();
       clearTimeout(window._tokenUpdateTimer);
       window._tokenUpdateTimer = setTimeout(() => {
         if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
@@ -166,14 +185,14 @@ async function init() {
     });
   }
   
-  // 11. 监听导入文本框变化
+  // 11. 鐩戝惉瀵煎叆鏂囨湰妗嗗彉鍖?
   const importTa = document.getElementById('importText');
   if (importTa) importTa.addEventListener('input', parseAndPreviewImport);
   
-  // 12. ESC 键关闭模态框
+  // 12. ESC 閿叧闂ā鎬佹
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
-      // ⭐ 顺序：先关最上层（图片预览、终端确认）→ 普通模态 → LMS 抽屉
+      // 猸?椤哄簭锛氬厛鍏虫渶涓婂眰锛堝浘鐗囬瑙堛€佺粓绔‘璁わ級鈫?鏅€氭ā鎬?鈫?LMS 鎶藉眽
       const modals = [
         'imgPreview', 'termConfirmMask',
         'toolEditModal', 'dialogManagerModal', 'backupModal', 'projectInstructionsModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
@@ -188,7 +207,7 @@ async function init() {
           return;
         }
       }
-      // 上面没关掉任何模态 → 再尝试关 LMS 抽屉
+      // 涓婇潰娌″叧鎺変换浣曟ā鎬?鈫?鍐嶅皾璇曞叧 LMS 鎶藉眽
       const lmsPanel = document.getElementById('lmsPanel');
       if (lmsPanel && lmsPanel.classList.contains('show')) {
         lmsPanel.classList.remove('show');
@@ -196,7 +215,7 @@ async function init() {
     }
   });
   
-  // 13. 移动端"更多"菜单切换
+  // 13. 绉诲姩绔?鏇村"鑿滃崟鍒囨崲
   document.addEventListener('click', e => {
     const wrap = document.querySelector('.more-menu-wrap');
     if (!wrap) return;
@@ -207,64 +226,71 @@ async function init() {
     }
   });
   
-  // 14. 拖拽和粘贴支持
+  // 14. 鎷栨嫿鍜岀矘璐存敮鎸?
   setupDrag();
   setupPaste();
   
-  // ⭐ 15. 安装 Trace 钩子（fetch + executeTool 自动插桩）
+  // 猸?15. 瀹夎 Trace 閽╁瓙锛坒etch + executeTool 鑷姩鎻掓々锛?
   if (typeof installTraceHooks === 'function') {
     installTraceHooks();
     if (typeof renderTracePanel === 'function') renderTracePanel();
   }
   
-  console.log('🚀 AI Chat 已启动');
-  console.log('📦 已加载工具:', state.tools.length);
-  console.log('💬 已有对话:', state.chats.length);
+  console.log('[init] AI Chat started');
+  console.log('[init] tools loaded:', mainState().tools.length);
+  console.log('[init] chats:', mainState().chats.length);
 }
 
-// 启动应用
+// 鍚姩搴旂敤
+window.AgentApp.define('main', {
+  mainState,
+  mainLoadData,
+  mainSaveData,
+  init
+});
+
 init();
 
-// ============ 🩺 浏览器控制台调试工具 ============
-// 用法：在浏览器 F12 控制台输入  debugLLM()  即可查看完整链路状态
+// ============ 馃┖ 娴忚鍣ㄦ帶鍒跺彴璋冭瘯宸ュ叿 ============
+// 鐢ㄦ硶锛氬湪娴忚鍣?F12 鎺у埗鍙拌緭鍏? debugLLM()  鍗冲彲鏌ョ湅瀹屾暣閾捐矾鐘舵€?
 window.debugLLM = async function() {
   const log = (...a) => console.log('%c[debugLLM]', 'color:#0a7', ...a);
   const err = (...a) => console.log('%c[debugLLM]', 'color:#c33', ...a);
-  console.log('═══════════ 🩺 LLM 链路自检 ═══════════');
+  console.log('[debugLLM] LLM chain self-check');
   
-  // 1. 当前页面环境
-  log('1️⃣ 页面 Origin:', location.origin, location.protocol === 'file:' ? '(file:// 双击打开)' : '');
+  // 1. 褰撳墠椤甸潰鐜
+  log('1. page origin:', location.origin, location.protocol === 'file:' ? '(file://)' : '');
   
-  // 2. 设置
-  const s = state.settings;
-  log('2️⃣ baseUrl:', s.baseUrl);
+  // 2. 璁剧疆
+  const s = mainState().settings;
+  log('2. baseUrl:', s.baseUrl);
   log('   apiPath:', s.apiPath);
   log('   model  :', s.currentModel);
   log('   stream :', s.stream);
-  log('   useLocalProxy:', s.useLocalProxy ? '✅ 已开启' : '❌ 未开启');
-  log('   apiKey :', s.apiKey ? s.apiKey.slice(0, 8) + '...' + s.apiKey.slice(-4) : '❌ 未填写');
+  log('   useLocalProxy:', s.useLocalProxy ? 'enabled' : 'disabled');
+  log('   apiKey :', s.apiKey ? s.apiKey.slice(0, 8) + '...' + s.apiKey.slice(-4) : 'missing');
   
-  // 3. 本地服务
+  // 3. 鏈湴鏈嶅姟
   const tc = (typeof TERMINAL_CONFIG !== 'undefined') ? TERMINAL_CONFIG : null;
-  if (!tc) { err('❌ TERMINAL_CONFIG 未定义'); return; }
-  log('3️⃣ 本地服务 URL:', tc.serverUrl);
-  log('   本地服务: 已就绪');
+  if (!tc) { err('TERMINAL_CONFIG is not defined'); return; }
+  log('3. local service URL:', tc.serverUrl);
+  log('   local service config: ready');
   try {
     const r = await fetch(tc.serverUrl + '/workspace');
     if (r.ok) {
       const j = await r.json();
-      log('   服务状态: ✅ 在线，workspace=' + j.workspace);
+      log('   service status: online, workspace=' + j.workspace);
     } else {
-      err('   服务状态: ❌ HTTP ' + r.status);
+      err('   service status: HTTP ' + r.status);
     }
   } catch (e) {
-    err('   服务状态: ❌ 连不上 —— 请运行 python local_terminal_server.py');
-    err('   错误:', e.message);
+    err('   service status: unreachable. Run python local_terminal_server.py');
+    err('   error:', e.message);
     return;
   }
   
-  // 5. 走代理实际发一条
-  log('5️⃣ 尝试通过本地代理发送测试请求…');
+  // 5. 璧颁唬鐞嗗疄闄呭彂涓€鏉?
+  log('5. sending test request through local proxy');
   const url = buildFullUrl(s.baseUrl, s.apiPath);
   const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + s.apiKey };
   const body = { model: s.currentModel, messages: [{ role: 'user', content: 'reply OK' }], max_tokens: 10, stream: false };
@@ -280,15 +306,16 @@ window.debugLLM = async function() {
     });
     const txt = await r.text();
     log('   HTTP:', r.status);
-    log('   响应:', txt.slice(0, 300));
+    log('   response:', txt.slice(0, 300));
     if (r.ok) {
-      log('✅ 全链路通！前端如果还报错，请清浏览器缓存重试（Ctrl+Shift+R）');
+      log('chain ok. If the frontend still fails, refresh the browser cache.');
     } else {
-      err('❌ 代理返回非 200');
+      err('proxy returned non-200');
     }
   } catch (e) {
-    err('❌ 代理请求异常:', e.message);
+    err('proxy request failed:', e.message);
   }
-  console.log('═══════════════════════════════════════');
+  console.log('[debugLLM] done');
 };
-console.log('%c💡 调试提示: 遇到问题在控制台输入 debugLLM() 即可自检', 'color:#888');
+console.log('%c馃挕 璋冭瘯鎻愮ず: 閬囧埌闂鍦ㄦ帶鍒跺彴杈撳叆 debugLLM() 鍗冲彲鑷', 'color:#888');
+

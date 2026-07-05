@@ -4,6 +4,12 @@
 // 加载顺序：在 chat.js / tokens.js 之后
 
 // ---- 代号生成器 ----
+const BeaconStateModule = window.AgentApp.require('state');
+const BeaconUiService = window.AgentApp.require('uiService');
+const beaconState = BeaconStateModule.state;
+const beaconCurrentChat = BeaconStateModule.currentChat;
+const beaconIsCurrentChatGenerating = BeaconStateModule.isCurrentChatGenerating;
+
 const BEACON_ADJECTIVES = [
   'NEPTUNE', 'PURPLE', 'THUNDER', 'CRIMSON', 'EMERALD', 'SAPPHIRE',
   'GOLDEN', 'SILVER', 'AMBER', 'JADE', 'CORAL', 'AZURE',
@@ -37,7 +43,7 @@ function _generateUniqueBeaconCode(chat) {
 //   策略：统计当前对话里**真实用户消息数**（不算信标），到达 interval 倍数就埋一个
 //   返回值：是否塞入了新信标
 function maybeInsertBeacon(chat) {
-  const s = state.settings;
+  const s = beaconState.settings;
   if (!s.beaconEnabled) return false;
   const interval = Math.max(1, parseInt(s.beaconInterval) || 5);
   if (!chat || !chat.messages || !chat.messages.length) return false;
@@ -151,13 +157,13 @@ function _collectBeacons(chat) {
 
 // ⭐ 体检主入口
 async function runHealthCheck() {
-  const c = currentChat();
+  const c = beaconCurrentChat();
   if (!c || !c.messages.length) {
-    toast('当前没有对话，无法体检');
+    BeaconUiService.toast('当前没有对话，无法体检');
     return;
   }
-  if (state.isGenerating) {
-    toast('当前正在生成，请稍候再体检');
+  if (beaconIsCurrentChatGenerating()) {
+    BeaconUiService.toast('当前正在生成，请稍候再体检');
     return;
   }
   
@@ -165,9 +171,9 @@ async function runHealthCheck() {
   if (beacons.length === 0) {
     _showHealthCheckResult({
       empty: true,
-      reason: !state.settings.beaconEnabled
+      reason: !beaconState.settings.beaconEnabled
         ? '⚠️ 你还没开启「自动信标」功能。请到 ⚙️ 设置 → 🧪 上下文体检 中启用，之后正常对话即可自动埋点。'
-        : '当前对话还没有信标。请继续对话，每 ' + (state.settings.beaconInterval || 5) + ' 条消息会自动埋一个信标，之后再来体检。'
+        : '当前对话还没有信标。请继续对话，每 ' + (beaconState.settings.beaconInterval || 5) + ' 条消息会自动埋一个信标，之后再来体检。'
     });
     return;
   }
@@ -203,7 +209,7 @@ async function runHealthCheck() {
 
 // ⭐ 静默 API 调用：不走 chat 流程，不渲染，不入 messages
 async function _silentApiCall(historyMessages) {
-  const s = state.settings;
+  const s = beaconState.settings;
   if (!s.apiKey) throw new Error('未配置 API Key');
   
   // 体检的温度策略：
@@ -456,7 +462,7 @@ function _showHealthCheckResult(result) {
           <p style="color:var(--text-secondary);font-size:13px;line-height:1.6;margin:0 0 16px;">
             ${(result.reason || '').replace(/\n/g, '<br>')}
           </p>
-          <button class="btn" onclick="closeHealthCheckModal()">关闭</button>
+          <button class="btn" data-action="closeHealthCheckModal">关闭</button>
         </div>
       </div>
     `;
@@ -560,8 +566,8 @@ function _showHealthCheckResult(result) {
         </details>
         
         <div style="display:flex;gap:8px;">
-          <button class="btn" style="flex:1;" onclick="runHealthCheck()">🔄 重新体检</button>
-          <button class="btn btn-primary" style="flex:1;" onclick="closeHealthCheckModal()">关闭</button>
+          <button class="btn" style="flex:1;" data-action="runHealthCheck">🔄 重新体检</button>
+          <button class="btn btn-primary" style="flex:1;" data-action="closeHealthCheckModal">关闭</button>
         </div>
       </div>
     </div>
@@ -612,3 +618,9 @@ function closeHealthCheckModal() {
   `;
   document.head.appendChild(style);
 })();
+
+window.AgentApp.define('beacon', {
+  maybeInsertBeacon,
+  runHealthCheck,
+  closeHealthCheckModal
+});

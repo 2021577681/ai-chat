@@ -8,8 +8,23 @@ const SCHEDULED_TASK_STATUS = {
   ERROR: 'error'
 };
 
+const ScheduledTasksStateModule = window.AgentApp.require('state');
+const scheduledTasksState = ScheduledTasksStateModule.state;
+const scheduledTasksSaveData = ScheduledTasksStateModule.saveData;
+const scheduledTasksCurrentChat = ScheduledTasksStateModule.currentChat;
+const scheduledTasksIsCurrentChat = ScheduledTasksStateModule.isCurrentChat;
+const scheduledTasksIsChatGenerating = ScheduledTasksStateModule.isChatGenerating;
+const ScheduledTasksOrchestrationService = window.AgentApp.require('orchestrationService');
+const ScheduledTasksUiService = window.AgentApp.require('uiService');
+
 let _scheduledSendActive = false;
 const _scheduledProcessing = new Set();
+
+function scheduledTasksRefreshMessage(idx, chat) {
+  if (!chat || !scheduledTasksIsCurrentChat(chat.id)) return;
+  if (ScheduledTasksUiService.has('refreshMsgNode')) ScheduledTasksUiService.refreshMsgNode(idx, chat);
+  else ScheduledTasksUiService.renderMessages();
+}
 
 function scheduledPad(n) {
   return String(n).padStart(2, '0');
@@ -68,7 +83,7 @@ function syncScheduledSendUI() {
   if (_scheduledSendActive && input && !input.value) {
     input.value = toDatetimeLocalValue(Date.now() + 10 * 60 * 1000);
   }
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  ScheduledTasksUiService.updateSendBtn();
 }
 
 function toggleScheduledSend(force) {
@@ -92,11 +107,11 @@ function createScheduledMessageFromComposer(chat, input, text) {
   if (!chat) return null;
   const runAt = parseScheduleTimeInput();
   if (!runAt) {
-    if (typeof toast === 'function') toast('请选择定时发送时间', 2500);
+    ScheduledTasksUiService.toast('请选择定时发送时间', 2500);
     return null;
   }
-  if (!text && !(state.pendingAttachments && state.pendingAttachments.length)) return null;
-  if (!state.settings.apiKey) {
+  if (!text && !(scheduledTasksState.pendingAttachments && scheduledTasksState.pendingAttachments.length)) return null;
+  if (!scheduledTasksState.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     if (typeof openSettings === 'function') openSettings();
     return null;
@@ -119,7 +134,7 @@ function createScheduledMessageFromComposer(chat, input, text) {
   if (typeof _clearComposerAfterSend === 'function') _clearComposerAfterSend(input);
   _scheduledSendActive = false;
   syncScheduledSendUI();
-  if (typeof toast === 'function') toast(`⏰ 已创建定时任务：${formatScheduleDateTime(runAt)}`, 2200);
+  ScheduledTasksUiService.toast(`⏰ 已创建定时任务：${formatScheduleDateTime(runAt)}`, 2200);
   return userMsg;
 }
 
@@ -157,7 +172,7 @@ function renderScheduledMeta(m) {
 }
 
 function updateScheduledCountdownNodes(chat) {
-  const c = chat || (typeof currentChat === 'function' ? currentChat() : null);
+  const c = chat || scheduledTasksCurrentChat();
   if (!c) return;
   document.querySelectorAll('.scheduled-countdown[data-msg-idx]').forEach(el => {
     const idx = parseInt(el.dataset.msgIdx, 10);
@@ -172,7 +187,7 @@ function updateScheduledCountdownNodes(chat) {
 
 function findDueScheduledMessages(now = Date.now()) {
   const out = [];
-  const chats = [...(state.chats || []), state.temporaryChat].filter(Boolean);
+  const chats = [...(scheduledTasksState.chats || []), scheduledTasksState.temporaryChat].filter(Boolean);
   for (const chat of chats) {
     if (!chat || !Array.isArray(chat.messages)) continue;
     chat.messages.forEach((m, idx) => {
@@ -188,13 +203,12 @@ async function runScheduledMessage(chat, idx, msg, info) {
   if (!chat || !msg || !info) return;
   const key = `${chat.id}:${info.id || idx}`;
   if (_scheduledProcessing.has(key)) return;
-  if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id)) return;
+  if (scheduledTasksIsChatGenerating(chat.id)) return;
   _scheduledProcessing.add(key);
   info.status = SCHEDULED_TASK_STATUS.RUNNING;
   delete msg._hiddenFromAI;
-  if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, chat);
-  else if (typeof renderMessages === 'function' && isCurrentChat(chat)) renderMessages();
-  if (typeof saveData === 'function') saveData();
+  scheduledTasksRefreshMessage(idx, chat);
+  scheduledTasksSaveData();
 
   try {
     if (typeof resetTaskPermission === 'function') resetTaskPermission();
@@ -210,11 +224,11 @@ async function runScheduledMessage(chat, idx, msg, info) {
     }
 
     const mode = info.mode || 'normal';
-    if (mode === 'outline') await callAPIWithOutline({ chatId: chat.id });
-    else if (mode === 'plan') await callAPIWithPlan({ chatId: chat.id });
-    else if (mode === 'ppt') await callAPIWithPptMode({ chatId: chat.id, contextChecked: true });
-    else if (mode === 'reflection') await callAPIWithReflection({ chatId: chat.id });
-    else await callAPI(undefined, { chatId: chat.id, contextChecked: true });
+    if (mode === 'outline') await ScheduledTasksOrchestrationService.callAPIWithOutline({ chatId: chat.id });
+    else if (mode === 'plan') await ScheduledTasksOrchestrationService.callAPIWithPlan({ chatId: chat.id });
+    else if (mode === 'ppt') await ScheduledTasksOrchestrationService.callAPIWithPptMode({ chatId: chat.id, contextChecked: true });
+    else if (mode === 'reflection') await ScheduledTasksOrchestrationService.callAPIWithReflection({ chatId: chat.id });
+    else await ScheduledTasksOrchestrationService.callAPI(undefined, { chatId: chat.id, contextChecked: true });
 
     info.status = SCHEDULED_TASK_STATUS.DONE;
     info.triggeredAt = Date.now();
@@ -222,14 +236,13 @@ async function runScheduledMessage(chat, idx, msg, info) {
     console.error('[scheduled] 定时任务触发失败:', e);
     info.status = SCHEDULED_TASK_STATUS.ERROR;
     info.error = e && e.message ? e.message : String(e || '未知错误');
-    if (typeof toast === 'function' && isCurrentChat(chat)) toast('❌ 定时任务触发失败：' + info.error, 3500);
+    if (scheduledTasksIsCurrentChat(chat.id)) ScheduledTasksUiService.toast('❌ 定时任务触发失败：' + info.error, 3500);
   } finally {
     _scheduledProcessing.delete(key);
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, chat);
-    else if (typeof renderMessages === 'function' && isCurrentChat(chat)) renderMessages();
-    if (typeof renderChatList === 'function') renderChatList();
-    if (typeof updateSendBtn === 'function') updateSendBtn();
-    if (typeof saveData === 'function') saveData();
+    scheduledTasksRefreshMessage(idx, chat);
+    ScheduledTasksUiService.renderChatList();
+    ScheduledTasksUiService.updateSendBtn();
+    scheduledTasksSaveData();
   }
 }
 
@@ -245,9 +258,40 @@ function initScheduledSend() {
   if (input && !input.dataset.boundScheduledChange) {
     input.dataset.boundScheduledChange = '1';
     input.addEventListener('input', () => {
-      if (typeof updateSendBtn === 'function') updateSendBtn();
+      ScheduledTasksUiService.updateSendBtn();
     });
   }
   syncScheduledSendUI();
   processScheduledTasks();
 }
+
+window.isScheduledSendActive = isScheduledSendActive;
+window.getScheduledSendInfoText = getScheduledSendInfoText;
+window.syncScheduledSendUI = syncScheduledSendUI;
+window.toggleScheduledSend = toggleScheduledSend;
+window.createScheduledMessageFromComposer = createScheduledMessageFromComposer;
+window.scheduledInfoForMessage = scheduledInfoForMessage;
+window.formatScheduledCountdown = formatScheduledCountdown;
+window.renderScheduledMeta = renderScheduledMeta;
+window.updateScheduledCountdownNodes = updateScheduledCountdownNodes;
+window.findDueScheduledMessages = findDueScheduledMessages;
+window.runScheduledMessage = runScheduledMessage;
+window.processScheduledTasks = processScheduledTasks;
+window.initScheduledSend = initScheduledSend;
+
+window.AgentApp.define('scheduledTasks', {
+  SCHEDULED_TASK_STATUS,
+  isScheduledSendActive,
+  getScheduledSendInfoText,
+  syncScheduledSendUI,
+  toggleScheduledSend,
+  createScheduledMessageFromComposer,
+  scheduledInfoForMessage,
+  formatScheduledCountdown,
+  renderScheduledMeta,
+  updateScheduledCountdownNodes,
+  findDueScheduledMessages,
+  runScheduledMessage,
+  processScheduledTasks,
+  initScheduledSend
+});

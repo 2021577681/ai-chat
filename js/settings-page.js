@@ -1,5 +1,9 @@
 // ============ Unified settings page ============
 
+const SettingsPageStateModule = window.AgentApp.require('state');
+const settingsPageState = SettingsPageStateModule.state;
+const settingsPagePersistSettings = SettingsPageStateModule.persistSettings;
+
 const SETTINGS_PAGE_SECTIONS = {
   main: { open: 'openSettings', close: 'closeSettings', modalId: 'settingsModal' },
   remoteControl: { open: 'openRemoteControlSettings', close: 'closeRemoteControlSettings', modalId: 'remoteControlSettingsModal' },
@@ -172,10 +176,10 @@ function initSettingsPage() {
 }
 
 function recordSettingsNavAccess(section) {
-  if (!state.settings) state.settings = {};
-  if (!state.settings.settingsNavAccessTimes) state.settings.settingsNavAccessTimes = {};
-  state.settings.settingsNavAccessTimes[section] = Date.now();
-  if (typeof persistSettings === 'function') persistSettings();
+  if (!settingsPageState.settings) settingsPageState.settings = {};
+  if (!settingsPageState.settings.settingsNavAccessTimes) settingsPageState.settings.settingsNavAccessTimes = {};
+  settingsPageState.settings.settingsNavAccessTimes[section] = Date.now();
+  settingsPagePersistSettings();
 }
 
 function sortSettingsNav() {
@@ -184,7 +188,7 @@ function sortSettingsNav() {
   const items = Array.from(nav.querySelectorAll('.settings-nav-item'));
   if (!items.length) return;
 
-  const accessTimes = (state.settings && state.settings.settingsNavAccessTimes) || {};
+  const accessTimes = (settingsPageState.settings && settingsPageState.settings.settingsNavAccessTimes) || {};
 
   // Remember original HTML order for items never accessed
   const defaultOrder = new Map();
@@ -377,34 +381,34 @@ function focusSettingsTarget(focusId) {
 }
 
 function undockSettingsPanel() {
-  const state = SETTINGS_PAGE_STATE;
-  if (!state.dockedModal || !state.originalParent) return;
+  const dockState = SETTINGS_PAGE_STATE;
+  if (!dockState.dockedModal || !dockState.originalParent) return;
 
-  const closeBtn = state.dockedModal.querySelector(':scope > h2 .modal-close');
-  if (closeBtn && state.originalCloseHandlers.has(closeBtn)) {
-    const old = state.originalCloseHandlers.get(closeBtn);
+  const closeBtn = dockState.dockedModal.querySelector(':scope > h2 .modal-close');
+  if (closeBtn && dockState.originalCloseHandlers.has(closeBtn)) {
+    const old = dockState.originalCloseHandlers.get(closeBtn);
     if (old === null) closeBtn.removeAttribute('onclick');
     else closeBtn.setAttribute('onclick', old);
   }
 
-  state.dockedModal.classList.remove('settings-docked-panel');
-  if (state.dockedSectionClass) state.dockedModal.classList.remove(state.dockedSectionClass);
-  state.dockedModal.querySelectorAll(':scope > .settings-footer-spacer').forEach(el => el.remove());
+  dockState.dockedModal.classList.remove('settings-docked-panel');
+  if (dockState.dockedSectionClass) dockState.dockedModal.classList.remove(dockState.dockedSectionClass);
+  dockState.dockedModal.querySelectorAll(':scope > .settings-footer-spacer').forEach(el => el.remove());
 
-  if (state.originalNext && state.originalNext.parentNode === state.originalParent) {
-    state.originalParent.insertBefore(state.dockedModal, state.originalNext);
+  if (dockState.originalNext && dockState.originalNext.parentNode === dockState.originalParent) {
+    dockState.originalParent.insertBefore(dockState.dockedModal, dockState.originalNext);
   } else {
-    state.originalParent.appendChild(state.dockedModal);
+    dockState.originalParent.appendChild(dockState.dockedModal);
   }
 
-  if (state.originalMask) state.originalMask.classList.remove('settings-docked-mask');
+  if (dockState.originalMask) dockState.originalMask.classList.remove('settings-docked-mask');
 
-  state.dockedModal = null;
-  state.dockedMask = null;
-  state.originalParent = null;
-  state.originalNext = null;
-  state.originalMask = null;
-  state.dockedSectionClass = null;
+  dockState.dockedModal = null;
+  dockState.dockedMask = null;
+  dockState.originalParent = null;
+  dockState.originalNext = null;
+  dockState.originalMask = null;
+  dockState.dockedSectionClass = null;
 }
 
 function closeDockedSection() {
@@ -450,3 +454,12 @@ if (document.readyState === 'loading') {
 } else {
   initSettingsPage();
 }
+
+window.AgentApp.define('settingsPage', {
+  initSettingsPage,
+  recordSettingsNavAccess,
+  sortSettingsNav,
+  openSettingsPage,
+  openSettingsSection,
+  closeSettingsPage
+});

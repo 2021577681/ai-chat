@@ -5,6 +5,15 @@
 
 // ============ 渲染计划面板 ============
 
+const PlanUiStateModule = window.AgentApp.require('state');
+const PlanUiUiService = window.AgentApp.require('uiService');
+const planUiState = PlanUiStateModule.state;
+const planUiSaveData = PlanUiStateModule.saveData;
+const planUiCurrentChat = PlanUiStateModule.currentChat;
+const planUiPersistSettings = PlanUiStateModule.persistSettings;
+const PlanUiConfigModule = window.AgentApp.require('config');
+const PLAN_UI_PRESETS = PlanUiConfigModule.PLAN_PRESETS;
+
 function renderPlanToolCalls(calls) {
   if (!calls || !calls.length) return '';
   return `<div class="plan-tool-calls">${calls.map(tc => {
@@ -69,11 +78,11 @@ function renderPlanPanel(m, idx) {
       const canStepAction = !p.inProgress && (p.status === 'paused' || p.status === 'error');
       const editBtns = canEdit ? `
         <div class="plan-step-actions">
-          <button class="plan-step-edit-btn" onclick="event.stopPropagation();editPlanStep(${idx}, ${si})" title="编辑">✏️</button>
-          ${canStepAction && s.status === 'failed' ? `<button class="plan-step-edit-btn" onclick="event.stopPropagation();retryPlanStep(${idx}, ${si})" title="重试">↻</button>` : ''}
-          ${canStepAction && s.status !== 'done' && s.status !== 'skipped' ? `<button class="plan-step-edit-btn" onclick="event.stopPropagation();skipPlanStep(${idx}, ${si})" title="跳过">~</button>` : ''}
-          ${canStepAction && s.status !== 'done' && s.status !== 'skipped' ? `<button class="plan-step-edit-btn" onclick="event.stopPropagation();markPlanStepDone(${idx}, ${si})" title="标记完成">✓</button>` : ''}
-          <button class="plan-step-edit-btn" onclick="event.stopPropagation();deletePlanStep(${idx}, ${si})" title="删除">×</button>
+          <button class="plan-step-edit-btn" data-action="valueClick" data-handler="editPlanStep" data-value="${idx}" data-value-type="number" data-extra-value="${si}" data-extra-type="number" data-stop-propagation="true" title="编辑">✏️</button>
+          ${canStepAction && s.status === 'failed' ? `<button class="plan-step-edit-btn" data-action="valueClick" data-handler="retryPlanStep" data-value="${idx}" data-value-type="number" data-extra-value="${si}" data-extra-type="number" data-stop-propagation="true" title="重试">↻</button>` : ''}
+          ${canStepAction && s.status !== 'done' && s.status !== 'skipped' ? `<button class="plan-step-edit-btn" data-action="valueClick" data-handler="skipPlanStep" data-value="${idx}" data-value-type="number" data-extra-value="${si}" data-extra-type="number" data-stop-propagation="true" title="跳过">~</button>` : ''}
+          ${canStepAction && s.status !== 'done' && s.status !== 'skipped' ? `<button class="plan-step-edit-btn" data-action="valueClick" data-handler="markPlanStepDone" data-value="${idx}" data-value-type="number" data-extra-value="${si}" data-extra-type="number" data-stop-propagation="true" title="标记完成">✓</button>` : ''}
+          <button class="plan-step-edit-btn" data-action="valueClick" data-handler="deletePlanStep" data-value="${idx}" data-value-type="number" data-extra-value="${si}" data-extra-type="number" data-stop-propagation="true" title="删除">×</button>
         </div>
       ` : '';
       const statusLabel = typeof planStepLabel === 'function' ? planStepLabel(s.status) : (s.status || 'pending');
@@ -195,9 +204,9 @@ function renderPlanPanel(m, idx) {
       <div class="plan-approval">
         <div class="plan-approval-hint">⏸ 请审查上方计划，确认无误后执行：</div>
         <div class="plan-approval-btns">
-          <button class="plan-btn approve" onclick="approveAndExecutePlan(${idx})">▶️ 执行计划</button>
-          <button class="plan-btn regenerate" onclick="regeneratePlan(${idx})">🔄 重新规划</button>
-          <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 取消</button>
+          <button class="plan-btn approve" data-action="valueClick" data-handler="approveAndExecutePlan" data-value="${idx}" data-value-type="number">▶️ 执行计划</button>
+          <button class="plan-btn regenerate" data-action="valueClick" data-handler="regeneratePlan" data-value="${idx}" data-value-type="number">🔄 重新规划</button>
+          <button class="plan-btn cancel" data-action="valueClick" data-handler="cancelPlan" data-value="${idx}" data-value-type="number">❌ 取消</button>
         </div>
       </div>`;
   } else if (p.status === 'paused' || p.status === 'error') {
@@ -205,8 +214,8 @@ function renderPlanPanel(m, idx) {
       <div class="plan-approval">
         <div class="plan-approval-hint">${p.status === 'paused' ? '⏸ 执行已暂停' : '❌ 执行中断'}，可以从未完成或失败的步骤继续：</div>
         <div class="plan-approval-btns">
-          <button class="plan-btn approve" onclick="approveAndExecutePlan(${idx})">▶️ 继续执行</button>
-          <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 放弃</button>
+          <button class="plan-btn approve" data-action="valueClick" data-handler="approveAndExecutePlan" data-value="${idx}" data-value-type="number">▶️ 继续执行</button>
+          <button class="plan-btn cancel" data-action="valueClick" data-handler="cancelPlan" data-value="${idx}" data-value-type="number">❌ 放弃</button>
         </div>
       </div>`;
   } else if (p.status === 'verification_failed') {
@@ -214,9 +223,9 @@ function renderPlanPanel(m, idx) {
       <div class="plan-approval">
         <div class="plan-approval-hint">⚠️ 最终结果验证未通过。可以根据老师建议追加一个改进阶段；原步骤不会重新执行。</div>
         <div class="plan-approval-btns">
-          <button class="plan-btn approve" onclick="continuePlanImprovement(${idx})">➕ 新增改进阶段并继续</button>
-          <button class="plan-btn regenerate" onclick="acceptPlanWithFailedVerification(${idx})">✓ 接受当前结果</button>
-          <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 放弃</button>
+          <button class="plan-btn approve" data-action="valueClick" data-handler="continuePlanImprovement" data-value="${idx}" data-value-type="number">➕ 新增改进阶段并继续</button>
+          <button class="plan-btn regenerate" data-action="valueClick" data-handler="acceptPlanWithFailedVerification" data-value="${idx}" data-value-type="number">✓ 接受当前结果</button>
+          <button class="plan-btn cancel" data-action="valueClick" data-handler="cancelPlan" data-value="${idx}" data-value-type="number">❌ 放弃</button>
         </div>
       </div>`;
   } else if (p.status === 'verification_exhausted') {
@@ -224,8 +233,8 @@ function renderPlanPanel(m, idx) {
       <div class="plan-approval">
         <div class="plan-approval-hint">⛔ 最终验证未通过，且已达到验证轮数上限。可以接受当前结果或放弃。</div>
         <div class="plan-approval-btns">
-          <button class="plan-btn regenerate" onclick="acceptPlanWithFailedVerification(${idx})">✓ 接受当前结果</button>
-          <button class="plan-btn cancel" onclick="cancelPlan(${idx})">❌ 放弃</button>
+          <button class="plan-btn regenerate" data-action="valueClick" data-handler="acceptPlanWithFailedVerification" data-value="${idx}" data-value-type="number">✓ 接受当前结果</button>
+          <button class="plan-btn cancel" data-action="valueClick" data-handler="cancelPlan" data-value="${idx}" data-value-type="number">❌ 放弃</button>
         </div>
       </div>`;
   }
@@ -236,7 +245,7 @@ function renderPlanPanel(m, idx) {
   
   return `
     <div class="plan-panel ${p.expanded ? '' : 'collapsed'}" data-msg-idx="${idx}">
-      <button class="plan-toggle" onclick="togglePlanPanel(${idx})">
+      <button class="plan-toggle" data-action="valueClick" data-handler="togglePlanPanel" data-value="${idx}" data-value-type="number">
         <span>📋 计划模式</span>
         <span class="plan-stats">${statsText}</span>
       </button>
@@ -251,12 +260,12 @@ function renderPlanPanel(m, idx) {
 }
 
 function togglePlanPanel(idx) {
-  const c = currentChat();
+  const c = planUiCurrentChat();
   if (!c || !c.messages[idx] || !c.messages[idx].plan) return;
   c.messages[idx].plan.expanded = !c.messages[idx].plan.expanded;
   const panel = document.querySelector(`.plan-panel[data-msg-idx="${idx}"]`);
   if (panel) panel.classList.toggle('collapsed');
-  saveData();
+  planUiSaveData();
 }
 
 function planIntegerOrFallback(value, min, fallback) {
@@ -303,7 +312,7 @@ function readPlanNumericControl(inputId, rangeId, min, fallback) {
 
 function openPlanSettings() {
   document.getElementById('planModal').classList.add('show');
-  const s = state.settings;
+  const s = planUiState.settings;
   document.getElementById('plan_enabled').checked = s.usePlan;
   document.getElementById('plan_review').checked = s.planReview;
   document.getElementById('plan_synthesize').checked = s.planSynthesize;
@@ -323,23 +332,23 @@ function closePlanSettings() {
 }
 
 function applyPlanPreset(key) {
-  const p = PLAN_PRESETS[key];
+  const p = PLAN_UI_PRESETS[key];
   if (!p) return;
   document.getElementById('plan_plannerPrompt').value = p.planner;
   document.getElementById('plan_executorPrompt').value = p.executor;
-  toast('✓ 已应用预设');
+  PlanUiUiService.toast('✓ 已应用预设');
 }
 
 function resetPlanPrompts() {
-  const p = PLAN_PRESETS.general;
+  const p = PLAN_UI_PRESETS.general;
   if (!p) return;
   document.getElementById('plan_plannerPrompt').value = p.planner;
   document.getElementById('plan_executorPrompt').value = p.executor;
-  if (typeof toast === 'function') toast('✓ 已恢复计划模式默认提示词');
+  PlanUiUiService.toast('✓ 已恢复计划模式默认提示词');
 }
 
 function savePlanSettings() {
-  const s = state.settings;
+  const s = planUiState.settings;
   s.usePlan = document.getElementById('plan_enabled').checked;
   s.planReview = document.getElementById('plan_review').checked;
   s.planSynthesize = document.getElementById('plan_synthesize').checked;
@@ -366,17 +375,17 @@ function savePlanSettings() {
     if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
     if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   }
-  persistSettings();
+  planUiPersistSettings();
   const btn = document.getElementById('planBtn');
   if (s.usePlan) btn.classList.add('plan-active');
   else btn.classList.remove('plan-active');
-  updateSendBtn();
+  PlanUiUiService.updateSendBtn();
   closePlanSettings();
-  toast('✓ 已保存');
+  PlanUiUiService.toast('✓ 已保存');
 }
 
 function togglePlan() {
-  const s = state.settings;
+  const s = planUiState.settings;
   s.usePlan = !s.usePlan;
   // 互斥：开启计划模式时关闭师生 / 大纲
   if (s.usePlan) {
@@ -395,7 +404,36 @@ function togglePlan() {
   const btn = document.getElementById('planBtn');
   if (s.usePlan) btn.classList.add('plan-active');
   else btn.classList.remove('plan-active');
-  persistSettings();
-  updateSendBtn();
-  toast(s.usePlan ? '✓ 已启用计划模式' : '✓ 已关闭计划模式');
+  planUiPersistSettings();
+  PlanUiUiService.updateSendBtn();
+  PlanUiUiService.toast(s.usePlan ? '✓ 已启用计划模式' : '✓ 已关闭计划模式');
 }
+window.renderPlanToolCalls = renderPlanToolCalls;
+window.renderPlanPanel = renderPlanPanel;
+window.togglePlanPanel = togglePlanPanel;
+window.setPlanNumericControl = setPlanNumericControl;
+window.syncPlanSettingRange = syncPlanSettingRange;
+window.syncPlanSettingInput = syncPlanSettingInput;
+window.readPlanNumericControl = readPlanNumericControl;
+window.openPlanSettings = openPlanSettings;
+window.closePlanSettings = closePlanSettings;
+window.applyPlanPreset = applyPlanPreset;
+window.resetPlanPrompts = resetPlanPrompts;
+window.savePlanSettings = savePlanSettings;
+window.togglePlan = togglePlan;
+
+window.AgentApp.define('planUi', {
+  renderPlanToolCalls,
+  renderPlanPanel,
+  togglePlanPanel,
+  setPlanNumericControl,
+  syncPlanSettingRange,
+  syncPlanSettingInput,
+  readPlanNumericControl,
+  openPlanSettings,
+  closePlanSettings,
+  applyPlanPreset,
+  resetPlanPrompts,
+  savePlanSettings,
+  togglePlan
+});

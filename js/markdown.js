@@ -1,5 +1,7 @@
 // ============ Markdown 渲染 ============
 
+const MarkdownUiService = window.AgentApp.require('uiService');
+
 function isSafeMarkdownLinkUrl(url) {
   const raw = String(url || '').trim();
   if (!raw) return false;
@@ -132,7 +134,7 @@ function renderMarkdown(text) {
   text = text.replace(/\x00CODE(\d+)\x00/g, (m, i) => {
     const cb = codeBlocks[+i];
     const codeId = 'code_' + Math.random().toString(36).slice(2, 9);
-    return `<div class="code-block"><div class="code-header"><span class="code-lang">${escapeHtml(cb.lang)}</span><button class="code-btn" onclick="copyCode('${codeId}')">📋 复制</button></div><pre><code id="${codeId}" class="language-${escapeHtml(cb.lang)}">${escapeHtml(cb.code)}</code></pre></div>`;
+    return `<div class="code-block"><div class="code-header"><span class="code-lang">${escapeHtml(cb.lang)}</span><button class="code-btn" data-action="valueClick" data-handler="copyCode" data-value="${codeId}">📋 复制</button></div><pre><code id="${codeId}" class="language-${escapeHtml(cb.lang)}">${escapeHtml(cb.code)}</code></pre></div>`;
   });
   
   return text;
@@ -269,8 +271,8 @@ document.addEventListener('click', event => {
   const path = link.getAttribute('data-explorer-file') || '';
   if (path && typeof openFileExplorerPath === 'function') {
     openFileExplorerPath(path);
-  } else if (typeof toast === 'function') {
-    toast('资源管理器未加载，暂时无法打开文件');
+  } else {
+    MarkdownUiService.toast('资源管理器未加载，暂时无法打开文件');
   }
 });
 
@@ -306,3 +308,21 @@ function postRender(root, opts) {
     });
   }
 }
+
+window.isSafeMarkdownLinkUrl = isSafeMarkdownLinkUrl;
+window.renderUnsafeMarkdownLink = renderUnsafeMarkdownLink;
+window.renderMarkdown = renderMarkdown;
+window.normalizeMarkdownFileLinkPath = normalizeMarkdownFileLinkPath;
+window.isLikelyMarkdownFileLinkPath = isLikelyMarkdownFileLinkPath;
+window.renderFilePathLinks = renderFilePathLinks;
+window.postRender = postRender;
+
+window.AgentApp.define('markdown', {
+  isSafeMarkdownLinkUrl,
+  renderUnsafeMarkdownLink,
+  renderMarkdown,
+  normalizeMarkdownFileLinkPath,
+  isLikelyMarkdownFileLinkPath,
+  renderFilePathLinks,
+  postRender
+});

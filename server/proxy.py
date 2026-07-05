@@ -21,10 +21,25 @@ from . import config
 class ProxyMixin:
     """Handler mixin：所有代理/静态/公开端点"""
 
+    def _read_proxy_json_body(self):
+        return self.request_context.read_json(default={})
+
+    def _send_proxy_bytes(self, code, body, content_type='application/octet-stream', headers=None,
+                          cors_origin=None, expose_headers='*'):
+        self.response.send_bytes(
+            code,
+            body or b'',
+            content_type=content_type,
+            headers=headers or {},
+            cors=cors_origin is not None,
+            origin=cors_origin,
+            expose_headers=expose_headers,
+        )
+
     # ============ GET /workspace ============
     def handle_workspace_info(self):
         """公开端点，不含 Token"""
-        self._send_json(200, {
+        self.response.json(200, {
             'ok': True,
             'workspace': config.WORKSPACE_ROOT,
             'cwd': config.get_current_cwd()
@@ -35,13 +50,9 @@ class ProxyMixin:
         """使用西交统一认证登录 LMS，并返回可供现有 LMS 代理复用的 Cookie 字符串。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         action = body.get('action', 'start')
@@ -52,20 +63,16 @@ class ProxyMixin:
             status, payload = handle_lms_login_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ POST /lms-scores ============
     def handle_lms_scores_post(self):
         """使用本机加密保存的统一认证凭据查询本科/研究生成绩。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         account_type = body.get('account_type', 'auto')
@@ -76,20 +83,16 @@ class ProxyMixin:
             status, payload = handle_lms_scores_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ POST /lms-schedule ============
     def handle_lms_schedule_post(self):
         """使用本机加密保存的统一认证凭据查询本科/研究生课表。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         account_type = body.get('account_type', 'auto')
@@ -100,20 +103,16 @@ class ProxyMixin:
             status, payload = handle_lms_schedule_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ POST /lms-empty-rooms ============
     def handle_lms_empty_rooms_post(self):
         """使用本机加密保存的统一认证凭据查询本科教务空闲教室。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         campus = body.get('campus', '兴庆校区')
@@ -125,20 +124,16 @@ class ProxyMixin:
             status, payload = handle_lms_empty_rooms_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ POST /lms-judge ============
     def handle_lms_judge_post(self):
         """使用本机加密保存的统一认证凭据执行本科/研究生一键评教。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         account_type = body.get('account_type', 'auto')
@@ -150,20 +145,16 @@ class ProxyMixin:
             status, payload = handle_lms_judge_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ POST /lms-attendance ============
     def handle_lms_attendance_post(self):
         """使用本机加密保存的统一认证凭据查询本科/研究生考勤。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         account_type = body.get('account_type', 'auto')
@@ -175,20 +166,16 @@ class ProxyMixin:
             status, payload = handle_lms_attendance_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ POST /lms-training-plan ============
     def handle_lms_training_plan_post(self):
         """使用本机加密保存的统一认证凭据查询本科个人培养方案。"""
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            raw = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-            body = json.loads(raw or '{}')
-            if not isinstance(body, dict):
-                raise ValueError('请求体必须是 JSON 对象')
+            body = self._read_proxy_json_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'请求格式错误: {e}'})
             return
 
         account_type = body.get('account_type', 'auto')
@@ -200,13 +187,13 @@ class ProxyMixin:
             status, payload = handle_lms_training_plan_request(body)
         except Exception as e:
             status, payload = 500, {'ok': False, 'error': '内部错误', 'message': str(e)}
-        self._send_json(status, payload)
+        self.response.json(status, payload)
 
     # ============ GET /xxx 静态文件 ============
     def handle_static_file(self):
         """安全的静态文件服务（只允许放出白名单扩展名，禁止越权）"""
-        from urllib.parse import urlparse, unquote
-        path = urlparse(self.path).path
+        from urllib.parse import unquote
+        path = self.request_context.parsed_url.path
         # 默认首页：找当前目录下唯一的 HTML（或固定文件名）
         if path == '/' or path == '':
             preferred = 'AI-Chat-大模型对话助手.html'
@@ -217,7 +204,7 @@ class ProxyMixin:
             if not os.path.isfile(target):
                 htmls = [f for f in os.listdir(project_root) if f.lower().endswith('.html')]
                 if not htmls:
-                    self._send_json(404, {'ok': False, 'error': '未找到任何 HTML 文件'})
+                    self.response.json(404, {'ok': False, 'error': '未找到任何 HTML 文件'})
                     return
                 target = os.path.join(project_root, htmls[0])
             base_dir = project_root
@@ -233,7 +220,7 @@ class ProxyMixin:
             except ValueError:
                 inside_project = False
             if not inside_project:
-                self._send_json(403, {'ok': False, 'error': '路径越界'})
+                self.response.json(403, {'ok': False, 'error': '路径越界'})
                 return
             base_dir = project_root
 
@@ -245,11 +232,11 @@ class ProxyMixin:
         }
         ext = os.path.splitext(target)[1].lower()
         if ext not in ALLOWED_EXTS:
-            self._send_json(403, {'ok': False, 'error': f'不允许的文件类型: {ext}'})
+            self.response.json(403, {'ok': False, 'error': f'不允许的文件类型: {ext}'})
             return
 
         if not os.path.isfile(target):
-            self._send_json(404, {'ok': False, 'error': f'文件不存在: {path}'})
+            self.response.json(404, {'ok': False, 'error': f'文件不存在: {path}'})
             return
 
         ctype, _ = mimetypes.guess_type(target)
@@ -262,21 +249,19 @@ class ProxyMixin:
             with open(target, 'rb') as f:
                 data = f.read()
         except Exception as e:
-            self._send_json(500, {'ok': False, 'error': f'读取失败: {e}'})
+            self.response.json(500, {'ok': False, 'error': f'读取失败: {e}'})
             return
 
-        self.send_response(200)
-        self.send_header('Content-Type', ctype)
-        self.send_header('Content-Length', str(len(data)))
-        origin = self.headers.get('Origin', '')
+        headers = {'Cache-Control': 'no-cache, no-store, must-revalidate'}
+        origin = self.request_context.origin
         if config.is_allowed_origin(origin) and origin:
-            self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Vary', 'Origin')
+            headers['Access-Control-Allow-Origin'] = origin
+            headers['Vary'] = 'Origin'
         # 开发体验：禁缓存，避免改完 JS 浏览器吃旧版
-        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-        self.end_headers()
-        try: self.wfile.write(data)
-        except Exception: pass
+        try:
+            self.response.send_bytes(200, data, content_type=ctype, headers=headers)
+        except Exception:
+            pass
 
     # ============ POST /llm-proxy ============
     def handle_llm_proxy_post(self):
@@ -291,34 +276,33 @@ class ProxyMixin:
         import urllib.request
         import urllib.error
 
-        origin = self.headers.get('Origin', '')
+        origin = self.request_context.origin
 
-        target_url = self.headers.get('X-Target-Url', '').strip()
+        target_url = self.request_context.header('X-Target-Url', '').strip()
         if not target_url or not (target_url.startswith('http://') or target_url.startswith('https://')):
-            self._send_json(400, {'ok': False, 'error': '缺少或非法的 X-Target-Url 头'})
+            self.response.json(400, {'ok': False, 'error': '缺少或非法的 X-Target-Url 头'})
             return
 
-        target_headers_raw = self.headers.get('X-Target-Headers', '')
+        target_headers_raw = self.request_context.header('X-Target-Headers', '')
         try:
             target_headers = json.loads(target_headers_raw) if target_headers_raw else {}
             if not isinstance(target_headers, dict):
                 raise ValueError('X-Target-Headers 必须是 JSON 对象')
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'X-Target-Headers 解析失败: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'X-Target-Headers 解析失败: {e}'})
             return
 
         try:
-            length = int(self.headers.get('Content-Length', 0))
-            req_body = self.rfile.read(length) if length > 0 else b''
+            req_body = self.request_context.read_body()
         except Exception as e:
-            self._send_json(400, {'ok': False, 'error': f'读取请求体失败: {e}'})
+            self.response.json(400, {'ok': False, 'error': f'读取请求体失败: {e}'})
             return
 
         if not any(k.lower() == 'content-type' for k in target_headers):
             target_headers['Content-Type'] = 'application/json'
         target_headers.setdefault('User-Agent', 'Mozilla/5.0 LLM-Proxy/1.0')
 
-        target_method = (self.headers.get('X-Target-Method', 'POST') or 'POST').strip().upper()
+        target_method = (self.request_context.header('X-Target-Method', 'POST') or 'POST').strip().upper()
         if target_method not in ('GET', 'POST', 'PUT', 'DELETE', 'PATCH'):
             target_method = 'POST'
         if target_method == 'GET':
@@ -351,18 +335,17 @@ class ProxyMixin:
             except Exception: pass
             up_ct = e.headers.get('Content-Type', 'text/plain; charset=utf-8') if e.headers else 'text/plain'
             print(f'   ⚠️ 上游 HTTP {e.code}: {err_body[:300]}')
-            self.send_response(e.code)
-            self.send_header('Content-Type', up_ct)
-            self.send_header('X-Upstream-Status', str(e.code))
-            self._write_cors_headers(origin)
-            self.send_header('Content-Length', str(len(err_body)))
-            self.end_headers()
-            try: self.wfile.write(err_body)
-            except Exception: pass
+            self._send_proxy_bytes(
+                e.code,
+                err_body,
+                content_type=up_ct,
+                headers={'X-Upstream-Status': str(e.code)},
+                cors_origin=origin,
+            )
             return
         except Exception as e:
             print(f'   ❌ 连接上游失败: {e}')
-            self._send_json(502, {'ok': False, 'error': f'代理失败：{e}'})
+            self.response.json(502, {'ok': False, 'error': f'代理失败：{e}'})
             return
 
         status = upstream.status
@@ -372,13 +355,13 @@ class ProxyMixin:
         print(f'   ✅ 上游 {status} | Content-Type: {up_ct} | 流式: {is_stream}')
 
         if is_stream:
-            self.send_response(status)
-            self.send_header('Content-Type', up_ct)
-            self.send_header('X-Upstream-Status', str(status))
-            self._write_cors_headers(origin)
-            self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'close')
-            self.end_headers()
+            self.response.status(status)
+            self.response.header('Content-Type', up_ct)
+            self.response.header('X-Upstream-Status', str(status))
+            self.response.cors_headers(origin=origin, expose_headers='*')
+            self.response.header('Cache-Control', 'no-cache')
+            self.response.header('Connection', 'close')
+            self.response.end()
             _t_first_chunk = None
             _total_bytes = 0
             _last_log = _time.time()
@@ -392,8 +375,8 @@ class ProxyMixin:
                         print(f'   🎯 首字 chunk 到达，距请求头 {_t_first_chunk - _t_headers:.2f}s', flush=True)
                     _total_bytes += len(chunk)
                     try:
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
+                        self.response.write(chunk)
+                        self.response.flush()
                     except (BrokenPipeError, ConnectionResetError):
                         print('   ⚠️ 浏览器断开了流式连接')
                         break
@@ -414,19 +397,18 @@ class ProxyMixin:
             except Exception as e:
                 try: upstream.close()
                 except Exception: pass
-                self._send_json(502, {'ok': False, 'error': f'读取上游响应失败: {e}'})
+                self.response.json(502, {'ok': False, 'error': f'读取上游响应失败: {e}'})
                 return
             finally:
                 try: upstream.close()
                 except Exception: pass
-            self.send_response(status)
-            self.send_header('Content-Type', up_ct)
-            self.send_header('X-Upstream-Status', str(status))
-            self._write_cors_headers(origin)
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            try: self.wfile.write(body)
-            except Exception: pass
+            self._send_proxy_bytes(
+                status,
+                body,
+                content_type=up_ct,
+                headers={'X-Upstream-Status': str(status)},
+                cors_origin=origin,
+            )
 
     # ============ GET /lms-proxy ============
     def handle_lms_proxy_get(self):
@@ -439,23 +421,22 @@ class ProxyMixin:
           raw   : =1 时不解析 JSON，直接透传响应体
           download : =1 时以二进制响应透传，供前端触发文件下载
         """
-        from urllib.parse import urlparse, parse_qs, urlencode
+        from urllib.parse import urlencode
         import urllib.request
         import urllib.error
 
-        cookie = self.headers.get('X-LMS-Cookie', '').strip()
+        cookie = self.request_context.header('X-LMS-Cookie', '').strip()
         if not cookie:
-            self._send_json(400, {'ok': False, 'error': '缺少 X-LMS-Cookie 头'})
+            self.response.json(400, {'ok': False, 'error': '缺少 X-LMS-Cookie 头'})
             return
 
-        parsed = urlparse(self.path)
-        qs = parse_qs(parsed.query)
+        qs = self.request_context.query
         lms_path = (qs.get('path', [''])[0] or '').strip()
         raw_mode = qs.get('raw', ['0'])[0] == '1'
         download_mode = qs.get('download', ['0'])[0] == '1'
 
         if not lms_path.startswith('/'):
-            self._send_json(400, {'ok': False, 'error': 'path 必须以 / 开头'})
+            self.response.json(400, {'ok': False, 'error': 'path 必须以 / 开头'})
             return
 
         passthrough = {k: v for k, v in qs.items() if k not in ('path', 'raw', 'download')}
@@ -497,17 +478,17 @@ class ProxyMixin:
             body_text = err_body.decode('utf-8', errors='replace')
             print(f'  ⚠️ HTTP {e.code}: {body_text[:200]}')
             if download_mode:
-                origin = self.headers.get('Origin', '')
-                self.send_response(e.code)
-                self.send_header('Content-Type', e.headers.get('Content-Type', 'text/plain; charset=utf-8') if e.headers else 'text/plain; charset=utf-8')
-                self.send_header('X-Upstream-Status', str(e.code))
-                self._write_cors_headers(origin)
-                self.send_header('Content-Length', str(len(err_body)))
-                self.end_headers()
-                try: self.wfile.write(err_body)
-                except Exception: pass
+                origin = self.request_context.origin
+                content_type = e.headers.get('Content-Type', 'text/plain; charset=utf-8') if e.headers else 'text/plain; charset=utf-8'
+                self._send_proxy_bytes(
+                    e.code,
+                    err_body,
+                    content_type=content_type,
+                    headers={'X-Upstream-Status': str(e.code)},
+                    cors_origin=origin,
+                )
                 return
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': False,
                 'status': e.code,
                 'error': f'LMS 返回 {e.code}',
@@ -516,31 +497,32 @@ class ProxyMixin:
             return
         except Exception as e:
             print(f'  ❌ 请求失败: {e}')
-            self._send_json(200, {'ok': False, 'error': f'请求失败: {e}'})
+            self.response.json(200, {'ok': False, 'error': f'请求失败: {e}'})
             return
 
         if download_mode:
-            origin = self.headers.get('Origin', '')
-            self.send_response(status)
-            self.send_header('Content-Type', ct or 'application/octet-stream')
-            self.send_header('X-Upstream-Status', str(status))
-            self._write_cors_headers(origin)
+            origin = self.request_context.origin
+            headers = {
+                'X-Upstream-Status': str(status),
+                'Cache-Control': 'no-store',
+            }
             if content_len:
-                self.send_header('Content-Length', content_len)
-            else:
-                self.send_header('Content-Length', str(len(body)))
+                headers['Content-Length'] = content_len
             if content_disp:
-                self.send_header('Content-Disposition', content_disp)
-            self.send_header('Cache-Control', 'no-store')
-            self.end_headers()
-            try: self.wfile.write(body)
-            except Exception: pass
+                headers['Content-Disposition'] = content_disp
+            self._send_proxy_bytes(
+                status,
+                body,
+                content_type=ct or 'application/octet-stream',
+                headers=headers,
+                cors_origin=origin,
+            )
             return
 
         if not raw_mode and 'json' in ct.lower():
             try:
                 data = json.loads(body.decode('utf-8'))
-                self._send_json(200, {'ok': True, 'status': status, 'data': data})
+                self.response.json(200, {'ok': True, 'status': status, 'data': data})
                 return
             except Exception:
                 pass
@@ -549,7 +531,7 @@ class ProxyMixin:
             text = body.decode('utf-8', errors='replace')
         except Exception:
             text = ''
-        self._send_json(200, {
+        self.response.json(200, {
             'ok': True, 'status': status,
             'content_type': ct,
             'text': text[:200000]

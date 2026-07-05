@@ -1,4 +1,4 @@
-// ============ 📑 大纲模式 - 核心执行逻辑 ============
+﻿// ============ 📑 大纲模式 - 核心执行逻辑 ============
 // 【模块定位】主流程 + 工具处理（无 DOM 操作）
 // 依赖：outline-prompts.js（OUTLINE_TOOLS / OUTLINE_TOOL_NAMES / DEFAULT_OUTLINE_SYSTEM_PROMPT）
 //       state.js / api.js / tools.js / chat.js
@@ -8,6 +8,20 @@
 // 5 分钟够长（推理模型也能跑完），但能兜住"网络层死锁"导致的永久挂起
 const OUTLINE_FETCH_TIMEOUT_MS = 5 * 60 * 1000;
 const OUTLINE_TOOL_TIMEOUT_MS = 90 * 1000;
+const OutlineCoreStateModule = window.AgentApp.require('state');
+const outlineCoreState = OutlineCoreStateModule.state;
+const outlineCoreSaveData = OutlineCoreStateModule.saveData;
+const outlineCoreCurrentChat = OutlineCoreStateModule.currentChat;
+const outlineCoreChatById = OutlineCoreStateModule.chatById;
+const outlineCoreIsCurrentChat = OutlineCoreStateModule.isCurrentChat;
+const outlineCoreIsChatGenerating = OutlineCoreStateModule.isChatGenerating;
+const outlineCoreBeginChatTask = OutlineCoreStateModule.beginChatTask;
+const outlineCoreSetChatTaskMode = OutlineCoreStateModule.setChatTaskMode;
+const outlineCoreUpdateChatTaskController = OutlineCoreStateModule.updateChatTaskController;
+const outlineCoreClearChatTask = OutlineCoreStateModule.clearChatTask;
+const outlineCoreActiveTaskChat = OutlineCoreStateModule.activeTaskChat;
+const OutlineCoreOrchestrationService = window.AgentApp.require('orchestrationService');
+const OutlineCoreUiService = window.AgentApp.require('uiService');
 
 function outlineToolTimeoutMs(name, args) {
   if (name === 'execute_action') {
@@ -87,7 +101,7 @@ async function executeOutlineToolWithTimeout(name, args, context, timeoutMs) {
     });
 
     const toolPromise = Promise.resolve()
-      .then(() => executeTool(name, args, runContext))
+      .then(() => OutlineCoreOrchestrationService.executeTool(name, args, runContext))
       .catch(e => {
         if (timedOut) return outlineToolTimeoutResult(name, timeoutMs);
         if (e && e.name === 'AbortError') throw e;
@@ -200,7 +214,7 @@ async function classifyOutlineTaskProfile(history, model, options = {}) {
   const taskText = outlineExtractTaskText(history);
   const prompt = outlinePromptSetting('outlineClassifierPrompt', DEFAULT_OUTLINE_CLASSIFIER_PROMPT);
   try {
-    const raw = await callOnceWithRole(
+    const raw = await OutlineCoreOrchestrationService.callOnceWithRole(
       [{ role: 'user', content: `【用户任务】\n${taskText || '(空)'}` }],
       model,
       prompt,
@@ -225,7 +239,7 @@ function outlineShouldUseCodeProfile(taskProfile, history) {
 }
 
 function outlineMaxItemsSetting() {
-  const raw = state && state.settings ? parseInt(state.settings.outlineMaxItems, 10) : 8;
+  const raw = outlineCoreState.settings ? parseInt(outlineCoreState.settings.outlineMaxItems, 10) : 8;
   return Math.max(3, Number.isFinite(raw) ? raw : 8);
 }
 
@@ -511,8 +525,8 @@ function outlineHasVerificationBlocker(outlineObj) {
 
 function outlineCodeGateNeedsVerification(outlineObj, taskProfile) {
   if (!taskProfile || !taskProfile.requiresVerification || outlineHasVerificationBlocker(outlineObj)) return false;
-  const state = outlineVerificationState(outlineObj);
-  return state.hasMutation && !state.hasPassedVerificationAfterMutation;
+  const verificationState = outlineVerificationState(outlineObj);
+  return verificationState.hasMutation && !verificationState.hasPassedVerificationAfterMutation;
 }
 
 function outlineCodeGateMessage(outlineObj) {
@@ -618,7 +632,7 @@ function outlineBuildResponsesInput(history, conversationMessages) {
 }
 
 function outlineNormalizeUsage(usage) {
-  return state.settings.apiFormat === 'responses' && typeof normalizeResponsesUsage === 'function'
+  return outlineCoreState.settings.apiFormat === 'responses' && typeof normalizeResponsesUsage === 'function'
     ? normalizeResponsesUsage(usage)
     : usage;
 }
@@ -718,7 +732,7 @@ function _outlineFetchWithTimeout(url, init, externalSignal, timeoutMs) {
 // 直接复用 api-core.js 的 _isRetryableError / _retryDelay / _sleepAbortable
 // 失败时把"正在重试"信息通过 onProgress 回写给 UI
 async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
-  const s = state.settings;
+  const s = outlineCoreState.settings;
   const maxAttempts = retryMaxAttemptsToTotalAttempts(s.retryMaxAttempts);
   const maxAttemptsLabel = retryTotalAttemptsLabel(maxAttempts);
   const baseDelay = Math.max(100, parseInt(s.retryBaseDelayMs) || 1000);
@@ -777,34 +791,25 @@ async function _outlineFetchJsonWithRetry(url, init, abortSignal, onProgress) {
 
 async function callAPIWithOutline(options = {}) {
   const requestedChatId = options && options.chatId;
-  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
+  const c = requestedChatId ? outlineCoreChatById(requestedChatId) : outlineCoreCurrentChat();
   if (!c) return;
   const taskChatId = c.id;
-  const s = state.settings;
+  const s = outlineCoreState.settings;
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   const suppressCompletionSound = !!options.suppressCompletionSound;
-  if (((typeof isChatGenerating === 'function') ? isChatGenerating(taskChatId) : !!state.isGenerating)) {
-    if (typeof toast === 'function' && isCurrentChat(taskChatId)) toast('此对话已有任务正在执行，请稍等');
+  if (outlineCoreIsChatGenerating(taskChatId)) {
+    if (outlineCoreIsCurrentChat(taskChatId)) OutlineCoreUiService.toast('此对话已有任务正在执行，请稍等');
     return;
   }
   
   let abortCtrl = new AbortController();
-  const task = (typeof beginChatTask === 'function')
-    ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
-    : null;
-  if (task && typeof setChatTaskMode === 'function') {
-    setChatTaskMode(taskChatId, 'outline', { outlineForceFinish: false });
-    if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
-  } else {
-    state.isGenerating = true;
-    state.activeTaskChatId = taskChatId;
-    state.abortCtrl = abortCtrl;
-    state._outlineExecuting = true;
-  }
+  const task = outlineCoreBeginChatTask(taskChatId, abortCtrl, { resetStop: true });
+  outlineCoreSetChatTaskMode(taskChatId, 'outline', { outlineForceFinish: false });
+  outlineCoreUpdateChatTaskController(taskChatId, abortCtrl);
   // ⭐ 清零软停止标志：本次任务是新的开始，不要被上次残留的停止意图误杀
-  state.stopRequested = false;
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof renderChatList === 'function') renderChatList();
+  outlineCoreState.stopRequested = false;
+  OutlineCoreUiService.updateSendBtn();
+  OutlineCoreUiService.renderChatList();
   
   let aiMsg, msgIdx;
   let conversationMessages, finalAnswer, completedNaturally, taskProfile;
@@ -831,15 +836,9 @@ async function callAPIWithOutline(options = {}) {
     msgIdx = options.resumeFromMsgIdx;
     aiMsg = c.messages[msgIdx];
     if (!aiMsg || !aiMsg.outline || !aiMsg.outline._snap) {
-      if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-      else {
-        state.isGenerating = false;
-        state.abortCtrl = null;
-        if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-        state._outlineExecuting = false;
-      }
-      if (typeof updateSendBtn === 'function') updateSendBtn();
-      if (typeof toast === 'function') toast('❌ 该任务无法恢复（状态已丢失，请重新提问）', 4000);
+      outlineCoreClearChatTask(taskChatId);
+      OutlineCoreUiService.updateSendBtn();
+      OutlineCoreUiService.toast('❌ 该任务无法恢复（状态已丢失，请重新提问）', 4000);
       return;
     }
     const snap = aiMsg.outline._snap;
@@ -879,7 +878,7 @@ async function callAPIWithOutline(options = {}) {
     }
     if (typeof resumeMsgTimer === 'function') resumeMsgTimer(aiMsg);
     else delete aiMsg._endTime;
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    OutlineCoreUiService.refreshMsgNode(msgIdx, c);
     
   } else {
     // ===== 新建模式 =====
@@ -906,8 +905,8 @@ async function callAPIWithOutline(options = {}) {
     
     if (typeof appendMsgNode === 'function') {
       appendMsgNode(msgIdx, c);
-    } else if (typeof renderMessages === 'function') {
-      if (isCurrentChat(c)) renderMessages();
+    } else if (OutlineCoreUiService.has('renderMessages')) {
+      if (outlineCoreIsCurrentChat(c)) OutlineCoreUiService.renderMessages();
     }
     
     history = c.messages.slice(0, -1).filter(m => !(m && m._hiddenFromAI));
@@ -927,13 +926,13 @@ async function callAPIWithOutline(options = {}) {
     systemPrompt = buildOutlineSystemPromptForProfile(s.outlineSystemPrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, history, taskProfile);
     saveSnap(0);
     aiMsg.outline.progressText = '🧭 识别任务类型...';
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    OutlineCoreUiService.refreshMsgNode(msgIdx, c);
     try {
       taskProfile = await classifyOutlineTaskProfile(history, model, {
         chatId: taskChatId,
         chat: c,
         signal: abortCtrl.signal,
-        isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+        isStopped: () => task ? !!task.stopRequested : !!outlineCoreState.stopRequested
       });
     } catch (e) {
       if (e && e.name === 'AbortError') {
@@ -941,11 +940,11 @@ async function callAPIWithOutline(options = {}) {
           aiMsg.outline.inProgress = false;
           delete aiMsg.outline.progressText;
           if (!aiMsg._endTime) aiMsg._endTime = Date.now();
-          if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-          if (typeof updateSendBtn === 'function') updateSendBtn();
-          if (typeof renderChatList === 'function') renderChatList();
-          if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-          saveData();
+          outlineCoreClearChatTask(taskChatId);
+          OutlineCoreUiService.updateSendBtn();
+          OutlineCoreUiService.renderChatList();
+          OutlineCoreUiService.refreshMsgNode(msgIdx, c);
+          outlineCoreSaveData();
           return;
         }
         aiMsg.content = (aiMsg.content || '') + '\n\n*[任务分类已停止]*';
@@ -953,11 +952,11 @@ async function callAPIWithOutline(options = {}) {
         aiMsg.outline.inProgress = false;
         delete aiMsg.outline.progressText;
         if (!aiMsg._endTime) aiMsg._endTime = Date.now();
-        if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-        if (typeof updateSendBtn === 'function') updateSendBtn();
-        if (typeof renderChatList === 'function') renderChatList();
-        if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-        saveData();
+        outlineCoreClearChatTask(taskChatId);
+        OutlineCoreUiService.updateSendBtn();
+        OutlineCoreUiService.renderChatList();
+        OutlineCoreUiService.refreshMsgNode(msgIdx, c);
+        outlineCoreSaveData();
         return;
       }
       taskProfile = outlineFallbackTaskProfile(history, `AI 分类调用失败，回退关键词规则：${e.message || e}`);
@@ -975,9 +974,9 @@ async function callAPIWithOutline(options = {}) {
   const throwIfAborted = () => {
     // ⭐ 同时检查两种停止信号：
     //   - abortSignal.aborted：fetch / sleep 等异步操作的标准中断
-    //   - state.stopRequested：跨 abortCtrl 重建边界的"软停止"，
+    //   - outlineCoreState.stopRequested：跨 abortCtrl 重建边界的"软停止"，
     //     用户点暂停后即使本轮 fetch 已经结束，下一轮也能立刻退出
-    const stopRequested = task ? task.stopRequested : state.stopRequested;
+    const stopRequested = task ? task.stopRequested : outlineCoreState.stopRequested;
     if (abortSignal.aborted || stopRequested) {
       const err = new Error('用户中断');
       err.name = 'AbortError';
@@ -1140,7 +1139,7 @@ async function callAPIWithOutline(options = {}) {
           chat: c,
           chatId: taskChatId,
           signal: abortSignal,
-          isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+          isStopped: () => task ? !!task.stopRequested : !!outlineCoreState.stopRequested
         });
         if (!ok) throw new Error('自动压缩失败，已暂停大纲模式请求');
       }
@@ -1251,7 +1250,7 @@ async function callAPIWithOutline(options = {}) {
           aiMsg.outline.progressText = '📑 正在重新要求创建本次任务大纲...';
           onUpdate();
           saveSnap(loop + 1);
-          saveData();
+          outlineCoreSaveData();
           continue;
         }
         if (outlineCodeGateNeedsVerification(aiMsg.outline, taskProfile)) {
@@ -1263,7 +1262,7 @@ async function callAPIWithOutline(options = {}) {
           aiMsg.outline.progressText = '🧪 代码任务需要执行验证命令...';
           onUpdate();
           saveSnap(loop + 1);
-          saveData();
+          outlineCoreSaveData();
           continue;
         }
         completedNaturally = true;
@@ -1322,7 +1321,7 @@ async function callAPIWithOutline(options = {}) {
               chat: c,
               outline: aiMsg.outline,
               signal: abortSignal,
-              isStopped: () => task ? !!task.stopRequested : !!state.stopRequested
+              isStopped: () => task ? !!task.stopRequested : !!outlineCoreState.stopRequested
             }, toolTimeoutMs);
           } catch (e) {
             liveEntry._running = false;
@@ -1437,14 +1436,14 @@ async function callAPIWithOutline(options = {}) {
         aiMsg.outline.progressText = '📑 正在重新要求创建本次任务大纲...';
         onUpdate();
         saveSnap(loop + 1);
-        saveData();
+        outlineCoreSaveData();
         continue;
       }
       
       // 保存快照（方便暂停后恢复）
       saveSnap(loop + 1);
       
-      saveData();
+      outlineCoreSaveData();
     }
     
     // ----- 循环结束 -----
@@ -1498,13 +1497,11 @@ async function callAPIWithOutline(options = {}) {
     aiMsg.outline.expanded = false; // 完成后默认折叠大纲，突出最终答案
     aiMsg._endTime = Date.now();
     
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-    else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
-    saveData();
-    if (typeof toast === 'function') {
-      if (completedNaturally) toast('✅ 大纲任务完成', 3000);
-      else toast('⚠️ 已达轮数上限，已强制收尾', 4000);
-    }
+    if (OutlineCoreUiService.has('refreshMsgNode')) OutlineCoreUiService.refreshMsgNode(msgIdx, c);
+    else if (outlineCoreIsCurrentChat(c)) OutlineCoreUiService.renderMessages();
+    outlineCoreSaveData();
+    if (completedNaturally) OutlineCoreUiService.toast('✅ 大纲任务完成', 3000);
+    else OutlineCoreUiService.toast('⚠️ 已达轮数上限，已强制收尾', 4000);
     if (!suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
     
   } catch (e) {
@@ -1514,11 +1511,11 @@ async function callAPIWithOutline(options = {}) {
     
     if (isAbortLike) {
       // 检查是否是"立即收尾"信号
-      const forceFinish = task ? !!task.outlineForceFinish : !!state._outlineForceFinish;
+      const forceFinish = task ? !!task.outlineForceFinish : !!outlineCoreState._outlineForceFinish;
         if (forceFinish) {
           completedByForceFinish = true;
           if (task) task.outlineForceFinish = false;
-          state._outlineForceFinish = false;
+          outlineCoreState._outlineForceFinish = false;
           // 走保底收尾流程
           aiMsg.outline.status = 'truncated';
           aiMsg.outline.finishRequested = true;
@@ -1527,8 +1524,7 @@ async function callAPIWithOutline(options = {}) {
         
         // 重建 abortCtrl（因为已经被 abort 了）
         abortCtrl = new AbortController();
-        if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
-        else state.abortCtrl = abortCtrl;
+        outlineCoreUpdateChatTaskController(taskChatId, abortCtrl);
         const newSignal = abortCtrl.signal;
         
         let fallbackAnswer = '';
@@ -1554,7 +1550,7 @@ async function callAPIWithOutline(options = {}) {
         }
         aiMsg.outline.diffSummary = outlineBuildDiffSummary(aiMsg.outline);
         
-        if (typeof toast === 'function') toast('🏁 已收尾', 3000);
+        OutlineCoreUiService.toast('🏁 已收尾', 3000);
         delete aiMsg.outline.finishRequested;
       } else {
         aiMsg.outline.status = 'paused';
@@ -1575,28 +1571,21 @@ async function callAPIWithOutline(options = {}) {
     aiMsg.outline.inProgress = false;
     delete aiMsg.outline.progressText;
     aiMsg._endTime = Date.now();
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-    else if (typeof renderMessages === 'function' && isCurrentChat(c)) renderMessages();
-    saveData();
+    if (OutlineCoreUiService.has('refreshMsgNode')) OutlineCoreUiService.refreshMsgNode(msgIdx, c);
+    else if (outlineCoreIsCurrentChat(c)) OutlineCoreUiService.renderMessages();
+    outlineCoreSaveData();
     if (completedByForceFinish && !suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
   } finally {
-    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-    else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
-      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
-      state._outlineExecuting = false;
-      state._outlineForceFinish = false;
-    }
-    if (typeof updateSendBtn === 'function') updateSendBtn();
-    if (typeof renderChatList === 'function') renderChatList();
+    outlineCoreClearChatTask(taskChatId);
+    OutlineCoreUiService.updateSendBtn();
+    OutlineCoreUiService.renderChatList();
   }
 }
 
 // ============ 🛡️ 第三层保护：保底收尾调用 ============
 // 当达到轮数上限但 AI 还在调工具时，额外发一次"无工具"请求逼出最终文字答案
 async function doFinalSummaryCall(conversationMessages, history, systemPrompt, model, outlineObj, abortSignal, recordChat) {
-  const s = state.settings;
+  const s = outlineCoreState.settings;
   
   const finalSystemPrompt = (typeof withActiveSkillPrompt === 'function' ? withActiveSkillPrompt(systemPrompt) : systemPrompt) + 
     '\n\n' + outlinePromptText('outlineForceFinalSystemPrompt', DEFAULT_OUTLINE_FORCE_FINAL_SYSTEM_PROMPT);
@@ -1773,7 +1762,7 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
   // ⭐ 保底收尾调用的 usage 也计入统计
   const usageForRecord = outlineNormalizeUsage(j.usage);
   if (usageForRecord && typeof recordUsageFromResponse === 'function') {
-    const _c = recordChat || (typeof activeTaskChat === 'function' ? activeTaskChat() : (typeof currentChat === 'function' ? currentChat() : null));
+    const _c = recordChat || outlineCoreActiveTaskChat();
     if (_c) recordUsageFromResponse(_c, usageForRecord, { model });
   }
   
@@ -1795,15 +1784,15 @@ async function doFinalSummaryCall(conversationMessages, history, systemPrompt, m
 // ============ 大纲工具处理（本地虚拟工具，不发请求）============
 
 // ⭐ 消化由 attach_file 等工具产生的待处理附件
-// 把 state.pendingAIAttachments 中的项目转换为 user 消息注入到对话上下文，
+// 把 outlineCoreState.pendingAIAttachments 中的项目转换为 user 消息注入到对话上下文，
 // 然后清空 pendingAIAttachments（防止 autoResend 在大纲结束后再触发新对话）
 function consumePendingAttachments(conversationMessages, outlineObj, chatId) {
-  const targetChatId = chatId || (typeof resolveToolChatId === 'function' ? resolveToolChatId() : state.currentId);
+  const targetChatId = chatId || (typeof resolveToolChatId === 'function' ? resolveToolChatId() : outlineCoreState.currentId);
   const atts = typeof takePendingAIAttachments === 'function'
     ? takePendingAIAttachments(targetChatId)
-    : ((state.pendingAIAttachments || []).splice(0));
+    : ((outlineCoreState.pendingAIAttachments || []).splice(0));
   if (!atts.length) return;
-  const s = state.settings;
+  const s = outlineCoreState.settings;
   
   // 同时取消任何待执行的 autoResend 定时器（双重保险）
   if (typeof window !== 'undefined') {
@@ -1992,7 +1981,7 @@ function outlineEnhanceExecuteActionToolForVerification(tool) {
 }
 
 function buildOutlineTools(options = {}) {
-  const s = state.settings;
+  const s = outlineCoreState.settings;
   const useUserTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   
   // 用户工具按本次任务配置合并；大纲内置工具始终存在。
@@ -2028,4 +2017,58 @@ function buildOutlineTools(options = {}) {
   
   return [...outlineToolsConverted, ...userToolsFinal];
 }
+
+window.AgentApp.define('outlineCore', {
+  OUTLINE_FETCH_TIMEOUT_MS,
+  OUTLINE_TOOL_TIMEOUT_MS,
+  outlineToolTimeoutMs,
+  outlineAbortError,
+  outlineToolTimeoutResult,
+  executeOutlineToolWithTimeout,
+  outlineExtractTaskText,
+  outlineLooksLikeCodeTask,
+  buildOutlineSystemPrompt,
+  outlineFallbackTaskProfile,
+  normalizeOutlineTaskProfile,
+  parseOutlineTaskProfileJson,
+  classifyOutlineTaskProfile,
+  outlineShouldUseCodeProfile,
+  outlineMaxItemsSetting,
+  outlinePromptVars,
+  buildOutlineSystemPromptForProfile,
+  outlineToolCallEntries,
+  outlineHasExecuteAction,
+  outlineRecordAssistantSpeech,
+  outlineIsCodeMutationCall,
+  outlineMutationActionKind,
+  outlineMutationFilesForEntry,
+  outlineMutationTimeline,
+  outlineNetMutationState,
+  outlineHasCodeMutation,
+  outlineCommandSegments,
+  outlineLooksLikeVerificationCommand,
+  outlineExecuteIntent,
+  outlineIsVerifyIntentToolCall,
+  outlineLooksLikePassedVerificationOutput,
+  outlineVerificationState,
+  outlineHasVerificationBlocker,
+  outlineCodeGateNeedsVerification,
+  outlineCodeGateMessage,
+  outlineNormalizePatchPath,
+  outlineBuildDiffSummary,
+  outlineNormalizeUsage,
+  outlineToolResultText,
+  outlineToolCanBeUserRejected,
+  outlineToolResultOutcome,
+  callAPIWithOutline,
+  doFinalSummaryCall,
+  consumePendingAttachments,
+  handleOutlineTool,
+  outlineCloneTool,
+  outlineToolName,
+  outlineToolSchema,
+  outlineSetToolDescription,
+  outlineEnhanceExecuteActionToolForVerification,
+  buildOutlineTools
+});
 

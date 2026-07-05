@@ -151,8 +151,8 @@ function lmsPanelRefreshStatus() {
     el.innerHTML = `
       <span class="lms-badge lms-badge-warn">⚠️ 未配置 Cookie</span>
       <span class="lms-status-hint">可直接使用统一认证登录</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">登录</button>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">手动 Cookie</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">登录</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="cookie">手动 Cookie</button>
     `;
     return;
   }
@@ -163,9 +163,9 @@ function lmsPanelRefreshStatus() {
     el.innerHTML = `
       <span class="lms-badge lms-badge-warn">⚠️ Cookie 格式异常</span>
       <span class="lms-status-hint">未找到 session 字段</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">✏️ 修改</button>
-      <button class="lms-mini-btn" onclick="lmsPanelClearCookie()">🗑 清空</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">重新登录</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="cookie">✏️ 修改</button>
+      <button class="lms-mini-btn" data-action="lmsPanelClearCookie">🗑 清空</button>
     `;
     return;
   }
@@ -174,21 +174,21 @@ function lmsPanelRefreshStatus() {
   if (h < 0) {
     el.innerHTML = `
       <span class="lms-badge lms-badge-err">⛔ 已过期 ${(-h).toFixed(1)} 小时</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">手动更新</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">重新登录</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="cookie">手动更新</button>
     `;
   } else if (h < 2) {
     el.innerHTML = `
       <span class="lms-badge lms-badge-warn">⏰ 即将过期 ${h.toFixed(1)}h</span>
       <span class="lms-status-hint">👤 ${uidSafe}</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">重新登录</button>
     `;
   } else {
     el.innerHTML = `
       <span class="lms-badge lms-badge-ok">✅ Cookie 有效</span>
       <span class="lms-status-hint">👤 ${uidSafe} · 还有 ${h.toFixed(1)}h</span>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('login')">重新登录</button>
-      <button class="lms-mini-btn" onclick="lmsPanelOpenCookieEditor('cookie')">✏️ Cookie</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">重新登录</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="cookie">✏️ Cookie</button>
     `;
   }
 }
@@ -271,7 +271,7 @@ function lmsPanelRender() {
 function lmsPanelRenderSubHeader(title) {
   return `
     <div class="lms-subpage-head">
-      <button class="lms-mini-btn" onclick="lmsPanelSetPage('home')">返回</button>
+      <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="home">返回</button>
       <div class="lms-subpage-title">${escapeHtml(title || '')}</div>
     </div>
   `;
@@ -281,31 +281,31 @@ function lmsPanelRenderHome() {
   return `
     <div class="lms-nav-page">
       <div class="lms-nav-list">
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('lms')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="lms">
           <span class="lms-nav-title">思源学堂</span>
           <span class="lms-nav-desc">课程、待办、作业详情和课件下载</span>
         </button>
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('scores')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="scores">
           <span class="lms-nav-title">成绩查询</span>
           <span class="lms-nav-desc">查询本科教务或研究生系统成绩</span>
         </button>
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('schedule')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="schedule">
           <span class="lms-nav-title">课表查询</span>
           <span class="lms-nav-desc">查询当前或指定学期课表</span>
         </button>
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('emptyRooms')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="emptyRooms">
           <span class="lms-nav-title">空闲教室</span>
           <span class="lms-nav-desc">按校区、教学楼、日期和节次查询空教室</span>
         </button>
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('attendance')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="attendance">
           <span class="lms-nav-title">考勤查询</span>
           <span class="lms-nav-desc">查询刷卡流水、课程考勤和出勤统计</span>
         </button>
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('judge')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="judge">
           <span class="lms-nav-title">一键评教</span>
           <span class="lms-nav-desc">查看未评教问卷，并批量提交评教</span>
         </button>
-        <button class="lms-nav-btn" onclick="lmsPanelSetPage('trainingPlan')">
+        <button class="lms-nav-btn" data-action="valueClick" data-handler="lmsPanelSetPage" data-value="trainingPlan">
           <span class="lms-nav-title">培养方案</span>
           <span class="lms-nav-desc">查看个人培养方案、课程组、学分要求和指导计划</span>
         </button>
@@ -328,7 +328,7 @@ function lmsPanelRenderScoresPage() {
     <div class="lms-score-controls">
       <label class="lms-score-field">
         <span>身份</span>
-        <select id="lmsScoreAccountType" class="lms-login-input" onchange="lmsPanelSetScoreAccountType(this.value)">
+        <select id="lmsScoreAccountType" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetScoreAccountType">
           <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
           <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
           <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
@@ -336,9 +336,9 @@ function lmsPanelRenderScoresPage() {
       </label>
       <label class="lms-score-field">
         <span>学期</span>
-        <input id="lmsScoreTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="留空/填 all 查询全部；或如 2024-2025-1" oninput="lmsPanelSetScoreTerm(this.value)">
+        <input id="lmsScoreTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="留空/填 all 查询全部；或如 2024-2025-1" data-input-action="valueInput" data-handler="lmsPanelSetScoreTerm">
       </label>
-      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchScores()">查询成绩</button>
+      <button class="lms-big-btn lms-score-query-btn" data-action="lmsPanelFetchScores">查询成绩</button>
     </div>
   `;
 
@@ -346,7 +346,7 @@ function lmsPanelRenderScoresPage() {
     html += `
       <div class="lms-score-error">
         <div>${escapeHtml(LMS_PANEL_STATE.scoreError)}</div>
-        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+        <button class="lms-mini-btn" data-action="lmsPanelOpenCredentialLogin">打开登录并保存凭据</button>
       </div>
     `;
   }
@@ -374,8 +374,8 @@ function lmsPanelRenderScoresPage() {
         ${term ? '' : '<span class="lms-score-tip">当前为全部学期结果</span>'}
       </div>
       <div class="lms-score-selection-actions">
-        <button class="lms-mini-btn" onclick="lmsPanelSelectAllScores(true)" ${allSelected ? 'disabled' : ''}>全选</button>
-        <button class="lms-mini-btn" onclick="lmsPanelSelectAllScores(false)" ${selectedScores.length ? '' : 'disabled'}>清空</button>
+        <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelSelectAllScores" data-value="true" data-value-type="boolean" ${allSelected ? 'disabled' : ''}>全选</button>
+        <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelSelectAllScores" data-value="false" data-value-type="boolean" ${selectedScores.length ? '' : 'disabled'}>清空</button>
       </div>
     </div>
     <div class="lms-score-summary">
@@ -400,7 +400,7 @@ function lmsPanelRenderScoresPage() {
       <table class="lms-score-table">
         <thead>
           <tr>
-            <th><input type="checkbox" ${allSelected ? 'checked' : ''} onchange="lmsPanelSelectAllScores(this.checked)"></th>
+            <th><input type="checkbox" ${allSelected ? 'checked' : ''} data-change-action="valueChange" data-handler="lmsPanelSelectAllScores"></th>
             <th>学期/类型</th>
             <th>课程</th>
             <th>学分</th>
@@ -498,7 +498,7 @@ function lmsPanelRenderScoreRow(item, idx) {
   const checked = lmsPanelIsScoreSelected(item, idx) ? 'checked' : '';
   return `
     <tr class="${failed}">
-      <td><input type="checkbox" ${checked} onchange="lmsPanelToggleScoreSelection(${keyForJs}, this.checked)"></td>
+      <td><input type="checkbox" ${checked} data-change-action="valueChange" data-handler="lmsPanelToggleScoreSelection" data-value="${escapeHtml(key)}" data-checked-arg="true"></td>
       <td>${escapeHtml(group)}</td>
       <td>${escapeHtml(item.courseName || '-')}</td>
       <td>${escapeHtml(lmsFmtScoreValue(item.coursePoint))}</td>
@@ -551,7 +551,7 @@ function lmsPanelRenderSchedulePage() {
     <div class="lms-score-controls">
       <label class="lms-score-field">
         <span>身份</span>
-        <select id="lmsScheduleAccountType" class="lms-login-input" onchange="lmsPanelSetScheduleAccountType(this.value)">
+        <select id="lmsScheduleAccountType" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetScheduleAccountType">
           <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
           <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
           <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
@@ -559,9 +559,9 @@ function lmsPanelRenderSchedulePage() {
       </label>
       <label class="lms-score-field">
         <span>学期</span>
-        <input id="lmsScheduleTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="留空查当前学期，如 2024-2025-1" oninput="lmsPanelSetScheduleTerm(this.value)">
+        <input id="lmsScheduleTerm" class="lms-login-input" value="${escapeHtml(term)}" placeholder="留空查当前学期，如 2024-2025-1" data-input-action="valueInput" data-handler="lmsPanelSetScheduleTerm">
       </label>
-      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchSchedule()">查询课表</button>
+      <button class="lms-big-btn lms-score-query-btn" data-action="lmsPanelFetchSchedule">查询课表</button>
     </div>
   `;
 
@@ -569,7 +569,7 @@ function lmsPanelRenderSchedulePage() {
     html += `
       <div class="lms-score-error">
         <div>${escapeHtml(LMS_PANEL_STATE.scheduleError)}</div>
-        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+        <button class="lms-mini-btn" data-action="lmsPanelOpenCredentialLogin">打开登录并保存凭据</button>
       </div>
     `;
   }
@@ -683,35 +683,35 @@ function lmsPanelRenderEmptyRoomsPage() {
     <div class="lms-score-controls">
       <label class="lms-score-field">
         <span>校区</span>
-        <select id="lmsEmptyRoomCampus" class="lms-login-input" onchange="lmsPanelSetEmptyRoomCampus(this.value)">
+        <select id="lmsEmptyRoomCampus" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetEmptyRoomCampus">
           ${lmsPanelRenderEmptyRoomCampusOptions(campus)}
         </select>
       </label>
       <label class="lms-score-field">
         <span>教学楼</span>
-        <select id="lmsEmptyRoomBuilding" class="lms-login-input" onchange="lmsPanelSetEmptyRoomBuilding(this.value)">
+        <select id="lmsEmptyRoomBuilding" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetEmptyRoomBuilding">
           ${lmsPanelRenderEmptyRoomBuildingOptions(campus, building)}
         </select>
       </label>
       <label class="lms-score-field">
         <span>日期</span>
-        <input id="lmsEmptyRoomDate" class="lms-login-input" type="date" value="${escapeHtml(queryDate)}" onchange="lmsPanelSetEmptyRoomDate(this.value)">
+        <input id="lmsEmptyRoomDate" class="lms-login-input" type="date" value="${escapeHtml(queryDate)}" data-change-action="valueChange" data-handler="lmsPanelSetEmptyRoomDate">
       </label>
       <div class="lms-period-grid">
         <label class="lms-score-field">
           <span>开始节次</span>
-          <select id="lmsEmptyRoomStartPeriod" class="lms-login-input" onchange="lmsPanelSetEmptyRoomStartPeriod(this.value)">
+          <select id="lmsEmptyRoomStartPeriod" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetEmptyRoomStartPeriod">
             ${lmsPanelRenderPeriodOptions(startPeriod)}
           </select>
         </label>
         <label class="lms-score-field">
           <span>结束节次</span>
-          <select id="lmsEmptyRoomEndPeriod" class="lms-login-input" onchange="lmsPanelSetEmptyRoomEndPeriod(this.value)">
+          <select id="lmsEmptyRoomEndPeriod" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetEmptyRoomEndPeriod">
             ${lmsPanelRenderPeriodOptions(endPeriod)}
           </select>
         </label>
       </div>
-      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchEmptyRooms()">查询空闲教室</button>
+      <button class="lms-big-btn lms-score-query-btn" data-action="lmsPanelFetchEmptyRooms">查询空闲教室</button>
     </div>
   `;
 
@@ -719,7 +719,7 @@ function lmsPanelRenderEmptyRoomsPage() {
     html += `
       <div class="lms-score-error">
         <div>${escapeHtml(LMS_PANEL_STATE.emptyRoomError)}</div>
-        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+        <button class="lms-mini-btn" data-action="lmsPanelOpenCredentialLogin">打开登录并保存凭据</button>
       </div>
     `;
   }
@@ -842,7 +842,7 @@ function lmsPanelRenderAttendancePage() {
     <div class="lms-score-controls">
       <label class="lms-score-field">
         <span>身份</span>
-        <select id="lmsAttendanceAccountType" class="lms-login-input" onchange="lmsPanelSetAttendanceAccountType(this.value)">
+        <select id="lmsAttendanceAccountType" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetAttendanceAccountType">
           <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
           <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
           <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
@@ -850,7 +850,7 @@ function lmsPanelRenderAttendancePage() {
       </label>
       <label class="lms-score-field">
         <span>访问方式</span>
-        <select id="lmsAttendanceAccessMode" class="lms-login-input" onchange="lmsPanelSetAttendanceAccessMode(this.value)">
+        <select id="lmsAttendanceAccessMode" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetAttendanceAccessMode">
           <option value="auto" ${accessMode === 'auto' ? 'selected' : ''}>自动</option>
           <option value="normal" ${accessMode === 'normal' ? 'selected' : ''}>普通直连</option>
           <option value="webvpn" ${accessMode === 'webvpn' ? 'selected' : ''}>WebVPN</option>
@@ -859,26 +859,26 @@ function lmsPanelRenderAttendancePage() {
       <div class="lms-period-grid">
         <label class="lms-score-field">
           <span>开始日期</span>
-          <input id="lmsAttendanceStartDate" class="lms-login-input" type="date" value="${escapeHtml(startDate)}" onchange="lmsPanelSetAttendanceStartDate(this.value)">
+          <input id="lmsAttendanceStartDate" class="lms-login-input" type="date" value="${escapeHtml(startDate)}" data-change-action="valueChange" data-handler="lmsPanelSetAttendanceStartDate">
         </label>
         <label class="lms-score-field">
           <span>结束日期</span>
-          <input id="lmsAttendanceEndDate" class="lms-login-input" type="date" value="${escapeHtml(endDate)}" onchange="lmsPanelSetAttendanceEndDate(this.value)">
+          <input id="lmsAttendanceEndDate" class="lms-login-input" type="date" value="${escapeHtml(endDate)}" data-change-action="valueChange" data-handler="lmsPanelSetAttendanceEndDate">
         </label>
       </div>
       <div class="lms-period-grid">
         <label class="lms-score-field">
           <span>流水页码</span>
-          <input id="lmsAttendancePage" class="lms-login-input" type="number" min="1" max="1000" value="${page}" onchange="lmsPanelSetAttendancePage(this.value)">
+          <input id="lmsAttendancePage" class="lms-login-input" type="number" min="1" max="1000" value="${page}" data-change-action="valueChange" data-handler="lmsPanelSetAttendancePage">
         </label>
         <label class="lms-score-field">
           <span>每页数量</span>
-          <select id="lmsAttendancePageSize" class="lms-login-input" onchange="lmsPanelSetAttendancePageSize(this.value)">
+          <select id="lmsAttendancePageSize" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetAttendancePageSize">
             ${[10, 20, 50, 100].map(size => `<option value="${size}" ${size === pageSize ? 'selected' : ''}>${size} 条</option>`).join('')}
           </select>
         </label>
       </div>
-      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchAttendance()">查询考勤</button>
+      <button class="lms-big-btn lms-score-query-btn" data-action="lmsPanelFetchAttendance">查询考勤</button>
     </div>
   `;
 
@@ -886,7 +886,7 @@ function lmsPanelRenderAttendancePage() {
     html += `
       <div class="lms-score-error">
         <div>${escapeHtml(LMS_PANEL_STATE.attendanceError)}</div>
-        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+        <button class="lms-mini-btn" data-action="lmsPanelOpenCredentialLogin">打开登录并保存凭据</button>
       </div>
     `;
   }
@@ -949,8 +949,8 @@ function lmsPanelRenderAttendancePage() {
         </table>
       </div>
       <div class="lms-attendance-pager">
-        <button class="lms-mini-btn" onclick="lmsPanelAttendancePrevPage()" ${page <= 1 ? 'disabled' : ''}>上一页</button>
-        <button class="lms-mini-btn" onclick="lmsPanelAttendanceNextPage()" ${pagination.totalPages && page >= pagination.totalPages ? 'disabled' : ''}>下一页</button>
+        <button class="lms-mini-btn" data-action="lmsPanelAttendancePrevPage" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+        <button class="lms-mini-btn" data-action="lmsPanelAttendanceNextPage" ${pagination.totalPages && page >= pagination.totalPages ? 'disabled' : ''}>下一页</button>
       </div>
     `;
   }
@@ -1054,7 +1054,7 @@ function lmsPanelRenderJudgePage() {
     <div class="lms-score-controls">
       <label class="lms-score-field">
         <span>身份</span>
-        <select id="lmsJudgeAccountType" class="lms-login-input" onchange="lmsPanelSetJudgeAccountType(this.value)">
+        <select id="lmsJudgeAccountType" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetJudgeAccountType">
           <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
           <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
           <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
@@ -1062,13 +1062,13 @@ function lmsPanelRenderJudgePage() {
       </label>
       <label class="lms-score-field">
         <span>本科评分</span>
-        <select id="lmsJudgeScore" class="lms-login-input" onchange="lmsPanelSetJudgeScore(this.value)">
+        <select id="lmsJudgeScore" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetJudgeScore">
           ${[100, 80, 60, 40].map(score => `<option value="${score}" ${String(score) === String(ugScore) ? 'selected' : ''}>${score} 分</option>`).join('')}
         </select>
       </label>
       <label class="lms-score-field">
         <span>研究生评分</span>
-        <select id="lmsJudgeGraduateScore" class="lms-login-input" onchange="lmsPanelSetJudgeGraduateScore(this.value)">
+        <select id="lmsJudgeGraduateScore" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetJudgeGraduateScore">
           <option value="3" ${String(pgScore) === '3' ? 'selected' : ''}>优秀</option>
           <option value="2" ${String(pgScore) === '2' ? 'selected' : ''}>良好</option>
           <option value="1" ${String(pgScore) === '1' ? 'selected' : ''}>合格</option>
@@ -1077,11 +1077,11 @@ function lmsPanelRenderJudgePage() {
       </label>
       <label class="lms-score-field lms-score-field-wide">
         <span>统一评语</span>
-        <textarea id="lmsJudgeComment" class="lms-login-input" rows="3" placeholder="主观题统一填写内容，可留空" oninput="lmsPanelSetJudgeComment(this.value)">${escapeHtml(comment)}</textarea>
+        <textarea id="lmsJudgeComment" class="lms-login-input" rows="3" placeholder="主观题统一填写内容，可留空" data-input-action="valueInput" data-handler="lmsPanelSetJudgeComment">${escapeHtml(comment)}</textarea>
       </label>
       <div class="lms-period-grid">
-        <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchJudgeStatus()">刷新待评教</button>
-        <button class="lms-big-btn lms-score-query-btn" style="background:var(--danger,#e74c3c);" onclick="lmsPanelSubmitJudgeAll()">提交全部评教</button>
+        <button class="lms-big-btn lms-score-query-btn" data-action="lmsPanelFetchJudgeStatus">刷新待评教</button>
+        <button class="lms-big-btn lms-score-query-btn" style="background:var(--danger,#e74c3c);" data-action="lmsPanelSubmitJudgeAll">提交全部评教</button>
       </div>
     </div>
   `;
@@ -1090,7 +1090,7 @@ function lmsPanelRenderJudgePage() {
     html += `
       <div class="lms-score-error">
         <div>${escapeHtml(LMS_PANEL_STATE.judgeError)}</div>
-        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+        <button class="lms-mini-btn" data-action="lmsPanelOpenCredentialLogin">打开登录并保存凭据</button>
       </div>
     `;
   }
@@ -1191,7 +1191,7 @@ function lmsPanelRenderTrainingPlanPage() {
     <div class="lms-score-controls">
       <label class="lms-score-field">
         <span>身份</span>
-        <select id="lmsTrainingPlanAccountType" class="lms-login-input" onchange="lmsPanelSetTrainingPlanAccountType(this.value)">
+        <select id="lmsTrainingPlanAccountType" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetTrainingPlanAccountType">
           <option value="auto" ${accountType === 'auto' ? 'selected' : ''}>自动识别</option>
           <option value="undergraduate" ${accountType === 'undergraduate' ? 'selected' : ''}>本科生</option>
           <option value="postgraduate" ${accountType === 'postgraduate' ? 'selected' : ''}>研究生</option>
@@ -1200,7 +1200,7 @@ function lmsPanelRenderTrainingPlanPage() {
       ${Array.isArray(plans) && plans.length > 1 ? `
         <label class="lms-score-field">
           <span>方案</span>
-          <select id="lmsTrainingPlanCode" class="lms-login-input" onchange="lmsPanelSetTrainingPlanCode(this.value)">
+          <select id="lmsTrainingPlanCode" class="lms-login-input" data-change-action="valueChange" data-handler="lmsPanelSetTrainingPlanCode">
             ${plans.map(plan => {
               const code = plan.code || '';
               const label = [plan.name, plan.routeName].filter(Boolean).join(' · ') || code || '未命名方案';
@@ -1209,7 +1209,7 @@ function lmsPanelRenderTrainingPlanPage() {
           </select>
         </label>
       ` : ''}
-      <button class="lms-big-btn lms-score-query-btn" onclick="lmsPanelFetchTrainingPlan()">查询培养方案</button>
+      <button class="lms-big-btn lms-score-query-btn" data-action="lmsPanelFetchTrainingPlan">查询培养方案</button>
     </div>
   `;
 
@@ -1217,7 +1217,7 @@ function lmsPanelRenderTrainingPlanPage() {
     html += `
       <div class="lms-score-error">
         <div>${escapeHtml(LMS_PANEL_STATE.trainingPlanError)}</div>
-        <button class="lms-mini-btn" onclick="lmsPanelOpenCredentialLogin()">打开登录并保存凭据</button>
+        <button class="lms-mini-btn" data-action="lmsPanelOpenCredentialLogin">打开登录并保存凭据</button>
       </div>
     `;
   }
@@ -1406,9 +1406,9 @@ function lmsPanelRenderBadCookie() {
         ${escapeHtml(preview) || '<em>（空）</em>'}
       </p>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-        <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor('login')">🔑 重新登录</button>
-        <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor('cookie')">✏️ 重新填写 Cookie</button>
-        <button class="lms-big-btn" style="background:var(--danger,#e74c3c);" onclick="lmsPanelClearCookie()">🗑 清空重来</button>
+        <button class="lms-big-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">🔑 重新登录</button>
+        <button class="lms-big-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="cookie">✏️ 重新填写 Cookie</button>
+        <button class="lms-big-btn" style="background:var(--danger,#e74c3c);" data-action="lmsPanelClearCookie">🗑 清空重来</button>
       </div>
       <div class="lms-guide">
         <h4>📝 正确的 Cookie 长这样</h4>
@@ -1426,8 +1426,8 @@ function lmsPanelRenderNoCookie() {
       <h3>欢迎使用学习面板</h3>
       <p>这是西安交大 LMS (lms.xjtu.edu.cn) 的可视化助手</p>
       <p>第一步：使用统一身份认证登录</p>
-      <button class="lms-big-btn" onclick="lmsPanelOpenCookieEditor('login')">🔑 账号密码登录</button>
-      <button class="lms-big-btn" style="background:var(--bg-card,#fff);color:var(--text,#1f2328);border:1px solid var(--border,#d0d7de);" onclick="lmsPanelOpenCookieEditor('cookie')">手动填写 Cookie</button>
+      <button class="lms-big-btn" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="login">🔑 账号密码登录</button>
+      <button class="lms-big-btn" style="background:var(--bg-card,#fff);color:var(--text,#1f2328);border:1px solid var(--border,#d0d7de);" data-action="valueClick" data-handler="lmsPanelOpenCookieEditor" data-value="cookie">手动填写 Cookie</button>
 
       <div class="lms-guide">
         <h4>📝 手动 Cookie 兜底方式</h4>
@@ -1495,11 +1495,11 @@ function lmsPanelRenderOverview() {
     sorted.forEach(t => html += lmsRenderTodoCard(t));
     html += '</div>';
     html += '<div style="text-align:center;margin-top:12px;">';
-    html += '<button class="lms-mini-btn" onclick="lmsPanelSetTab(\'todos\')">查看全部待办 →</button>';
+    html += '<button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelSetTab" data-value="todos">查看全部待办 →</button>';
     html += '</div>';
   } else {
     html += '<div class="lms-empty-mini">';
-    html += '<button class="lms-big-btn" onclick="lmsPanelFetchAll()">📡 拉取最新数据</button>';
+    html += '<button class="lms-big-btn" data-action="lmsPanelFetchAll">📡 拉取最新数据</button>';
     html += '</div>';
   }
 
@@ -1511,7 +1511,7 @@ function lmsPanelRenderTodos() {
   const todos = LMS_PANEL_STATE.cache.todos;
   if (!todos) {
     return `<div class="lms-empty-mini">
-      <button class="lms-big-btn" onclick="lmsPanelFetchTodos()">📡 拉取待办列表</button>
+      <button class="lms-big-btn" data-action="lmsPanelFetchTodos">📡 拉取待办列表</button>
     </div>`;
   }
   if (!todos.length) {
@@ -1524,7 +1524,7 @@ function lmsPanelRenderTodos() {
   });
   let html = `<div class="lms-toolbar">
     <span>共 <strong>${sorted.length}</strong> 项</span>
-    <button class="lms-mini-btn" onclick="lmsPanelFetchTodos()">🔄 刷新</button>
+    <button class="lms-mini-btn" data-action="lmsPanelFetchTodos">🔄 刷新</button>
   </div>`;
   html += '<div class="lms-todo-list">';
   sorted.forEach(t => html += lmsRenderTodoCard(t));
@@ -1557,7 +1557,7 @@ function lmsRenderTodoCard(t) {
         🔴 截止：${lmsFmtTime(end)}
       </div>
       <div class="lms-todo-actions">
-        <button class="lms-mini-btn" onclick="lmsPanelShowHomework(${t.id})">📖 查看详情</button>
+        <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelShowHomework" data-value="${t.id}" data-value-type="number">📖 查看详情</button>
         <a class="lms-mini-btn" href="https://lms.xjtu.edu.cn/course/${t.course_id}/homework/${t.id}" target="_blank">🔗 打开网页</a>
       </div>
     </div>
@@ -1568,7 +1568,7 @@ function lmsPanelRenderCourses() {
   const courses = LMS_PANEL_STATE.cache.courses;
   if (!courses) {
     return `<div class="lms-empty-mini">
-      <button class="lms-big-btn" onclick="lmsPanelFetchCourses()">📡 拉取课程列表</button>
+      <button class="lms-big-btn" data-action="lmsPanelFetchCourses">📡 拉取课程列表</button>
     </div>`;
   }
   if (!courses.length) return '<div class="lms-empty"><div class="lms-empty-icon">📚</div><h3>暂无课程</h3></div>';
@@ -1581,20 +1581,20 @@ function lmsPanelRenderCourses() {
   });
   let html = `<div class="lms-toolbar">
     <span>共 <strong>${courses.length}</strong> 门</span>
-    <button class="lms-mini-btn" onclick="lmsPanelFetchCourses()">🔄 刷新</button>
+    <button class="lms-mini-btn" data-action="lmsPanelFetchCourses">🔄 刷新</button>
   </div>`;
   Object.keys(groups).sort().reverse().forEach(year => {
     html += `<h3 class="lms-section-title">📅 ${escapeHtml(year)}（${groups[year].length} 门）</h3>`;
     html += '<div class="lms-course-grid">';
     groups[year].forEach(c => {
       html += `
-        <div class="lms-course-card" onclick="lmsPanelShowMaterials(${c.id})">
+        <div class="lms-course-card" data-action="valueClick" data-handler="lmsPanelShowMaterials" data-value="${c.id}" data-value-type="number">
           <div class="lms-course-name">${escapeHtml(c.name || '?')}</div>
           <div class="lms-course-meta">
             <span>🆔 ${c.id}</span>
             ${c.credit ? `<span>💯 ${c.credit} 学分</span>` : ''}
           </div>
-          <button class="lms-mini-btn" onclick="event.stopPropagation();lmsPanelShowMaterials(${c.id})">📂 查看课件</button>
+          <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelShowMaterials" data-value="${c.id}" data-value-type="number">📂 查看课件</button>
         </div>
       `;
     });
@@ -1610,13 +1610,13 @@ function lmsPanelRenderMaterials() {
       <div class="lms-empty-icon">📂</div>
       <h3>请先选择一门课程</h3>
       <p>切到「📚 课程」标签，点击任意课程查看课件</p>
-      <button class="lms-big-btn" onclick="lmsPanelSetTab('courses')">前往课程列表</button>
+      <button class="lms-big-btn" data-action="valueClick" data-handler="lmsPanelSetTab" data-value="courses">前往课程列表</button>
     </div>`;
   }
   const data = LMS_PANEL_STATE.cache.materialsByCid[cid];
   if (!data) {
     return `<div class="lms-empty-mini">
-      <button class="lms-big-btn" onclick="lmsPanelFetchMaterials(${cid})">📡 拉取课程 ${cid} 的课件</button>
+      <button class="lms-big-btn" data-action="valueClick" data-handler="lmsPanelFetchMaterials" data-value="${cid}" data-value-type="number">📡 拉取课程 ${cid} 的课件</button>
     </div>`;
   }
   const { activities, modules } = data;
@@ -1626,8 +1626,8 @@ function lmsPanelRenderMaterials() {
 
   let html = `<div class="lms-toolbar">
     <span>📚 课程 <strong>${cid}</strong> · ${materials.length} 项课件</span>
-    <button class="lms-mini-btn" onclick="lmsPanelFetchMaterials(${cid})">🔄 刷新</button>
-    <button class="lms-mini-btn" onclick="lmsPanelSetTab('courses')">← 返回课程</button>
+    <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelFetchMaterials" data-value="${cid}" data-value-type="number">🔄 刷新</button>
+    <button class="lms-mini-btn" data-action="valueClick" data-handler="lmsPanelSetTab" data-value="courses">← 返回课程</button>
   </div>`;
   if (!materials.length) {
     html += '<div class="lms-empty-mini">本课程暂无课件</div>';
@@ -1648,9 +1648,7 @@ function lmsPanelRenderMaterials() {
       ups.forEach(u => {
         if (typeof lmsRegisterUpload === 'function') lmsRegisterUpload(u);
         const dl = u.allow_download;
-        // 🛡️ 把文件名作为合法 JS 字符串字面量嵌入 onclick：先 JSON.stringify 再 HTML escape
-        // 避免 "escapeHtml 再当 JS 字符串" 的层级混乱
-        const nameForJs = escapeHtml(JSON.stringify(u.name || ''));
+        const nameForAttr = escapeHtml(u.name || '');
         html += `
           <div class="lms-material-item">
             <div class="lms-material-icon">${dl ? '📄' : '🔒'}</div>
@@ -1660,8 +1658,8 @@ function lmsPanelRenderMaterials() {
             </div>
             <div class="lms-material-actions">
               ${dl
-                ? `<button class="lms-mini-btn lms-btn-primary" onclick="lmsPanelDownload(${u.id}, ${nameForJs})">⬇️ 下载</button>`
-                : `<button class="lms-mini-btn" title="服务器返回可用地址时可下载" onclick="lmsPanelDownload(${u.id}, ${nameForJs})">🔒 尝试</button>`}
+                ? `<button class="lms-mini-btn lms-btn-primary" data-action="valueClick" data-handler="lmsPanelDownload" data-value="${u.id}" data-value-type="number" data-extra-value="${nameForAttr}">⬇️ 下载</button>`
+                : `<button class="lms-mini-btn" title="服务器返回可用地址时可下载" data-action="valueClick" data-handler="lmsPanelDownload" data-value="${u.id}" data-value-type="number" data-extra-value="${nameForAttr}">🔒 尝试</button>`}
             </div>
           </div>
         `;
@@ -2129,8 +2127,8 @@ async function lmsPanelLoadCredentialStatus() {
         <div class="lms-saved-sub">${escapeHtml(username || '未知账号')} · ${escapeHtml(savedAt)}</div>
       </div>
       <div class="lms-saved-actions">
-        <button class="btn btn-primary" onclick="lmsPanelLoginWithSavedCredential()">使用保存账号登录</button>
-        <button class="btn" onclick="lmsPanelClearSavedCredential()">忘记</button>
+        <button class="btn btn-primary" data-action="lmsPanelLoginWithSavedCredential">使用保存账号登录</button>
+        <button class="btn" data-action="lmsPanelClearSavedCredential">忘记</button>
       </div>
     </div>
   `;

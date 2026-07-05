@@ -341,7 +341,7 @@ class WechatBridgeMixin:
         try:
             op = str(body.get('op') or '').strip().lower()
             if not op:
-                return self._send_json(200, {'ok': False, 'error': 'missing op'})
+                return self.response.json(200, {'ok': False, 'error': 'missing op'})
             if op == 'start':
                 timeout = float(body.get('timeout') or body.get('bridge_timeout') or 120)
                 payload = _BRIDGE.start(timeout=timeout)
@@ -361,6 +361,6 @@ class WechatBridgeMixin:
 
             if isinstance(payload, dict) and 'text' not in payload:
                 payload['text'] = json.dumps(payload, ensure_ascii=False, indent=2)
-            return self._send_json(200, payload)
+            return self.response.json(200, payload)
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})

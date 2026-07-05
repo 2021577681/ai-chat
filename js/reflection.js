@@ -5,33 +5,46 @@
 // - 老师只看学生最终答案，不看学生过程
 // - 工具历史不进入主对话 c.messages，只存 reflection.turns
 
+const ReflectionStateModule = window.AgentApp.require('state');
+const reflectionState = ReflectionStateModule.state;
+const reflectionSaveData = ReflectionStateModule.saveData;
+const reflectionPersistSettings = ReflectionStateModule.persistSettings;
+const reflectionCurrentChat = ReflectionStateModule.currentChat;
+const reflectionChatById = ReflectionStateModule.chatById;
+const reflectionIsCurrentChat = ReflectionStateModule.isCurrentChat;
+const reflectionIsChatGenerating = ReflectionStateModule.isChatGenerating;
+const reflectionBeginChatTask = ReflectionStateModule.beginChatTask;
+const reflectionSetChatTaskMode = ReflectionStateModule.setChatTaskMode;
+const reflectionUpdateChatTaskController = ReflectionStateModule.updateChatTaskController;
+const reflectionClearChatTask = ReflectionStateModule.clearChatTask;
+const ReflectionConfigModule = window.AgentApp.require('config');
+const REFLECTION_CONFIG_PRESETS = ReflectionConfigModule.REFLECTION_PRESETS;
+
 async function callAPIWithReflection(options = {}) {
   const requestedChatId = options && options.chatId;
-  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
-  const s = state.settings;
+  const c = requestedChatId ? reflectionChatById(requestedChatId) : reflectionCurrentChat();
+  const s = reflectionState.settings;
   const taskChatId = c && c.id;
-  const renderIfVisible = () => { if (!taskChatId || isCurrentChat(taskChatId)) renderMessages(); };
+  const renderIfVisible = () => { if (!taskChatId || reflectionIsCurrentChat(taskChatId)) renderMessages(); };
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   const suppressCompletionSound = !!options.suppressCompletionSound;
-  if (taskChatId && ((typeof isChatGenerating === 'function') ? isChatGenerating(taskChatId) : !!state.isGenerating)) {
-    if (typeof toast === 'function' && isCurrentChat(taskChatId)) toast('此对话已有任务正在执行，请稍等');
+  if (taskChatId && reflectionIsChatGenerating(taskChatId)) {
+    if (typeof toast === 'function' && reflectionIsCurrentChat(taskChatId)) toast('此对话已有任务正在执行，请稍等');
     return;
   }
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
   const abortCtrl = new AbortController();
-  const task = (typeof beginChatTask === 'function')
-    ? beginChatTask(taskChatId, abortCtrl, { resetStop: true })
-    : null;
-  if (task && typeof setChatTaskMode === 'function') {
-    setChatTaskMode(taskChatId, 'reflection');
-    if (typeof updateChatTaskController === 'function') updateChatTaskController(taskChatId, abortCtrl);
+  const task = reflectionBeginChatTask(taskChatId, abortCtrl, { resetStop: true });
+  if (task) {
+    reflectionSetChatTaskMode(taskChatId, 'reflection');
+    reflectionUpdateChatTaskController(taskChatId, abortCtrl);
   } else if (!task) {
-    state.isGenerating = true;
-    state.activeTaskChatId = taskChatId || null;
-    state.abortCtrl = abortCtrl;
+    reflectionState.isGenerating = true;
+    reflectionState.activeTaskChatId = taskChatId || null;
+    reflectionState.abortCtrl = abortCtrl;
   }
   // ⭐ 清零软停止标志：新任务开始
-  state.stopRequested = false;
+  reflectionState.stopRequested = false;
   updateSendBtn();
   if (typeof renderChatList === 'function') renderChatList();
   
@@ -62,7 +75,7 @@ async function callAPIWithReflection(options = {}) {
   const teacherMaxRounds = parseInt(s.refTeacherMaxToolRounds) || 5;
   
   const signal = abortCtrl.signal;
-  const isStopped = () => task ? !!task.stopRequested : !!state.stopRequested;
+  const isStopped = () => task ? !!task.stopRequested : !!reflectionState.stopRequested;
   
   try {
     let currentAnswer = '';
@@ -114,7 +127,7 @@ async function callAPIWithReflection(options = {}) {
         chat: c,
         chatId: taskChatId,
         stream: true,
-        useTools: studentUseTools && taskUseTools && state.tools.length > 0,
+        useTools: studentUseTools && taskUseTools && reflectionState.tools.length > 0,
         onProgress: (ev) => onStudentProgress(ev, studentTurn, aiMsg, c)
       });
       
@@ -161,7 +174,7 @@ async function callAPIWithReflection(options = {}) {
         chat: c,
         chatId: taskChatId,
         stream: true,
-        useTools: teacherUseTools && taskUseTools && state.tools.length > 0,
+        useTools: teacherUseTools && taskUseTools && reflectionState.tools.length > 0,
         onProgress: (ev) => onTeacherProgress(ev, teacherTurn, aiMsg, c)
       });
       
@@ -197,7 +210,7 @@ async function callAPIWithReflection(options = {}) {
       if (finalIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(finalIdx, c);
       else renderIfVisible();
     }
-    saveData();
+    reflectionSaveData();
     if (!suppressCompletionSound && typeof playCompletionSound === 'function') playCompletionSound();
   } catch (e) {
     if (e.name === 'AbortError') aiMsg.content = (aiMsg.content || '') + '\n\n*[已停止]*';
@@ -219,13 +232,14 @@ async function callAPIWithReflection(options = {}) {
       if (errIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(errIdx, c);
       else renderIfVisible();
     }
-    saveData();
+    reflectionSaveData();
   } finally {
-    if (typeof clearChatTask === 'function') clearChatTask(taskChatId);
-    else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
-      if (state.activeTaskChatId === taskChatId) state.activeTaskChatId = null;
+    if (task) {
+      reflectionClearChatTask(taskChatId);
+    } else {
+      reflectionState.isGenerating = false;
+      reflectionState.abortCtrl = null;
+      if (reflectionState.activeTaskChatId === taskChatId) reflectionState.activeTaskChatId = null;
     }
     updateSendBtn();
     if (typeof renderChatList === 'function') renderChatList();
@@ -297,14 +311,14 @@ function onTeacherProgress(ev, turn, aiMsg, targetChat) {
 // ⭐ 只替换 .reflection-body 的内部 HTML，不动外层节点，不动其它消息
 // immediate=true 时绕过节流（用于工具卡片增删，确保不丢事件）
 function refreshReflectionLive(aiMsg, immediate, targetChat) {
-  const c = targetChat || currentChat();
-  if (!c || (targetChat && !isCurrentChat(targetChat))) return;
+  const c = targetChat || reflectionCurrentChat();
+  if (!c || (targetChat && !reflectionIsCurrentChat(targetChat.id))) return;
   const idx = c.messages.indexOf(aiMsg);
   if (idx < 0) return;
   
   const doUpdate = () => {
     refreshReflectionLive._t = null;
-    if (!isCurrentChat(c)) return;
+    if (!reflectionIsCurrentChat(c.id)) return;
     const panel = document.querySelector(`.reflection-panel[data-msg-idx="${idx}"]`);
     if (!panel) {
       // 面板还没创建（首次出现）：局部刷新这一条消息
@@ -459,19 +473,19 @@ function renderReflectionTurn(t) {
 }
 
 function toggleReflectionPanel(idx) {
-  const c = currentChat();
+  const c = reflectionCurrentChat();
   if (!c || !c.messages[idx] || !c.messages[idx].reflection) return;
   c.messages[idx].reflection.expanded = !c.messages[idx].reflection.expanded;
   const panel = document.querySelector(`.reflection-panel[data-msg-idx="${idx}"]`);
   if (panel) panel.classList.toggle('collapsed');
-  saveData();
+  reflectionSaveData();
 }
 
 // ============ 设置面板 ============
 
 function openReflectionSettings() {
   document.getElementById('reflectionModal').classList.add('show');
-  const s = state.settings;
+  const s = reflectionState.settings;
   document.getElementById('ref_enabled').checked = s.useReflection;
   document.getElementById('ref_rounds').value = s.refRounds;
   document.getElementById('refRoundsVal').textContent = s.refRounds;
@@ -497,7 +511,7 @@ function closeReflectionSettings() {
 }
 
 function applyPreset(key) {
-  const p = REFLECTION_PRESETS[key];
+  const p = REFLECTION_CONFIG_PRESETS[key];
   if (!p) return;
   document.getElementById('ref_studentPrompt').value = p.student;
   document.getElementById('ref_teacherPrompt').value = p.teacher;
@@ -505,7 +519,7 @@ function applyPreset(key) {
 }
 
 function saveReflectionSettings() {
-  const s = state.settings;
+  const s = reflectionState.settings;
   s.useReflection = document.getElementById('ref_enabled').checked;
   s.refRounds = parseInt(document.getElementById('ref_rounds').value);
   s.refMinScore = parseInt(document.getElementById('ref_minScore').value);
@@ -536,7 +550,7 @@ function saveReflectionSettings() {
     if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
     if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   }
-  persistSettings();
+  reflectionPersistSettings();
   // 师生模式没有独立的工具栏按钮（通过"更多菜单"打开），不需要切换按钮态
   // 旧代码里访问不存在的 reflectBtn 会抛 TypeError，导致后面的 close + updateSendBtn 都不执行
   const btn = document.getElementById('reflectBtn');
@@ -550,7 +564,7 @@ function saveReflectionSettings() {
 }
 
 function toggleReflection() {
-  const s = state.settings;
+  const s = reflectionState.settings;
   s.useReflection = !s.useReflection;
   // 互斥：开启师生时关闭 Plan / 大纲
   if (s.useReflection) {
@@ -571,7 +585,34 @@ function toggleReflection() {
     if (s.useReflection) btn.classList.add('reflect-active');
     else btn.classList.remove('reflect-active');
   }
-  persistSettings();
+  reflectionPersistSettings();
   updateSendBtn();
   toast(s.useReflection ? '✓ 已启用师生' : '✓ 已关闭师生');
 }
+window.callAPIWithReflection = callAPIWithReflection;
+window.refreshReflectionLive = refreshReflectionLive;
+window.buildRefineRequest = buildRefineRequest;
+window.parseCritique = parseCritique;
+window.renderRefToolCalls = renderRefToolCalls;
+window.renderReflectionTurn = renderReflectionTurn;
+window.toggleReflectionPanel = toggleReflectionPanel;
+window.openReflectionSettings = openReflectionSettings;
+window.closeReflectionSettings = closeReflectionSettings;
+window.applyPreset = applyPreset;
+window.saveReflectionSettings = saveReflectionSettings;
+window.toggleReflection = toggleReflection;
+
+window.AgentApp.define('reflection', {
+  callAPIWithReflection,
+  refreshReflectionLive,
+  buildRefineRequest,
+  parseCritique,
+  renderRefToolCalls,
+  renderReflectionTurn,
+  toggleReflectionPanel,
+  openReflectionSettings,
+  closeReflectionSettings,
+  applyPreset,
+  saveReflectionSettings,
+  toggleReflection
+});

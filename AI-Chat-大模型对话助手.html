@@ -154,10 +154,10 @@
         <div class="logo-icon">🐍</div>
         <span>SNAKE</span>
       </div>
-      <button class="sidebar-mode-btn" id="sidebarExplorerBtn" onclick="toggleSidebarExplorer()" title="资源管理器" aria-pressed="false">
+      <button class="sidebar-mode-btn" id="sidebarExplorerBtn" data-action="toggleSidebarExplorer" title="资源管理器" aria-pressed="false">
         <img src="icon/文件夹-开_folder-open.png" alt="">
       </button>
-      <button class="sidebar-collapse-btn" onclick="collapseSidebar()" title="收起侧栏">◀</button>
+      <button class="sidebar-collapse-btn" data-action="collapseSidebar" title="收起侧栏">◀</button>
     </div>
 
     <!-- 沙箱信息：放在侧栏顶部，减少主对话区干扰 -->
@@ -167,26 +167,26 @@
         <span class="workspace-label">沙箱目录</span>
         <div class="workspace-actions">
           <span class="workspace-status" id="workspaceStatus">●</span>
-          <button class="workspace-refresh" onclick="refreshWorkspaceInfo()" title="刷新">⟳</button>
-          <button class="workspace-select" onclick="selectWorkspaceFromUi()" title="选择沙箱目录">📂</button>
+          <button class="workspace-refresh" data-action="refreshWorkspaceInfo" title="刷新">⟳</button>
+          <button class="workspace-select" data-action="selectWorkspaceFromUi" title="选择沙箱目录">📂</button>
         </div>
       </div>
       <span class="workspace-path" id="workspacePath">未连接</span>
     </div>
     
     <div class="sidebar-panel sidebar-chat-panel" id="sidebarChatPanel">
-      <button class="btn-new" onclick="newChat()">+ 新建对话</button>
+      <button class="btn-new" data-action="newChat">+ 新建对话</button>
       <div class="chat-list" id="chatList"></div>
     </div>
 
     <div class="sidebar-panel sidebar-explorer-panel" id="sidebarExplorerPanel" hidden>
       <div class="file-explorer-toolbar">
-        <button class="file-explorer-nav" id="fileExplorerUpBtn" onclick="fileExplorerGoUp()" title="上级目录">←</button>
+        <button class="file-explorer-nav" id="fileExplorerUpBtn" data-action="fileExplorerGoUp" title="上级目录">←</button>
         <div class="file-explorer-title">
           <span>资源管理器</span>
           <small id="fileExplorerPath">.</small>
         </div>
-        <button class="file-explorer-nav" onclick="refreshFileExplorer()" title="刷新">⟳</button>
+        <button class="file-explorer-nav" data-action="refreshFileExplorer" title="刷新">⟳</button>
       </div>
       <div class="file-explorer-list" id="fileExplorerList">
         <div class="file-explorer-empty">切换到资源管理器后会显示当前沙箱目录。</div>
@@ -195,9 +195,9 @@
     
     <!-- 侧边栏底部：设置 + 主题 -->
     <div class="sidebar-footer">
-      <button class="icon-btn" onclick="openWorkspaceTerminal()"><img class="icon-btn-img" src="icon/终端_terminal.png" alt="">终端</button>
-      <button class="icon-btn" onclick="openRemoteConnection()"><img class="icon-btn-img" src="icon/无线网络_wifi.png" alt="">远程</button>
-      <button class="icon-btn" onclick="openSettings()"><img class="icon-btn-img" src="icon/配置_config.png" alt="">设置</button>
+      <button class="icon-btn" data-action="openWorkspaceTerminal"><img class="icon-btn-img" src="icon/终端_terminal.png" alt="">终端</button>
+      <button class="icon-btn" data-action="openRemoteConnection"><img class="icon-btn-img" src="icon/无线网络_wifi.png" alt="">远程</button>
+      <button class="icon-btn" data-action="openSettings"><img class="icon-btn-img" src="icon/配置_config.png" alt="">设置</button>
     </div>
   </aside>
   
@@ -214,26 +214,26 @@
     </div>
     <!-- 顶部工具栏 -->
     <div class="topbar">
-      <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+      <button class="menu-toggle" data-action="toggleSidebar">☰</button>
       <div class="model-picker" id="modelPicker">
-        <select class="model-select" id="modelSelect" onchange="saveSettings()" tabindex="-1" aria-hidden="true"></select>
-        <button type="button" class="model-trigger" id="modelTrigger" onclick="toggleModelMenu(event)" title="选择模型" aria-haspopup="listbox" aria-expanded="false">
+        <select class="model-select" id="modelSelect" data-change-action="saveSettings" tabindex="-1" aria-hidden="true"></select>
+        <button type="button" class="model-trigger" id="modelTrigger" data-action="toggleModelMenu" title="选择模型" aria-haspopup="listbox" aria-expanded="false">
           <span class="model-trigger-label" id="modelTriggerLabel">选择模型</span>
           <span class="model-trigger-caret">▾</span>
         </button>
         <div class="model-menu" id="modelMenu" role="listbox" hidden></div>
       </div>
-      <button class="stats-toggle-btn" id="statsToggleBtn" type="button" onclick="toggleStatsBar()" title="收起 Token / 请求速度统计栏">统计</button>
+      <button class="stats-toggle-btn" id="statsToggleBtn" type="button" data-action="toggleStatsBar" title="收起 Token / 请求速度统计栏">统计</button>
       <div class="topbar-spacer"></div>
-      <button class="topbar-btn" id="temporaryChatBtn" onclick="startTemporaryChat()" title="临时会话：刷新保留，切换或新建对话后删除"><img class="topbar-btn-icon" src="icon/时间_time.png" alt=""><span>临时</span></button>
-      <button class="topbar-btn" id="scheduleBtn" onclick="toggleScheduledSend()" title="定时发送：到点后才让 AI 响应"><img class="topbar-btn-icon" src="icon/闹钟_alarm-clock.png" alt=""><span>定时</span></button>
-      <button class="topbar-btn" id="planBtn" onclick="togglePlan()" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
-      <button class="topbar-btn" id="outlineBtn" onclick="toggleOutline()" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
-      <button class="topbar-btn" id="toolsBtn" onclick="toggleTools()" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
-      <button class="topbar-btn" onclick="openLmsPanel()" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
-      <button class="topbar-btn" id="traceToggleBtn" onclick="toggleTracePanel()" title="Trace 提交记录（本地）"><img class="topbar-btn-icon" src="icon/日志_log.png" alt=""><span>日志</span></button>
-      <button class="topbar-btn" onclick="runHealthCheck()" title="上下文体检：测试 AI 是否还记得之前的对话"><img class="topbar-btn-icon" src="icon/健康_health.png" alt=""><span>体检</span></button>
-      <button class="topbar-btn" id="remoteControlBtn" onclick="toggleRemoteControl()" title="遥控：轮询微信文件传输助手指令"><img class="topbar-btn-icon" src="icon/遥控器_remote-control.png" alt=""><span>遥控</span></button>
+      <button class="topbar-btn" id="temporaryChatBtn" data-action="startTemporaryChat" title="临时会话：刷新保留，切换或新建对话后删除"><img class="topbar-btn-icon" src="icon/时间_time.png" alt=""><span>临时</span></button>
+      <button class="topbar-btn" id="scheduleBtn" data-action="toggleScheduledSend" title="定时发送：到点后才让 AI 响应"><img class="topbar-btn-icon" src="icon/闹钟_alarm-clock.png" alt=""><span>定时</span></button>
+      <button class="topbar-btn" id="planBtn" data-action="togglePlan" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
+      <button class="topbar-btn" id="outlineBtn" data-action="toggleOutline" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
+      <button class="topbar-btn" id="toolsBtn" data-action="toggleTools" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
+      <button class="topbar-btn" data-action="openLmsPanel" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
+      <button class="topbar-btn" id="traceToggleBtn" data-action="toggleTracePanel" title="Trace 提交记录（本地）"><img class="topbar-btn-icon" src="icon/日志_log.png" alt=""><span>日志</span></button>
+      <button class="topbar-btn" data-action="runHealthCheck" title="上下文体检：测试 AI 是否还记得之前的对话"><img class="topbar-btn-icon" src="icon/健康_health.png" alt=""><span>体检</span></button>
+      <button class="topbar-btn" id="remoteControlBtn" data-action="toggleRemoteControl" title="遥控：轮询微信文件传输助手指令"><img class="topbar-btn-icon" src="icon/遥控器_remote-control.png" alt=""><span>遥控</span></button>
     </div>
     
     <!-- Token + 频率统计栏（合并为单栏，左 Token 右 Rate） -->
@@ -265,11 +265,11 @@
             <div class="pending-atts" id="pendingAtts"></div>
             <textarea id="input" placeholder="输入消息，Enter 发送 / Shift+Enter 换行 / 可拖拽或粘贴图片..." rows="1"></textarea>
             <div class="input-bar">
-              <button class="input-tool" id="uploadBtn" onclick="document.getElementById('fileInput').click()" title="上传文件">+</button>
-              <input type="file" id="fileInput" multiple style="display:none" onchange="onPickFiles(event)">
+              <button class="input-tool" id="uploadBtn" data-action="openFilePicker" data-target="fileInput" title="上传文件">+</button>
+              <input type="file" id="fileInput" multiple style="display:none" data-change-action="onPickFiles">
               <div class="input-info" id="inputInfo">准备就绪</div>
               <div class="effort-picker" id="effortPicker">
-                <select class="effort-select-native" id="effortSelect" onchange="saveSettings()" tabindex="-1" aria-hidden="true">
+                <select class="effort-select-native" id="effortSelect" data-change-action="saveSettings" tabindex="-1" aria-hidden="true">
                   <option value="">不设置</option>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
@@ -277,27 +277,27 @@
                   <option value="xhigh">xhigh</option>
                   <option value="max">max</option>
                 </select>
-                <button type="button" class="effort-trigger" id="effortTrigger" onclick="toggleReasoningEffortMenu(event)" title="模型思考程度" aria-haspopup="listbox" aria-expanded="false">
+                <button type="button" class="effort-trigger" id="effortTrigger" data-action="toggleReasoningEffortMenu" title="模型思考程度" aria-haspopup="listbox" aria-expanded="false">
                   <span class="effort-trigger-label" id="effortTriggerLabel">不设置</span>
                   <span class="effort-trigger-caret">▾</span>
                 </button>
                 <div class="effort-menu" id="effortMenu" role="listbox" hidden>
-                  <button type="button" class="effort-option" data-effort="" onclick="setReasoningEffort('', event)" role="option">
+                  <button type="button" class="effort-option" data-effort="" data-action="setReasoningEffort" role="option">
                     <span class="effort-option-text">不设置</span><span class="effort-option-check">✓</span>
                   </button>
-                  <button type="button" class="effort-option" data-effort="low" onclick="setReasoningEffort('low', event)" role="option">
+                  <button type="button" class="effort-option" data-effort="low" data-action="setReasoningEffort" role="option">
                     <span class="effort-option-text">low</span><span class="effort-option-check">✓</span>
                   </button>
-                  <button type="button" class="effort-option" data-effort="medium" onclick="setReasoningEffort('medium', event)" role="option">
+                  <button type="button" class="effort-option" data-effort="medium" data-action="setReasoningEffort" role="option">
                     <span class="effort-option-text">medium</span><span class="effort-option-check">✓</span>
                   </button>
-                  <button type="button" class="effort-option" data-effort="high" onclick="setReasoningEffort('high', event)" role="option">
+                  <button type="button" class="effort-option" data-effort="high" data-action="setReasoningEffort" role="option">
                     <span class="effort-option-text">high</span><span class="effort-option-check">✓</span>
                   </button>
-                  <button type="button" class="effort-option" data-effort="xhigh" onclick="setReasoningEffort('xhigh', event)" role="option">
+                  <button type="button" class="effort-option" data-effort="xhigh" data-action="setReasoningEffort" role="option">
                     <span class="effort-option-text">xhigh</span><span class="effort-option-check">✓</span>
                   </button>
-                  <button type="button" class="effort-option" data-effort="max" onclick="setReasoningEffort('max', event)" role="option">
+                  <button type="button" class="effort-option" data-effort="max" data-action="setReasoningEffort" role="option">
                     <span class="effort-option-text">max</span><span class="effort-option-check">✓</span>
                   </button>
                 </div>
@@ -305,9 +305,9 @@
               <div class="schedule-picker" id="schedulePicker" hidden>
                 <span class="schedule-picker-label">定时</span>
                 <input type="datetime-local" id="scheduleTimeInput" class="schedule-time-input" title="选择 AI 开始响应的时间">
-                <button type="button" class="schedule-clear" onclick="toggleScheduledSend(false)" title="取消定时">×</button>
+                <button type="button" class="schedule-clear" data-action="toggleScheduledSend" data-value="false" title="取消定时">×</button>
               </div>
-              <button class="send-btn" id="sendBtn" onclick="onSend()">↑</button>
+              <button class="send-btn" id="sendBtn" data-action="onSend">↑</button>
             </div>
           </div>
         </div>
@@ -321,8 +321,8 @@
             <span id="inlineFileTitle">文件内容</span>
             <code id="inlineFilePath">-</code>
           </div>
-          <button class="inline-file-side-toggle" id="inlineFileSideToggle" type="button" onclick="toggleInlineFileSide()" title="切换左右列">左列</button>
-          <button class="inline-file-close" type="button" onclick="closeInlineFilePanel()" title="关闭">×</button>
+          <button class="inline-file-side-toggle" id="inlineFileSideToggle" type="button" data-action="toggleInlineFileSide" title="切换左右列">左列</button>
+          <button class="inline-file-close" type="button" data-action="closeInlineFilePanel" title="关闭">×</button>
         </div>
         <div class="inline-file-status" id="inlineFileStatus">未加载</div>
         <div class="inline-file-body" id="inlineFileBody"></div>
@@ -340,18 +340,18 @@
       <span>日志</span>
       <span class="trace-header-stats" id="traceHeaderStats"></span>
     </div>
-    <button class="trace-close" onclick="closeTracePanel()" title="关闭">×</button>
+    <button class="trace-close" data-action="closeTracePanel" title="关闭">×</button>
   </div>
   <div class="trace-tabs">
-    <button class="trace-tab active" id="traceTabSession" onclick="setTraceFilter('session')">Session</button>
-    <button class="trace-tab" id="traceTabAll" onclick="setTraceFilter('all')">All</button>
+    <button class="trace-tab active" id="traceTabSession" data-action="setTraceFilter" data-value="session">Session</button>
+    <button class="trace-tab" id="traceTabAll" data-action="setTraceFilter" data-value="all">All</button>
     <div class="trace-tab-spacer"></div>
-    <button class="trace-mini" onclick="exportTraces()" title="导出 JSON">⬇</button>
-    <button class="trace-mini" onclick="clearSessionTraces()" title="清空当前会话">🧹</button>
-    <button class="trace-mini" onclick="clearAllTraces()" title="清空全部">🗑</button>
+    <button class="trace-mini" data-action="exportTraces" title="导出 JSON">⬇</button>
+    <button class="trace-mini" data-action="clearSessionTraces" title="清空当前会话">🧹</button>
+    <button class="trace-mini" data-action="clearAllTraces" title="清空全部">🗑</button>
   </div>
   <div class="trace-search">
-    <input id="traceSearchInput" placeholder="🔍 搜索 hash / 标题 / 输入输出..." oninput="renderTracePanel()">
+    <input id="traceSearchInput" placeholder="🔍 搜索 hash / 标题 / 输入输出..." data-input-action="renderTracePanel">
   </div>
   <div class="trace-body" id="traceBody"></div>
   <div class="trace-foot">
@@ -364,7 +364,7 @@
 <!-- ============ 设置面板 ============ -->
 <div class="modal-mask" id="settingsModal">
   <div class="modal wide">
-    <h2>设置 <button class="modal-close" onclick="closeSettings()">×</button></h2>
+    <h2>设置 <button class="modal-close" data-action="closeSettings">×</button></h2>
     
     <!-- 🗂️ API 配置档案 -->
     <div class="form-group api-profile-box">
@@ -374,12 +374,12 @@
       </label>
       <div style="display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;">
         <!-- 隐藏的原生 select 仅作为数据源/兼容层 -->
-        <select id="apiProfileSelect" onchange="onApiProfileSelectChange()" style="display:none;">
+        <select id="apiProfileSelect" data-change-action="onApiProfileSelectChange" style="display:none;">
           <option value="">— 未保存的临时配置 —</option>
         </select>
         <!-- 自定义两行下拉 -->
         <div class="api-profile-dropdown" id="apiProfileDropdown" style="flex:1;min-width:200px;">
-          <button type="button" class="api-profile-trigger" id="apiProfileTrigger" onclick="toggleApiProfileMenu()">
+          <button type="button" class="api-profile-trigger" id="apiProfileTrigger" data-action="toggleApiProfileMenu">
             <div class="api-profile-trigger-text" id="apiProfileTriggerText">
               <div class="api-profile-name">— 未保存的临时配置 —</div>
               <div class="api-profile-summary">点击选择已保存的配置</div>
@@ -388,11 +388,11 @@
           </button>
           <div class="api-profile-menu" id="apiProfileMenu" hidden></div>
         </div>
-        <button class="btn api-profile-action-btn" type="button" onclick="onSaveAsNewProfile()" title="把当前所有 API 设置保存为一个新的配置档案">另存</button>
-        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" onclick="onOverwriteActiveProfile()" title="用当前设置覆盖此档案" disabled>更新</button>
-        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" onclick="onRenameActiveProfile()" title="重命名" disabled>改名</button>
-        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" onclick="onDuplicateActiveProfile()" title="复制一份" disabled>复制</button>
-        <button class="btn api-profile-action-btn api-profile-op-btn api-profile-danger-btn" type="button" onclick="onDeleteActiveProfile()" title="删除此档案" disabled>删除</button>
+        <button class="btn api-profile-action-btn" type="button" data-action="onSaveAsNewProfile" title="把当前所有 API 设置保存为一个新的配置档案">另存</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" data-action="onOverwriteActiveProfile" title="用当前设置覆盖此档案" disabled>更新</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" data-action="onRenameActiveProfile" title="重命名" disabled>改名</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn" type="button" data-action="onDuplicateActiveProfile" title="复制一份" disabled>复制</button>
+        <button class="btn api-profile-action-btn api-profile-op-btn api-profile-danger-btn" type="button" data-action="onDeleteActiveProfile" title="删除此档案" disabled>删除</button>
       </div>
       <div class="form-hint" style="margin-top:6px;">
         切换档案会自动应用 baseUrl / API Key / 模型 / 系统提示等配置。修改后点「保存」会自动同步到当前激活的档案。
@@ -403,7 +403,7 @@
     
     <div class="form-group">
       <label>服务商预设</label>
-      <select id="provider" onchange="onProviderChange()">
+      <select id="provider" data-change-action="onProviderChange">
         <option value="openai">OpenAI</option>
         <option value="openai_responses">OpenAI Responses</option>
         <option value="anthropic">Anthropic Claude</option>
@@ -416,19 +416,19 @@
     
     <div class="form-group">
       <label>API Base URL</label>
-      <input type="text" id="baseUrl" oninput="updateUrlPreview()">
+      <input type="text" id="baseUrl" data-input-action="updateUrlPreview">
       <div class="form-hint">基础地址，不含 /chat/completions、/responses 这部分</div>
     </div>
     
     <div class="form-group">
       <label>API 路径</label>
-      <input type="text" id="apiPath" oninput="updateUrlPreview()">
+      <input type="text" id="apiPath" data-input-action="updateUrlPreview">
       <div class="form-hint">OpenAI Chat: <code>/chat/completions</code>；OpenAI Responses: <code>/responses</code>；Claude: <code>/messages</code></div>
     </div>
     
     <div class="form-group">
       <label>API 格式</label>
-      <select id="apiFormat" onchange="updateUrlPreview()">
+      <select id="apiFormat" data-change-action="updateUrlPreview">
         <option value="openai">OpenAI 兼容</option>
         <option value="responses">OpenAI Responses</option>
         <option value="anthropic">Anthropic 原生</option>
@@ -444,14 +444,14 @@
       <label>API Key</label>
       <div class="key-wrap">
         <input type="password" id="apiKey">
-        <button class="key-toggle" onclick="toggleKey()" id="keyToggle">显示</button>
+        <button class="key-toggle" data-action="toggleKey" id="keyToggle">显示</button>
       </div>
     </div>
     
     <div class="form-group">
       <label style="display:flex;align-items:center;justify-content:space-between;">
         <span>模型名称</span>
-        <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" onclick="onFetchModels()">📡 拉取模型</button>
+        <button type="button" class="btn" style="padding:4px 10px;font-size:12px;" data-action="onFetchModels">📡 拉取模型</button>
       </label>
       <input type="text" id="modelName">
       <div class="form-hint">多个用逗号分隔。点【拉取模型】可从服务商自动获取可用列表</div>
@@ -465,7 +465,7 @@
     <div class="form-group">
       <label>Temperature</label>
       <div class="slider-row">
-        <input type="range" id="temperature" min="0" max="2" step="0.1" oninput="document.getElementById('tempVal').textContent=this.value">
+        <input type="range" id="temperature" min="0" max="2" step="0.1" data-input-action="setLabelFromValue" data-label-target="tempVal">
         <span class="slider-val" id="tempVal">0.7</span>
       </div>
     </div>
@@ -478,10 +478,10 @@
     <div class="form-group">
       <label>工具调用最大轮数</label>
       <div class="slider-row">
-        <input type="range" id="maxToolRounds" min="1" max="100" step="1" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRoundsInput').value=this.value">
+        <input type="range" id="maxToolRounds" min="1" max="100" step="1" data-input-action="syncMaxToolRoundsRange">
         <span class="slider-val" id="maxToolRoundsVal">15</span>
       </div>
-      <input type="number" id="maxToolRoundsInput" min="1" step="1" style="margin-top:8px;" oninput="document.getElementById('maxToolRoundsVal').textContent=this.value;document.getElementById('maxToolRounds').value=Math.max(1, Math.min(100, parseInt(this.value)||1))">
+      <input type="number" id="maxToolRoundsInput" min="1" step="1" style="margin-top:8px;" data-input-action="syncMaxToolRoundsInput">
       <div class="form-hint">单次对话中模型连续调用工具的最大轮次。一轮可包含多个并行工具。滑块最高 100，也可以直接输入更大的整数。</div>
     </div>
     
@@ -501,7 +501,7 @@
     <div class="form-group">
       <label>提示音音量</label>
       <div class="slider-row">
-        <input type="range" id="completionSoundVolume" min="0" max="100" step="5" oninput="document.getElementById('completionSoundVolumeVal').textContent=this.value + '%'">
+        <input type="range" id="completionSoundVolume" min="0" max="100" step="5" data-input-action="setLabelFromValue" data-label-target="completionSoundVolumeVal" data-suffix="%">
         <span class="slider-val" id="completionSoundVolumeVal">80%</span>
       </div>
       <div class="form-hint">只影响 AI 完成提示音，不影响浏览器或系统音量。</div>
@@ -538,7 +538,7 @@
     <div class="form-group">
       <label>失败自动重试次数</label>
       <div class="slider-row">
-        <input type="range" id="retryMaxAttempts" min="0" max="9" step="1" oninput="setRetryMaxAttemptsLabel(this.value)">
+        <input type="range" id="retryMaxAttempts" min="0" max="9" step="1" data-input-action="setRetryMaxAttemptsLabel">
         <span class="slider-val" id="retryMaxAttemptsVal">∞</span>
       </div>
       <div class="form-hint">网络抖动 / 5xx / 429 / 流中断时自动重发。最右侧 ∞ 表示无限重试；前 5 次按退避等待，之后固定每 2s 重试一次。</div>
@@ -559,7 +559,7 @@
     <div class="form-group">
       <label>自动压缩阈值（上下文使用率）</label>
       <div class="slider-row">
-        <input type="range" id="compressAutoThreshold" min="50" max="95" step="5" oninput="document.getElementById('compressThresholdVal').textContent=this.value+'%'">
+        <input type="range" id="compressAutoThreshold" min="50" max="95" step="5" data-input-action="setLabelFromValue" data-label-target="compressThresholdVal" data-suffix="%">
         <span class="slider-val" id="compressThresholdVal">75%</span>
       </div>
     </div>
@@ -567,7 +567,7 @@
     <div class="form-group">
       <label>压缩时保留最近几条消息</label>
       <div class="slider-row">
-        <input type="range" id="compressKeepLast" min="2" max="10" step="1" oninput="document.getElementById('compressKeepLastVal').textContent=this.value">
+        <input type="range" id="compressKeepLast" min="2" max="10" step="1" data-input-action="setLabelFromValue" data-label-target="compressKeepLastVal">
         <span class="slider-val" id="compressKeepLastVal">4</span>
       </div>
       <div class="form-hint">最近的消息保留原样，前面的消息会被压缩成摘要</div>
@@ -588,7 +588,7 @@
     <div class="form-group">
       <label>埋点间隔（每 N 条用户消息埋一个）</label>
       <div class="slider-row">
-        <input type="range" id="beaconInterval" min="1" max="20" step="1" oninput="document.getElementById('beaconIntervalVal').textContent=this.value">
+        <input type="range" id="beaconInterval" min="1" max="20" step="1" data-input-action="setLabelFromValue" data-label-target="beaconIntervalVal">
         <span class="slider-val" id="beaconIntervalVal">5</span>
       </div>
       <div class="form-hint">值越小信标越密集（监测越精细，但额外 token 越多）。每个信标约消耗 30-50 tokens。</div>
@@ -597,9 +597,9 @@
     <div id="testResult" class="test-result"></div>
     
     <div class="modal-footer">
-      <button class="btn" onclick="closeSettings()">取消</button>
-      <button class="btn" onclick="testConnection()">测试连接</button>
-      <button class="btn btn-primary" onclick="saveAndClose()">保存</button>
+      <button class="btn" data-action="closeSettings">取消</button>
+      <button class="btn" data-action="testConnection">测试连接</button>
+      <button class="btn btn-primary" data-action="saveAndClose">保存</button>
     </div>
   </div>
 </div>
@@ -607,7 +607,7 @@
 <!-- 远程遥控设置 -->
 <div class="modal-mask" id="remoteControlSettingsModal">
   <div class="modal wide">
-    <h2>远程遥控 <button class="modal-close" onclick="closeRemoteControlSettings()">×</button></h2>
+    <h2>远程遥控 <button class="modal-close" data-action="closeRemoteControlSettings">×</button></h2>
 
     <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
       <div>
@@ -671,8 +671,8 @@
     </div>
 
     <div class="modal-footer">
-      <button class="btn" onclick="closeRemoteControlSettings()">取消</button>
-      <button class="btn btn-primary" onclick="saveAndCloseRemoteControlSettings()">保存</button>
+      <button class="btn" data-action="closeRemoteControlSettings">取消</button>
+      <button class="btn btn-primary" data-action="saveAndCloseRemoteControlSettings">保存</button>
     </div>
   </div>
 </div>
@@ -682,7 +682,7 @@
   <div class="modal wide file-editor-modal">
     <h2>
       <span>文本编辑器</span>
-      <button class="modal-close" onclick="closeFileEditor()">×</button>
+      <button class="modal-close" data-action="closeFileEditor">×</button>
     </h2>
     <div class="file-editor-meta">
       <code id="fileEditorPath">-</code>
@@ -695,13 +695,13 @@
       <textarea id="fileEditorContent" spellcheck="false" placeholder="文件内容..."></textarea>
     </div>
     <div class="modal-footer file-editor-footer">
-      <button class="btn" type="button" onclick="copyFileEditorContent()">复制内容</button>
-      <button class="btn" type="button" id="fileEditorMarkdownToggle" onclick="setFileEditorMarkdownPreview(!FILE_EXPLORER_STATE.editorMarkdownPreview)" hidden>Markdown 预览</button>
-      <button class="btn" type="button" id="fileEditorCodeToggle" onclick="setFileEditorCodePreview(!FILE_EXPLORER_STATE.editorCodePreview)" hidden>Python 高亮预览</button>
-      <button class="btn" type="button" onclick="reloadFileEditor()">重新读取</button>
-      <button class="btn" type="button" onclick="openCurrentFileInMainPanel('text')">主页面显示</button>
-      <button class="btn" type="button" onclick="closeFileEditor()">关闭</button>
-      <button class="btn btn-primary" id="fileEditorSaveBtn" type="button" onclick="saveFileEditor()">保存修改</button>
+      <button class="btn" type="button" data-action="copyFileEditorContent">复制内容</button>
+      <button class="btn" type="button" id="fileEditorMarkdownToggle" data-action="toggleFileEditorMarkdownPreview" hidden>Markdown 预览</button>
+      <button class="btn" type="button" id="fileEditorCodeToggle" data-action="toggleFileEditorCodePreview" hidden>Python 高亮预览</button>
+      <button class="btn" type="button" data-action="reloadFileEditor">重新读取</button>
+      <button class="btn" type="button" data-action="openCurrentFileInMainPanel" data-kind="text">主页面显示</button>
+      <button class="btn" type="button" data-action="closeFileEditor">关闭</button>
+      <button class="btn btn-primary" id="fileEditorSaveBtn" type="button" data-action="saveFileEditor">保存修改</button>
     </div>
   </div>
 </div>
@@ -711,7 +711,7 @@
   <div class="modal wide pdf-viewer-modal">
     <h2>
       <span>PDF 阅读器</span>
-      <button class="modal-close" onclick="closePdfViewer()">×</button>
+      <button class="modal-close" data-action="closePdfViewer">×</button>
     </h2>
     <div class="file-editor-meta">
       <code id="pdfViewerPath">-</code>
@@ -719,10 +719,10 @@
     </div>
     <iframe id="pdfViewerFrame" title="PDF 阅读器"></iframe>
     <div class="modal-footer file-editor-footer">
-      <button class="btn" type="button" onclick="reloadPdfViewer()">重新读取</button>
-      <button class="btn" type="button" onclick="openPdfViewerInNewTab()">新标签打开</button>
-      <button class="btn" type="button" onclick="openCurrentFileInMainPanel('pdf')">主页面显示</button>
-      <button class="btn" type="button" onclick="closePdfViewer()">关闭</button>
+      <button class="btn" type="button" data-action="reloadPdfViewer">重新读取</button>
+      <button class="btn" type="button" data-action="openPdfViewerInNewTab">新标签打开</button>
+      <button class="btn" type="button" data-action="openCurrentFileInMainPanel" data-kind="pdf">主页面显示</button>
+      <button class="btn" type="button" data-action="closePdfViewer">关闭</button>
     </div>
   </div>
 </div>
@@ -732,7 +732,7 @@
   <div class="modal wide image-viewer-modal">
     <h2>
       <span>图片预览器</span>
-      <button class="modal-close" onclick="closeImageViewer()">×</button>
+      <button class="modal-close" data-action="closeImageViewer">×</button>
     </h2>
     <div class="file-editor-meta">
       <code id="imageViewerPath">-</code>
@@ -742,9 +742,9 @@
       <img id="imageViewerImg" alt="图片预览">
     </div>
     <div class="modal-footer file-editor-footer">
-      <button class="btn" type="button" onclick="reloadImageViewer()">重新读取</button>
-      <button class="btn" type="button" onclick="openImageViewerInNewTab()">新标签打开</button>
-      <button class="btn" type="button" onclick="closeImageViewer()">关闭</button>
+      <button class="btn" type="button" data-action="reloadImageViewer">重新读取</button>
+      <button class="btn" type="button" data-action="openImageViewerInNewTab">新标签打开</button>
+      <button class="btn" type="button" data-action="closeImageViewer">关闭</button>
     </div>
   </div>
 </div>
@@ -754,7 +754,7 @@
   <div class="modal wide media-viewer-modal">
     <h2>
       <span id="mediaViewerTitle">媒体预览器</span>
-      <button class="modal-close" onclick="closeMediaViewer()">×</button>
+      <button class="modal-close" data-action="closeMediaViewer">×</button>
     </h2>
     <div class="file-editor-meta">
       <code id="mediaViewerPath">-</code>
@@ -765,9 +765,9 @@
       <video id="videoViewerPlayer" controls preload="metadata"></video>
     </div>
     <div class="modal-footer file-editor-footer">
-      <button class="btn" type="button" onclick="reloadMediaViewer()">重新读取</button>
-      <button class="btn" type="button" onclick="openMediaViewerInNewTab()">新标签打开</button>
-      <button class="btn" type="button" onclick="closeMediaViewer()">关闭</button>
+      <button class="btn" type="button" data-action="reloadMediaViewer">重新读取</button>
+      <button class="btn" type="button" data-action="openMediaViewerInNewTab">新标签打开</button>
+      <button class="btn" type="button" data-action="closeMediaViewer">关闭</button>
     </div>
   </div>
 </div>
@@ -775,7 +775,7 @@
 <!-- 远程连接设置 -->
 <div class="modal-mask remote-connection-mask" id="remoteConnectionModal">
   <div class="modal wide remote-connection-modal">
-    <h2>远程连接 <button class="modal-close" onclick="closeRemoteConnection()">×</button></h2>
+    <h2>远程连接 <button class="modal-close" data-action="closeRemoteConnection">×</button></h2>
     <div class="remote-connection-grid">
       <label>
         <span>SSH 命令</span>
@@ -789,14 +789,14 @@
         <span>远程工作区沙箱目录</span>
         <div class="remote-path-picker-row">
           <input id="remoteWorkspace" type="text" placeholder="留空默认使用远程主目录 ~，例如 ~/project">
-          <button class="btn" type="button" onclick="openRemoteDirPicker()">浏览...</button>
+          <button class="btn" type="button" data-action="openRemoteDirPicker">浏览...</button>
         </div>
         <div id="remoteDirPicker" class="remote-dir-picker">
           <div class="remote-dir-picker-toolbar">
-            <button class="btn" type="button" onclick="remoteDirGoHome()">主目录</button>
-            <button class="btn" type="button" onclick="remoteDirGoParent()">上级</button>
-            <button class="btn" type="button" onclick="refreshRemoteDirPicker()">刷新</button>
-            <button class="btn btn-primary" type="button" onclick="selectRemoteDirCurrent()">选择当前目录</button>
+            <button class="btn" type="button" data-action="remoteDirGoHome">主目录</button>
+            <button class="btn" type="button" data-action="remoteDirGoParent">上级</button>
+            <button class="btn" type="button" data-action="refreshRemoteDirPicker">刷新</button>
+            <button class="btn btn-primary" type="button" data-action="selectRemoteDirCurrent">选择当前目录</button>
           </div>
           <div id="remoteDirCurrent" class="remote-dir-current">未打开远程目录</div>
           <div id="remoteDirList" class="remote-dir-list"></div>
@@ -828,10 +828,10 @@
       <div id="remoteConnectionStatus" class="remote-connection-status">未连接</div>
     </div>
     <div class="modal-footer file-editor-footer">
-      <button class="btn" type="button" onclick="checkRemoteStatus()">检查状态</button>
-      <button class="btn" type="button" onclick="saveRemoteConnectionFromUi()">保存配置</button>
-      <button class="btn" type="button" onclick="disconnectRemoteAgent()">断开/切回本地</button>
-      <button class="btn btn-primary" id="remoteConnectBtn" type="button" onclick="connectRemoteAgent()">连接远程</button>
+      <button class="btn" type="button" data-action="checkRemoteStatus">检查状态</button>
+      <button class="btn" type="button" data-action="saveRemoteConnectionFromUi">保存配置</button>
+      <button class="btn" type="button" data-action="disconnectRemoteAgent">断开/切回本地</button>
+      <button class="btn btn-primary" id="remoteConnectBtn" type="button" data-action="connectRemoteAgent">连接远程</button>
     </div>
   </div>
 </div>
@@ -839,15 +839,15 @@
 <!-- ============ 📡 拉取模型 - 选择列表 ============ -->
 <div class="modal-mask" id="fetchModelsModal">
   <div class="modal">
-    <h2>📡 选择要添加的模型 <button class="modal-close" onclick="closeFetchModelsModal()">×</button></h2>
+    <h2>📡 选择要添加的模型 <button class="modal-close" data-action="closeFetchModelsModal">×</button></h2>
     
     <div id="fetchModelsHint" class="json-help" style="display:none;"></div>
     
     <div class="form-group" style="display:flex;gap:8px;align-items:center;">
-      <input type="text" id="fetchModelsFilter" placeholder="🔍 过滤模型名（支持关键词）" 
-             oninput="filterFetchModels()"
+      <input type="text" id="fetchModelsFilter" placeholder="🔍 过滤模型名（支持关键词）"
+             data-input-action="filterFetchModels"
              style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;">
-      <button class="btn" type="button" onclick="toggleSelectAllFetchModels()" id="fetchModelsSelAllBtn" title="选择本次拉取到的全部未添加模型">全选</button>
+      <button class="btn" type="button" data-action="toggleSelectAllFetchModels" id="fetchModelsSelAllBtn" title="选择本次拉取到的全部未添加模型">全选</button>
     </div>
     
     <div class="form-hint" id="fetchModelsCount" style="margin:6px 0 10px;">共 0 个</div>
@@ -858,8 +858,8 @@
     </div>
     
     <div class="modal-footer">
-      <button class="btn" onclick="closeFetchModelsModal()">取消</button>
-      <button class="btn btn-primary" onclick="confirmAddFetchedModels()">✅ 添加选中</button>
+      <button class="btn" data-action="closeFetchModelsModal">取消</button>
+      <button class="btn btn-primary" data-action="confirmAddFetchedModels">✅ 添加选中</button>
     </div>
   </div>
 </div>
@@ -867,7 +867,7 @@
 <!-- ============ 计划模式设置 ============ -->
 <div class="modal-mask" id="planModal">
   <div class="modal wide">
-    <h2>📋 计划模式 <button class="modal-close" onclick="closePlanSettings()">×</button></h2>
+    <h2>📋 计划模式 <button class="modal-close" data-action="closePlanSettings">×</button></h2>
     
     <div class="json-help">
       💡 <strong>流程</strong>：① AI 生成执行计划（工具开启时可先侦察项目）→ ② 老师评审计划 → ③ 规划者根据意见修订 → ④ 按计划逐步执行 → ⑤ 整合输出 → ⑥ 独立老师验证结果。<br>
@@ -898,28 +898,28 @@
     <div class="form-group">
       <label>步骤数上限</label>
       <div class="slider-row">
-        <input type="range" id="plan_maxSteps" min="2" max="10" step="1" oninput="syncPlanSettingRange('plan_maxSteps','plan_maxStepsInput','planMaxStepsVal')">
+        <input type="range" id="plan_maxSteps" min="2" max="10" step="1" data-input-action="syncPlanSettingRange" data-input-target="plan_maxStepsInput" data-label-target="planMaxStepsVal">
         <span class="slider-val" id="planMaxStepsVal">5</span>
       </div>
-      <input type="number" id="plan_maxStepsInput" min="2" step="1" style="margin-top:8px;" oninput="syncPlanSettingInput('plan_maxStepsInput','plan_maxSteps','planMaxStepsVal',2,10,5)">
+      <input type="number" id="plan_maxStepsInput" min="2" step="1" style="margin-top:8px;" data-input-action="syncPlanSettingInput" data-range-target="plan_maxSteps" data-label-target="planMaxStepsVal" data-min="2" data-max="10" data-fallback="5">
     </div>
     
     <div class="form-group">
       <label>评审最大轮数</label>
       <div class="slider-row">
-        <input type="range" id="plan_reviewRounds" min="1" max="10" step="1" oninput="syncPlanSettingRange('plan_reviewRounds','plan_reviewRoundsInput','planReviewRoundsVal')">
+        <input type="range" id="plan_reviewRounds" min="1" max="10" step="1" data-input-action="syncPlanSettingRange" data-input-target="plan_reviewRoundsInput" data-label-target="planReviewRoundsVal">
         <span class="slider-val" id="planReviewRoundsVal">2</span>
       </div>
-      <input type="number" id="plan_reviewRoundsInput" min="1" step="1" style="margin-top:8px;" oninput="syncPlanSettingInput('plan_reviewRoundsInput','plan_reviewRounds','planReviewRoundsVal',1,10,2)">
+      <input type="number" id="plan_reviewRoundsInput" min="1" step="1" style="margin-top:8px;" data-input-action="syncPlanSettingInput" data-range-target="plan_reviewRounds" data-label-target="planReviewRoundsVal" data-min="1" data-max="10" data-fallback="2">
     </div>
 
     <div class="form-group">
       <label>最终验证最大轮数</label>
       <div class="slider-row">
-        <input type="range" id="plan_verifyRounds" min="1" max="10" step="1" oninput="syncPlanSettingRange('plan_verifyRounds','plan_verifyRoundsInput','planVerifyRoundsVal')">
+        <input type="range" id="plan_verifyRounds" min="1" max="10" step="1" data-input-action="syncPlanSettingRange" data-input-target="plan_verifyRoundsInput" data-label-target="planVerifyRoundsVal">
         <span class="slider-val" id="planVerifyRoundsVal">2</span>
       </div>
-      <input type="number" id="plan_verifyRoundsInput" min="1" step="1" style="margin-top:8px;" oninput="syncPlanSettingInput('plan_verifyRoundsInput','plan_verifyRounds','planVerifyRoundsVal',1,10,2)">
+      <input type="number" id="plan_verifyRoundsInput" min="1" step="1" style="margin-top:8px;" data-input-action="syncPlanSettingInput" data-range-target="plan_verifyRounds" data-label-target="planVerifyRoundsVal" data-min="1" data-max="10" data-fallback="2">
       <div class="form-hint">每轮未通过后，需要你手动决定是否追加改进阶段；不会自动重跑原步骤。</div>
     </div>
     
@@ -941,12 +941,12 @@
     <div class="form-group">
       <label>预设场景</label>
       <div class="preset-grid">
-        <div class="preset-card" onclick="applyPlanPreset('general')"><strong>📚 通用</strong><span>通用任务拆解</span></div>
-        <div class="preset-card" onclick="applyPlanPreset('research')"><strong>🔬 研究</strong><span>多角度研究</span></div>
-        <div class="preset-card" onclick="applyPlanPreset('writing')"><strong>✍️ 写作</strong><span>分章节写作</span></div>
-        <div class="preset-card" onclick="applyPlanPreset('code')"><strong>💻 代码</strong><span>设计+实现</span></div>
-        <div class="preset-card" onclick="applyPlanPreset('problem')"><strong>🧩 解题</strong><span>多步推理</span></div>
-        <div class="preset-card" onclick="applyPlanPreset('teaching')"><strong>👨‍🏫 教学</strong><span>循序渐进</span></div>
+        <div class="preset-card" data-action="applyPlanPreset" data-value="general"><strong>📚 通用</strong><span>通用任务拆解</span></div>
+        <div class="preset-card" data-action="applyPlanPreset" data-value="research"><strong>🔬 研究</strong><span>多角度研究</span></div>
+        <div class="preset-card" data-action="applyPlanPreset" data-value="writing"><strong>✍️ 写作</strong><span>分章节写作</span></div>
+        <div class="preset-card" data-action="applyPlanPreset" data-value="code"><strong>💻 代码</strong><span>设计+实现</span></div>
+        <div class="preset-card" data-action="applyPlanPreset" data-value="problem"><strong>🧩 解题</strong><span>多步推理</span></div>
+        <div class="preset-card" data-action="applyPlanPreset" data-value="teaching"><strong>👨‍🏫 教学</strong><span>循序渐进</span></div>
       </div>
     </div>
     
@@ -958,12 +958,12 @@
     <div class="form-group">
       <label>执行者 Prompt</label>
       <textarea id="plan_executorPrompt" rows="3"></textarea>
-      <button class="btn" type="button" style="margin-top:6px;" onclick="resetPlanPrompts()">恢复默认提示词</button>
+      <button class="btn" type="button" style="margin-top:6px;" data-action="resetPlanPrompts">恢复默认提示词</button>
     </div>
     
     <div class="modal-footer">
-      <button class="btn" onclick="closePlanSettings()">取消</button>
-      <button class="btn btn-primary" onclick="savePlanSettings()">保存</button>
+      <button class="btn" data-action="closePlanSettings">取消</button>
+      <button class="btn btn-primary" data-action="savePlanSettings">保存</button>
     </div>
   </div>
 </div>
@@ -971,7 +971,7 @@
 <!-- ============ 📑 大纲模式设置 ============ -->
 <div class="modal-mask" id="outlineModal">
   <div class="modal wide">
-    <h2>📑 大纲模式 - 动态规划 <button class="modal-close" onclick="closeOutlineSettings()">×</button></h2>
+    <h2>📑 大纲模式 - 动态规划 <button class="modal-close" data-action="closeOutlineSettings">×</button></h2>
     
     <div class="json-help">
       💡 <strong>机制</strong>：AI 在单一上下文中边做边维护一份"工作大纲"，发现新需求会动态追加条目，全程使用工具。<br>
@@ -1012,7 +1012,7 @@
       <label>系统提示词</label>
       <textarea id="outline_systemPrompt" rows="10" placeholder="留空则使用默认提示词"></textarea>
       <div class="form-hint">指导 AI 如何使用 save_outline / append_outline / update_outline 三个工具维护大纲。</div>
-      <button class="btn" style="margin-top:6px;" onclick="resetOutlinePrompt()">恢复默认</button>
+      <button class="btn" style="margin-top:6px;" data-action="resetOutlinePrompt">恢复默认</button>
     </div>
 
     <details class="form-group">
@@ -1083,12 +1083,12 @@
         <label>原地踏步提醒</label>
         <textarea id="outline_stalledPrompt" rows="3"></textarea>
       </div>
-      <button class="btn" type="button" onclick="resetAllOutlinePrompts()">全部提示词恢复默认值</button>
+      <button class="btn" type="button" data-action="resetAllOutlinePrompts">全部提示词恢复默认值</button>
     </details>
     
     <div class="modal-footer">
-      <button class="btn" onclick="closeOutlineSettings()">取消</button>
-      <button class="btn btn-primary" onclick="saveOutlineSettings()">保存</button>
+      <button class="btn" data-action="closeOutlineSettings">取消</button>
+      <button class="btn btn-primary" data-action="saveOutlineSettings">保存</button>
     </div>
   </div>
 </div>
@@ -1096,7 +1096,7 @@
 <!-- ============ 师生讨论设置 ============ -->
 <div class="modal-mask" id="reflectionModal">
   <div class="modal wide">
-    <h2>🎭 师生讨论模式 <button class="modal-close" onclick="closeReflectionSettings()">×</button></h2>
+    <h2>🎭 师生讨论模式 <button class="modal-close" data-action="closeReflectionSettings">×</button></h2>
     
     <div class="json-help">
       💡 学生先答 → 老师评审 → 学生改进 → 循环。最大轮数表示老师最多评审 N 次，最终一定停在学生回答。
@@ -1110,7 +1110,7 @@
     <div class="form-group">
       <label>最大评审轮数</label>
       <div class="slider-row">
-        <input type="range" id="ref_rounds" min="1" max="5" step="1" oninput="document.getElementById('refRoundsVal').textContent=this.value">
+        <input type="range" id="ref_rounds" min="1" max="5" step="1" data-input-action="setLabelFromValue" data-label-target="refRoundsVal">
         <span class="slider-val" id="refRoundsVal">3</span>
       </div>
     </div>
@@ -1118,7 +1118,7 @@
     <div class="form-group">
       <label>满意分数（达到此分提前结束）</label>
       <div class="slider-row">
-        <input type="range" id="ref_minScore" min="6" max="10" step="1" oninput="document.getElementById('refScoreVal').textContent=this.value">
+        <input type="range" id="ref_minScore" min="6" max="10" step="1" data-input-action="setLabelFromValue" data-label-target="refScoreVal">
         <span class="slider-val" id="refScoreVal">9</span>
       </div>
     </div>
@@ -1160,12 +1160,12 @@
     <div class="form-group">
       <label>预设</label>
       <div class="preset-grid">
-        <div class="preset-card" onclick="applyPreset('general')"><strong>📚 通用</strong><span>全面审查</span></div>
-        <div class="preset-card" onclick="applyPreset('code')"><strong>💻 代码</strong><span>关注正确性</span></div>
-        <div class="preset-card" onclick="applyPreset('writing')"><strong>✍️ 写作</strong><span>关注文笔</span></div>
-        <div class="preset-card" onclick="applyPreset('math')"><strong>🧮 数学</strong><span>严格检查</span></div>
-        <div class="preset-card" onclick="applyPreset('analysis')"><strong>🔬 分析</strong><span>多视角</span></div>
-        <div class="preset-card" onclick="applyPreset('translation')"><strong>🌐 翻译</strong><span>信达雅</span></div>
+        <div class="preset-card" data-action="applyPreset" data-value="general"><strong>📚 通用</strong><span>全面审查</span></div>
+        <div class="preset-card" data-action="applyPreset" data-value="code"><strong>💻 代码</strong><span>关注正确性</span></div>
+        <div class="preset-card" data-action="applyPreset" data-value="writing"><strong>✍️ 写作</strong><span>关注文笔</span></div>
+        <div class="preset-card" data-action="applyPreset" data-value="math"><strong>🧮 数学</strong><span>严格检查</span></div>
+        <div class="preset-card" data-action="applyPreset" data-value="analysis"><strong>🔬 分析</strong><span>多视角</span></div>
+        <div class="preset-card" data-action="applyPreset" data-value="translation"><strong>🌐 翻译</strong><span>信达雅</span></div>
       </div>
     </div>
     
@@ -1180,8 +1180,8 @@
     </div>
     
     <div class="modal-footer">
-      <button class="btn" onclick="closeReflectionSettings()">取消</button>
-      <button class="btn btn-primary" onclick="saveReflectionSettings()">保存</button>
+      <button class="btn" data-action="closeReflectionSettings">取消</button>
+      <button class="btn btn-primary" data-action="saveReflectionSettings">保存</button>
     </div>
   </div>
 </div>
@@ -1189,15 +1189,15 @@
 <!-- ============ MCP / Skill 设置 ============ -->
 <div class="modal-mask" id="mcpSkillModal">
   <div class="modal wide">
-    <h2>🔌 MCP / Skill <button class="modal-close" onclick="closeMcpSkillSettings()">×</button></h2>
+    <h2>🔌 MCP / Skill <button class="modal-close" data-action="closeMcpSkillSettings">×</button></h2>
     
     <div class="json-help">
       MCP 服务器会同步成普通工具；Skill 会以目录摘要追加到系统提示中，全文由 read_skill 按需读取。当前 MCP 支持 stdio server。
     </div>
     
     <div class="json-tabs">
-      <button class="json-tab mcp-skill-tab active" data-tab="mcp" onclick="switchMcpSkillTab('mcp')">MCP 服务器</button>
-      <button class="json-tab mcp-skill-tab" data-tab="skills" onclick="switchMcpSkillTab('skills')">Skill</button>
+      <button class="json-tab mcp-skill-tab active" data-tab="mcp" data-action="switchMcpSkillTab" data-value="mcp">MCP 服务器</button>
+      <button class="json-tab mcp-skill-tab" data-tab="skills" data-action="switchMcpSkillTab" data-value="skills">Skill</button>
     </div>
     
     <div class="mcp-skill-pane" data-pane="mcp">
@@ -1206,8 +1206,8 @@
           <h3 style="font-size:14px;margin:0 0 10px;">已配置服务器</h3>
           <div id="mcpServerList"></div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="syncMcpTools()">同步 MCP 工具到工具列表</button>
-            <button class="btn" onclick="openTools()">查看工具管理</button>
+            <button class="btn btn-primary" data-action="syncMcpTools">同步 MCP 工具到工具列表</button>
+            <button class="btn" data-action="openTools">查看工具管理</button>
           </div>
           <pre id="mcpSyncResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:52px;max-height:180px;overflow:auto;font-size:12px;margin-top:10px;color:var(--text-secondary);"></pre>
         </div>
@@ -1240,8 +1240,8 @@
             <label class="switch"><input type="checkbox" id="mcpServerEnabled" checked><span class="switch-slider"></span></label>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="saveMcpServer()">保存服务器</button>
-            <button class="btn" onclick="clearMcpServerForm()">清空表单</button>
+            <button class="btn btn-primary" data-action="saveMcpServer">保存服务器</button>
+            <button class="btn" data-action="clearMcpServerForm">清空表单</button>
           </div>
           <div class="form-hint" style="margin-top:8px;">
             服务器进程由本地后端启动。同步和调用 MCP 工具时会走“权限管理”里的 MCP 服务器确认。
@@ -1256,23 +1256,23 @@
           <label style="margin:0;">启用 Skill 目录摘要</label>
           <div class="form-hint">勾选的 Skill 只追加摘要到 System Prompt；需要全文时由 read_skill 工具按路径读取。</div>
         </div>
-        <label class="switch"><input type="checkbox" id="skillUseEnabled" checked onchange="saveSkillRootsFromUi()"><span class="switch-slider"></span></label>
+        <label class="switch"><input type="checkbox" id="skillUseEnabled" checked data-change-action="saveSkillRootsFromUi"><span class="switch-slider"></span></label>
       </div>
       <div class="form-group">
         <label>Skill 根目录（每行一个，支持相对沙箱路径）</label>
         <textarea id="skillRootsText" rows="4" placeholder="skill"></textarea>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-        <button class="btn btn-primary" onclick="scanSkills()">🔍 扫描 Skill</button>
-        <button class="btn" onclick="saveSkillRootsFromUi()">保存设置</button>
+        <button class="btn btn-primary" data-action="scanSkills">🔍 扫描 Skill</button>
+        <button class="btn" data-action="saveSkillRootsFromUi">保存设置</button>
       </div>
       <pre id="skillScanResult" style="white-space:pre-wrap;background:var(--bg-input);border-radius:6px;padding:8px;min-height:40px;max-height:120px;overflow:auto;font-size:12px;color:var(--text-secondary);"></pre>
       <div id="skillList" style="margin-top:10px;"></div>
     </div>
     
     <div class="modal-footer">
-      <button class="btn" onclick="closeMcpSkillSettings()">关闭</button>
-      <button class="btn btn-primary" onclick="closeMcpSkillSettings()">保存并完成</button>
+      <button class="btn" data-action="closeMcpSkillSettings">关闭</button>
+      <button class="btn btn-primary" data-action="closeMcpSkillSettings">保存并完成</button>
     </div>
   </div>
 </div>
@@ -1280,7 +1280,7 @@
 <!-- ============ 项目指令 ============ -->
 <div class="modal-mask" id="projectInstructionsModal">
   <div class="modal wide">
-    <h2>📘 项目指令 <button class="modal-close" onclick="closeProjectInstructionsSettings()">×</button></h2>
+    <h2>📘 项目指令 <button class="modal-close" data-action="closeProjectInstructionsSettings">×</button></h2>
     <div class="json-help" style="margin-bottom:12px;">
       项目指令来自 <code>AGENTS.md</code>，用于记录人工维护的稳定规则、命令和项目约定。开启后会作为独立指令层注入，不会自动覆盖项目记忆。
     </div>
@@ -1326,13 +1326,13 @@
     </div>
 
     <div class="modal-footer" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-      <button class="btn btn-primary" onclick="saveProjectInstructionsSettingsFromUi()">保存设置</button>
-      <button class="btn" onclick="initProjectInstructions(false)">检测/读取</button>
-      <button class="btn" onclick="generateProjectInstructionsDraft()">AI 生成/刷新草稿</button>
-      <button class="btn" onclick="fillDefaultProjectInstructionsDraft()">填入默认内容</button>
-      <button class="btn btn-primary" onclick="saveProjectInstructionsFromUi()">保存到项目</button>
-      <button class="btn" onclick="clearLoadedProjectInstructions()">卸载当前指令</button>
-      <button class="btn" onclick="closeProjectInstructionsSettings()">关闭</button>
+      <button class="btn btn-primary" data-action="saveProjectInstructionsSettingsFromUi">保存设置</button>
+      <button class="btn" data-action="initProjectInstructions" data-create-if-missing="false">检测/读取</button>
+      <button class="btn" data-action="generateProjectInstructionsDraft">AI 生成/刷新草稿</button>
+      <button class="btn" data-action="fillDefaultProjectInstructionsDraft">填入默认内容</button>
+      <button class="btn btn-primary" data-action="saveProjectInstructionsFromUi">保存到项目</button>
+      <button class="btn" data-action="clearLoadedProjectInstructions">卸载当前指令</button>
+      <button class="btn" data-action="closeProjectInstructionsSettings">关闭</button>
     </div>
   </div>
 </div>
@@ -1340,7 +1340,7 @@
 <!-- ============ 项目记忆 ============ -->
 <div class="modal-mask" id="projectMemoryModal">
   <div class="modal wide">
-    <h2>🧠 项目记忆 <button class="modal-close" onclick="closeProjectMemorySettings()">×</button></h2>
+    <h2>🧠 项目记忆 <button class="modal-close" data-action="closeProjectMemorySettings">×</button></h2>
     <div class="json-help" style="margin-bottom:12px;">
       项目记忆用于记录当前工作区的长期背景。关闭时不会读取、生成或注入任何项目记忆。
     </div>
@@ -1378,12 +1378,12 @@
     </div>
 
     <div class="modal-footer" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;">
-      <button class="btn btn-primary" onclick="saveProjectMemorySettingsFromUi()">保存设置</button>
-      <button class="btn" onclick="initProjectMemory(true)">检测/读取</button>
-      <button class="btn" onclick="generateProjectMemoryDraft()">生成/刷新草稿</button>
-      <button class="btn btn-primary" onclick="saveProjectMemoryFromUi()">保存到项目</button>
-      <button class="btn" onclick="clearLoadedProjectMemory()">卸载当前记忆</button>
-      <button class="btn" onclick="closeProjectMemorySettings()">关闭</button>
+      <button class="btn btn-primary" data-action="saveProjectMemorySettingsFromUi">保存设置</button>
+      <button class="btn" data-action="initProjectMemory" data-force-reload="true">检测/读取</button>
+      <button class="btn" data-action="generateProjectMemoryDraft">生成/刷新草稿</button>
+      <button class="btn btn-primary" data-action="saveProjectMemoryFromUi">保存到项目</button>
+      <button class="btn" data-action="clearLoadedProjectMemory">卸载当前记忆</button>
+      <button class="btn" data-action="closeProjectMemorySettings">关闭</button>
     </div>
   </div>
 </div>
@@ -1391,32 +1391,32 @@
 <!-- ============ 工具管理 ============ -->
 <div class="modal-mask" id="toolsModal">
   <div class="modal wide">
-    <h2>🛠 工具管理 <button class="modal-close" onclick="closeTools()">×</button></h2>
+    <h2>🛠 工具管理 <button class="modal-close" data-action="closeTools">×</button></h2>
     
     <div class="json-help">💡 添加工具 → 工具栏启用 → AI 自动调用</div>
     
     <div class="form-group">
       <label>预设工具：</label>
       <div>
-        <span class="tool-preset" onclick="addPresetTool('time')">⏰ 时间</span>
-        <span class="tool-preset" onclick="addPresetTool('calc')">🧮 计算器</span>
-        <span class="tool-preset" onclick="addPresetTool('weather')">☁️ 天气</span>
-        <span class="tool-preset" onclick="addPresetTool('random')">🎲 随机数</span>
-        <span class="tool-preset" onclick="addPresetTool('search')">🔍 搜索</span>
-        <span class="tool-preset" onclick="addPresetTool('fetch')">🌐 HTTP</span>
+        <span class="tool-preset" data-action="addPresetTool" data-value="time">⏰ 时间</span>
+        <span class="tool-preset" data-action="addPresetTool" data-value="calc">🧮 计算器</span>
+        <span class="tool-preset" data-action="addPresetTool" data-value="weather">☁️ 天气</span>
+        <span class="tool-preset" data-action="addPresetTool" data-value="random">🎲 随机数</span>
+        <span class="tool-preset" data-action="addPresetTool" data-value="search">🔍 搜索</span>
+        <span class="tool-preset" data-action="addPresetTool" data-value="fetch">🌐 HTTP</span>
       </div>
     </div>
     
     <div id="toolList"></div>
-    <button class="tool-add-btn" onclick="addCustomTool()">+ 添加自定义工具</button>
+    <button class="tool-add-btn" data-action="addCustomTool">+ 添加自定义工具</button>
     
     <div class="modal-footer">
-      <button class="btn" id="lmsToggleBtn" onclick="toggleLmsTools()">启用 LMS 工具</button>
-      <button class="btn" id="gitToggleBtn" onclick="toggleGitTools()">启用快照工具</button>
-      <button class="btn" id="paperToggleBtn" onclick="togglePaperTools()">启用论文工具</button>
-      <button class="btn" onclick="resetBuiltinTools()">恢复内置工具</button>
-      <button class="btn btn-warning" onclick="clearAllTools()">清空全部</button>
-      <button class="btn btn-primary" onclick="closeTools()">完成</button>
+      <button class="btn" id="lmsToggleBtn" data-action="toggleLmsTools">启用 LMS 工具</button>
+      <button class="btn" id="gitToggleBtn" data-action="toggleGitTools">启用快照工具</button>
+      <button class="btn" id="paperToggleBtn" data-action="togglePaperTools">启用论文工具</button>
+      <button class="btn" data-action="resetBuiltinTools">恢复内置工具</button>
+      <button class="btn btn-warning" data-action="clearAllTools">清空全部</button>
+      <button class="btn btn-primary" data-action="closeTools">完成</button>
     </div>
   </div>
 </div>
@@ -1424,7 +1424,7 @@
 <!-- ============ 工具编辑 ============ -->
 <div class="modal-mask" id="toolEditModal">
   <div class="modal wide">
-    <h2>编辑工具 <button class="modal-close" onclick="document.getElementById('toolEditModal').classList.remove('show')">×</button></h2>
+    <h2>编辑工具 <button class="modal-close" data-action="hideModal" data-target="toolEditModal">×</button></h2>
     
     <div class="form-group"><label>名称（英文）</label><input type="text" id="te_name"></div>
     <div class="form-group"><label>描述</label><textarea id="te_desc" rows="2"></textarea></div>
@@ -1432,8 +1432,8 @@
     <div class="form-group"><label>执行代码（JS）</label><textarea class="json-editor" id="te_code" style="min-height:160px;"></textarea></div>
     
     <div class="modal-footer">
-      <button class="btn" onclick="document.getElementById('toolEditModal').classList.remove('show')">取消</button>
-      <button class="btn btn-primary" onclick="saveToolEdit()">保存</button>
+      <button class="btn" data-action="hideModal" data-target="toolEditModal">取消</button>
+      <button class="btn btn-primary" data-action="saveToolEdit">保存</button>
     </div>
   </div>
 </div>
@@ -1443,15 +1443,15 @@
   <div class="modal wide">
     <h2>
       <span>{ } 请求 JSON 查看器</span>
-      <button class="modal-close" onclick="closeJsonEditor()">×</button>
+      <button class="modal-close" data-action="closeJsonEditor">×</button>
     </h2>
     
     <div class="json-tabs">
-      <button class="json-tab active" data-jsontab="preview" onclick="switchJsonTab('preview', this)">实时预览</button>
-      <button class="json-tab" data-jsontab="response" onclick="switchJsonTab('response', this)">AI 响应</button>
-      <button class="json-tab" data-jsontab="template" onclick="switchJsonTab('template', this)">自定义模板</button>
-      <button class="json-tab" data-jsontab="headers" onclick="switchJsonTab('headers', this)">自定义请求头</button>
-      <button class="json-tab" data-jsontab="history" onclick="switchJsonTab('history', this)">请求历史</button>
+      <button class="json-tab active" data-jsontab="preview" data-action="switchJsonTab">实时预览</button>
+      <button class="json-tab" data-jsontab="response" data-action="switchJsonTab">AI 响应</button>
+      <button class="json-tab" data-jsontab="template" data-action="switchJsonTab">自定义模板</button>
+      <button class="json-tab" data-jsontab="headers" data-action="switchJsonTab">自定义请求头</button>
+      <button class="json-tab" data-jsontab="history" data-action="switchJsonTab">请求历史</button>
     </div>
     
     <!-- Tab 1: 实时预览 -->
@@ -1463,10 +1463,10 @@
       <div class="json-stats" id="jsonStats" style="margin-bottom:8px;font-size:12px;color:var(--text-secondary);"></div>
       <textarea class="json-editor" id="jsonPreview" readonly style="min-height:380px;"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="refreshJsonPreview()">刷新</button>
-        <button class="btn" onclick="copyJsonPreview()">复制完整内容</button>
-        <button class="btn" onclick="copyJsonBodyOnly()">仅复制 body</button>
-        <button class="btn" onclick="copyAsCurl()">复制为 cURL</button>
+        <button class="btn" data-action="refreshJsonPreview">刷新</button>
+        <button class="btn" data-action="copyJsonPreview">复制完整内容</button>
+        <button class="btn" data-action="copyJsonBodyOnly">仅复制 body</button>
+        <button class="btn" data-action="copyAsCurl">复制为 cURL</button>
       </div>
     </div>
     
@@ -1484,9 +1484,9 @@
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="refreshJsonResponse()">刷新</button>
-        <button class="btn" onclick="copyJsonResponse()">复制内容</button>
-        <button class="btn btn-warning" onclick="clearJsonResponses()">清空</button>
+        <button class="btn" data-action="refreshJsonResponse">刷新</button>
+        <button class="btn" data-action="copyJsonResponse">复制内容</button>
+        <button class="btn btn-warning" data-action="clearJsonResponses">清空</button>
       </div>
     </div>
     
@@ -1504,9 +1504,9 @@
       </div>
       <textarea class="json-editor" id="jsonTemplate" style="min-height:300px;"></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="formatJsonTemplate()">格式化</button>
-        <button class="btn btn-warning" onclick="resetJsonTemplate()">恢复默认</button>
-        <button class="btn btn-primary" onclick="saveJsonTemplate()">保存</button>
+        <button class="btn" data-action="formatJsonTemplate">格式化</button>
+        <button class="btn btn-warning" data-action="resetJsonTemplate">恢复默认</button>
+        <button class="btn btn-primary" data-action="saveJsonTemplate">保存</button>
       </div>
     </div>
     
@@ -1518,8 +1518,8 @@
       </div>
       <textarea class="json-editor" id="jsonHeaders" style="min-height:200px;" placeholder='{"User-Agent": "codex-tui/0.118.0 (Mac OS 26.3.1; arm64)"}'></textarea>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-        <button class="btn" onclick="setCodexUserAgentHeader()">填入 Codex UA</button>
-        <button class="btn btn-primary" onclick="saveJsonTemplate()">保存</button>
+        <button class="btn" data-action="setCodexUserAgentHeader">填入 Codex UA</button>
+        <button class="btn btn-primary" data-action="saveJsonTemplate">保存</button>
       </div>
     </div>
     
@@ -1529,14 +1529,14 @@
         💡 最近 20 次 API 请求记录。可查看请求体、响应、错误，方便调试。
       </div>
       <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <button class="btn" onclick="refreshJsonHistory()">刷新</button>
-        <button class="btn btn-warning" onclick="clearJsonHistory()">清空历史</button>
+        <button class="btn" data-action="refreshJsonHistory">刷新</button>
+        <button class="btn btn-warning" data-action="clearJsonHistory">清空历史</button>
       </div>
       <div id="jsonHistory" style="max-height:480px;overflow-y:auto;"></div>
     </div>
     
     <div class="modal-footer" style="margin-top:16px;">
-      <button class="btn" onclick="closeJsonEditor()">关闭</button>
+      <button class="btn" data-action="closeJsonEditor">关闭</button>
     </div>
   </div>
 </div>
@@ -1544,7 +1544,7 @@
 <!-- ============ 备份与恢复 ============ -->
 <div class="modal-mask" id="backupModal">
   <div class="modal wide">
-    <h2>💾 备份与恢复 <button class="modal-close" onclick="closeBackup()">×</button></h2>
+    <h2>💾 备份与恢复 <button class="modal-close" data-action="closeBackup">×</button></h2>
     
     <div class="backup-lede">
       <div>
@@ -1579,8 +1579,8 @@
       </div>
     </div>
     <div class="modal-footer backup-export-actions" style="margin-top:10px;justify-content:flex-start;">
-      <button class="btn btn-primary" onclick="exportConfig()">下载</button>
-      <button class="btn" onclick="copyConfigToClipboard()">复制</button>
+      <button class="btn btn-primary" data-action="exportConfig">下载</button>
+      <button class="btn" data-action="copyConfigToClipboard">复制</button>
     </div>
 
     <hr style="margin:20px 0;border:none;border-top:1px solid var(--border);">
@@ -1588,7 +1588,7 @@
     <h3 style="font-size:15px;margin:0 0 10px;">📥 导入</h3>
     <div class="form-group">
       <label>从文件</label>
-      <input type="file" id="importFile" accept=".json" onchange="importFromFile(event)">
+      <input type="file" id="importFile" accept=".json" data-change-action="importFromFile">
     </div>
     <div class="form-group">
       <label>或粘贴 JSON</label>
@@ -1618,9 +1618,9 @@
     </div>
     <div id="importPreview" class="test-result"></div>
     <div class="modal-footer">
-      <button class="btn btn-warning" onclick="resetAllData()">清空所有</button>
-      <button class="btn" onclick="closeBackup()">关闭</button>
-      <button class="btn btn-primary" onclick="applyImport()">应用导入</button>
+      <button class="btn btn-warning" data-action="resetAllData">清空所有</button>
+      <button class="btn" data-action="closeBackup">关闭</button>
+      <button class="btn btn-primary" data-action="applyImport">应用导入</button>
     </div>
   </div>
 </div>
@@ -1628,7 +1628,7 @@
 <!-- ============ 权限管理面板 ============ -->
 <div class="modal-mask" id="permissionsModal">
   <div class="modal">
-    <h2>🔐 工具权限管理 <button class="modal-close" onclick="closePermissions()">×</button></h2>
+    <h2>🔐 工具权限管理 <button class="modal-close" data-action="closePermissions">×</button></h2>
     
     <div class="json-help">
       💡 勾选「永久允许」后，AI 调用该类操作将不再弹窗。<br>
@@ -1658,9 +1658,9 @@
     </div>
 
     <div class="modal-footer">
-      <button class="btn" onclick="onClearAllPerms()">清空所有永久授权</button>
-      <button class="btn" style="color:var(--danger,#d9534f);border-color:var(--danger,#d9534f);" onclick="onClearAllSecrets()">清除所有凭证</button>
-      <button class="btn btn-primary" onclick="closePermissions()">完成</button>
+      <button class="btn" data-action="onClearAllPerms">清空所有永久授权</button>
+      <button class="btn" style="color:var(--danger,#d9534f);border-color:var(--danger,#d9534f);" data-action="onClearAllSecrets">清除所有凭证</button>
+      <button class="btn btn-primary" data-action="closePermissions">完成</button>
     </div>
   </div>
 </div>
@@ -1691,8 +1691,8 @@
       <div class="term-confirm-cmd" id="shellAuditCmd"></div>
     </div>
     <div class="term-confirm-footer">
-      <button class="term-btn deny" onclick="shellAuditConfirmReject(false)">取消执行</button>
-      <button class="term-btn allow" onclick="shellAuditConfirmAccept()">仍然执行</button>
+      <button class="term-btn deny" data-action="shellAuditConfirmReject" data-aborted="false">取消执行</button>
+      <button class="term-btn allow" data-action="shellAuditConfirmAccept">仍然执行</button>
     </div>
   </div>
 </div>
@@ -1725,18 +1725,18 @@
       <div class="form-hint" id="termConfirmAutoAllowHint" style="display:none;margin-top:8px;"></div>
     </div>
     <div class="term-confirm-footer">
-      <button class="term-btn deny" onclick="termConfirmReject()">仅拒绝此次</button>
-      <button class="term-btn deny" onclick="termConfirmRejectAll()">拒绝并停止</button>
-      <button class="term-btn allow" onclick="termConfirmAccept()" id="termAllowBtn">
+      <button class="term-btn deny" data-action="termConfirmReject">仅拒绝此次</button>
+      <button class="term-btn deny" data-action="termConfirmRejectAll">拒绝并停止</button>
+      <button class="term-btn allow" data-action="termConfirmAccept" id="termAllowBtn">
         允许执行 <span class="term-countdown" id="termCountdown"></span>
       </button>
-      <button class="term-btn allow-always" onclick="termConfirmAcceptAll()" id="termAllowTaskBtn">本任务后续允许此类</button>
+      <button class="term-btn allow-always" data-action="termConfirmAcceptAll" id="termAllowTaskBtn">本任务后续允许此类</button>
     </div>
   </div>
 </div>
 
 <!-- ============ 图片预览大图 ============ -->
-<div class="img-preview-mask" id="imgPreview" onclick="this.classList.remove('show')">
+<div class="img-preview-mask" id="imgPreview" data-action="hideSelf">
   <img id="imgPreviewSrc" src="">
 </div>
 
@@ -1753,30 +1753,30 @@
         <div class="settings-page-sub">Snake Chat</div>
       </div>
     </div>
-    <button class="settings-nav-item active" data-settings-section="main" data-desc="管理 API、模型、代理和本地授权。" onclick="openSettingsSection('main')"><span><img class="settings-nav-icon" src="icon/设置_setting-one.png" alt=""></span><span>主设置</span></button>
-    <button class="settings-nav-item" data-settings-section="remoteControl" data-desc="配置微信文件传输助手轮询、指令格式和回复模板。" onclick="openSettingsSection('remoteControl')"><span><img class="settings-nav-icon" src="icon/遥控器_remote-control.png" alt=""></span><span>远程遥控</span></button>
-    <button class="settings-nav-item" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。" onclick="openSettingsSection('plan')"><span><img class="settings-nav-icon" src="icon/计划_plan.png" alt=""></span><span>计划模式</span></button>
-    <button class="settings-nav-item" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。" onclick="openSettingsSection('outline')"><span><img class="settings-nav-icon" src="icon/大纲视图_mindmap-list.png" alt=""></span><span>大纲模式</span></button>
-    <button class="settings-nav-item" data-settings-section="ppt" data-desc="配置图片页 PPT 生成流程、目标页数、视觉偏好和各阶段 Prompt。" onclick="openSettingsSection('ppt')"><span><img class="settings-nav-icon" src="icon/pdf文件_file-pdf-one.png" alt=""></span><span>PPT 模式</span></button>
-    <button class="settings-nav-item" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。" onclick="openSettingsSection('reflection')"><span><img class="settings-nav-icon" src="icon/家庭_family.png" alt=""></span><span>师生讨论</span></button>
-    <button class="settings-nav-item" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。" onclick="openSettingsSection('tools')"><span><img class="settings-nav-icon" src="icon/工具_tool.png" alt=""></span><span>工具管理</span></button>
-    <button class="settings-nav-item" data-settings-section="privacy" data-desc="配置本地脱敏、Shell 审核、附件策略和响应防尾注。" onclick="openSettingsSection('privacy')"><span><img class="settings-nav-icon" src="icon/人身安全_people-safe.png" alt=""></span><span>隐私模式</span></button>
-    <button class="settings-nav-item" data-settings-section="securityRecords" data-desc="查看隐私脱敏和 Shell 命令审核的本地安全记录。" onclick="openSettingsSection('securityRecords')"><span><img class="settings-nav-icon" src="icon/记忆卡_memory-card-one.png" alt=""></span><span>安全记录</span></button>
-    <button class="settings-nav-item" data-settings-section="taskQueue" data-desc="管理自动任务、依赖关系和队列执行。" onclick="openSettingsSection('taskQueue')"><span><img class="settings-nav-icon" src="icon/流水线_assembly-line.png" alt=""></span><span>任务队列</span></button>
-    <button class="settings-nav-item" data-settings-section="concurrentRequests" data-desc="让多个独立 AI 同时执行同一条指令，并汇总到一个对话。" onclick="openSettingsSection('concurrentRequests')"><span><img class="settings-nav-icon" src="icon/上层_bring-forward.png" alt=""></span><span>并发请求</span></button>
-    <button class="settings-nav-item" data-settings-section="debateMode" data-desc="配置正反方和评委模型，自动创建多局辩论对话。" onclick="openSettingsSection('debateMode')"><span><img class="settings-nav-icon" src="icon/用户互传_user-to-user-transmission.png" alt=""></span><span>辩论模式</span></button>
-    <button class="settings-nav-item" data-settings-section="music" data-desc="播放 music 文件夹、本机文件和本机文件夹中的音乐。" onclick="openSettingsSection('music')"><span><img class="settings-nav-icon" src="icon/音乐_music.png" alt=""></span><span>音乐播放</span></button>
-    <button class="settings-nav-item" data-settings-section="mcpSkill" data-desc="管理可注入的 Skill 根目录和 MCP 工具摘要。" onclick="openSettingsSection('mcpSkill')"><span><img class="settings-nav-icon" src="icon/文档搜索_doc-search-two.png" alt=""></span><span>MCP / Skill</span></button>
-    <button class="settings-nav-item" data-settings-section="projectInstructions" data-desc="管理 AGENTS.md 项目规则、默认内容和注入策略。" onclick="openSettingsSection('projectInstructions')"><span><img class="settings-nav-icon" src="icon/提示_tips-one.png" alt=""></span><span>项目指令</span></button>
-    <button class="settings-nav-item" data-settings-section="projectMemory" data-desc="管理当前项目的长期记忆文件和注入策略。" onclick="openSettingsSection('projectMemory')"><span><img class="settings-nav-icon" src="icon/云连接_link-cloud-sucess.png" alt=""></span><span>项目记忆</span></button>
-    <button class="settings-nav-item" data-settings-section="jsonEditor" data-desc="查看实际请求、响应、模板、请求头和历史。" onclick="openSettingsSection('jsonEditor')"><span><img class="settings-nav-icon" src="icon/搜索_search.png" alt=""></span><span>JSON 查看器</span></button>
-    <button class="settings-nav-item" data-settings-section="dialogManager" data-desc="管理对话时间轴、文件夹、导出和提示词库。" onclick="openSettingsSection('dialogManager')"><span><img class="settings-nav-icon" src="icon/评论_comment.png" alt=""></span><span>对话管理</span></button>
-    <button class="settings-nav-item" data-settings-section="backup" data-desc="导出和导入配置、工具、归档和模式设置。" onclick="openSettingsSection('backup')"><span><img class="settings-nav-icon" src="icon/更新_update-rotation.png" alt=""></span><span>备份恢复</span></button>
-    <button class="settings-nav-item" data-settings-section="permissions" data-desc="管理工具调用授权、临时权限和本地敏感凭证。" onclick="openSettingsSection('permissions')"><span><img class="settings-nav-icon" src="icon/权限_permissions.png" alt=""></span><span>权限管理</span></button>
-    <button class="settings-nav-item" data-settings-section="pricing" data-desc="配置模型 token 单价和费用估算规则。" onclick="openSettingsSection('pricing')"><span><img class="settings-nav-icon" src="icon/货币流通_currency.png" alt=""></span><span>定价管理</span></button>
-    <button class="settings-nav-item" data-settings-section="tokenUsage" data-desc="查看全局 token 使用、费用估算和历史账本。" onclick="openSettingsSection('tokenUsage')"><span><img class="settings-nav-icon" src="icon/比分牌_scoreboard.png" alt=""></span><span>Token 统计</span></button>
-    <button class="settings-nav-item" data-settings-section="contextLimit" data-desc="按模型关键词配置上下文长度匹配规则。" onclick="openSettingsSection('contextLimit')"><span><img class="settings-nav-icon" src="icon/排序3_sort-three.png" alt=""></span><span>上下文长度</span></button>
-    <button class="settings-nav-item" data-settings-section="git" data-desc="查看仓库状态、提交历史、文件 diff 和提交操作。" onclick="openSettingsSection('git')"><span><img class="settings-nav-icon" src="icon/文件夹-上传_folder-upload.png" alt=""></span><span>Git 管理</span></button>
+    <button class="settings-nav-item active" data-action="openSettingsSection" data-settings-section="main" data-desc="管理 API、模型、代理和本地授权。"><span><img class="settings-nav-icon" src="icon/设置_setting-one.png" alt=""></span><span>主设置</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="remoteControl" data-desc="配置微信文件传输助手轮询、指令格式和回复模板。"><span><img class="settings-nav-icon" src="icon/遥控器_remote-control.png" alt=""></span><span>远程遥控</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。"><span><img class="settings-nav-icon" src="icon/计划_plan.png" alt=""></span><span>计划模式</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。"><span><img class="settings-nav-icon" src="icon/大纲视图_mindmap-list.png" alt=""></span><span>大纲模式</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="ppt" data-desc="配置图片页 PPT 生成流程、目标页数、视觉偏好和各阶段 Prompt。"><span><img class="settings-nav-icon" src="icon/pdf文件_file-pdf-one.png" alt=""></span><span>PPT 模式</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="reflection" data-desc="配置学生回答、老师评审和多轮改进。"><span><img class="settings-nav-icon" src="icon/家庭_family.png" alt=""></span><span>师生讨论</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="tools" data-desc="管理 AI 可调用的工具、预设和内置工具开关。"><span><img class="settings-nav-icon" src="icon/工具_tool.png" alt=""></span><span>工具管理</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="privacy" data-desc="配置本地脱敏、Shell 审核、附件策略和响应防尾注。"><span><img class="settings-nav-icon" src="icon/人身安全_people-safe.png" alt=""></span><span>隐私模式</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="securityRecords" data-desc="查看隐私脱敏和 Shell 命令审核的本地安全记录。"><span><img class="settings-nav-icon" src="icon/记忆卡_memory-card-one.png" alt=""></span><span>安全记录</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="taskQueue" data-desc="管理自动任务、依赖关系和队列执行。"><span><img class="settings-nav-icon" src="icon/流水线_assembly-line.png" alt=""></span><span>任务队列</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="concurrentRequests" data-desc="让多个独立 AI 同时执行同一条指令，并汇总到一个对话。"><span><img class="settings-nav-icon" src="icon/上层_bring-forward.png" alt=""></span><span>并发请求</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="debateMode" data-desc="配置正反方和评委模型，自动创建多局辩论对话。"><span><img class="settings-nav-icon" src="icon/用户互传_user-to-user-transmission.png" alt=""></span><span>辩论模式</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="music" data-desc="播放 music 文件夹、本机文件和本机文件夹中的音乐。"><span><img class="settings-nav-icon" src="icon/音乐_music.png" alt=""></span><span>音乐播放</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="mcpSkill" data-desc="管理可注入的 Skill 根目录和 MCP 工具摘要。"><span><img class="settings-nav-icon" src="icon/文档搜索_doc-search-two.png" alt=""></span><span>MCP / Skill</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="projectInstructions" data-desc="管理 AGENTS.md 项目规则、默认内容和注入策略。"><span><img class="settings-nav-icon" src="icon/提示_tips-one.png" alt=""></span><span>项目指令</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="projectMemory" data-desc="管理当前项目的长期记忆文件和注入策略。"><span><img class="settings-nav-icon" src="icon/云连接_link-cloud-sucess.png" alt=""></span><span>项目记忆</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="jsonEditor" data-desc="查看实际请求、响应、模板、请求头和历史。"><span><img class="settings-nav-icon" src="icon/搜索_search.png" alt=""></span><span>JSON 查看器</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="dialogManager" data-desc="管理对话时间轴、文件夹、导出和提示词库。"><span><img class="settings-nav-icon" src="icon/评论_comment.png" alt=""></span><span>对话管理</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="backup" data-desc="导出和导入配置、工具、归档和模式设置。"><span><img class="settings-nav-icon" src="icon/更新_update-rotation.png" alt=""></span><span>备份恢复</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="permissions" data-desc="管理工具调用授权、临时权限和本地敏感凭证。"><span><img class="settings-nav-icon" src="icon/权限_permissions.png" alt=""></span><span>权限管理</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="pricing" data-desc="配置模型 token 单价和费用估算规则。"><span><img class="settings-nav-icon" src="icon/货币流通_currency.png" alt=""></span><span>定价管理</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="tokenUsage" data-desc="查看全局 token 使用、费用估算和历史账本。"><span><img class="settings-nav-icon" src="icon/比分牌_scoreboard.png" alt=""></span><span>Token 统计</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="contextLimit" data-desc="按模型关键词配置上下文长度匹配规则。"><span><img class="settings-nav-icon" src="icon/排序3_sort-three.png" alt=""></span><span>上下文长度</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="git" data-desc="查看仓库状态、提交历史、文件 diff 和提交操作。"><span><img class="settings-nav-icon" src="icon/文件夹-上传_folder-upload.png" alt=""></span><span>Git 管理</span></button>
   </aside>
   <main class="settings-page-main">
     <div class="settings-page-top">
@@ -1785,10 +1785,10 @@
         <p id="settingsPageDesc">管理 API、模型、代理和本地授权。</p>
       </div>
       <div class="settings-page-actions">
-        <button class="settings-theme-btn" onclick="toggleTheme()" id="themeBtn" title="切换主题"><img class="settings-mode-icon" src="icon/月亮_moon.png" alt=""></button>
-        <button class="settings-theme-btn settings-cool-btn" onclick="toggleCoolMode()" id="coolModeBtn" title="酷炫模式"><img class="settings-mode-icon" src="icon/加载_loading-three.png" alt=""></button>
-        <button class="settings-theme-btn settings-security-btn" onclick="toggleSecurityMode()" id="securityModeBtn" title="安全模式"><img class="settings-mode-icon" src="icon/警报_alarm.png" alt=""></button>
-        <button class="settings-page-close" onclick="closeSettingsPage()" title="关闭">×</button>
+        <button class="settings-theme-btn" data-action="toggleTheme" id="themeBtn" title="切换主题"><img class="settings-mode-icon" src="icon/月亮_moon.png" alt=""></button>
+        <button class="settings-theme-btn settings-cool-btn" data-action="toggleCoolMode" id="coolModeBtn" title="酷炫模式"><img class="settings-mode-icon" src="icon/加载_loading-three.png" alt=""></button>
+        <button class="settings-theme-btn settings-security-btn" data-action="toggleSecurityMode" id="securityModeBtn" title="安全模式"><img class="settings-mode-icon" src="icon/警报_alarm.png" alt=""></button>
+        <button class="settings-page-close" data-action="closeSettingsPage" title="关闭">×</button>
       </div>
     </div>
     <div class="settings-page-content" id="settingsPageContent"></div>
@@ -1798,7 +1798,7 @@
 <!-- ============ 对话管理 ============ -->
 <div class="modal-mask" id="dialogManagerModal">
   <div class="modal wide dialog-manager-modal">
-    <h2>对话管理 <button class="modal-close" onclick="closeDialogManager()">×</button></h2>
+    <h2>对话管理 <button class="modal-close" data-action="closeDialogManager">×</button></h2>
 
     <div class="backup-lede">
       <div>
@@ -1819,7 +1819,7 @@
         </div>
         <div class="dialog-timeline-preview" id="dialogManagerTimelineList"></div>
         <div class="dialog-section-actions">
-          <button class="btn btn-primary" type="button" onclick="saveDialogManagerSettings()">保存设置</button>
+          <button class="btn btn-primary" type="button" data-action="saveDialogManagerSettings">保存设置</button>
         </div>
       </section>
 
@@ -1853,14 +1853,14 @@
         </div>
         <div class="form-group">
           <label>选择对话</label>
-          <select id="dialogExportChatSelect" onchange="setDialogExportChat(this.value)"></select>
+          <select id="dialogExportChatSelect" data-change-action="setDialogExportChat"></select>
         </div>
         <div class="dialog-export-actions">
-          <button class="btn" type="button" onclick="exportDialogManagedChat('md')">导出到 Markdown</button>
-          <button class="btn" type="button" onclick="exportDialogManagedChat('json')">导出到 JSON</button>
-          <button class="btn" type="button" onclick="exportDialogManagedChat('txt')">导出到 TXT</button>
-          <button class="btn" type="button" onclick="exportDialogManagedChat('doc')">导出到 DOC</button>
-          <button class="btn" type="button" onclick="exportDialogManagedChat('pdf')">导出到 PDF</button>
+          <button class="btn" type="button" data-action="exportDialogManagedChat" data-value="md">导出到 Markdown</button>
+          <button class="btn" type="button" data-action="exportDialogManagedChat" data-value="json">导出到 JSON</button>
+          <button class="btn" type="button" data-action="exportDialogManagedChat" data-value="txt">导出到 TXT</button>
+          <button class="btn" type="button" data-action="exportDialogManagedChat" data-value="doc">导出到 DOC</button>
+          <button class="btn" type="button" data-action="exportDialogManagedChat" data-value="pdf">导出到 PDF</button>
         </div>
       </section>
 
@@ -1876,8 +1876,8 @@
           <input id="promptTitleInput" placeholder="提示词标题">
           <textarea id="promptContentInput" placeholder="提示词内容..." rows="5"></textarea>
           <div class="dialog-section-actions">
-            <button class="btn btn-primary" type="button" onclick="savePromptFromUi()">保存提示词</button>
-            <button class="btn" type="button" onclick="clearPromptEditor()">清空</button>
+            <button class="btn btn-primary" type="button" data-action="savePromptFromUi">保存提示词</button>
+            <button class="btn" type="button" data-action="clearPromptEditor">清空</button>
           </div>
         </div>
         <div class="prompt-library-list" id="promptLibraryList"></div>
@@ -1894,7 +1894,7 @@
       <span>学习助手</span>
       <span class="lms-panel-sub">西安交大 LMS</span>
     </div>
-    <button class="lms-panel-close" onclick="closeLmsPanel()" title="关闭">×</button>
+    <button class="lms-panel-close" data-action="closeLmsPanel" title="关闭">×</button>
   </div>
 
   <div class="lms-panel-statusbar" id="lmsStatusBar">
@@ -1902,29 +1902,29 @@
   </div>
 
   <div class="lms-panel-tabs" id="lmsPanelTabs">
-    <button class="lms-tab active" id="lmsTab_overview"  onclick="lmsPanelSetTab('overview')">📊 概览</button>
-    <button class="lms-tab"        id="lmsTab_todos"     onclick="lmsPanelSetTab('todos')">📝 待办</button>
-    <button class="lms-tab"        id="lmsTab_courses"   onclick="lmsPanelSetTab('courses')">📚 课程</button>
-    <button class="lms-tab"        id="lmsTab_materials" onclick="lmsPanelSetTab('materials')">📂 课件</button>
+    <button class="lms-tab active" id="lmsTab_overview"  data-action="valueClick" data-handler="lmsPanelSetTab" data-value="overview">📊 概览</button>
+    <button class="lms-tab"        id="lmsTab_todos"     data-action="valueClick" data-handler="lmsPanelSetTab" data-value="todos">📝 待办</button>
+    <button class="lms-tab"        id="lmsTab_courses"   data-action="valueClick" data-handler="lmsPanelSetTab" data-value="courses">📚 课程</button>
+    <button class="lms-tab"        id="lmsTab_materials" data-action="valueClick" data-handler="lmsPanelSetTab" data-value="materials">📂 课件</button>
   </div>
 
   <div class="lms-panel-body" id="lmsPanelBody"></div>
 
   <div class="lms-panel-foot">
     <span>💡 一句话试试：</span>
-    <span class="lms-hint-chip" onclick="useSuggestion('看看我现在有什么未完成作业')">「看看我有什么作业」</span>
-    <span class="lms-hint-chip" onclick="useSuggestion('查一下操作系统课的课件')">「查课件」</span>
+    <span class="lms-hint-chip" data-action="valueClick" data-handler="useSuggestion" data-value="看看我现在有什么未完成作业">「看看我有什么作业」</span>
+    <span class="lms-hint-chip" data-action="valueClick" data-handler="useSuggestion" data-value="查一下操作系统课的课件">「查课件」</span>
   </div>
 </aside>
 
 <!-- ============ LMS 登录 / Cookie 编辑器（小弹窗） ============ -->
 <div class="modal-mask" id="lmsCookieModal">
   <div class="modal">
-    <h2>🔑 登录 LMS <button class="modal-close" onclick="lmsPanelCloseCookieEditor()">×</button></h2>
+    <h2>🔑 登录 LMS <button class="modal-close" data-action="lmsPanelCloseCookieEditor">×</button></h2>
 
     <div class="lms-auth-tabs">
-      <button class="lms-auth-tab active" id="lmsAuthTabLogin" onclick="lmsPanelSetAuthMode('login')">账号登录</button>
-      <button class="lms-auth-tab" id="lmsAuthTabCookie" onclick="lmsPanelSetAuthMode('cookie')">手动 Cookie</button>
+      <button class="lms-auth-tab active" id="lmsAuthTabLogin" data-action="valueClick" data-handler="lmsPanelSetAuthMode" data-value="login">账号登录</button>
+      <button class="lms-auth-tab" id="lmsAuthTabCookie" data-action="valueClick" data-handler="lmsPanelSetAuthMode" data-value="cookie">手动 Cookie</button>
     </div>
 
     <div id="lmsPasswordLoginPane" class="lms-auth-pane">
@@ -1936,7 +1936,7 @@
       </div>
       <div class="form-group">
         <label>密码</label>
-        <input id="lmsLoginPassword" type="password" autocomplete="current-password" placeholder="统一身份认证密码" class="lms-login-input" onkeydown="if(event.key==='Enter') lmsPanelLoginWithPassword()">
+        <input id="lmsLoginPassword" type="password" autocomplete="current-password" placeholder="统一身份认证密码" class="lms-login-input" data-keydown-action="enterGlobal" data-handler="lmsPanelLoginWithPassword">
       </div>
       <div id="lmsLoginCaptchaBox" class="lms-login-step" style="display:none;">
         <div class="lms-login-step-title">验证码</div>
@@ -1949,8 +1949,8 @@
         <div class="lms-login-step-title">短信验证</div>
         <div class="lms-login-muted" id="lmsLoginMfaPhone"></div>
         <div class="lms-mfa-row">
-          <input id="lmsLoginMfaCode" type="text" inputmode="numeric" placeholder="短信验证码" class="lms-login-input" onkeydown="if(event.key==='Enter') lmsPanelVerifyMfaCode()">
-          <button class="btn" id="lmsLoginSendMfaBtn" onclick="lmsPanelSendMfaCode()">发送验证码</button>
+          <input id="lmsLoginMfaCode" type="text" inputmode="numeric" placeholder="短信验证码" class="lms-login-input" data-keydown-action="enterGlobal" data-handler="lmsPanelVerifyMfaCode">
+          <button class="btn" id="lmsLoginSendMfaBtn" data-action="lmsPanelSendMfaCode">发送验证码</button>
         </div>
         <label class="lms-login-check">
           <input type="checkbox" id="lmsLoginTrustAgent" checked>
@@ -1965,22 +1965,22 @@
         <div class="lms-login-step-title">选择身份</div>
         <div class="lms-login-muted" id="lmsLoginAccountChoices"></div>
         <div class="lms-account-actions">
-          <button class="btn" onclick="lmsPanelFinishAccountChoice('undergraduate')">本科生</button>
-          <button class="btn btn-primary" onclick="lmsPanelFinishAccountChoice('postgraduate')">研究生</button>
+          <button class="btn" data-action="valueClick" data-handler="lmsPanelFinishAccountChoice" data-value="undergraduate">本科生</button>
+          <button class="btn btn-primary" data-action="valueClick" data-handler="lmsPanelFinishAccountChoice" data-value="postgraduate">研究生</button>
         </div>
       </div>
       <div id="lmsLoginStatus" class="lms-login-status"></div>
       <div class="modal-footer">
-        <button class="btn" onclick="lmsPanelCloseCookieEditor()">取消</button>
-        <button class="btn btn-primary" id="lmsLoginSubmitBtn" onclick="lmsPanelLoginWithPassword()">登录</button>
-        <button class="btn btn-primary" id="lmsLoginVerifyMfaBtn" onclick="lmsPanelVerifyMfaCode()" style="display:none;">验证并登录</button>
+        <button class="btn" data-action="lmsPanelCloseCookieEditor">取消</button>
+        <button class="btn btn-primary" id="lmsLoginSubmitBtn" data-action="lmsPanelLoginWithPassword">登录</button>
+        <button class="btn btn-primary" id="lmsLoginVerifyMfaBtn" data-action="lmsPanelVerifyMfaCode" style="display:none;">验证并登录</button>
       </div>
     </div>
 
     <div id="lmsCookiePane" class="lms-auth-pane" style="display:none;">
       <div class="form-group">
         <label>📋 粘贴你的 LMS Cookie（含 <code>session=...</code> 字段）</label>
-        <textarea id="lmsCookieInput" rows="5" placeholder="_ga=...; session=V2-1-...; ..." oninput="lmsPanelCookieParse()" style="width:100%;font-family:Consolas,monospace;font-size:12px;"></textarea>
+        <textarea id="lmsCookieInput" rows="5" placeholder="_ga=...; session=V2-1-...; ..." data-input-action="lmsPanelCookieParse" style="width:100%;font-family:Consolas,monospace;font-size:12px;"></textarea>
       </div>
       <div id="lmsCookieParseResult" style="background:var(--bg-input);padding:10px;border-radius:6px;font-size:13px;line-height:1.7;"></div>
       <details style="margin-top:12px;font-size:13px;color:var(--text-secondary);">
@@ -1994,9 +1994,9 @@
         <p style="margin-top:8px;">⏰ Cookie 大约 24 小时过期，过期后重新走一遍。</p>
       </details>
       <div class="modal-footer">
-        <button class="btn" onclick="lmsPanelClearCookie()" style="color:var(--danger,#e74c3c);">🗑 清空</button>
-        <button class="btn" onclick="lmsPanelCloseCookieEditor()">取消</button>
-        <button class="btn btn-primary" onclick="lmsPanelSaveCookie()">💾 保存</button>
+        <button class="btn" data-action="lmsPanelClearCookie" style="color:var(--danger,#e74c3c);">🗑 清空</button>
+        <button class="btn" data-action="lmsPanelCloseCookieEditor">取消</button>
+        <button class="btn btn-primary" data-action="lmsPanelSaveCookie">💾 保存</button>
       </div>
     </div>
   </div>
@@ -2005,10 +2005,10 @@
 <!-- ============ LMS 内嵌弹窗（作业详情等） ============ -->
 <div class="modal-mask" id="lmsModal">
   <div class="modal wide">
-    <h2>📖 详情 <button class="modal-close" onclick="lmsPanelCloseModal()">×</button></h2>
+    <h2>📖 详情 <button class="modal-close" data-action="lmsPanelCloseModal">×</button></h2>
     <div id="lmsModalContent" class="msg-content" style="max-height:60vh;overflow-y:auto;"></div>
     <div class="modal-footer">
-      <button class="btn btn-primary" onclick="lmsPanelCloseModal()">关闭</button>
+      <button class="btn btn-primary" data-action="lmsPanelCloseModal">关闭</button>
     </div>
   </div>
 </div>
@@ -2017,6 +2017,9 @@
 <!-- ⭐ idb-store.js 必须最先加载：它提供 storage 同步 API 和 localStorage 垫片，
      后续所有 .js 中的 storage.xxx / localStorage.xxx 调用都依赖它 -->
 <script src="js/idb-store.js"></script>
+<script src="js/app-context.js"></script>
+<script src="js/ui-service.js"></script>
+<script src="js/orchestration-service.js"></script>
 <script src="js/config.js"></script>
 <script src="js/state.js"></script>
 <script src="js/utils.js"></script>
@@ -2069,6 +2072,7 @@
 <script src="js/music-player.js"></script>
 <script src="js/settings-page.js"></script>
 <script src="js/main.js"></script>
+<script src="js/event-delegation.js"></script>
 
 </body>
 </html>

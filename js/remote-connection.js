@@ -1,5 +1,6 @@
 // ============ 远程连接：SSH 隧道 + 远程 Agent 后端 ============
 const REMOTE_CONNECTION_KEY = 'snake_remote_connection_v1';
+const RemoteConnectionUiService = window.AgentApp.require('uiService');
 const REMOTE_CONTROLLER = {
   serverUrl: (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl) ? TERMINAL_CONFIG.serverUrl : 'http://localhost:8765'
 };
@@ -125,7 +126,7 @@ async function saveRemoteConnectionFromUi() {
     encryptedPassword
   });
   setRemoteStatus('配置已加密保存到本地。', 'ok');
-  if (typeof toast === 'function') toast('远程连接配置已保存');
+  RemoteConnectionUiService.toast('远程连接配置已保存');
 }
 
 async function remoteBackend(action, params = {}) {
@@ -262,7 +263,7 @@ async function selectRemoteDirCurrent() {
     refreshWorkspaceDependentContext();
     if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
     setRemoteStatus('远程沙箱目录已切换：' + (r.workspace || selected), 'ok');
-    if (typeof toast === 'function') toast('✓ 远程沙箱目录已切换');
+    RemoteConnectionUiService.toast('✓ 远程沙箱目录已切换');
   } catch (e) {
     setRemoteStatus('远程目录已填入，但切换当前沙箱失败：' + e.message, 'error');
   }
@@ -311,7 +312,7 @@ async function connectRemoteAgent() {
     }
     if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
     setRemoteStatus(`已连接：${r.server_url} → ${workspaceInfo.workspace || v.remoteWorkspace}`, 'ok');
-    if (typeof toast === 'function') toast('远程 Agent 已连接');
+    RemoteConnectionUiService.toast('远程 Agent 已连接');
   } catch (e) {
     TERMINAL_CONFIG.serverUrl = oldServerUrl;
     if (remoteStarted) {
@@ -364,3 +365,17 @@ window.refreshRemoteDirPicker = refreshRemoteDirPicker;
 window.remoteDirGoHome = remoteDirGoHome;
 window.remoteDirGoParent = remoteDirGoParent;
 window.selectRemoteDirCurrent = selectRemoteDirCurrent;
+
+window.AgentApp.define('remoteConnection', {
+  openRemoteConnection,
+  closeRemoteConnection,
+  saveRemoteConnectionFromUi,
+  connectRemoteAgent,
+  disconnectRemoteAgent,
+  checkRemoteStatus,
+  openRemoteDirPicker,
+  refreshRemoteDirPicker,
+  remoteDirGoHome,
+  remoteDirGoParent,
+  selectRemoteDirCurrent
+});

@@ -58,6 +58,11 @@ const PRIVACY_GUARD_SESSION_MAP_KEY = 'aichat_privacy_restore_session_v1';
 const PRIVACY_GUARD_LOCAL_MAP_KEY = 'aichat_privacy_restore_local_v1';
 const PRIVACY_GUARD_RESTORE_MAP_LIMIT = 2000;
 
+const PrivacyGuardStateModule = window.AgentApp.require('state');
+const PrivacyGuardUiService = window.AgentApp.require('uiService');
+const privacyGuardState = PrivacyGuardStateModule.state;
+const privacyGuardPersistSettings = PrivacyGuardStateModule.persistSettings;
+
 const PRIVACY_GUARD_DETECTORS = [
   {
     key: 'secrets',
@@ -159,10 +164,10 @@ function clonePrivacyGuardDefaults() {
 }
 
 function ensurePrivacyGuardSettings() {
-  if (!state.settings) state.settings = {};
-  const existing = state.settings.privacyGuard || {};
+  if (!privacyGuardState.settings) privacyGuardState.settings = {};
+  const existing = privacyGuardState.settings.privacyGuard || {};
   const defaults = clonePrivacyGuardDefaults();
-  state.settings.privacyGuard = {
+  privacyGuardState.settings.privacyGuard = {
     ...defaults,
     ...existing,
     fakeTemplates: {
@@ -174,7 +179,7 @@ function ensurePrivacyGuardSettings() {
       ...(existing.detector || {})
     }
   };
-  return state.settings.privacyGuard;
+  return privacyGuardState.settings.privacyGuard;
 }
 
 function getPrivacyGuardSettings() {
@@ -374,14 +379,14 @@ function clearAllPrivacyGuardRestoreStores() {
 }
 
 function showPrivacyGuardReport(report) {
-  if (!report || typeof toast !== 'function') return;
+  if (!report) return;
   const total = Object.values(report.counters || {}).reduce((sum, n) => sum + n, 0);
   const stripped = report.strippedAttachments || 0;
   if (!total && !stripped) return;
   const parts = [];
   if (total) parts.push(`脱敏 ${total} 处`);
   if (stripped) parts.push(`剥离 ${stripped} 个附件`);
-  toast('隐私模式：' + parts.join('，'), 2400);
+  PrivacyGuardUiService.toast('隐私模式：' + parts.join('，'), 2400);
 }
 
 function privacyGuardPrepareHistory(history, options = {}) {
@@ -836,17 +841,17 @@ function parsePrivacyRegex(pattern) {
 
 function togglePrivacyGuard() {
   const cfg = getPrivacyGuardSettings();
-  if (typeof state !== 'undefined' && state.settings?.securityMode && cfg.enabled) {
+  if (privacyGuardState.settings?.securityMode && cfg.enabled) {
     cfg.enabled = true;
     updatePrivacyGuardButton();
-    if (typeof toast === 'function') toast('安全模式已开启，隐私模式会保持启用');
+    PrivacyGuardUiService.toast('安全模式已开启，隐私模式会保持启用');
     return;
   }
   cfg.enabled = !cfg.enabled;
-  persistSettings();
+  privacyGuardPersistSettings();
   updatePrivacyGuardButton();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast(cfg.enabled ? '隐私模式已开启' : '隐私模式已关闭');
+  PrivacyGuardUiService.updateSendBtn();
+  PrivacyGuardUiService.toast(cfg.enabled ? '隐私模式已开启' : '隐私模式已关闭');
 }
 
 function updatePrivacyGuardButton() {
@@ -887,7 +892,7 @@ function renderPrivacySettings() {
   const replacementMode = cfg.localRestoreEnabled ? 'mask' : cfg.replacementMode;
   mask.innerHTML = `
     <div class="modal wide privacy-settings-panel">
-      <h2>隐私模式 <button class="modal-close" onclick="closePrivacySettings()">×</button></h2>
+      <h2>隐私模式 <button class="modal-close" data-action="closePrivacySettings">×</button></h2>
 
       <div class="json-help privacy-help">
         此功能在本地构造请求体前替换敏感文本，尽量降低不可信中转站看到真实数据的概率。它不能保护上游鉴权 Key，也不能对已发送到中转站的内容做加密；图片/PDF 默认会被剥离。
@@ -937,7 +942,7 @@ function renderPrivacySettings() {
           </div>
           <div>
             <label>映射管理</label>
-            <button type="button" class="btn" onclick="clearPrivacyRestoreMappings()">清空已保存映射</button>
+            <button type="button" class="btn" data-action="clearPrivacyRestoreMappings">清空已保存映射</button>
             <div class="form-hint">清空当前页面会话和永久本地映射，不影响已显示的聊天文本。</div>
           </div>
         </div>
@@ -1068,9 +1073,9 @@ function renderPrivacySettings() {
       <div class="privacy-status" id="privacyLastReport">${renderPrivacyLastReport()}</div>
 
       <div class="modal-footer">
-        <button class="btn" onclick="closePrivacySettings()">取消</button>
-        <button class="btn" onclick="resetPrivacyGuardDefaults()">恢复默认</button>
-        <button class="btn btn-primary" onclick="savePrivacySettingsFromUi()">保存</button>
+        <button class="btn" data-action="closePrivacySettings">取消</button>
+        <button class="btn" data-action="resetPrivacyGuardDefaults">恢复默认</button>
+        <button class="btn btn-primary" data-action="savePrivacySettingsFromUi">保存</button>
       </div>
     </div>
   `;
@@ -1142,7 +1147,7 @@ function savePrivacySettingsFromUi() {
   const value = id => document.getElementById(id)?.value || '';
 
   cfg.enabled = checked('pgEnabled');
-  if (typeof state !== 'undefined' && state.settings?.securityMode) cfg.enabled = true;
+  if (privacyGuardState.settings?.securityMode) cfg.enabled = true;
   cfg.localRestoreEnabled = checked('pgLocalRestoreEnabled');
   cfg.localRestoreRetention = normalizePrivacyRestoreRetention(value('pgLocalRestoreRetention'));
   cfg.replacementMode = cfg.localRestoreEnabled ? 'mask' : (value('pgReplacementMode') || 'mask');
@@ -1176,10 +1181,10 @@ function savePrivacySettingsFromUi() {
   cfg.responseGuardMarker = normalizePrivacyMarker(value('pgResponseGuardMarker'));
   cfg.responseGuardAction = value('pgResponseGuardAction') || 'trim';
 
-  persistSettings();
+  privacyGuardPersistSettings();
   updatePrivacyGuardButton();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast('隐私设置已保存');
+  PrivacyGuardUiService.updateSendBtn();
+  PrivacyGuardUiService.toast('隐私设置已保存');
 }
 
 function collectPrivacyFakeTemplates() {
@@ -1210,7 +1215,7 @@ function updatePrivacyLocalRestoreUi() {
 
 function clearPrivacyRestoreMappings() {
   clearAllPrivacyGuardRestoreStores();
-  if (typeof toast === 'function') toast('已清空本地还原映射');
+  PrivacyGuardUiService.toast('已清空本地还原映射');
   const status = document.getElementById('privacyLastReport');
   if (status) status.textContent = renderPrivacyLastReport();
 }
@@ -1247,15 +1252,15 @@ function updatePrivacyInstructionPreview() {
 }
 
 function resetPrivacyGuardDefaults() {
-  state.settings.privacyGuard = clonePrivacyGuardDefaults();
-  if (typeof state !== 'undefined' && state.settings?.securityMode && typeof enforceSecurityModeProtections === 'function') {
+  privacyGuardState.settings.privacyGuard = clonePrivacyGuardDefaults();
+  if (privacyGuardState.settings?.securityMode && typeof enforceSecurityModeProtections === 'function') {
     enforceSecurityModeProtections();
   }
-  persistSettings();
+  privacyGuardPersistSettings();
   renderPrivacySettings();
   updatePrivacyGuardButton();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast('隐私设置已恢复默认');
+  PrivacyGuardUiService.updateSendBtn();
+  PrivacyGuardUiService.toast('隐私设置已恢复默认');
 }
 
 function renderPrivacyLastReport() {
@@ -1297,4 +1302,30 @@ window.resetPrivacyGuardDefaults = resetPrivacyGuardDefaults;
 window.clearPrivacyRestoreMappings = clearPrivacyRestoreMappings;
 window.getPrivacyGuardInputInfoSuffix = getPrivacyGuardInputInfoSuffix;
 
-if (typeof state !== 'undefined') ensurePrivacyGuardSettings();
+window.AgentApp.define('privacyGuard', {
+  ensurePrivacyGuardSettings,
+  getPrivacyGuardSettings,
+  isPrivacyGuardEnabled,
+  beginPrivacyGuardRequest,
+  endPrivacyGuardRequest,
+  withPrivacyGuardRequest,
+  privacyGuardPrepareHistory,
+  privacyGuardSanitizeSystemText,
+  privacyGuardSanitizeAuxiliarySystemText,
+  privacyGuardFinalizeAssistantMessage,
+  privacyGuardFinalizeText,
+  privacyGuardRestoreText,
+  privacyGuardRestoreValue,
+  privacyGuardRestoreToolCallArguments,
+  togglePrivacyGuard,
+  updatePrivacyGuardButton,
+  openPrivacySettings,
+  closePrivacySettings,
+  renderPrivacySettings,
+  savePrivacySettingsFromUi,
+  resetPrivacyGuardDefaults,
+  clearPrivacyRestoreMappings,
+  getPrivacyGuardInputInfoSuffix
+});
+
+ensurePrivacyGuardSettings();

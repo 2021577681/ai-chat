@@ -6,7 +6,7 @@ import base64
 import mimetypes
 import os
 import re
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import quote
 
 
 
@@ -77,30 +77,26 @@ def _track_payload(path):
 
 class MusicMixin:
     def _send_music_cors(self):
-        origin = self.headers.get('Origin', '')
-        self.send_header('Access-Control-Allow-Origin', origin or '*')
-        self.send_header('Vary', 'Origin')
-        self.send_header('Access-Control-Allow-Headers', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        self.response.cors_headers()
 
     def handle_music_file_get(self):
-        qs = parse_qs(urlparse(self.path).query)
+        qs = self.request_context.query
         rel = (qs.get('path') or [''])[0]
         path = _music_path(rel)
         if not path or not os.path.isfile(path) or not _is_audio(path):
-            self._send_json(404, {'ok': False, 'error': '音乐文件不存在'})
+            self.response.json(404, {'ok': False, 'error': '音乐文件不存在'})
             return
 
         size = os.path.getsize(path)
         if size <= 0:
-            self.send_response(416)
+            self.response.status(416)
             self._send_music_cors()
-            self.send_header('Content-Range', 'bytes */0')
-            self.end_headers()
+            self.response.header('Content-Range', 'bytes */0')
+            self.response.end()
             return
         ctype, _ = mimetypes.guess_type(path)
         ctype = ctype or 'audio/mpeg'
-        range_header = self.headers.get('Range', '')
+        range_header = self.request_context.header('Range')
         start, end = 0, size - 1
         status = 200
 
@@ -119,22 +115,22 @@ class MusicMixin:
                     raise ValueError()
                 status = 206
             except Exception:
-                self.send_response(416)
+                self.response.status(416)
                 self._send_music_cors()
-                self.send_header('Content-Range', f'bytes */{size}')
-                self.end_headers()
+                self.response.header('Content-Range', f'bytes */{size}')
+                self.response.end()
                 return
 
         length = end - start + 1
-        self.send_response(status)
+        self.response.status(status)
         self._send_music_cors()
-        self.send_header('Content-Type', ctype)
-        self.send_header('Accept-Ranges', 'bytes')
-        self.send_header('Content-Length', str(length))
+        self.response.header('Content-Type', ctype)
+        self.response.header('Accept-Ranges', 'bytes')
+        self.response.header('Content-Length', str(length))
         if status == 206:
-            self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
-        self.send_header('Cache-Control', 'no-cache')
-        self.end_headers()
+            self.response.header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.response.header('Cache-Control', 'no-cache')
+        self.response.end()
 
         try:
             with open(path, 'rb') as f:
@@ -144,7 +140,7 @@ class MusicMixin:
                     chunk = f.read(min(1024 * 512, remaining))
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    self.response.write(chunk)
                     remaining -= len(chunk)
         except Exception:
             pass
@@ -155,7 +151,7 @@ class MusicMixin:
             return self._music_list()
         if op == 'import':
             return self._music_import(body)
-        self._send_json(400, {'ok': False, 'error': f'未知音乐操作: {op}'})
+        self.response.json(400, {'ok': False, 'error': f'未知音乐操作: {op}'})
 
     def _music_list(self):
         root = _music_root()
@@ -170,7 +166,7 @@ class MusicMixin:
                     except Exception:
                         pass
         tracks.sort(key=lambda item: item.get('name', '').lower())
-        self._send_json(200, {
+        self.response.json(200, {
             'ok': True,
             'musicDir': root,
             'tracks': tracks,
@@ -182,7 +178,7 @@ class MusicMixin:
         os.makedirs(root, exist_ok=True)
         filename = _safe_music_name(body.get('name') or 'track')
         if not _is_audio(filename):
-            self._send_json(200, {'ok': False, 'error': '只支持常见音频格式'})
+            self.response.json(200, {'ok': False, 'error': '只支持常见音频格式'})
             return
 
         target = _unique_path(root, filename)
@@ -194,8 +190,8 @@ class MusicMixin:
                 with open(target, 'wb') as f:
                     f.write(base64.b64decode(data))
             else:
-                self._send_json(200, {'ok': False, 'error': '缺少导入数据'})
+                self.response.json(200, {'ok': False, 'error': '缺少导入数据'})
                 return
-            self._send_json(200, {'ok': True, 'track': _track_payload(target), 'musicDir': root})
+            self.response.json(200, {'ok': True, 'track': _track_payload(target), 'musicDir': root})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})

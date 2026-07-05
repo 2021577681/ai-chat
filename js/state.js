@@ -1,3 +1,23 @@
+const StateConfig = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('config')
+  : null;
+const STATE_REFLECTION_PRESETS = StateConfig ? StateConfig.REFLECTION_PRESETS : REFLECTION_PRESETS;
+const STATE_PLAN_PRESETS = StateConfig ? StateConfig.PLAN_PRESETS : PLAN_PRESETS;
+const STATE_BUILTIN_TOOLS = StateConfig ? StateConfig.BUILTIN_TOOLS : BUILTIN_TOOLS;
+const STORAGE_KEYS = StateConfig
+  ? {
+      store: StateConfig.STORE_KEY,
+      settings: StateConfig.SETTINGS_KEY,
+      tools: StateConfig.TOOLS_KEY,
+      builtinToolsLoaded: StateConfig.BUILTIN_TOOLS_LOADED_KEY
+    }
+  : {
+      store: STORE_KEY,
+      settings: SETTINGS_KEY,
+      tools: TOOLS_KEY,
+      builtinToolsLoaded: BUILTIN_TOOLS_LOADED_KEY
+    };
+
 // ============ 全局状态 ============
 let state = {
   chats: [],
@@ -29,8 +49,8 @@ let state = {
     refMinScore: 9,
     refStudentModel: '',
     refTeacherModel: '',
-    refStudentPrompt: REFLECTION_PRESETS.general.student,
-    refTeacherPrompt: REFLECTION_PRESETS.general.teacher,
+    refStudentPrompt: STATE_REFLECTION_PRESETS.general.student,
+    refTeacherPrompt: STATE_REFLECTION_PRESETS.general.teacher,
     // 🔧 师生模式工具调用支持
     refStudentUseTools: true,           // 学生是否允许调用工具（多轮完成任务）
     refTeacherUseTools: true,           // 老师是否允许调用工具（独立验证答案）
@@ -46,8 +66,8 @@ let state = {
     planVerify: true,
     planVerifyRounds: 2,
     planVerifierModel: '',
-    planPlannerPrompt: PLAN_PRESETS.general.planner,
-    planExecutorPrompt: PLAN_PRESETS.general.executor,
+    planPlannerPrompt: STATE_PLAN_PRESETS.general.planner,
+    planExecutorPrompt: STATE_PLAN_PRESETS.general.executor,
     // 📑 大纲模式（动态规划）
     useOutline: false,
     outlineMaxRounds: 30,
@@ -291,7 +311,7 @@ function migrateRetrySettings() {
 
 function loadData() {
   try {
-    const d = storage.get(STORE_KEY);
+    const d = storage.get(STORAGE_KEYS.store);
     if (d) {
       const p = JSON.parse(d);
       state.chats = p.chats || [];
@@ -306,9 +326,9 @@ function loadData() {
       state._lastSavedAt = p.savedAt || null;
     }
   } catch (e) {}
-  try { const s = storage.get(SETTINGS_KEY); if (s) state.settings = { ...state.settings, ...JSON.parse(s) }; } catch (e) {}
+  try { const s = storage.get(STORAGE_KEYS.settings); if (s) state.settings = { ...state.settings, ...JSON.parse(s) }; } catch (e) {}
   migrateRetrySettings();
-  try { const t = storage.get(TOOLS_KEY); if (t) state.tools = JSON.parse(t); } catch (e) {}
+  try { const t = storage.get(STORAGE_KEYS.tools); if (t) state.tools = JSON.parse(t); } catch (e) {}
   injectBuiltinTools();
 }
 
@@ -451,10 +471,10 @@ function registerMsgTimerExitRecovery() {
 }
 
 function injectBuiltinTools() {
-  if (typeof BUILTIN_TOOLS === 'undefined' || !Array.isArray(BUILTIN_TOOLS)) return;
+  if (!Array.isArray(STATE_BUILTIN_TOOLS)) return;
   let loadedSignatures = [];
   try {
-    const raw = storage.get(BUILTIN_TOOLS_LOADED_KEY);
+    const raw = storage.get(STORAGE_KEYS.builtinToolsLoaded);
     if (raw) loadedSignatures = JSON.parse(raw);
   } catch (e) {}
   const DEPRECATED_BUILTIN_TOOL_NAMES = new Set([
@@ -469,8 +489,8 @@ function injectBuiltinTools() {
   const removedDeprecated = beforeDeprecated - state.tools.length;
 
   const existingNames = new Set(state.tools.map(t => t.name));
-  const currentSignatures = BUILTIN_TOOLS.map(t => t.name);
-  const builtinByName = new Map(BUILTIN_TOOLS.map(t => [t.name, t]));
+  const currentSignatures = STATE_BUILTIN_TOOLS.map(t => t.name);
+  const builtinByName = new Map(STATE_BUILTIN_TOOLS.map(t => [t.name, t]));
   
   // ⭐ 可选工具组：首次安装默认不注入（用户在工具面板手动一键启用）
   // 既减少给模型的工具数量，也降低对外暴露的工具特征
@@ -503,7 +523,7 @@ function injectBuiltinTools() {
   });
   
   let added = 0;
-  for (const tool of BUILTIN_TOOLS) {
+  for (const tool of STATE_BUILTIN_TOOLS) {
     if (!existingNames.has(tool.name)) {
       if (!loadedSignatures.includes(tool.name)) {
         // 可选工具组：首次见到时跳过自动注入
@@ -525,7 +545,7 @@ function injectBuiltinTools() {
     if (added > 0) console.log(`[内置工具] 自动加载了 ${added} 个工具`);
     if (refreshed > 0) console.log(`[内置工具] 刷新了 ${refreshed} 个 LMS 工具`);
   }
-  storage.set(BUILTIN_TOOLS_LOADED_KEY, JSON.stringify(currentSignatures));
+  storage.set(STORAGE_KEYS.builtinToolsLoaded, JSON.stringify(currentSignatures));
 }
 
 function sanitizeMessageAttachmentsForSave(msg) {
@@ -600,7 +620,7 @@ function saveData() {
     const payload = JSON.stringify({ chats: chatsForSave, temporaryChat: temporaryChatForSave, currentId: state.currentId, savedAt });
     
     try {
-      storage.set(STORE_KEY, payload);
+      storage.set(STORAGE_KEYS.store, payload);
       // ⭐ 注：storage.set 是同步写内存 + 异步落盘，这里不会抛 quota 错误。
       //    真正的配额错误在 idb-store 的 flushNow 中捕获，并通过
       //    storage.onQuotaError 回调反向调用 handleStorageQuotaExceeded()。
@@ -647,7 +667,7 @@ function handleStorageQuotaExceeded() {
     
     try {
       const payload = serializeChatsWithStrippedAttachments();
-      storage.set(STORE_KEY, payload);
+      storage.set(STORAGE_KEYS.store, payload);
       if (typeof toast === 'function') {
         toast(`⚠️ 存储已满，已自动删除 ${oldCount - 10} 个旧对话`, 5000);
       }
@@ -689,7 +709,7 @@ function handleStorageQuotaExceeded() {
       temporaryChat: activeTemporaryChatForSave() ? sanitizeChatForSave(state.temporaryChat) : null,
       currentId: state.currentId
     });
-    storage.set(STORE_KEY, payload);
+    storage.set(STORAGE_KEYS.store, payload);
     if (typeof toast === 'function') {
       toast('⚠️ 存储空间不足，已清理所有附件', 5000);
     }
@@ -711,7 +731,7 @@ function serializeChatsWithStrippedAttachments() {
 
 function persistSettings() {
   try {
-    storage.set(SETTINGS_KEY, JSON.stringify(state.settings));
+    storage.set(STORAGE_KEYS.settings, JSON.stringify(state.settings));
   } catch (e) {
     console.warn('[persistSettings] 失败:', e.message);
   }
@@ -719,7 +739,7 @@ function persistSettings() {
 
 function persistTools() {
   try {
-    storage.set(TOOLS_KEY, JSON.stringify(state.tools));
+    storage.set(STORAGE_KEYS.tools, JSON.stringify(state.tools));
   } catch (e) {
     console.warn('[persistTools] 失败:', e.message);
   }
@@ -958,7 +978,7 @@ function activeTaskChat() {
 
 function resetBuiltinTools() {
   if (!confirm('重新加载所有内置工具？\n已有同名工具不会被覆盖，已被删除的内置工具会被重新加回。\n\n注意：LMS、版本快照、论文工具不会自动加回，需要在工具面板里点专用按钮启用。')) return;
-  storage.remove(BUILTIN_TOOLS_LOADED_KEY);
+  storage.remove(STORAGE_KEYS.builtinToolsLoaded);
   // ⭐ 与 injectBuiltinTools 保持一致：可选工具组（LMS / Git 快照 / 论文）不自动恢复
   const OPTIONAL_TOOL_NAMES = new Set([
     'note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore',
@@ -969,14 +989,14 @@ function resetBuiltinTools() {
   const isOptional = (name) => 
     OPTIONAL_TOOL_NAMES.has(name) || name.startsWith('lms_');
   
-  for (const tool of BUILTIN_TOOLS) {
+  for (const tool of STATE_BUILTIN_TOOLS) {
     if (isOptional(tool.name)) continue;
     if (!state.tools.some(t => t.name === tool.name)) {
       state.tools.push(JSON.parse(JSON.stringify(tool)));
     }
   }
   persistTools();
-  storage.set(BUILTIN_TOOLS_LOADED_KEY, JSON.stringify(BUILTIN_TOOLS.map(t => t.name)));
+  storage.set(STORAGE_KEYS.builtinToolsLoaded, JSON.stringify(STATE_BUILTIN_TOOLS.map(t => t.name)));
   if (typeof renderToolList === 'function') renderToolList();
   if (typeof toast === 'function') toast('✓ 内置工具已重置');
 }
@@ -1013,3 +1033,39 @@ function cleanupStorage() {
 
 // 暴露到全局
 window.cleanupStorage = cleanupStorage;
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('state', {
+    get state() { return state; },
+    get pendingImportData() { return pendingImportData; },
+    set pendingImportData(value) { pendingImportData = value; },
+    loadData,
+    saveData,
+    persistSettings,
+    persistTools,
+    currentChat,
+    chatById,
+    isCurrentChat,
+    createTemporaryChat,
+    isTemporaryChat,
+    discardTemporaryChat,
+    ensureChatTasks,
+    chatTaskById,
+    isChatGenerating,
+    isCurrentChatGenerating,
+    isAnyChatGenerating,
+    beginChatTask,
+    updateChatTaskController,
+    requestStopChatTask,
+    setChatTaskGuidance,
+    chatTaskHasGuidance,
+    takeChatTaskGuidance,
+    clearChatTask,
+    setChatTaskMode,
+    isChatTaskMode,
+    isAnyChatTaskMode,
+    syncGlobalTaskState,
+    activeTaskChat,
+    cleanupStorage
+  });
+}

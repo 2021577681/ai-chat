@@ -81,7 +81,7 @@ class WorkspaceMixin:
     def _apply_workspace(self, path):
         raw = str(path or '').strip().strip('"')
         if not raw:
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'cancelled': True,
                 'error': 'No folder selected.',
@@ -92,12 +92,12 @@ class WorkspaceMixin:
         try:
             config.set_workspace(raw)
         except FileNotFoundError as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})
         except Exception as e:
-            return self._send_json(500, {'ok': False, 'error': f'Failed to set workspace: {e}'})
+            return self.response.json(500, {'ok': False, 'error': f'Failed to set workspace: {e}'})
 
         workspace = config.WORKSPACE_ROOT
-        return self._send_json(200, {
+        return self.response.json(200, {
             'ok': True,
             'workspace': workspace,
             'cwd': workspace
@@ -111,13 +111,13 @@ class WorkspaceMixin:
         try:
             selected = choose_directory(initial)
         except Exception as e:
-            return self._send_json(500, {
+            return self.response.json(500, {
                 'ok': False,
                 'error': str(e),
                 'platform': sys.platform
             })
         if not selected:
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'cancelled': True,
                 'error': 'Folder selection cancelled.',

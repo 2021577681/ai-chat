@@ -1,6 +1,10 @@
 // ============ 请求频率管理 ============
 
 const RATE_LIMITER_KEY = 'aichat_rate_v1';
+const RateLimiterStateModule = window.AgentApp.require('state');
+const RateLimiterUiService = window.AgentApp.require('uiService');
+const rateLimiterState = RateLimiterStateModule.state;
+const rateLimiterPersistSettings = RateLimiterStateModule.persistSettings;
 
 let _requestLog = {
   timestamps: [],
@@ -62,7 +66,7 @@ function _interruptibleSleep(ms, onTick, signalOverride) {
     const start = Date.now();
     let cancelled = false;
 
-    const signal = signalOverride || ((typeof state !== 'undefined' && state.abortCtrl) ? state.abortCtrl.signal : null);
+    const signal = signalOverride || (rateLimiterState.abortCtrl ? rateLimiterState.abortCtrl.signal : null);
     const waitKey = signal || Symbol('rate-wait');
 
     const cleanup = () => {
@@ -117,7 +121,7 @@ function _interruptibleSleep(ms, onTick, signalOverride) {
 
 // ⭐ 每次发请求前调用：检查频率 + 应用延迟（超限时自动等待，不再抛错）
 async function applyRateLimit(signalOverride) {
-  const s = state.settings;
+  const s = rateLimiterState.settings;
   
   if (_requestLog.paused) {
     throw new Error('⏸ 请求已暂停。点击顶部「▶️ 继续」恢复');
@@ -220,7 +224,7 @@ function updateRateDisplay(extraText) {
   const oneMinuteAgo = now - 60000;
   const last1min = _requestLog.timestamps.filter(t => t > oneMinuteAgo).length;
   
-  const s = state.settings;
+  const s = rateLimiterState.settings;
   const maxPerMin = s.rateMaxPerMinute || 20;
   
   let rateClass = 'safe';
@@ -232,7 +236,7 @@ function updateRateDisplay(extraText) {
   if (_requestLog.paused) {
     html = `
       <span class="rate-paused"><img class="status-icon" src="icon/暂停_pause.png" alt="">已暂停</span>
-      <button class="rate-btn rate-resume" onclick="toggleRatePause()"><img class="status-icon" src="icon/速度_speed-one.png" alt="">继续</button>
+      <button class="rate-btn rate-resume" data-action="toggleRatePause"><img class="status-icon" src="icon/速度_speed-one.png" alt="">继续</button>
     `;
   } else {
     html = `
@@ -246,8 +250,8 @@ function updateRateDisplay(extraText) {
     }
     
     html += `
-      <button class="rate-btn" onclick="openRateSettings()" title="频率设置"><img class="status-icon" src="icon/设置配置_setting-config.png" alt=""></button>
-      <button class="rate-btn rate-pause" onclick="toggleRatePause()" title="暂停所有请求"><img class="status-icon" src="icon/暂停_pause.png" alt=""></button>
+      <button class="rate-btn" data-action="openRateSettings" title="频率设置"><img class="status-icon" src="icon/设置配置_setting-config.png" alt=""></button>
+      <button class="rate-btn rate-pause" data-action="toggleRatePause" title="暂停所有请求"><img class="status-icon" src="icon/暂停_pause.png" alt=""></button>
     `;
   }
   
@@ -258,7 +262,7 @@ function toggleRatePause() {
   _requestLog.paused = !_requestLog.paused;
   saveRateLimiter();
   updateRateDisplay();
-  toast(_requestLog.paused ? '⏸ 请求已暂停' : '▶️ 请求已恢复');
+  RateLimiterUiService.toast(_requestLog.paused ? '⏸ 请求已暂停' : '▶️ 请求已恢复');
 }
 
 function openRateSettings() {
@@ -274,7 +278,7 @@ function openRateSettings() {
             <h3>请求频率设置</h3>
             <p>控制 API 请求节奏，降低服务商判定异常高频的风险</p>
           </div>
-          <button class="modal-close" onclick="closeRateSettings()">×</button>
+          <button class="modal-close" data-action="closeRateSettings">×</button>
         </div>
         
         <div class="rate-settings-card rate-settings-note">
@@ -286,7 +290,7 @@ function openRateSettings() {
           <div class="form-group rate-setting-group">
             <label>每分钟最大请求数</label>
             <div class="slider-row">
-              <input type="range" id="rate_maxPerMinute" min="5" max="100" step="5" oninput="document.getElementById('rateMaxPerMinVal').textContent=this.value">
+              <input type="range" id="rate_maxPerMinute" min="5" max="100" step="5" data-input-action="setLabelFromValue" data-label-target="rateMaxPerMinVal">
               <span class="slider-val" id="rateMaxPerMinVal">20</span>
             </div>
             <div class="form-hint">超过会拒绝请求。普通聊天 5-20 即可；Agent 任务可能需要 30-60</div>
@@ -295,7 +299,7 @@ function openRateSettings() {
           <div class="form-group rate-setting-group">
             <label>最小请求间隔（毫秒）</label>
             <div class="slider-row">
-              <input type="range" id="rate_minInterval" min="0" max="10000" step="500" oninput="document.getElementById('rateMinIntervalVal').textContent=this.value+'ms'">
+              <input type="range" id="rate_minInterval" min="0" max="10000" step="500" data-input-action="setLabelFromValue" data-label-target="rateMinIntervalVal" data-suffix="ms">
               <span class="slider-val" id="rateMinIntervalVal">0ms</span>
             </div>
             <div class="form-hint">两次请求之间至少等待这么久。0 = 不限制</div>
@@ -305,12 +309,12 @@ function openRateSettings() {
             <label>随机延迟范围（毫秒）</label>
             <div class="slider-row">
               <span class="rate-range-label">最小</span>
-              <input type="range" id="rate_randomMin" min="0" max="5000" step="100" oninput="document.getElementById('rateRandomMinVal').textContent=this.value+'ms'">
+              <input type="range" id="rate_randomMin" min="0" max="5000" step="100" data-input-action="setLabelFromValue" data-label-target="rateRandomMinVal" data-suffix="ms">
               <span class="slider-val" id="rateRandomMinVal">0ms</span>
             </div>
             <div class="slider-row rate-range-subrow">
               <span class="rate-range-label">最大</span>
-              <input type="range" id="rate_randomMax" min="0" max="10000" step="100" oninput="document.getElementById('rateRandomMaxVal').textContent=this.value+'ms'">
+              <input type="range" id="rate_randomMax" min="0" max="10000" step="100" data-input-action="setLabelFromValue" data-label-target="rateRandomMaxVal" data-suffix="ms">
               <span class="slider-val" id="rateRandomMaxVal">0ms</span>
             </div>
             <div class="form-hint">每次请求前随机等待 X 毫秒，模拟更自然的请求节奏</div>
@@ -322,18 +326,18 @@ function openRateSettings() {
         
         <div class="rate-settings-section-title"><h4>预设配置</h4></div>
         <div class="rate-preset-grid">
-          <button class="rate-preset-card" type="button" onclick="applyRatePreset('off')"><strong>无限制</strong><span>开发测试用</span></button>
-          <button class="rate-preset-card" type="button" onclick="applyRatePreset('chat')"><strong>普通聊天</strong><span>20/分，1-2s 延迟</span></button>
-          <button class="rate-preset-card" type="button" onclick="applyRatePreset('safe')"><strong>低调模式</strong><span>10/分，2-5s 延迟</span></button>
-          <button class="rate-preset-card" type="button" onclick="applyRatePreset('stealth')"><strong>极致低调</strong><span>5/分，5-10s 延迟</span></button>
-          <button class="rate-preset-card" type="button" onclick="applyRatePreset('agent')"><strong>Agent 模式</strong><span>30/分，1s 延迟</span></button>
-          <button class="rate-preset-card" type="button" onclick="applyRatePreset('humanlike')"><strong>类人节奏</strong><span>不规律的延迟</span></button>
+          <button class="rate-preset-card" type="button" data-action="valueClick" data-handler="applyRatePreset" data-value="off"><strong>无限制</strong><span>开发测试用</span></button>
+          <button class="rate-preset-card" type="button" data-action="valueClick" data-handler="applyRatePreset" data-value="chat"><strong>普通聊天</strong><span>20/分，1-2s 延迟</span></button>
+          <button class="rate-preset-card" type="button" data-action="valueClick" data-handler="applyRatePreset" data-value="safe"><strong>低调模式</strong><span>10/分，2-5s 延迟</span></button>
+          <button class="rate-preset-card" type="button" data-action="valueClick" data-handler="applyRatePreset" data-value="stealth"><strong>极致低调</strong><span>5/分，5-10s 延迟</span></button>
+          <button class="rate-preset-card" type="button" data-action="valueClick" data-handler="applyRatePreset" data-value="agent"><strong>Agent 模式</strong><span>30/分，1s 延迟</span></button>
+          <button class="rate-preset-card" type="button" data-action="valueClick" data-handler="applyRatePreset" data-value="humanlike"><strong>类人节奏</strong><span>不规律的延迟</span></button>
         </div>
         
         <div class="modal-footer">
-          <button class="btn btn-warning" onclick="resetRateStats()">重置</button>
-          <button class="btn" onclick="closeRateSettings()">取消</button>
-          <button class="btn btn-primary" onclick="saveRateSettings()">保存</button>
+          <button class="btn btn-warning" data-action="resetRateStats">重置</button>
+          <button class="btn" data-action="closeRateSettings">取消</button>
+          <button class="btn btn-primary" data-action="saveRateSettings">保存</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -342,7 +346,7 @@ function openRateSettings() {
   
   modal.classList.add('show');
   
-  const s = state.settings;
+  const s = rateLimiterState.settings;
   document.getElementById('rate_maxPerMinute').value = s.rateMaxPerMinute || 20;
   document.getElementById('rateMaxPerMinVal').textContent = s.rateMaxPerMinute || 20;
   document.getElementById('rate_minInterval').value = s.rateMinIntervalMs || 0;
@@ -381,7 +385,7 @@ function closeRateSettings() {
 }
 
 function saveRateSettings() {
-  const s = state.settings;
+  const s = rateLimiterState.settings;
   s.rateMaxPerMinute = parseInt(document.getElementById('rate_maxPerMinute').value);
   s.rateMinIntervalMs = parseInt(document.getElementById('rate_minInterval').value);
   s.rateRandomMinMs = parseInt(document.getElementById('rate_randomMin').value);
@@ -391,10 +395,10 @@ function saveRateSettings() {
     s.rateRandomMaxMs = s.rateRandomMinMs;
   }
   
-  persistSettings();
+  rateLimiterPersistSettings();
   updateRateDisplay();
   closeRateSettings();
-  toast('频率设置已保存');
+  RateLimiterUiService.toast('频率设置已保存');
 }
 
 function applyRatePreset(key) {
@@ -418,7 +422,7 @@ function applyRatePreset(key) {
   document.getElementById('rate_randomMax').value = p.randMax;
   document.getElementById('rateRandomMaxVal').textContent = p.randMax + 'ms';
   
-  toast('已应用预设：' + p.name);
+  RateLimiterUiService.toast('已应用预设：' + p.name);
 }
 
 function resetRateStats() {
@@ -429,7 +433,7 @@ function resetRateStats() {
   saveRateLimiter();
   updateRateDisplay();
   updateRateCurrentStats();
-  toast('统计已重置');
+  RateLimiterUiService.toast('统计已重置');
 }
 
 // 每 5 秒自动刷新显示
@@ -441,3 +445,29 @@ setInterval(() => {
     updateRateCurrentStats();
   }
 }, 5000);
+
+window.loadRateLimiter = loadRateLimiter;
+window.applyRateLimit = applyRateLimit;
+window.recordRequest = recordRequest;
+window.updateRateDisplay = updateRateDisplay;
+window.toggleRatePause = toggleRatePause;
+window.openRateSettings = openRateSettings;
+window.updateRateCurrentStats = updateRateCurrentStats;
+window.closeRateSettings = closeRateSettings;
+window.saveRateSettings = saveRateSettings;
+window.applyRatePreset = applyRatePreset;
+window.resetRateStats = resetRateStats;
+
+window.AgentApp.define('rateLimiter', {
+  loadRateLimiter,
+  applyRateLimit,
+  recordRequest,
+  updateRateDisplay,
+  toggleRatePause,
+  openRateSettings,
+  updateRateCurrentStats,
+  closeRateSettings,
+  saveRateSettings,
+  applyRatePreset,
+  resetRateStats
+});

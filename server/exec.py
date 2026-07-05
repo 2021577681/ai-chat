@@ -99,9 +99,9 @@ class ExecMixin:
         cwd = body.get('cwd') or config.WORKSPACE_ROOT
         cwd_abs = os.path.realpath(os.path.expanduser(str(cwd)))
         if not command:
-            return self._send_json(400, {'ok': False, 'error': '命令为空'})
+            return self.response.json(400, {'ok': False, 'error': '命令为空'})
         if not os.path.isdir(cwd_abs):
-            return self._send_json(200, {'ok': False, 'error': f'工作目录不存在: {cwd_abs}'})
+            return self.response.json(200, {'ok': False, 'error': f'工作目录不存在: {cwd_abs}'})
         print(f'💻 [遥控终端] cwd={cwd_abs}\n   $ {command}')
         try:
             proc = subprocess.run(
@@ -110,7 +110,7 @@ class ExecMixin:
             )
             stdout = _decode_process_output(proc.stdout)
             stderr = _decode_process_output(proc.stderr)
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': True,
                 'stdout': stdout[-12000:],
                 'stderr': stderr[-6000:],
@@ -119,18 +119,18 @@ class ExecMixin:
                 'workspace': config.WORKSPACE_ROOT
             })
         except subprocess.TimeoutExpired:
-            return self._send_json(200, {'ok': False, 'error': f'命令超时（{timeout}秒）', 'cwd': cwd_abs, 'workspace': config.WORKSPACE_ROOT})
+            return self.response.json(200, {'ok': False, 'error': f'命令超时（{timeout}秒）', 'cwd': cwd_abs, 'workspace': config.WORKSPACE_ROOT})
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e), 'cwd': cwd_abs, 'workspace': config.WORKSPACE_ROOT})
+            return self.response.json(200, {'ok': False, 'error': str(e), 'cwd': cwd_abs, 'workspace': config.WORKSPACE_ROOT})
 
     def handle_open_terminal(self, body):
         """打开系统终端窗口，工作目录为当前沙箱目录。"""
         try:
             cwd_abs = os.path.realpath(config.WORKSPACE_ROOT)
             if not os.path.isdir(cwd_abs):
-                return self._send_json(200, {'ok': False, 'error': f'沙箱目录不存在: {cwd_abs}'})
+                return self.response.json(200, {'ok': False, 'error': f'沙箱目录不存在: {cwd_abs}'})
             if not is_inside_workspace(cwd_abs):
-                return self._send_json(200, {'ok': False, 'error': f'工作目录越界: {cwd_abs}'})
+                return self.response.json(200, {'ok': False, 'error': f'工作目录越界: {cwd_abs}'})
 
             system = platform.system().lower()
             proc = None
@@ -182,28 +182,28 @@ class ExecMixin:
                 if proc is None:
                     raise last_error or RuntimeError('无法启动系统终端')
 
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': True,
                 'stdout': f'✅ 已打开终端: {cwd_abs}',
                 'pid': getattr(proc, 'pid', None),
                 'cwd': cwd_abs,
             })
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': f'无法打开终端: {e}'})
+            return self.response.json(200, {'ok': False, 'error': f'无法打开终端: {e}'})
 
     def handle_execute(self, body):
         command = body.get('command', '').strip()
         cwd = body.get('cwd') or config.get_current_cwd()
         timeout = min(int(body.get('timeout', 30)), 300)
         if not command:
-            return self._send_json(400, {'ok': False, 'error': '命令为空'})
+            return self.response.json(400, {'ok': False, 'error': '命令为空'})
         print(f'💻 [执行] cwd={cwd}\n   $ {command}')
 
         # ⭐ L3: 危险命令黑名单
         is_danger, reason = is_dangerous_command(command)
         if is_danger:
             print(f'🚫 [拦截] 危险命令：{reason}')
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': f'🚫 命令被沙箱黑名单拒绝：{reason}\n命令：{command}'
             })
@@ -212,7 +212,7 @@ class ExecMixin:
         violates_workspace, workspace_reason = command_workspace_violation(command)
         if violates_workspace:
             print(f'🚫 [拦截] 命令路径越界：{workspace_reason}')
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': f'🚫 命令被沙箱路径规则拒绝：{workspace_reason}\n命令：{command}'
             })
@@ -220,7 +220,7 @@ class ExecMixin:
         # ⭐ L1: cwd 必须在沙箱内
         cwd_abs = resolve_path(cwd) if not os.path.isabs(cwd) else os.path.expanduser(cwd)
         if not is_inside_workspace(cwd_abs):
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': f'🚫 工作目录越界：{cwd_abs}\n沙箱根: {config.WORKSPACE_ROOT}'
             })
@@ -272,7 +272,7 @@ class ExecMixin:
                     creationflags=subprocess.CREATE_NEW_CONSOLE,
                     cwd=cwd_abs
                 )
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': True,
                     'stdout': f'✅ 已在新终端窗口启动命令 (PID: {proc.pid})',
                     'stderr': '',
@@ -281,7 +281,7 @@ class ExecMixin:
                     'new_window': True
                 })
             except Exception as e:
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': False,
                     'error': f'无法创建新终端窗口: {e}'
                 })
@@ -296,7 +296,7 @@ class ExecMixin:
         if cd_match:
             target = (cd_match.group(1) or '').strip().strip('"').strip("'")
             if not target:
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': True,
                     'stdout': config.get_current_cwd(),
                     'stderr': '',
@@ -306,10 +306,10 @@ class ExecMixin:
             new_cwd = resolve_path(target) if not os.path.isabs(target) else target
             new_cwd = os.path.expanduser(new_cwd)
             if not os.path.isdir(new_cwd):
-                return self._send_json(200, {'ok': False, 'error': f'目录不存在: {new_cwd}'})
+                return self.response.json(200, {'ok': False, 'error': f'目录不存在: {new_cwd}'})
             if not is_inside_workspace(new_cwd):
                 print(f'🚫 [拦截] cd 越界: {new_cwd}')
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': False,
                     'error': (
                         f'🚫 cd 越界被拒绝：{new_cwd}\n'
@@ -319,9 +319,9 @@ class ExecMixin:
                 })
             # 修改当前浏览器会话的 cwd，避免多标签/多任务互相影响。
             new_cwd = os.path.realpath(new_cwd)
-            config.set_session_cwd(getattr(self, 'session_id', ''), new_cwd)
+            config.set_session_cwd(self.request_context.session_id, new_cwd)
             config.bind_request_cwd(new_cwd)
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': True,
                 'stdout': f'已切换到: {new_cwd}',
                 'stderr': '',
@@ -336,7 +336,7 @@ class ExecMixin:
             )
             stdout = _decode_process_output(proc.stdout)
             stderr = _decode_process_output(proc.stderr)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'stdout': stdout[-8000:],
                 'stderr': stderr[-3000:],
@@ -344,6 +344,6 @@ class ExecMixin:
                 'cwd': cwd_abs
             })
         except subprocess.TimeoutExpired:
-            self._send_json(200, {'ok': False, 'error': f'命令超时（{timeout}秒）'})
+            self.response.json(200, {'ok': False, 'error': f'命令超时（{timeout}秒）'})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})

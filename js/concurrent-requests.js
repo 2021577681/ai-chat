@@ -1,12 +1,20 @@
 // ============ 并发请求 ============
 
+const ConcurrentRequestsStateModule = window.AgentApp.require('state');
+const concurrentRequestsState = ConcurrentRequestsStateModule.state;
+const concurrentRequestsSaveData = ConcurrentRequestsStateModule.saveData;
+const concurrentRequestsCurrentChat = ConcurrentRequestsStateModule.currentChat;
+const concurrentRequestsChatById = ConcurrentRequestsStateModule.chatById;
+const concurrentRequestsIsCurrentChat = ConcurrentRequestsStateModule.isCurrentChat;
+const ConcurrentRequestsUiService = window.AgentApp.require('uiService');
+
 const CONCURRENT_REQUESTS_SETTINGS_KEY = 'aichat_concurrent_requests_settings_v1';
 const CONCURRENT_RUNTIME = {};
 
 function _concurrentDefaultSettings() {
   return {
     agentCount: 3,
-    useTools: !!(state && state.settings && state.settings.useTools),
+    useTools: !!(concurrentRequestsState.settings && concurrentRequestsState.settings.useTools),
     targetChatId: 'new'
   };
 }
@@ -70,7 +78,7 @@ function _concurrentCloneAttachments(attachments) {
 }
 
 function _concurrentGetChats() {
-  return (state.chats || []).filter(c => c && c.concurrent && c.concurrent.type === 'concurrent_requests');
+  return (concurrentRequestsState.chats || []).filter(c => c && c.concurrent && c.concurrent.type === 'concurrent_requests');
 }
 
 function _concurrentEnsureAgents(meta, count) {
@@ -142,7 +150,7 @@ function _concurrentCreateChat(agentCount, useTools, prompt) {
     }
   };
   ensureConcurrentChatMeta(chat, count, useTools);
-  state.chats.unshift(chat);
+  concurrentRequestsState.chats.unshift(chat);
   return chat;
 }
 
@@ -243,11 +251,11 @@ function _concurrentRepairAgentPrivateContext(chat, agent) {
 }
 
 function _concurrentRenderCurrent(chat) {
-  if (typeof isCurrentChat === 'function' && isCurrentChat(chat)) {
-    renderMessages();
+  if (concurrentRequestsIsCurrentChat(chat && chat.id)) {
+    ConcurrentRequestsUiService.renderMessages();
   }
-  if (typeof renderChatList === 'function') renderChatList();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  ConcurrentRequestsUiService.renderChatList();
+  ConcurrentRequestsUiService.updateSendBtn();
   if (document.getElementById('concurrentRequestsModal')) renderConcurrentRequestsModal();
 }
 
@@ -289,7 +297,7 @@ function requestStopConcurrentChat(chatId) {
   Object.values(runtime.controllers || {}).forEach(ctrl => {
     try { ctrl.abort(); } catch (e) {}
   });
-  const chat = typeof chatById === 'function' ? chatById(chatId) : null;
+  const chat = concurrentRequestsChatById(chatId);
   const groupMsg = chat ? _concurrentFindGroup(chat, runtime.roundId) : null;
   if (groupMsg && groupMsg.concurrent) {
     groupMsg.concurrent.status = 'stopping';
@@ -305,10 +313,10 @@ function requestStopConcurrentChat(chatId) {
 }
 
 function recoverInterruptedConcurrentRequests() {
-  if (!state || !Array.isArray(state.chats)) return false;
+  if (!Array.isArray(concurrentRequestsState.chats)) return false;
   const now = Date.now();
   let changed = false;
-  state.chats.forEach(chat => {
+  concurrentRequestsState.chats.forEach(chat => {
     if (!chat || !chat.concurrent || chat.concurrent.type !== 'concurrent_requests') return;
     if (isConcurrentChatRunning(chat.id)) return;
     const meta = ensureConcurrentChatMeta(chat);
@@ -354,35 +362,35 @@ function recoverInterruptedConcurrentRequests() {
 
 function stopSelectedConcurrentRequest() {
   const select = document.getElementById('concurrentTargetSelect');
-  const chatId = select && select.value !== 'new' ? select.value : state.currentId;
+  const chatId = select && select.value !== 'new' ? select.value : concurrentRequestsState.currentId;
   if (!requestStopConcurrentChat(chatId)) {
-    if (typeof toast === 'function') toast('当前没有正在运行的并发请求');
-  } else if (typeof toast === 'function') {
-    toast('已请求停止该并发对话');
+    ConcurrentRequestsUiService.toast('当前没有正在运行的并发请求');
+  } else {
+    ConcurrentRequestsUiService.toast('已请求停止该并发对话');
   }
 }
 
 function stopAllConcurrentRequests() {
   const ids = Object.keys(CONCURRENT_RUNTIME);
   if (!ids.length) {
-    if (typeof toast === 'function') toast('没有正在运行的并发请求');
+    ConcurrentRequestsUiService.toast('没有正在运行的并发请求');
     return;
   }
   ids.forEach(id => requestStopConcurrentChat(id));
-  if (typeof toast === 'function') toast(`已请求停止 ${ids.length} 个并发对话`);
+  ConcurrentRequestsUiService.toast(`已请求停止 ${ids.length} 个并发对话`);
 }
 
 async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
   const cleanPrompt = String(prompt || '').trim();
   const roundAttachments = _concurrentCloneAttachments(attachments);
   if (!chat || (!cleanPrompt && !roundAttachments.length)) return false;
-  if (!state.settings.apiKey) {
+  if (!concurrentRequestsState.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     if (typeof openSettings === 'function') openSettings();
     return false;
   }
   if (isConcurrentChatRunning(chat.id)) {
-    if (typeof toast === 'function') toast('该并发对话正在运行，请先等待完成或停止');
+    ConcurrentRequestsUiService.toast('该并发对话正在运行，请先等待完成或停止');
     return false;
   }
 
@@ -433,10 +441,10 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     status: 'running'
   });
   meta.updatedAt = startedAt;
-  state.currentId = chat.id;
-  saveData();
-  if (typeof renderChatList === 'function') renderChatList();
-  renderMessages();
+  concurrentRequestsState.currentId = chat.id;
+  concurrentRequestsSaveData();
+  ConcurrentRequestsUiService.renderChatList();
+  ConcurrentRequestsUiService.renderMessages();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 
   const runtime = {
@@ -449,10 +457,10 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
   if (typeof updateGenerationBgmForTasks === 'function') updateGenerationBgmForTasks();
   _concurrentRenderCurrent(chat);
 
-  const maxRoundsRaw = parseInt(state.settings.maxToolRounds, 10);
+  const maxRoundsRaw = parseInt(concurrentRequestsState.settings.maxToolRounds, 10);
   const maxRounds = (Number.isFinite(maxRoundsRaw) && maxRoundsRaw >= 0) ? maxRoundsRaw : 15;
-  const systemPrompt = state.settings.systemPrompt || '';
-  const model = state.settings.currentModel;
+  const systemPrompt = concurrentRequestsState.settings.systemPrompt || '';
+  const model = concurrentRequestsState.settings.currentModel;
 
   const runOne = async (agent, turn) => {
     if (!agent || !turn) return;
@@ -460,12 +468,12 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     runtime.controllers[agent.id] = ctrl;
     turn.status = 'running';
     turn.startedAt = Date.now();
-    saveData();
+    concurrentRequestsSaveData();
     _concurrentRenderCurrent(chat);
 
     const addItem = (item) => {
       turn.items.push({ id: _concurrentId('item'), at: Date.now(), ...item });
-      saveData();
+      concurrentRequestsSaveData();
       _concurrentRenderCurrent(chat);
     };
 
@@ -522,7 +530,7 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     } finally {
       turn.finishedAt = Date.now();
       delete runtime.controllers[agent.id];
-      saveData();
+      concurrentRequestsSaveData();
       _concurrentRenderCurrent(chat);
     }
   };
@@ -548,7 +556,7 @@ async function startConcurrentRound(chat, prompt, useTools, attachments = []) {
     meta.updatedAt = finishedAt;
     delete CONCURRENT_RUNTIME[chat.id];
     if (typeof updateGenerationBgmForTasks === 'function') updateGenerationBgmForTasks();
-    saveData();
+    concurrentRequestsSaveData();
     _concurrentRenderCurrent(chat);
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   }
@@ -562,10 +570,10 @@ async function startConcurrentRequestFromUi() {
   const select = document.getElementById('concurrentTargetSelect');
   const prompt = input ? input.value.trim() : '';
   if (!prompt) {
-    if (typeof toast === 'function') toast('请输入并发请求指令');
+    ConcurrentRequestsUiService.toast('请输入并发请求指令');
     return;
   }
-  if (!state.settings.apiKey) {
+  if (!concurrentRequestsState.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     if (typeof openSettings === 'function') openSettings();
     return;
@@ -576,9 +584,9 @@ async function startConcurrentRequestFromUi() {
   let agentCount = _concurrentClampAgentCount(countEl ? countEl.value : 3);
 
   if (target && target !== 'new') {
-    chat = chatById(target);
+    chat = concurrentRequestsChatById(target);
     if (!chat || !chat.concurrent) {
-      if (typeof toast === 'function') toast('找不到选中的并发对话');
+      ConcurrentRequestsUiService.toast('找不到选中的并发对话');
       return;
     }
     agentCount = _concurrentClampAgentCount(chat.concurrent.agentCount);
@@ -587,7 +595,7 @@ async function startConcurrentRequestFromUi() {
     chat = _concurrentCreateChat(agentCount, useTools, prompt);
   }
   if (chat && isConcurrentChatRunning(chat.id)) {
-    if (typeof toast === 'function') toast('该并发对话正在运行，请先等待完成或停止');
+    ConcurrentRequestsUiService.toast('该并发对话正在运行，请先等待完成或停止');
     return;
   }
 
@@ -600,12 +608,12 @@ async function startConcurrentRequestFromUi() {
   renderConcurrentRequestsModal();
   startConcurrentRound(chat, prompt, useTools).catch(e => {
     console.error('[concurrent] start failed:', e);
-    if (typeof toast === 'function') toast('并发请求启动失败：' + (e.message || e), 4000);
+    ConcurrentRequestsUiService.toast('并发请求启动失败：' + (e.message || e), 4000);
   });
 }
 
 async function continueConcurrentChatFromMainInput(prompt, chat, attachments = []) {
-  const targetChat = chat || (typeof currentChat === 'function' ? currentChat() : null);
+  const targetChat = chat || concurrentRequestsCurrentChat();
   if (!targetChat || !targetChat.concurrent || targetChat.concurrent.type !== 'concurrent_requests') return false;
   const cleanPrompt = String(prompt || '').trim();
   const roundAttachments = _concurrentCloneAttachments(attachments);
@@ -619,7 +627,7 @@ function concurrentSelectTargetChanged() {
   const countEl = document.getElementById('concurrentAgentCount');
   const toolsEl = document.getElementById('concurrentUseTools');
   if (!select || !countEl) return;
-  const chat = select.value && select.value !== 'new' ? chatById(select.value) : null;
+  const chat = select.value && select.value !== 'new' ? concurrentRequestsChatById(select.value) : null;
   if (chat && chat.concurrent) {
     countEl.value = _concurrentClampAgentCount(chat.concurrent.agentCount);
     countEl.disabled = true;
@@ -666,7 +674,7 @@ function _concurrentEnsureModal() {
   modal.className = 'modal-mask concurrent-requests-modal';
   modal.innerHTML = `
     <div class="modal wide">
-      <h2>并发请求 <button class="modal-close" onclick="closeConcurrentRequests()">×</button></h2>
+      <h2>并发请求 <button class="modal-close" data-action="closeConcurrentRequests">×</button></h2>
       <div class="concurrent-compose">
         <div class="form-group" style="margin-bottom:0;">
           <label>指令</label>
@@ -674,7 +682,7 @@ function _concurrentEnsureModal() {
         </div>
         <div class="concurrent-controls">
           <label class="concurrent-field">目标对话
-            <select id="concurrentTargetSelect" onchange="concurrentSelectTargetChanged()"></select>
+            <select id="concurrentTargetSelect" data-change-action="concurrentSelectTargetChanged"></select>
           </label>
           <label class="concurrent-field">并发数
             <input type="number" id="concurrentAgentCount" min="1" max="20" step="1">
@@ -682,9 +690,9 @@ function _concurrentEnsureModal() {
           <label class="concurrent-check">
             <input type="checkbox" id="concurrentUseTools"> 允许调用工具
           </label>
-          <button class="btn btn-primary" id="concurrentStartBtn" onclick="startConcurrentRequestFromUi()">开始执行</button>
-          <button class="btn btn-warning" onclick="stopSelectedConcurrentRequest()">停止当前对话</button>
-          <button class="btn" onclick="stopAllConcurrentRequests()">停止全部</button>
+          <button class="btn btn-primary" id="concurrentStartBtn" data-action="startConcurrentRequestFromUi">开始执行</button>
+          <button class="btn btn-warning" data-action="stopSelectedConcurrentRequest">停止当前对话</button>
+          <button class="btn" data-action="stopAllConcurrentRequests">停止全部</button>
         </div>
       </div>
       <div class="concurrent-summary" id="concurrentSummary"></div>
@@ -727,7 +735,7 @@ function renderConcurrentRequestsModal() {
       <span>历史对话 ${chats.length}</span>
       <span>并发轮次 ${totalRounds}</span>
       <span>运行中 ${runningCount}</span>
-      <span>当前模型 ${escapeHtml(state.settings.currentModel || '-')}</span>
+      <span>当前模型 ${escapeHtml(concurrentRequestsState.settings.currentModel || '-')}</span>
     `;
   }
   if (!history) return;
@@ -757,9 +765,9 @@ function renderConcurrentRequestsModal() {
           <span>${_concurrentFormatTime(meta.updatedAt)}</span>
         </div>
         <div class="concurrent-history-actions">
-          <button class="btn" onclick="openConcurrentChat('${escapeHtml(chat.id)}')">打开</button>
-          <button class="btn" onclick="chooseConcurrentChat('${escapeHtml(chat.id)}')">继续发指令</button>
-          <button class="btn btn-warning" ${running ? '' : 'disabled'} onclick="requestStopConcurrentChat('${escapeHtml(chat.id)}')">停止</button>
+          <button class="btn" data-action="valueClick" data-handler="openConcurrentChat" data-value="${escapeHtml(chat.id)}">打开</button>
+          <button class="btn" data-action="valueClick" data-handler="chooseConcurrentChat" data-value="${escapeHtml(chat.id)}">继续发指令</button>
+          <button class="btn btn-warning" ${running ? '' : 'disabled'} data-action="valueClick" data-handler="requestStopConcurrentChat" data-value="${escapeHtml(chat.id)}">停止</button>
         </div>
       </div>
     `;
@@ -767,19 +775,19 @@ function renderConcurrentRequestsModal() {
 }
 
 function toggleConcurrentAgent(roundId, agentId) {
-  const chat = currentChat();
+  const chat = concurrentRequestsCurrentChat();
   const group = _concurrentFindGroup(chat, roundId);
   const turn = _concurrentFindTurn(group, agentId);
   if (!turn) return;
   turn.collapsed = !turn.collapsed;
-  saveData();
-  renderMessages();
+  concurrentRequestsSaveData();
+  ConcurrentRequestsUiService.renderMessages();
 }
 
 function _renderConcurrentToolCall(item) {
   return `
     <div class="tool-call">
-      <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+      <div class="tool-call-header" data-action="toggleParentCollapsed">
         <span>🔧 调用工具：${escapeHtml(item.name || 'tool')}</span>
       </div>
       <div class="tool-call-body">
@@ -792,7 +800,7 @@ function _renderConcurrentToolCall(item) {
 function _renderConcurrentToolResult(item) {
   return `
     <div class="tool-call">
-      <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+      <div class="tool-call-header" data-action="toggleParentCollapsed">
         <span>📤 ${escapeHtml(item.name || 'tool')} 执行结果</span>
         <span class="tool-status ${item.ok === false ? 'error' : 'success'}">${item.ok === false ? '失败' : '成功'}</span>
       </div>
@@ -942,7 +950,7 @@ function _renderConcurrentToolFlowGroup(events, idx) {
   const elapsed = first && last ? _concurrentElapsed(first.at, last.at) : '';
   return `
     <div class="tool-flow-group concurrent-tool-flow collapsed" data-flow-key="concurrent_${idx}_${escapeHtml(first && first.item ? first.item.id || first.at : Date.now())}">
-      <button class="tool-flow-toggle" type="button" onclick="this.parentElement.classList.toggle('collapsed')">
+      <button class="tool-flow-toggle" type="button" data-action="toggleParentCollapsed">
         <span class="tool-flow-icon">🛠</span>
         <span class="tool-flow-title">工具调用过程</span>
         <span class="tool-flow-meta">
@@ -964,7 +972,7 @@ function _renderConcurrentAnswerFlowGroup(ev, idx) {
   const elapsed = _concurrentElapsed(ev.startedAt, ev.finishedAt);
   return `
     <div class="tool-flow-group concurrent-answer-flow collapsed" data-flow-key="concurrent_answer_${idx}_${escapeHtml(ev.agentId || '')}_${escapeHtml(item.id || ev.at || '')}">
-      <button class="tool-flow-toggle" type="button" onclick="this.parentElement.classList.toggle('collapsed')">
+      <button class="tool-flow-toggle" type="button" data-action="toggleParentCollapsed">
         <span class="tool-flow-icon">💬</span>
         <span class="tool-flow-title">${escapeHtml(ev.agentName || 'AI助手')} 的回答</span>
         <span class="tool-flow-meta">
@@ -1067,7 +1075,7 @@ function _concurrentContext(context) {
   const chatId = context.concurrentChatId || context.chatId || (context.chat && context.chat.id);
   const agentId = context.concurrentAgentId || '';
   if (!chatId || !agentId) return null;
-  const chat = typeof chatById === 'function' ? chatById(chatId) : null;
+  const chat = concurrentRequestsChatById(chatId);
   if (!chat || !chat.concurrent || chat.concurrent.type !== 'concurrent_requests') return null;
   return {
     chat,
@@ -1148,7 +1156,7 @@ function guardConcurrentFileOwnership(action, params, context) {
   if (changed) {
     ctx.meta.fileOwners = owners;
     ctx.meta.updatedAt = now;
-    if (typeof saveData === 'function') saveData();
+    concurrentRequestsSaveData();
   }
   return null;
 }
@@ -1190,7 +1198,7 @@ function rememberConcurrentCheckpoints(result, context) {
   if (!checkpoints.length) return;
   checkpoints.forEach(checkpoint => _concurrentRememberCheckpoint(ctx.meta, checkpoint));
   ctx.meta.updatedAt = Date.now();
-  if (typeof saveData === 'function') saveData();
+  concurrentRequestsSaveData();
 }
 
 function _concurrentReleasePendingOwnership(ctx, action, params) {
@@ -1214,7 +1222,7 @@ function _concurrentReleasePendingOwnership(ctx, action, params) {
   }
   if (changed) {
     ctx.meta.updatedAt = Date.now();
-    if (typeof saveData === 'function') saveData();
+    concurrentRequestsSaveData();
   }
 }
 
@@ -1245,7 +1253,7 @@ function claimConcurrentFileOwnership(action, params, result, context) {
     };
   }
   ctx.meta.updatedAt = Date.now();
-  if (typeof saveData === 'function') saveData();
+  concurrentRequestsSaveData();
 }
 
 window.openConcurrentRequests = openConcurrentRequests;
@@ -1267,3 +1275,33 @@ window.guardConcurrentFileOwnership = guardConcurrentFileOwnership;
 window.claimConcurrentFileOwnership = claimConcurrentFileOwnership;
 window.rememberConcurrentCheckpoints = rememberConcurrentCheckpoints;
 window.normalizeConcurrentPath = normalizeConcurrentPath;
+
+window.AgentApp.define('concurrentRequests', {
+  CONCURRENT_REQUESTS_SETTINGS_KEY,
+  CONCURRENT_RUNTIME,
+  loadConcurrentRequestSettings,
+  saveConcurrentRequestSettings,
+  concurrentAgentName,
+  ensureConcurrentChatMeta,
+  isConcurrentChatRunning,
+  isAnyConcurrentChatRunning,
+  requestStopConcurrentChat,
+  recoverInterruptedConcurrentRequests,
+  stopSelectedConcurrentRequest,
+  stopAllConcurrentRequests,
+  startConcurrentRound,
+  startConcurrentRequestFromUi,
+  continueConcurrentChatFromMainInput,
+  concurrentSelectTargetChanged,
+  openConcurrentChat,
+  chooseConcurrentChat,
+  openConcurrentRequests,
+  closeConcurrentRequests,
+  renderConcurrentRequestsModal,
+  toggleConcurrentAgent,
+  renderConcurrentMsg,
+  normalizeConcurrentPath,
+  guardConcurrentFileOwnership,
+  claimConcurrentFileOwnership,
+  rememberConcurrentCheckpoints
+});

@@ -2,6 +2,19 @@
 // 顶栏按钮开启后，下一条用户消息会直接走 PPT Pipeline：
 // 项目 PPT 工作流：需求理解/澄清 → 叙事弧大纲 → 选择风格/主题 → 登记版式 → HTML 模板页 → 浏览器截图 → PPT 图片页 → 导出。
 
+const PptModeStateModule = window.AgentApp.require('state');
+const pptModeState = PptModeStateModule.state;
+const pptModeSaveData = PptModeStateModule.saveData;
+const pptModePersistSettings = PptModeStateModule.persistSettings;
+const pptModeCurrentChat = PptModeStateModule.currentChat;
+const pptModeChatById = PptModeStateModule.chatById;
+const pptModeBeginChatTask = PptModeStateModule.beginChatTask;
+const pptModeSetChatTaskMode = PptModeStateModule.setChatTaskMode;
+const pptModeSyncGlobalTaskState = PptModeStateModule.syncGlobalTaskState;
+const pptModeChatTaskById = PptModeStateModule.chatTaskById;
+const pptModeClearChatTask = PptModeStateModule.clearChatTask;
+const PptModeOrchestrationService = window.AgentApp.require('orchestrationService');
+
 const DEFAULT_PPT_UNDERSTAND_PROMPT = [
   '你是 项目 PPT 工作流 的演示策划总监。请理解用户要做的 PPT 主题、内容、用途、受众和语气，并为 PPT 自动命名。',
   '必须只输出 JSON 对象，不要输出解释。',
@@ -208,13 +221,13 @@ function confirmPptIntentIfNeeded(userRequest) {
 }
 
 function disablePptModeUi(options = {}) {
-  const s = state.settings || {};
+  const s = pptModeState.settings || {};
   s.usePpt = false;
   if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
   const btn = document.getElementById('pptModeBtn');
   if (btn) btn.classList.remove('ppt-active');
   syncPptComposerHint();
-  if (options.persist !== false && typeof persistSettings === 'function') persistSettings();
+  if (options.persist !== false) pptModePersistSettings();
   if (options.renderTools !== false && typeof renderToolList === 'function') renderToolList();
   if (options.updateSend !== false && typeof updateSendBtn === 'function') updateSendBtn();
 }
@@ -222,7 +235,7 @@ function disablePptModeUi(options = {}) {
 async function fallbackToNormalChatFromPptMode(options = {}) {
   disablePptModeUi();
   if (typeof toast === 'function') toast('已关闭 PPT 模式，改用普通聊天回答', 2200);
-  await callAPI(undefined, { contextChecked: !!options.contextChecked });
+  await PptModeOrchestrationService.callAPI(undefined, { contextChecked: !!options.contextChecked });
 }
 
 function createPptModeState(payload, intent) {
@@ -592,7 +605,7 @@ function applyPptTaskSnapshot(ppt, snap) {
 }
 
 function refreshPptModeMessage(msgIdx, chat, options = {}) {
-  const c = chat || currentChat();
+  const c = chat || pptModeCurrentChat();
   const msg = c && c.messages && c.messages[msgIdx];
   const full = !!options.full;
   const inner = document.getElementById('messagesInner');
@@ -607,7 +620,7 @@ function refreshPptModeMessage(msgIdx, chat, options = {}) {
     }
   } else if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, chat);
   else if (typeof renderMessages === 'function') renderMessages();
-  if (typeof saveData === 'function') saveData();
+  pptModeSaveData();
 }
 
 function syncPptComposerHint() {
@@ -616,7 +629,7 @@ function syncPptComposerHint() {
   if (!input.dataset.defaultPlaceholder) {
     input.dataset.defaultPlaceholder = input.getAttribute('placeholder') || '输入消息，Enter 发送 / Shift+Enter 换行 / 可拖拽或粘贴图片...';
   }
-  input.setAttribute('placeholder', state.settings && state.settings.usePpt ? 'PPT' : input.dataset.defaultPlaceholder);
+  input.setAttribute('placeholder', pptModeState.settings && pptModeState.settings.usePpt ? 'PPT' : input.dataset.defaultPlaceholder);
 }
 
 function ensurePptSettingsModal() {
@@ -627,7 +640,7 @@ function ensurePptSettingsModal() {
   modal.id = 'pptSettingsModal';
   modal.innerHTML = `
     <div class="modal wide">
-      <h2>📊 PPT 模式 <button class="modal-close" onclick="closePptSettings()">×</button></h2>
+      <h2>📊 PPT 模式 <button class="modal-close" data-action="closePptSettings">×</button></h2>
       <div class="json-help">
         在此启用 PPT 模式后，下一条消息会按项目 PPT 工作流生成：需求理解/澄清 → 叙事弧大纲 → 选择电子杂志或瑞士国际主义风格 → 绑定登记版式和主题色 → 生成模板 HTML 页面 → 浏览器截图 → 图片铺入 PPT → 导出。所有模板和校验资源都使用项目内 <code>server/ppt_templates/project</code>。
       </div>
@@ -695,7 +708,7 @@ function ensurePptSettingsModal() {
       <div class="form-group">
         <label>PPT 规划温度</label>
         <div class="slider-row">
-          <input type="range" id="pptTemperature" min="0" max="1" step="0.1" oninput="document.getElementById('pptTemperatureVal').textContent=this.value">
+          <input type="range" id="pptTemperature" min="0" max="1" step="0.1" data-input-action="setLabelFromValue" data-label-target="pptTemperatureVal">
           <span class="slider-val" id="pptTemperatureVal">0.6</span>
         </div>
       </div>
@@ -729,9 +742,9 @@ function ensurePptSettingsModal() {
       </div>
 
       <div class="modal-footer">
-        <button class="btn" onclick="resetPptPromptsToDefault()">恢复默认 Prompt</button>
-        <button class="btn" onclick="closePptSettings()">取消</button>
-        <button class="btn btn-primary" onclick="savePptSettings()">保存</button>
+        <button class="btn" data-action="resetPptPromptsToDefault">恢复默认 Prompt</button>
+        <button class="btn" data-action="closePptSettings">取消</button>
+        <button class="btn btn-primary" data-action="savePptSettings">保存</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -740,7 +753,7 @@ function ensurePptSettingsModal() {
 
 function openPptSettings() {
   const modal = ensurePptSettingsModal();
-  const s = state.settings || {};
+  const s = pptModeState.settings || {};
   document.getElementById('pptEnabled').checked = !!s.usePpt;
   document.getElementById('pptSlideCount').value = normalizePptSlideCount(s.pptSlideCount || 8);
   document.getElementById('pptDeckStyle').value = normalizePptDeckStyle(s.pptDeckStyle || 'auto');
@@ -765,7 +778,7 @@ function closePptSettings() {
 }
 
 function savePptSettings() {
-  const s = state.settings;
+  const s = pptModeState.settings;
   s.usePpt = !!document.getElementById('pptEnabled').checked;
   if (s.usePpt) {
     s.usePlan = false;
@@ -790,7 +803,7 @@ function savePptSettings() {
   s.pptHtmlPrompt = normalizePptPromptOverride(document.getElementById('pptHtmlPrompt').value, DEFAULT_PPT_HTML_PROMPT);
   if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(!!s.usePpt, { render: false });
   syncPptComposerHint();
-  if (typeof persistSettings === 'function') persistSettings();
+  pptModePersistSettings();
   closePptSettings();
   if (typeof toast === 'function') toast('✓ PPT 设置已保存');
 }
@@ -807,7 +820,7 @@ function resetPptPromptsToDefault() {
 }
 
 function buildPptModePayload(userRequest, attachments = []) {
-  const s = state.settings || {};
+  const s = pptModeState.settings || {};
   const model = (s.pptModel || s.currentModel || '').trim();
   const htmlPrompt = normalizePptPromptOverride(
     s.pptHtmlPrompt || '',
@@ -865,14 +878,14 @@ function clonePptAttachments(attachments) {
 }
 
 function takePptGuidanceAttachments(chat) {
-  const out = clonePptAttachments(state.pendingAttachments || []);
+  const out = clonePptAttachments(pptModeState.pendingAttachments || []);
   const pendingAI = (typeof takePendingAIAttachments === 'function')
     ? takePendingAIAttachments(chat && chat.id)
-    : (state.pendingAIAttachments || []).splice(0);
+    : (pptModeState.pendingAIAttachments || []).splice(0);
   for (const att of pendingAI || []) {
     if (att && !out.some(ex => ex && ex.id === att.id)) out.push({ ...att });
   }
-  state.pendingAttachments = [];
+  pptModeState.pendingAttachments = [];
   if (typeof renderPendingAtts === 'function') renderPendingAtts();
   if (typeof updateSendBtn === 'function') updateSendBtn();
   return out;
@@ -967,20 +980,20 @@ function renderPptPanel(m, idx) {
     <div class="outline-actions paused ppt-task-controls">
       <div class="outline-actions-hint">PPT 已暂停。可以补充风格、素材、页数、路径或修改意见；不填写也可以直接继续。</div>
       <textarea class="outline-inject-input" id="pptGuide_${idx}" rows="3"
-        onpaste="handlePptGuidancePaste(event)"
-        ondragover="handlePptGuidanceDragOver(event)"
-        ondrop="handlePptGuidanceDrop(event)"
+        data-paste-action="handlePptGuidancePaste"
+        data-dragover-action="handlePptGuidanceDragOver"
+        data-drop-action="handlePptGuidanceDrop"
         placeholder="给 PPT 流程留言：例如「改成瑞士风」「第 4 页必须用 output/data.csv」「这张截图放在封面」。可在这里粘贴/拖入图片和文件。"></textarea>
       <div class="outline-actions-btns">
-        <button class="outline-btn resume" onclick="resumePptTaskFromPanel(${idx})">继续执行</button>
-        <button class="outline-btn finish" onclick="resumePptTaskFromPanel(${idx}, true)">仅继续</button>
-        <button class="outline-btn cancel" onclick="cancelPptTaskFromPanel(${idx})">放弃生成</button>
+        <button class="outline-btn resume" data-action="valueClick" data-handler="resumePptTaskFromPanel" data-value="${idx}" data-value-type="number">继续执行</button>
+        <button class="outline-btn finish" data-action="valueClick" data-handler="resumePptTaskFromPanel" data-value="${idx}" data-value-type="number" data-extra-value="true" data-extra-type="boolean">仅继续</button>
+        <button class="outline-btn cancel" data-action="valueClick" data-handler="cancelPptTaskFromPanel" data-value="${idx}" data-value-type="number">放弃生成</button>
       </div>
       <div class="form-hint">任务ID：${escapeHtml(ppt.taskId || '')}</div>
     </div>` : `
     <div class="ppt-task-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
-      <button class="btn mini" onclick="pausePptTaskFromPanel(${idx})">暂停并留言</button>
-      <button class="btn mini danger" onclick="cancelPptTaskFromPanel(${idx})">放弃生成</button>
+      <button class="btn mini" data-action="valueClick" data-handler="pausePptTaskFromPanel" data-value="${idx}" data-value-type="number">暂停并留言</button>
+      <button class="btn mini danger" data-action="valueClick" data-handler="cancelPptTaskFromPanel" data-value="${idx}" data-value-type="number">放弃生成</button>
       <span class="form-hint">任务ID：${escapeHtml(ppt.taskId || '')}</span>
     </div>`) : '';
 
@@ -1050,7 +1063,7 @@ function renderPptPanel(m, idx) {
 
   return `
     <div class="outline-panel ppt-panel ${ppt.expanded === false ? 'collapsed' : ''}" data-msg-idx="${idx}">
-      <button class="outline-toggle ppt-toggle" onclick="togglePptPanel(${idx})">
+      <button class="outline-toggle ppt-toggle" data-action="valueClick" data-handler="togglePptPanel" data-value="${idx}" data-value-type="number">
         <span>PPT 项目 PPT 工作流</span>
         <span class="outline-stats">${escapeHtml(stats || '准备中')}</span>
       </button>
@@ -1071,17 +1084,17 @@ function renderPptPanel(m, idx) {
 }
 
 function togglePptPanel(idx) {
-  const c = currentChat();
+  const c = pptModeCurrentChat();
   const msg = c && c.messages && c.messages[idx];
   if (!msg || !msg.pptMode) return;
   msg.pptMode.expanded = msg.pptMode.expanded === false;
   if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
   else if (typeof renderMessages === 'function') renderMessages();
-  if (typeof saveData === 'function') saveData();
+  pptModeSaveData();
 }
 
 async function resumePptTaskFromPanel(idx, skipGuidance = false) {
-  const c = currentChat();
+  const c = pptModeCurrentChat();
   const msg = c && c.messages && c.messages[idx];
   if (!msg || !msg.pptMode || !msg.pptMode.taskId) return;
   const taskId = msg.pptMode.taskId;
@@ -1094,10 +1107,9 @@ async function resumePptTaskFromPanel(idx, skipGuidance = false) {
   msg.pptMode.progressText = hasGuidance ? '正在带着用户补充继续 PPT 任务...' : '正在恢复 PPT 任务...';
   refreshPptModeMessage(idx, c);
   const ctrl = new AbortController();
-  if (typeof beginChatTask === 'function') beginChatTask(c.id, ctrl, { resetStop: true });
-  else state.abortCtrl = ctrl;
-  if (typeof setChatTaskMode === 'function') setChatTaskMode(c.id, 'ppt');
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+  pptModeBeginChatTask(c.id, ctrl, { resetStop: true });
+  pptModeSetChatTaskMode(c.id, 'ppt');
+  pptModeSyncGlobalTaskState(c.id);
   if (typeof updateSendBtn === 'function') updateSendBtn();
   let since = msg.pptMode.progressIndex || 0;
   try {
@@ -1116,8 +1128,8 @@ async function resumePptTaskFromPanel(idx, skipGuidance = false) {
     }
     since = msg.pptMode.progressIndex || since;
     while (true) {
-      const task = typeof chatTaskById === 'function' ? chatTaskById(c.id) : null;
-      if (ctrl.signal.aborted || !!(task && task.stopRequested) || !!state.stopRequested) {
+      const task = pptModeChatTaskById(c.id);
+      if (ctrl.signal.aborted || !!(task && task.stopRequested) || !!pptModeState.stopRequested) {
         const pauseSnap = await controlPptTask(taskId, 'pause', { since }, { skipConfirm: true });
         if (pauseSnap && pauseSnap.ok) applyPptTaskSnapshot(msg.pptMode, pauseSnap);
         msg.pptMode.status = 'paused';
@@ -1154,21 +1166,17 @@ async function resumePptTaskFromPanel(idx, skipGuidance = false) {
     msg.pptMode.inProgress = false;
     refreshPptModeMessage(idx, c);
   } finally {
-    const task = typeof chatTaskById === 'function' ? chatTaskById(c.id) : null;
+    const task = pptModeChatTaskById(c.id);
     if (!task || task.abortCtrl === ctrl) {
-      if (typeof clearChatTask === 'function') clearChatTask(c.id);
-      else {
-        state.isGenerating = false;
-        state.abortCtrl = null;
-      }
+      pptModeClearChatTask(c.id);
     }
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+    pptModeSyncGlobalTaskState(c.id);
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
 
 async function pausePptTaskFromPanel(idx) {
-  const c = currentChat(); const msg = c && c.messages && c.messages[idx];
+  const c = pptModeCurrentChat(); const msg = c && c.messages && c.messages[idx];
   if (msg && msg.pptMode && msg.pptMode.taskId) {
     msg.pptMode.status = 'paused';
     msg.pptMode.progressText = '已请求暂停，当前小步结束后会停住。';
@@ -1180,7 +1188,7 @@ async function pausePptTaskFromPanel(idx) {
 }
 
 async function cancelPptTaskFromPanel(idx) {
-  const c = currentChat(); const msg = c && c.messages && c.messages[idx];
+  const c = pptModeCurrentChat(); const msg = c && c.messages && c.messages[idx];
   if (msg && msg.pptMode && msg.pptMode.taskId && confirm('确定取消这个 PPT 后端任务吗？取消后不能恢复。')) {
     const snap = await controlPptTask(msg.pptMode.taskId, 'cancel', { since: msg.pptMode.progressIndex || 0 }, { skipConfirm: true });
     if (snap && snap.ok) applyPptTaskSnapshot(msg.pptMode, snap);
@@ -1201,7 +1209,7 @@ function latestActivePptMessageIndex(chat) {
 }
 
 function queuePptMidrunGuidanceFromComposer(chat, input, text) {
-  if (!chat || (!text && !(state.pendingAttachments || []).length)) return false;
+  if (!chat || (!text && !(pptModeState.pendingAttachments || []).length)) return false;
   const idx = latestActivePptMessageIndex(chat);
   if (idx < 0) return false;
   const msg = chat.messages[idx];
@@ -1239,7 +1247,7 @@ function queuePptMidrunGuidanceFromComposer(chat, input, text) {
 
 async function callAPIWithPptMode(options = {}) {
   const requestedChatId = options && options.chatId;
-  const c = requestedChatId ? chatById(requestedChatId) : currentChat();
+  const c = requestedChatId ? pptModeChatById(requestedChatId) : pptModeCurrentChat();
   if (!c) return;
   const userRequest = currentLastUserText(c).trim();
   if (!userRequest) return;
@@ -1259,13 +1267,12 @@ async function callAPIWithPptMode(options = {}) {
   c.messages.push(aiMsg);
   const msgIdx = c.messages.length - 1;
   renderMessages();
-  saveData();
+  pptModeSaveData();
 
   const ctrl = new AbortController();
-  if (typeof beginChatTask === 'function') beginChatTask(c.id, ctrl, { resetStop: true });
-  else state.abortCtrl = ctrl;
-  if (typeof setChatTaskMode === 'function') setChatTaskMode(c.id, 'ppt');
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+  pptModeBeginChatTask(c.id, ctrl, { resetStop: true });
+  pptModeSetChatTaskMode(c.id, 'ppt');
+  pptModeSyncGlobalTaskState(c.id);
   if (typeof updateSendBtn === 'function') updateSendBtn();
 
   try {
@@ -1326,8 +1333,8 @@ async function callAPIWithPptMode(options = {}) {
       chatId: c.id,
       skipConfirm: true,
       isStopped: () => {
-        const t = typeof chatTaskById === 'function' ? chatTaskById(c.id) : null;
-        return !!(t && t.stopRequested) || !!state.stopRequested;
+        const t = pptModeChatTaskById(c.id);
+        return !!(t && t.stopRequested) || !!pptModeState.stopRequested;
       },
       onProgress: ev => {
         applyPptTaskSnapshot(aiMsg.pptMode, ev.snapshot || { events: [ev], task_id: ev.task_id });
@@ -1411,22 +1418,66 @@ async function callAPIWithPptMode(options = {}) {
     aiMsg._endTime = Date.now();
     aiMsg.pptMode.inProgress = false;
     delete aiMsg.pptMode.progressText;
-    const s = state.settings || {};
+    const s = pptModeState.settings || {};
     s.usePpt = false;
     if (typeof syncPptToolsWithMode === 'function') syncPptToolsWithMode(false, { render: false });
     const btn = document.getElementById('pptModeBtn');
     if (btn) btn.classList.remove('ppt-active');
     syncPptComposerHint();
-    if (typeof persistSettings === 'function') persistSettings();
+    pptModePersistSettings();
     if (typeof renderToolList === 'function') renderToolList();
-    if (typeof clearChatTask === 'function') clearChatTask(c.id);
-    else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
-    }
-    saveData();
+    pptModeClearChatTask(c.id);
+    pptModeSaveData();
     if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
     else renderMessages();
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
+
+window.AgentApp.define('pptMode', {
+  DEFAULT_PPT_UNDERSTAND_PROMPT,
+  DEFAULT_PPT_OUTLINE_PROMPT,
+  DEFAULT_PPT_PAGE_TYPE_PROMPT,
+  DEFAULT_PPT_HTML_PROMPT,
+  PPT_DECK_STYLE_OPTIONS,
+  PPT_DECK_THEME_OPTIONS,
+  normalizePptPromptText,
+  normalizePptPromptOverride,
+  normalizePptSlideCount,
+  normalizePptRenderStyle,
+  normalizePptDeckStyle,
+  normalizePptDeckTheme,
+  pptRenderStyleLabel,
+  pptDeckStyleLabel,
+  pptDeckThemeLabel,
+  sanitizePptPayloadForUi,
+  inferPptVisionInterface,
+  pptVisionInterfaceLabel,
+  classifyPptIntent,
+  confirmPptIntentIfNeeded,
+  disablePptModeUi,
+  fallbackToNormalChatFromPptMode,
+  createPptModeState,
+  applyPptPipelineDetails,
+  applyPptProgressEvent,
+  applyPptTaskSnapshot,
+  refreshPptModeMessage,
+  syncPptComposerHint,
+  ensurePptSettingsModal,
+  openPptSettings,
+  closePptSettings,
+  savePptSettings,
+  resetPptPromptsToDefault,
+  buildPptModePayload,
+  currentLastUserText,
+  currentLastUserAttachments,
+  takePptGuidanceAttachments,
+  renderPptPanel,
+  togglePptPanel,
+  resumePptTaskFromPanel,
+  pausePptTaskFromPanel,
+  cancelPptTaskFromPanel,
+  latestActivePptMessageIndex,
+  queuePptMidrunGuidanceFromComposer,
+  callAPIWithPptMode
+});

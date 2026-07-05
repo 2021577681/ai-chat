@@ -1,6 +1,17 @@
-// ============ 辩论模式 ============
+﻿// ============ 辩论模式 ============
 
 const DEBATE_SETTINGS_KEY = 'aichat_debate_settings_v1';
+const DebateStateModule = window.AgentApp.require('state');
+const debateState = DebateStateModule.state;
+const debateSaveData = DebateStateModule.saveData;
+const debateCurrentChat = DebateStateModule.currentChat;
+const debateChatById = DebateStateModule.chatById;
+const debateIsCurrentChat = DebateStateModule.isCurrentChat;
+const debateBeginChatTask = DebateStateModule.beginChatTask;
+const debateSetChatTaskMode = DebateStateModule.setChatTaskMode;
+const debateClearChatTask = DebateStateModule.clearChatTask;
+const DebateOrchestrationService = window.AgentApp.require('orchestrationService');
+
 const DEBATE_RUNTIME = {};
 const DEBATE_REVIEW_TIMEOUT_SLIDER_MAX = 120;
 const DEBATE_FINAL_JUDGE_TIMEOUT_SLIDER_MAX = 300;
@@ -16,17 +27,17 @@ function _debateDefaultSettings() {
     finalJudgeTimeoutSec: 300,
     pro: {
       profileId: '__current',
-      model: state.settings.currentModel || '',
+      model: debateState.settings.currentModel || '',
       systemPrompt: '你是辩论赛中的正方辩手。\n辩题：{{topic}}\n你必须坚持正方立场。\n默认不使用工具，不要提及工具、计划模式、大纲模式或系统实现。\n本次你负责{{task}}：{{taskDesc}}\n如果你确实无法反驳，可以明确承认无法反驳或主动认输，不要强行狡辩。\n输出只写你的辩论发言，不要附加 JSON、评审、分数或角色说明。'
     },
     con: {
       profileId: '__current',
-      model: state.settings.currentModel || '',
+      model: debateState.settings.currentModel || '',
       systemPrompt: '你是辩论赛中的反方辩手。\n辩题：{{topic}}\n你必须坚持反方立场。\n默认不使用工具，不要提及工具、计划模式、大纲模式或系统实现。\n本次你负责{{task}}：{{taskDesc}}\n如果你确实无法反驳，可以明确承认无法反驳或主动认输，不要强行狡辩。\n输出只写你的辩论发言，不要附加 JSON、评审、分数或角色说明。'
     },
     judge: {
       profileId: '__current',
-      model: state.settings.currentModel || '',
+      model: debateState.settings.currentModel || '',
       systemPrompt: '你是辩论赛评委，只负责审核当前发言是否可以通过。\n审核标准要宽松：只要发言整体合理、回应了任务，即使有瑕疵也通过。\n不需要打分。\n如果当前发言明显无关、没有完成立论/反驳、反驳没有道理、无法回应对方，或主动认输，则不通过。\n只输出 JSON，格式为 {"pass":true|false,"reason":"简短说明"}。'
     }
   };
@@ -159,7 +170,7 @@ function _debateProfileById(profileId) {
 
 function _debateProfileSettings(profileId) {
   const profile = _debateProfileById(profileId);
-  return profile && profile.settings ? profile.settings : state.settings;
+  return profile && profile.settings ? profile.settings : debateState.settings;
 }
 
 function _debateProfileName(profileId) {
@@ -173,18 +184,18 @@ function _debateModelsForProfile(profileId) {
   // 优先从 profile 的 modelName 取，为空时回退到当前主设置的 modelName
   let modelNameStr = s.modelName || '';
   if (!modelNameStr && profileId !== '__current') {
-    modelNameStr = state.settings.modelName || '';
+    modelNameStr = debateState.settings.modelName || '';
   }
   const list = String(modelNameStr)
     .split(',')
     .map(x => x.trim())
     .filter(Boolean);
   // 确保 currentModel 也在列表中
-  const currentModel = s.currentModel || state.settings.currentModel || '';
+  const currentModel = s.currentModel || debateState.settings.currentModel || '';
   if (currentModel && !list.includes(currentModel)) list.unshift(currentModel);
   // 如果仍然为空，尝试从 PROVIDERS 配置中获取默认模型
   if (!list.length && typeof PROVIDERS !== 'undefined') {
-    const provider = s.provider || state.settings.provider || '';
+    const provider = s.provider || debateState.settings.provider || '';
     const prov = PROVIDERS[provider];
     if (prov && prov.models) {
       const defaults = String(prov.models).split(',').map(x => x.trim()).filter(Boolean);
@@ -206,7 +217,7 @@ function _debateNormalizeRoleConfig(roleConfig) {
   }
   return {
     profileId,
-    model: String(cfg.model || models[0] || state.settings.currentModel || '').trim(),
+    model: String(cfg.model || models[0] || debateState.settings.currentModel || '').trim(),
     systemPrompt: String(cfg.systemPrompt !== undefined ? cfg.systemPrompt : defaultPrompt).trim()
   };
 }
@@ -275,8 +286,8 @@ function _debateTimeoutField(kind, label, value, sliderMax, hint) {
   return `
     <label class="debate-field debate-timeout-field">${escapeHtml(label)}
       <div class="debate-timeout-control">
-        <input type="range" id="debate${kind}TimeoutSlider" min="1" max="${sliderMax}" step="1" value="${_debateSliderTimeoutValue(clean, sliderMax)}" oninput="debateTimeoutSliderChanged('${kind}')">
-        <input type="number" id="debate${kind}Timeout" min="1" step="1" value="${clean}" oninput="debateTimeoutInputChanged('${kind}')">
+        <input type="range" id="debate${kind}TimeoutSlider" min="1" max="${sliderMax}" step="1" value="${_debateSliderTimeoutValue(clean, sliderMax)}" data-input-action="valueInput" data-handler="debateTimeoutSliderChanged" data-value="${kind}">
+        <input type="number" id="debate${kind}Timeout" min="1" step="1" value="${clean}" data-input-action="valueInput" data-handler="debateTimeoutInputChanged" data-value="${kind}">
         <span>秒</span>
       </div>
       <span class="form-hint">${escapeHtml(hint)}</span>
@@ -289,7 +300,7 @@ function _debateRoleField(role, title, cfg) {
     <div class="debate-role-card">
       <div class="debate-role-title">${escapeHtml(title)}</div>
       <label class="debate-field">API 配置
-        <select id="debate${role}Profile" onchange="debateProfileChanged('${role}')">
+        <select id="debate${role}Profile" data-change-action="valueChange" data-handler="debateProfileChanged" data-value="${role}">
           ${_debateProfileOptions(normalized.profileId)}
         </select>
       </label>
@@ -321,7 +332,7 @@ function _debateEnsureModal() {
   modal.className = 'modal-mask debate-mode-modal';
   modal.innerHTML = `
     <div class="modal wide">
-      <h2>辩论模式 <button class="modal-close" onclick="closeDebateMode()">×</button></h2>
+      <h2>辩论模式 <button class="modal-close" data-action="closeDebateMode">×</button></h2>
       <div id="debateModeContent"></div>
     </div>`;
   modal.addEventListener('click', e => {
@@ -340,7 +351,7 @@ function renderDebateModeModal() {
   const content = document.getElementById('debateModeContent');
   if (!content) return;
   const settings = loadDebateSettings();
-  const debateChats = (state.chats || []).filter(c => c && c.debate && c.debate.type === 'debate_mode');
+  const debateChats = (debateState.chats || []).filter(c => c && c.debate && c.debate.type === 'debate_mode');
   const runningCount = Object.keys(DEBATE_RUNTIME).length;
   content.innerHTML = `
     <div class="debate-compose">
@@ -369,9 +380,9 @@ function renderDebateModeModal() {
         ${_debateRoleField('judge', '评委', settings.judge)}
       </div>
       <div class="debate-actions">
-        <button class="btn btn-primary" onclick="startDebateFromUi()">开始辩论</button>
-        <button class="btn btn-warning" onclick="stopCurrentDebate()">停止当前辩论</button>
-        <button class="btn" onclick="continueCurrentDebate()">继续当前辩论</button>
+        <button class="btn btn-primary" data-action="startDebateFromUi">开始辩论</button>
+        <button class="btn btn-warning" data-action="stopCurrentDebate">停止当前辩论</button>
+        <button class="btn" data-action="continueCurrentDebate">继续当前辩论</button>
       </div>
     </div>
     <div class="debate-summary">
@@ -398,9 +409,9 @@ function renderDebateModeModal() {
               <span>${new Date(meta.updatedAt || chat.createdAt || Date.now()).toLocaleString('zh-CN')}</span>
             </div>
             <div class="debate-history-actions">
-              <button class="btn" onclick="openDebateChat('${escapeHtml(chat.id)}')">打开</button>
-              <button class="btn btn-primary" ${canContinue ? '' : 'disabled'} onclick="continueDebate('${escapeHtml(chat.id)}')">继续</button>
-              <button class="btn btn-warning" ${running ? '' : 'disabled'} onclick="requestStopDebate('${escapeHtml(chat.id)}')">停止</button>
+              <button class="btn" data-action="valueClick" data-handler="openDebateChat" data-value="${escapeHtml(chat.id)}">打开</button>
+              <button class="btn btn-primary" ${canContinue ? '' : 'disabled'} data-action="valueClick" data-handler="continueDebate" data-value="${escapeHtml(chat.id)}">继续</button>
+              <button class="btn btn-warning" ${running ? '' : 'disabled'} data-action="valueClick" data-handler="requestStopDebate" data-value="${escapeHtml(chat.id)}">停止</button>
             </div>
           </div>`;
       }).join('') : '<div class="debate-empty">还没有辩论。配置辩题和模型后点击开始辩论会自动创建新对话。</div>'}
@@ -488,9 +499,9 @@ function _debateCreateChat(settings) {
       updatedAt: now
     }
   };
-  state.chats.unshift(chat);
-  state.currentId = id;
-  saveData();
+  debateState.chats.unshift(chat);
+  debateState.currentId = id;
+  debateSaveData();
   if (typeof renderChatList === 'function') renderChatList();
   if (typeof renderMessages === 'function') renderMessages();
   return chat;
@@ -516,7 +527,7 @@ function _debateEnsureRound(meta, roundNo) {
 }
 
 function _debateRenderRefresh(chat) {
-  if (typeof isCurrentChat === 'function' && isCurrentChat(chat)) renderMessages();
+  if (debateIsCurrentChat(chat)) renderMessages();
   if (typeof renderChatList === 'function') renderChatList();
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (document.getElementById('debateModeModal')) renderDebateModeModal();
@@ -531,19 +542,19 @@ function isAnyDebateRunning() {
 }
 
 function isDebateWaitingManual(chatId) {
-  const chat = chatId ? chatById(chatId) : null;
+  const chat = chatId ? debateChatById(chatId) : null;
   return !!(chat && chat.debate && chat.debate.type === 'debate_mode'
     && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual);
 }
 
 function isDebateWaitingManualTimed(chatId) {
-  const chat = chatId ? chatById(chatId) : null;
+  const chat = chatId ? debateChatById(chatId) : null;
   return !!(chat && isDebateWaitingManual(chatId)
     && _debateManualWaitDurationForChat(chat, chat.debate.waitingManual.reason) > 0);
 }
 
 function isDebateCompressing(chatId) {
-  const chat = chatId ? chatById(chatId) : null;
+  const chat = chatId ? debateChatById(chatId) : null;
   return !!(chat && chat.debate && chat.debate.type === 'debate_mode'
     && chat.debate._compression && chat.debate._compression.running);
 }
@@ -554,7 +565,7 @@ function isDebatePausable(chatId) {
 
 function isAnyDebatePausable() {
   return isAnyDebateRunning()
-    || (state && Array.isArray(state.chats) && state.chats.some(chat =>
+    || (Array.isArray(debateState.chats) && debateState.chats.some(chat =>
       chat && chat.debate && chat.debate.type === 'debate_mode'
       && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual
       && _debateManualWaitDurationForChat(chat, chat.debate.waitingManual.reason) > 0
@@ -562,7 +573,7 @@ function isAnyDebatePausable() {
 }
 
 function requestStopDebate(chatId) {
-  const chat = chatId ? chatById(chatId) : null;
+  const chat = chatId ? debateChatById(chatId) : null;
   const runtime = chatId ? DEBATE_RUNTIME[chatId] : null;
   if (!runtime) {
     if (chat && chat.debate && chat.debate.status === 'waiting_manual') {
@@ -579,29 +590,29 @@ function requestStopDebate(chatId) {
     _debateClearManualPassTimeout(chat);
     chat.debate.status = 'stopped';
     chat.debate.updatedAt = Date.now();
-    saveData();
+    debateSaveData();
     _debateRenderRefresh(chat);
   }
-  if (typeof clearChatTask === 'function') clearChatTask(chatId);
+  debateClearChatTask(chatId);
   return true;
 }
 
 function stopCurrentDebate() {
-  const chatId = state.currentId;
+  const chatId = debateState.currentId;
   if (!requestStopDebate(chatId)) {
     if (typeof toast === 'function') toast('当前没有正在运行的辩论');
   }
 }
 
 function continueCurrentDebate() {
-  const chatId = state.currentId;
+  const chatId = debateState.currentId;
   if (!continueDebate(chatId) && typeof toast === 'function') {
     toast('当前没有可继续的辩论');
   }
 }
 
 function continueDebate(chatId) {
-  const chat = chatId ? chatById(chatId) : null;
+  const chat = chatId ? debateChatById(chatId) : null;
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
   if (isDebateRunning(chat.id)) {
     if (typeof switchChat === 'function') switchChat(chat.id);
@@ -619,7 +630,7 @@ function continueDebate(chatId) {
   chat.debate.status = 'running';
   chat.debate.error = '';
   chat.debate.updatedAt = Date.now();
-  saveData();
+  debateSaveData();
   if (typeof switchChat === 'function') switchChat(chat.id);
   startDebate(chat.id).catch(e => {
     console.error('[debate] continue failed:', e);
@@ -694,8 +705,8 @@ function _debatePauseWaitingManual(chat) {
   chat.debate.status = 'stopped';
   chat.debate.error = 'paused';
   chat.debate.updatedAt = Date.now();
-  if (typeof clearChatTask === 'function') clearChatTask(chat.id);
-  saveData();
+  debateClearChatTask(chat.id);
+  debateSaveData();
   _debateRenderRefresh(chat);
   if (typeof toast === 'function') toast('已暂停辩论审核倒计时');
   return true;
@@ -714,7 +725,7 @@ function _debatePauseManualWaitForCompression(chat) {
   waiting.pausedForCompression = true;
   waiting.pausedForCompressionAt = Date.now();
   chat.debate.updatedAt = Date.now();
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
   return { reason, remainingMs };
 }
@@ -727,7 +738,7 @@ function _debateResumeManualWaitAfterCompression(chat, paused) {
   delete waiting.pausedForCompressionAt;
   _debateArmManualWaitTimer(chat, waiting, paused.remainingMs);
   chat.debate.updatedAt = Date.now();
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
 }
 
@@ -745,7 +756,7 @@ function _debateResumeWaitingManual(chat) {
     delete waiting.paused;
     delete waiting.pausedAt;
   }
-  saveData();
+  debateSaveData();
   if (typeof switchChat === 'function') switchChat(chat.id);
   _debateRenderRefresh(chat);
   if (typeof toast === 'function') toast('已恢复辩论人工审核');
@@ -753,18 +764,18 @@ function _debateResumeWaitingManual(chat) {
 }
 
 async function startDebate(chatId) {
-  const chat = chatById(chatId);
+  const chat = debateChatById(chatId);
   if (!chat || !chat.debate) return false;
   if (isDebateRunning(chat.id)) return false;
 
   const ctrl = new AbortController();
   const runtime = { chatId: chat.id, ctrl, stopRequested: false };
   DEBATE_RUNTIME[chat.id] = runtime;
-  if (typeof beginChatTask === 'function') beginChatTask(chat.id, ctrl, { resetStop: true });
-  if (typeof setChatTaskMode === 'function') setChatTaskMode(chat.id, 'debate');
+  debateBeginChatTask(chat.id, ctrl, { resetStop: true });
+  debateSetChatTaskMode(chat.id, 'debate');
   chat.debate.status = 'running';
   chat.debate.updatedAt = Date.now();
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
 
   try {
@@ -780,9 +791,9 @@ async function startDebate(chatId) {
   } finally {
     if (chat.debate.status !== 'waiting_manual') {
       delete DEBATE_RUNTIME[chat.id];
-      if (typeof clearChatTask === 'function') clearChatTask(chat.id);
+      debateClearChatTask(chat.id);
     }
-    saveData();
+    debateSaveData();
     _debateRenderRefresh(chat);
   }
   return true;
@@ -821,18 +832,18 @@ async function _debateRunLoop(chat, runtime) {
         throw new Error('辩论自动压缩失败，已停止本轮请求');
       }
       speechMsg = _debateStartSpeech(chat, round, side, speechType);
-      saveData();
+      debateSaveData();
       _debateRenderRefresh(chat);
       await _debateCallSpeakerStream(chat, round, side, speechType, speechMsg, runtime);
       _debateSyncRoundAnswerCount(chat, round);
-      saveData();
+      debateSaveData();
       _debateRenderRefresh(chat);
     }
 
     const review = await _debateCallJudge(chat, round, speechMsg, runtime);
     _debateAddJudgeCard(chat, round, speechMsg, review);
     _debateSyncRoundAnswerCount(chat, round);
-    saveData();
+    debateSaveData();
     _debateRenderRefresh(chat);
 
     // 检查是否达到每局轮数上限
@@ -977,16 +988,16 @@ function _debatePauseForManual(chat, round, speechMsg, review, reason) {
   };
   meta.updatedAt = Date.now();
   delete DEBATE_RUNTIME[chat.id];
-  if (typeof clearChatTask === 'function') clearChatTask(chat.id);
+  debateClearChatTask(chat.id);
   if (reason === 'threshold') {
     _debateArmManualWaitTimer(chat, meta.waitingManual);
   }
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
 }
 
 function debateManualPass(chatId) {
-  const chat = chatById(chatId);
+  const chat = debateChatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   if (isDebateCompressing(chat.id)) {
     if (typeof toast === 'function') toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
@@ -997,7 +1008,7 @@ function debateManualPass(chatId) {
   delete chat.debate.waitingManual;
   chat.debate.status = 'running';
   chat.debate.updatedAt = Date.now();
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
   startDebate(chat.id).catch(e => {
     console.error('[debate] manual continue failed:', e);
@@ -1006,7 +1017,7 @@ function debateManualPass(chatId) {
 }
 
 function debateManualWin(chatId, side) {
-  const chat = chatById(chatId);
+  const chat = debateChatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   if (isDebateCompressing(chat.id)) {
     if (typeof toast === 'function') toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
@@ -1019,7 +1030,7 @@ function debateManualWin(chatId, side) {
   _debateSetRoundWinner(chat, round, side, 'manual');
   delete chat.debate.waitingManual;
   _debateAdvanceRound(chat);
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
   if (chat.debate.status !== 'completed') {
     startDebate(chat.id).catch(e => {
@@ -1177,7 +1188,7 @@ function _debateContextLimit(chat) {
     .map(role => meta.roles && meta.roles[role] && meta.roles[role].model)
     .filter(Boolean);
   const limits = models.map(model => typeof getContextLimit === 'function' ? getContextLimit(model) : 200000);
-  return Math.min(...(limits.length ? limits : [typeof getContextLimit === 'function' ? getContextLimit(state.settings.currentModel) : 200000]));
+  return Math.min(...(limits.length ? limits : [typeof getContextLimit === 'function' ? getContextLimit(debateState.settings.currentModel) : 200000]));
 }
 
 function _debateEstimateSpeakerContextTokens(chat) {
@@ -1260,7 +1271,7 @@ async function compressDebateChat(chat, options = {}) {
   const taskOptions = {
     ...options,
     signal,
-    isStopped: options.isStopped || (shouldTouchGlobalGenerating ? () => !!state.stopRequested : undefined)
+    isStopped: options.isStopped || (shouldTouchGlobalGenerating ? () => !!debateState.stopRequested : undefined)
   };
   const pausedManualWait = _debatePauseManualWaitForCompression(chat);
   chat.debate._compression = {
@@ -1272,14 +1283,11 @@ async function compressDebateChat(chat, options = {}) {
 
   try {
     if (shouldTouchGlobalGenerating) {
-      state.stopRequested = false;
-      if (foregroundCtrl && typeof beginChatTask === 'function') {
-        beginChatTask(chat.id, foregroundCtrl, { resetStop: true });
+      debateState.stopRequested = false;
+      if (foregroundCtrl) {
+        debateBeginChatTask(chat.id, foregroundCtrl, { resetStop: true });
         foregroundTaskCreated = true;
-        if (typeof setChatTaskMode === 'function') setChatTaskMode(chat.id, 'debate_compress');
-      } else {
-        state.isGenerating = true;
-        if (foregroundCtrl) state.abortCtrl = foregroundCtrl;
+        debateSetChatTaskMode(chat.id, 'debate_compress');
       }
       if (typeof updateSendBtn === 'function') updateSendBtn();
     }
@@ -1289,7 +1297,7 @@ async function compressDebateChat(chat, options = {}) {
       _debateCheckStopped(taskOptions);
       await _debateCompressRound(chat, round, taskOptions);
       compressed += 1;
-      saveData();
+      debateSaveData();
       _debateRenderRefresh(chat);
     }
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
@@ -1309,15 +1317,11 @@ async function compressDebateChat(chat, options = {}) {
     if (chat && chat.debate) {
       delete chat.debate._compression;
       chat.debate.updatedAt = Date.now();
-      saveData();
+      debateSaveData();
     }
     if (shouldTouchGlobalGenerating) {
-      if (foregroundTaskCreated && typeof clearChatTask === 'function') {
-        clearChatTask(chat.id);
-      } else {
-        state.isGenerating = false;
-        state.abortCtrl = null;
-        state.stopRequested = false;
+      if (foregroundTaskCreated) {
+        debateClearChatTask(chat.id);
       }
       if (typeof updateSendBtn === 'function') updateSendBtn();
     }
@@ -1355,14 +1359,14 @@ async function manualCompressDebate(chat) {
 }
 
 async function autoCompressDebateCheck(chat, options = {}) {
-  if (!state.settings.compressAutoEnabled) return false;
+  if (!debateState.settings.compressAutoEnabled) return false;
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
   if (isDebateCompressing(chat.id)) return false;
   const limit = _debateContextLimit(chat);
   const tokens = _debateEstimateSpeakerContextTokens(chat);
   const pct = tokens / limit * 100;
-  const threshold = state.settings.compressAutoThreshold || 75;
-  const maxOutput = Math.max(0, parseInt(state.settings.maxTokens) || 0);
+  const threshold = debateState.settings.compressAutoThreshold || 75;
+  const maxOutput = Math.max(0, parseInt(debateState.settings.maxTokens) || 0);
   const safetyBuffer = Math.max(1024, Math.min(8192, Math.round(limit * 0.03)));
   const reserve = maxOutput + safetyBuffer;
   const remaining = limit - tokens;
@@ -1401,7 +1405,7 @@ function _debateRefreshMessage(chat, msg, forceSave = false) {
   // ⭐ 如果消息已结束且不是 forceSave → 静默跳过（避免无效 DOM 操作）
   if (msg._endTime && !forceSave) return;
   // ⭐ 非当前对话 → 全量渲染（用户切走了）
-  if (!isCurrentChat(chat)) {
+  if (!debateIsCurrentChat(chat)) {
     _debateRenderRefresh(chat);
     return;
   }
@@ -1568,22 +1572,22 @@ async function _debateCallJudge(chat, round, speechMsg, runtime) {
 async function _debateCallWithRoleConfig(roleConfig, history, rolePrompt, options = {}) {
   const cfg = _debateNormalizeRoleConfig(roleConfig);
   if (!cfg.model) throw new Error('辩论角色模型不能为空');
-  const originalSettings = JSON.parse(JSON.stringify(state.settings || {}));
+  const originalSettings = JSON.parse(JSON.stringify(debateState.settings || {}));
   const profileSettings = _debateProfileSettings(cfg.profileId);
   const keys = (typeof PROFILE_SETTINGS_KEYS !== 'undefined' && Array.isArray(PROFILE_SETTINGS_KEYS))
     ? PROFILE_SETTINGS_KEYS
     : ['provider', 'baseUrl', 'apiPath', 'apiFormat', 'apiKey', 'modelName', 'currentModel', 'temperature', 'maxTokens', 'useLocalProxy', 'systemPrompt', 'useCustomJson', 'jsonTemplate', 'jsonHeaders'];
   try {
     for (const k of keys) {
-      if (profileSettings[k] !== undefined) state.settings[k] = profileSettings[k];
+      if (profileSettings[k] !== undefined) debateState.settings[k] = profileSettings[k];
     }
-    state.settings.currentModel = cfg.model;
-    return await callOnceWithRole(history, cfg.model, rolePrompt, {
+    debateState.settings.currentModel = cfg.model;
+    return await DebateOrchestrationService.callOnceWithRole(history, cfg.model, rolePrompt, {
       ...options,
       useGlobalAbortFallback: false
     });
   } finally {
-    state.settings = { ...state.settings, ...originalSettings };
+    debateState.settings = { ...debateState.settings, ...originalSettings };
   }
 }
 
@@ -1591,7 +1595,7 @@ async function _debateCallWithRoleConfig(roleConfig, history, rolePrompt, option
 async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
   const cfg = _debateNormalizeRoleConfig(roleConfig);
   if (!cfg.model) throw new Error('辩论角色模型不能为空');
-  const originalSettings = JSON.parse(JSON.stringify(state.settings || {}));
+  const originalSettings = JSON.parse(JSON.stringify(debateState.settings || {}));
   const profileSettings = _debateProfileSettings(cfg.profileId);
   const keys = (typeof PROFILE_SETTINGS_KEYS !== 'undefined' && Array.isArray(PROFILE_SETTINGS_KEYS))
     ? PROFILE_SETTINGS_KEYS
@@ -1599,11 +1603,11 @@ async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
 
   try {
     for (const k of keys) {
-      if (profileSettings[k] !== undefined) state.settings[k] = profileSettings[k];
+      if (profileSettings[k] !== undefined) debateState.settings[k] = profileSettings[k];
     }
-    state.settings.currentModel = cfg.model;
+    debateState.settings.currentModel = cfg.model;
 
-    const s = state.settings;
+    const s = debateState.settings;
     const stream = options.stream !== undefined ? !!options.stream : true;
     const signal = options.signal || null;
     const isStopped = options.isStopped || (() => false);
@@ -1812,7 +1816,7 @@ async function _debateRunAgentWithRoleConfig(roleConfig, options = {}) {
     }
     return { finalText, messages };
   } finally {
-    state.settings = { ...state.settings, ...originalSettings };
+    debateState.settings = { ...debateState.settings, ...originalSettings };
   }
 }
 
@@ -1931,8 +1935,8 @@ async function _debateHandleMaxExchanges(chat, round, runtime) {
     meta.error = '终审裁决调用失败：' + (e.message || String(e));
     meta.updatedAt = Date.now();
     delete DEBATE_RUNTIME[chat.id];
-    if (typeof clearChatTask === 'function') clearChatTask(chat.id);
-    saveData();
+    debateClearChatTask(chat.id);
+    debateSaveData();
     _debateRenderRefresh(chat);
     if (typeof toast === 'function') toast('终审裁决调用失败：' + (e.message || String(e)), 5000);
     return;
@@ -1978,14 +1982,14 @@ function _debatePauseForFinalJudge(chat, round, finalResult) {
   };
   meta.updatedAt = Date.now();
   delete DEBATE_RUNTIME[chat.id];
-  if (typeof clearChatTask === 'function') clearChatTask(chat.id);
-  saveData();
+  debateClearChatTask(chat.id);
+  debateSaveData();
   _debateRenderRefresh(chat);
   _debateArmManualWaitTimer(chat, meta.waitingManual);
 }
 
 function _debateFinalJudgeTimeout(chatId) {
-  const chat = chatById(chatId);
+  const chat = debateChatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   if (isDebateCompressing(chat.id)) return;
   const waiting = chat.debate.waitingManual || {};
@@ -1999,7 +2003,7 @@ function _debateFinalJudgeTimeout(chatId) {
   delete chat.debate.waitingManual;
   chat.debate.status = 'running';
   _debateAdvanceRound(chat);
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
   if (typeof toast === 'function') toast(`超时未响应，已按评委裁决自动判${_debateSideName(pick)}胜利`, 4000);
   if (chat.debate.status !== 'completed') {
@@ -2010,7 +2014,7 @@ function _debateFinalJudgeTimeout(chatId) {
 }
 
 function _debateManualPassTimeout(chatId) {
-  const chat = chatById(chatId);
+  const chat = debateChatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   if (isDebateCompressing(chat.id)) return;
   const waiting = chat.debate.waitingManual || {};
@@ -2019,7 +2023,7 @@ function _debateManualPassTimeout(chatId) {
   delete chat.debate.waitingManual;
   chat.debate.status = 'running';
   chat.debate.updatedAt = Date.now();
-  saveData();
+  debateSaveData();
   _debateRenderRefresh(chat);
   if (typeof toast === 'function') toast('人工审核超时未操作，已默认通过', 3000);
   startDebate(chat.id).catch(e => {
@@ -2111,7 +2115,7 @@ function renderDebateJudgeMsg(m, idx) {
   }
   const d = m.debate || {};
   const pass = !!d.pass;
-  const chat = currentChat();
+  const chat = debateCurrentChat();
   const waiting = chat && chat.debate && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual;
   const showActions = waiting && waiting.round === d.round && waiting.side === d.side && waiting.speechSeq === d.speechSeq;
   const reason = d.reason || m.content || '';
@@ -2132,9 +2136,9 @@ function renderDebateJudgeMsg(m, idx) {
           <div class="debate-judge-reason">${renderMarkdown(reason)}</div>
           ${showActions ? `
             <div class="debate-manual-actions">
-              <button class="btn btn-primary" onclick="debateManualPass('${escapeHtml(chat.id)}')">通过</button>
-              <button class="btn" onclick="debateManualWin('${escapeHtml(chat.id)}','pro')">判正方胜利</button>
-              <button class="btn" onclick="debateManualWin('${escapeHtml(chat.id)}','con')">判反方胜利</button>
+              <button class="btn btn-primary" data-action="valueClick" data-handler="debateManualPass" data-value="${escapeHtml(chat.id)}">通过</button>
+              <button class="btn" data-action="valueClick" data-handler="debateManualWin" data-value="${escapeHtml(chat.id)}" data-extra-value="pro">判正方胜利</button>
+              <button class="btn" data-action="valueClick" data-handler="debateManualWin" data-value="${escapeHtml(chat.id)}" data-extra-value="con">判反方胜利</button>
             </div>
             ${countdownHtml}` : ''}
         </div>
@@ -2144,7 +2148,7 @@ function renderDebateJudgeMsg(m, idx) {
 
 function renderDebateFinalJudgeMsg(m, idx) {
   const d = m.debate || {};
-  const chat = currentChat();
+  const chat = debateCurrentChat();
   const waiting = chat && chat.debate && chat.debate.status === 'waiting_manual' && chat.debate.waitingManual;
   const showActions = waiting && waiting.reason === 'max_exchanges' && waiting.round === d.round;
   const pick = d.finalJudgePick || (waiting && waiting.finalJudgePick) || '';
@@ -2182,8 +2186,8 @@ function renderDebateFinalJudgeMsg(m, idx) {
           </div>
           ${showActions ? `
             <div class="debate-final-actions">
-              <button class="btn btn-primary" onclick="debateManualWin('${escapeHtml(chat.id)}','pro')">判正方胜利</button>
-              <button class="btn btn-primary" onclick="debateManualWin('${escapeHtml(chat.id)}','con')">判反方胜利</button>
+              <button class="btn btn-primary" data-action="valueClick" data-handler="debateManualWin" data-value="${escapeHtml(chat.id)}" data-extra-value="pro">判正方胜利</button>
+              <button class="btn btn-primary" data-action="valueClick" data-handler="debateManualWin" data-value="${escapeHtml(chat.id)}" data-extra-value="con">判反方胜利</button>
             </div>
             ${countdownHtml}
           ` : ''}
@@ -2205,14 +2209,14 @@ function renderDebateSpeechMsg(m, idx) {
         </div>
         <div class="msg-content">${renderMarkdown(m.content || '')}</div>
         <div class="msg-actions">
-          <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
+          <button class="msg-action" data-action="valueClick" data-handler="copyMsg" data-value="${idx}" data-value-type="number">📋 复制</button>
         </div>
       </div>
     </div>`;
 }
 
 function renderDebateSummaryMsg(m, idx) {
-  const chat = currentChat();
+  const chat = debateCurrentChat();
   const meta = chat && chat.debate ? chat.debate : {};
   const score = meta.score || {};
   const winner = meta.finalWinner === 'draw' ? '平局' : `${_debateSideName(meta.finalWinner)}胜利`;
@@ -2272,9 +2276,9 @@ function openDebateChat(chatId) {
 }
 
 function recoverInterruptedDebates() {
-  if (!state || !Array.isArray(state.chats)) return false;
+  if (!Array.isArray(debateState.chats)) return false;
   let changed = false;
-  for (const chat of state.chats) {
+  for (const chat of debateState.chats) {
     if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') continue;
     if (chat.debate.status === 'running') {
       chat.debate.status = 'stopped';
@@ -2320,3 +2324,40 @@ window.renderDebateFinalJudgeMsg = renderDebateFinalJudgeMsg;
 window.renderDebateSummaryMsg = renderDebateSummaryMsg;
 window.renderDebateCompletedChat = renderDebateCompletedChat;
 window.recoverInterruptedDebates = recoverInterruptedDebates;
+
+window.AgentApp.define('debateMode', {
+  DEBATE_RUNTIME,
+  loadDebateSettings,
+  saveDebateSettings,
+  debateTimeoutInputChanged,
+  debateTimeoutSliderChanged,
+  debateProfileChanged,
+  openDebateMode,
+  closeDebateMode,
+  renderDebateModeModal,
+  startDebateFromUi,
+  startDebate,
+  requestStopDebate,
+  stopCurrentDebate,
+  continueCurrentDebate,
+  continueDebate,
+  isDebateRunning,
+  isAnyDebateRunning,
+  isDebateWaitingManual,
+  isDebateWaitingManualTimed,
+  isDebateCompressing,
+  isDebatePausable,
+  isAnyDebatePausable,
+  debateManualPass,
+  debateManualWin,
+  compressDebateChat,
+  manualCompressDebate,
+  autoCompressDebateCheck,
+  renderDebateJudgeMsg,
+  renderDebateFinalJudgeMsg,
+  renderDebateSpeechMsg,
+  renderDebateSummaryMsg,
+  renderDebateCompletedChat,
+  openDebateChat,
+  recoverInterruptedDebates
+});

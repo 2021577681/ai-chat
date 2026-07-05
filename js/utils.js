@@ -1,5 +1,8 @@
 // ============ 通用工具函数 ============
 
+const UtilsStateModule = window.AgentApp.require('state');
+const utilsState = UtilsStateModule.state;
+
 function toast(msg, ms = 1800) {
   const t = document.getElementById('toast');
   if (!t) return;
@@ -28,8 +31,8 @@ let _completionSoundAudioCtx = null;
 
 function ensureCompletionSoundReady() {
   try {
-    if (!state.settings || !state.settings.completionSoundEnabled) return;
-    if (state.settings.musicPlayer && state.settings.musicPlayer.completionSoundMode === 'music') return;
+    if (!utilsState.settings || !utilsState.settings.completionSoundEnabled) return;
+    if (utilsState.settings.musicPlayer && utilsState.settings.musicPlayer.completionSoundMode === 'music') return;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
     if (!_completionSoundAudioCtx) _completionSoundAudioCtx = new AudioCtx();
@@ -41,10 +44,10 @@ function ensureCompletionSoundReady() {
 
 function playCompletionSound(options = {}) {
   try {
-    if (!state.settings || !state.settings.completionSoundEnabled) return;
+    if (!utilsState.settings || !utilsState.settings.completionSoundEnabled) return;
     if (options && options.suppress) return;
-    if (state.settings.musicPlayer
-      && state.settings.musicPlayer.completionSoundMode === 'music'
+    if (utilsState.settings.musicPlayer
+      && utilsState.settings.musicPlayer.completionSoundMode === 'music'
       && typeof playMusicCompletionSound === 'function'
       && playMusicCompletionSound()) {
       return;
@@ -55,7 +58,7 @@ function playCompletionSound(options = {}) {
 
 function playDefaultCompletionSound() {
   try {
-    const rawVolume = parseInt(state.settings.completionSoundVolume);
+    const rawVolume = parseInt(utilsState.settings.completionSoundVolume);
     const volumePct = isNaN(rawVolume) ? 80 : Math.max(0, Math.min(100, rawVolume));
     if (volumePct <= 0) return;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -317,3 +320,28 @@ function useSuggestion(text) {
   document.getElementById('input').value = text;
   document.getElementById('input').focus();
 }
+
+window.AgentApp.define('utils', {
+  toast,
+  escapeHtml,
+  formatSize,
+  scrollBottom,
+  ensureCompletionSoundReady,
+  playCompletionSound,
+  playDefaultCompletionSound,
+  isNearBottom,
+  buildFullUrl,
+  updateTopUrlPreview,
+  updateWorkspaceDisplay,
+  workspaceBackendAction,
+  refreshWorkspaceDependentContext,
+  selectWorkspaceFromUi,
+  refreshWorkspaceInfo,
+  updateUrlPreview,
+  extractUserQuestion,
+  showImagePreview,
+  copyCode,
+  toggleSidebar,
+  collapseSidebar,
+  useSuggestion
+});

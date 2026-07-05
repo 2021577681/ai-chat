@@ -269,16 +269,16 @@ class McpSkillsMixin:
                 lambda s: s.request('tools/list', {}, timeout=30),
             )
             tools = result.get('tools', []) if isinstance(result, dict) else []
-            return self._send_json(200, {'ok': True, 'tools': tools, 'raw': result})
+            return self.response.json(200, {'ok': True, 'tools': tools, 'raw': result})
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_mcp_call_tool(self, body):
         server = body.get('server') or {}
         tool_name = body.get('tool_name') or ''
         arguments = body.get('arguments') or {}
         if not tool_name:
-            return self._send_json(200, {'ok': False, 'error': 'tool_name is required'})
+            return self.response.json(200, {'ok': False, 'error': 'tool_name is required'})
         try:
             _, result = _mcp_with_session(
                 server,
@@ -289,14 +289,14 @@ class McpSkillsMixin:
             )
             text = _mcp_content_to_text(result)
             is_error = bool(isinstance(result, dict) and result.get('isError'))
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': not is_error,
                 'isError': is_error,
                 'text': text,
                 'result': result,
             })
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_skill_list(self, body):
         roots = body.get('roots') or []
@@ -346,16 +346,16 @@ class McpSkillsMixin:
                 if len(skills) >= SKILL_MAX_COUNT:
                     break
 
-        return self._send_json(200, {'ok': True, 'skills': skills, 'errors': errors})
+        return self.response.json(200, {'ok': True, 'skills': skills, 'errors': errors})
 
     def handle_skill_read(self, body):
         path = body.get('path') or ''
         abs_path, err = check_path_or_error(path, must_exist=True)
         if err:
-            return self._send_json(200, {'ok': False, 'error': err})
+            return self.response.json(200, {'ok': False, 'error': err})
         if os.path.basename(abs_path).lower() != 'skill.md':
-            return self._send_json(200, {'ok': False, 'error': 'Only SKILL.md files can be read as skills'})
+            return self.response.json(200, {'ok': False, 'error': 'Only SKILL.md files can be read as skills'})
         try:
-            return self._send_json(200, {'ok': True, 'skill': _read_skill_file(abs_path)})
+            return self.response.json(200, {'ok': True, 'skill': _read_skill_file(abs_path)})
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})

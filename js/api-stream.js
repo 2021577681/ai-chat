@@ -3,8 +3,18 @@
 // 依赖：state.js / chat.js（renderMessages / scrollToBottom）
 // 加载顺序：随便，但建议放 api-core.js 之后保持习惯
 
+const ApiStreamStateModule = window.AgentApp.require('state');
+const apiStreamState = ApiStreamStateModule.state;
+const apiStreamCurrentChat = ApiStreamStateModule.currentChat;
+const apiStreamIsCurrentChat = ApiStreamStateModule.isCurrentChat;
+const apiStreamChatTaskById = ApiStreamStateModule.chatTaskById;
+const apiStreamRequestStopChatTask = ApiStreamStateModule.requestStopChatTask;
+const apiStreamSyncGlobalTaskState = ApiStreamStateModule.syncGlobalTaskState;
+const apiStreamIsCurrentChatGenerating = ApiStreamStateModule.isCurrentChatGenerating;
+const apiStreamIsAnyChatGenerating = ApiStreamStateModule.isAnyChatGenerating;
+
 function updateLastMsg(targetChat, targetIdx) {
-  if (targetChat && !isCurrentChat(targetChat)) return;
+  if (targetChat && !apiStreamIsCurrentChat(targetChat)) return;
   // ⭐ 节流：连续 chunk 一帧只渲染一次，避免每个 chunk 都重做 markdown 解析 + DOM 重建
   if (_updateLastMsgScheduled) return;
   _updateLastMsgTarget = targetChat ? { chat: targetChat, idx: targetIdx } : null;
@@ -36,8 +46,8 @@ function cancelPendingStreamFlush() {
 }
 
 function _flushLastMsg(targetChat, targetIdx) {
-  if (targetChat && !isCurrentChat(targetChat)) return;
-  const c = targetChat || currentChat();
+  if (targetChat && !apiStreamIsCurrentChat(targetChat)) return;
+  const c = targetChat || apiStreamCurrentChat();
   if (!c) return;
   const lastIdx = (typeof targetIdx === 'number') ? targetIdx : c.messages.length - 1;
   const m = c.messages[lastIdx];
@@ -81,12 +91,12 @@ function stopGenerate() {
   //   - 这些场景会在某些时刻把 abortCtrl 重建甚至清空，单靠 signal.aborted 检查会漏
   //   - 各模式在工具循环、递归 callAPI 之前都应主动检查这个标志，及时退出
   //   - 由 callAPI / Plan / Outline / Reflection 的"首次进入"分支负责清零
-  const c = typeof currentChat === 'function' ? currentChat() : null;
-  const chatId = (c && c.id) || state.activeTaskChatId;
+  const c = apiStreamCurrentChat();
+  const chatId = (c && c.id) || apiStreamState.activeTaskChatId;
   if (typeof requestStopConcurrentChat === 'function' && requestStopConcurrentChat(chatId)) {
-    state.stopRequested = true;
+    apiStreamState.stopRequested = true;
     if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    apiStreamSyncGlobalTaskState(chatId);
     if (typeof updateSendBtn === 'function') updateSendBtn();
     return;
   }
@@ -94,19 +104,19 @@ function stopGenerate() {
   if (c && c.debate && c.debate.type === 'debate_mode' && chatId
       && typeof isDebatePausable === 'function' && isDebatePausable(chatId)) {
     if (typeof requestStopDebate === 'function') requestStopDebate(chatId);
-    state.stopRequested = true;
+    apiStreamState.stopRequested = true;
     if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    apiStreamSyncGlobalTaskState(chatId);
     if (typeof updateSendBtn === 'function') updateSendBtn();
     return;
   }
-  const task = (typeof chatTaskById === 'function' && chatId) ? chatTaskById(chatId) : null;
-  if (typeof requestStopChatTask === 'function' && requestStopChatTask(chatId)) {
+  const task = chatId ? apiStreamChatTaskById(chatId) : null;
+  if (apiStreamRequestStopChatTask(chatId)) {
     // requestStopChatTask 已经标记 stopRequested 并 abort 对应 controller
   } else {
-    state.stopRequested = true;
+    apiStreamState.stopRequested = true;
   }
-  const ctrl = task ? (task.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  const ctrl = task ? (task.abortCtrl || apiStreamState.abortCtrl) : apiStreamState.abortCtrl;
   if (ctrl) {
     try {
       ctrl.abort();
@@ -126,7 +136,7 @@ function stopGenerate() {
   }
   // ⭐ 清掉流式刷新与残留光标
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+  apiStreamSyncGlobalTaskState(chatId);
   if (typeof updateSendBtn === 'function') updateSendBtn();
 }
 
@@ -135,8 +145,8 @@ function updateSendBtn() {
   if (!btn) return;
   if (typeof syncPptComposerHint === 'function') syncPptComposerHint();
   const privacySuffix = typeof getPrivacyGuardInputInfoSuffix === 'function' ? getPrivacyGuardInputInfoSuffix() : '';
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
-  const c = (typeof currentChat === 'function') ? currentChat() : null;
+  apiStreamSyncGlobalTaskState(apiStreamState.currentId);
+  const c = apiStreamCurrentChat();
   const debateWaitingManual = !!(c && c.debate && c.debate.type === 'debate_mode'
     && typeof isDebateWaitingManualTimed === 'function' && isDebateWaitingManualTimed(c.id));
   if (typeof _editResendState !== 'undefined' && _editResendState && c && _editResendState.chatId === c.id) {
@@ -145,11 +155,11 @@ function updateSendBtn() {
     document.getElementById('inputInfo').textContent = '编辑重发：发送后会截断后续消息并重新回答' + privacySuffix;
     return;
   }
-  const currentGenerating = (typeof isCurrentChatGenerating === 'function') ? isCurrentChatGenerating() : !!state.isGenerating;
+  const currentGenerating = apiStreamIsCurrentChatGenerating();
   if (currentGenerating) {
     const input = document.getElementById('input');
-    const hasDraft = !!(input && input.value.trim()) || !!(state.pendingAttachments && state.pendingAttachments.length);
-    const task = (typeof chatTaskById === 'function' && c) ? chatTaskById(c.id) : null;
+    const hasDraft = !!(input && input.value.trim()) || !!(apiStreamState.pendingAttachments && apiStreamState.pendingAttachments.length);
+    const task = c ? apiStreamChatTaskById(c.id) : null;
     const canGuide = !!(task && task.isGenerating && (!task.mode || task.mode === 'chat'));
     if (hasDraft && canGuide && !debateWaitingManual) {
       btn.textContent = '↑';
@@ -165,7 +175,7 @@ function updateSendBtn() {
     btn.classList.remove('stop');
     if (c && c.concurrent && c.concurrent.type === 'concurrent_requests') {
       let info = `⚡ 并发请求 · ${c.concurrent.agentCount || 1} AI · ${c.concurrent.useTools ? '允许工具' : '禁用工具'}`;
-      if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+      if (apiStreamIsAnyChatGenerating()) info += ' · 后台生成中';
       info += privacySuffix;
       document.getElementById('inputInfo').textContent = info;
       return;
@@ -173,26 +183,33 @@ function updateSendBtn() {
     if (c && c.debate && c.debate.type === 'debate_mode') {
       const statusText = typeof _debateStatusText === 'function' ? _debateStatusText(c.debate.status) : (c.debate.status || '空闲');
       let info = `⚖️ 辩论模式 · ${statusText} · 禁用工具`;
-      if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+      if (apiStreamIsAnyChatGenerating()) info += ' · 后台生成中';
       info += privacySuffix;
       document.getElementById('inputInfo').textContent = info;
       return;
     }
-    let info = `${state.settings.apiFormat === 'anthropic' ? '🟠 Anthropic' : '🟢 OpenAI'}`;
+    let info = `${apiStreamState.settings.apiFormat === 'anthropic' ? '🟠 Anthropic' : '🟢 OpenAI'}`;
     if (typeof isScheduledSendActive === 'function' && isScheduledSendActive()) {
       const text = typeof getScheduledSendInfoText === 'function' ? getScheduledSendInfoText() : '⏰ 定时发送';
       document.getElementById('inputInfo').textContent = text + privacySuffix;
       btn.textContent = '⏰';
       return;
     }
-    if (state.settings.usePlan) info += ` · 📋 计划模式(${state.settings.planMaxSteps}步)`;
-    if (state.settings.useReflection) info += ` · 🎭 师生(评审${state.settings.refRounds}轮)`;
-    if (state.settings.useOutline) info += ` · 📑 大纲(${state.settings.outlineMaxRounds || 30}轮)`;
-    if (state.settings.usePpt) info += ' · PPT';
-    if (state.settings.useTools && state.tools.length) info += ` · 🛠 ${state.tools.length}工具`;
-    if (state.settings.compressAutoEnabled) info += ` · 🗜️ 自动压缩`;
-    if (typeof isAnyChatGenerating === 'function' && isAnyChatGenerating()) info += ' · 后台生成中';
+    if (apiStreamState.settings.usePlan) info += ` · 📋 计划模式(${apiStreamState.settings.planMaxSteps}步)`;
+    if (apiStreamState.settings.useReflection) info += ` · 🎭 师生(评审${apiStreamState.settings.refRounds}轮)`;
+    if (apiStreamState.settings.useOutline) info += ` · 📑 大纲(${apiStreamState.settings.outlineMaxRounds || 30}轮)`;
+    if (apiStreamState.settings.usePpt) info += ' · PPT';
+    if (apiStreamState.settings.useTools && apiStreamState.tools.length) info += ` · 🛠 ${apiStreamState.tools.length}工具`;
+    if (apiStreamState.settings.compressAutoEnabled) info += ` · 🗜️ 自动压缩`;
+    if (apiStreamIsAnyChatGenerating()) info += ' · 后台生成中';
     info += privacySuffix;
     document.getElementById('inputInfo').textContent = info;
   }
 }
+
+window.AgentApp.define('apiStream', {
+  updateLastMsg,
+  cancelPendingStreamFlush,
+  stopGenerate,
+  updateSendBtn
+});

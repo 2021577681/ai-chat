@@ -49,9 +49,9 @@ function _buildGitModal() {
     <div class="modal git-modal-box">
       <h2>
         <span>📜 Git 管理</span>
-        <span class="git-branch-badge" id="gitBranchBadge" title="点击切换/管理分支" onclick="_toggleBranchMenu(event)"></span>
-        <button class="git-btn git-btn-small" id="gitRemoteBtn" onclick="_openRemotePanel()" title="远程仓库 / 推送拉取 / 用户配置">🌐 远程仓库</button>
-        <button class="modal-close" onclick="closeGitPanel()" style="margin-left:auto;">×</button>
+        <span class="git-branch-badge" id="gitBranchBadge" title="点击切换/管理分支" data-action="_toggleBranchMenu"></span>
+        <button class="git-btn git-btn-small" id="gitRemoteBtn" data-action="_openRemotePanel" title="远程仓库 / 推送拉取 / 用户配置">🌐 远程仓库</button>
+        <button class="modal-close" data-action="closeGitPanel" style="margin-left:auto;">×</button>
       </h2>
       <div id="gitBranchMenu" class="git-branch-menu" hidden></div>
       <div id="gitBody"></div>
@@ -107,7 +107,7 @@ async function _refreshGitPanel() {
     ${missingUser ? `
       <div class="git-warning-bar">
         ⚠️ 当前仓库未配置 user.name 或 user.email，提交时可能报错。
-        <button class="git-btn-link" onclick="_showGitConfigInline()">立即配置 →</button>
+        <button class="git-btn-link" data-action="_showGitConfigInline">立即配置 →</button>
       </div>
     ` : ''}
     <div class="git-user-bar">
@@ -116,8 +116,8 @@ async function _refreshGitPanel() {
         <span class="git-user-value" title="${escapeHtml(userTitle)}">${escapeHtml(userTitle)}</span>
       </div>
       <div class="git-user-actions">
-        <button class="git-btn git-btn-small" onclick="_openRemotePanel()" title="配置 origin、推送、拉取和凭证说明">🌐 远程仓库</button>
-        <button class="git-btn git-btn-small" onclick="_showGitConfigInline()" title="修改当前仓库的 user.name / user.email">👤 修改</button>
+        <button class="git-btn git-btn-small" data-action="_openRemotePanel" title="配置 origin、推送、拉取和凭证说明">🌐 远程仓库</button>
+        <button class="git-btn git-btn-small" data-action="_showGitConfigInline" title="修改当前仓库的 user.name / user.email">👤 修改</button>
       </div>
     </div>
     <div id="gitConfigInline" hidden></div>
@@ -128,10 +128,10 @@ async function _refreshGitPanel() {
           <div class="git-recovery-note">可找回被 reset 隐藏的提交；未提交的工作区改动不一定能恢复。</div>
         </div>
         <div class="git-recovery-actions">
-          <button class="git-btn git-btn-small" onclick="_undoLastReset()" title="使用 git reset --hard ORIG_HEAD 回到上次 reset 前的 HEAD">
+          <button class="git-btn git-btn-small" data-action="_undoLastReset" title="使用 git reset --hard ORIG_HEAD 回到上次 reset 前的 HEAD">
             ↩ 撤回上次重置
           </button>
-          <button class="git-btn git-btn-small" id="gitReflogToggleBtn" onclick="_toggleReflogPanel()" title="查看 Git reflog 恢复点">
+          <button class="git-btn git-btn-small" id="gitReflogToggleBtn" data-action="_toggleReflogPanel" title="查看 Git reflog 恢复点">
             恢复点 ▾
           </button>
         </div>
@@ -150,8 +150,8 @@ async function _refreshGitPanel() {
               <span>包含所有未暂存改动</span>
             </label>
             <div class="git-commit-buttons">
-              <button class="git-btn" onclick="_onCommitAndPush()" title="提交后推送到指定 origin/远程分支">⬆️ 提交并推送</button>
-              <button class="git-btn git-btn-primary" onclick="_onCommit()">💬 提交</button>
+              <button class="git-btn" data-action="_onCommitAndPush" title="提交后推送到指定 origin/远程分支">⬆️ 提交并推送</button>
+              <button class="git-btn git-btn-primary" data-action="_onCommit">💬 提交</button>
             </div>
           </div>
           <div id="gitCommitRemoteStatus" class="git-sync-log git-commit-remote-log" hidden></div>
@@ -231,7 +231,7 @@ function _renderInitWizard(checkResult) {
         </div>
       </div>
       <div class="git-init-actions">
-        <button class="git-btn git-btn-primary" onclick="_doInit()">✓ 初始化 Git 仓库</button>
+        <button class="git-btn git-btn-primary" data-action="_doInit">✓ 初始化 Git 仓库</button>
       </div>
     </div>
   `;
@@ -273,15 +273,15 @@ async function _loadStatus() {
   }
   let html = '';
   if (r.staged.length) {
-    html += `<div class="git-group-header">已暂存 (${r.staged.length}) <button class="git-btn-tiny" onclick="_unstageAll()">全部取消</button></div>`;
+    html += `<div class="git-group-header">已暂存 (${r.staged.length}) <button class="git-btn-tiny" data-action="_unstageAll">全部取消</button></div>`;
     html += r.staged.map(f => _renderFileRow(f, 'staged')).join('');
   }
   if (r.unstaged.length) {
-    html += `<div class="git-group-header">未暂存 (${r.unstaged.length}) <button class="git-btn-tiny" onclick="_stageAll()">全部暂存</button></div>`;
+    html += `<div class="git-group-header">未暂存 (${r.unstaged.length}) <button class="git-btn-tiny" data-action="_stageAll">全部暂存</button></div>`;
     html += r.unstaged.map(f => _renderFileRow(f, 'unstaged')).join('');
   }
   if (r.untracked.length) {
-    html += `<div class="git-group-header">未跟踪 (${r.untracked.length}) <button class="git-btn-tiny" onclick="_stageUntracked()">全部添加</button></div>`;
+    html += `<div class="git-group-header">未跟踪 (${r.untracked.length}) <button class="git-btn-tiny" data-action="_stageUntracked">全部添加</button></div>`;
     html += r.untracked.map(f => _renderFileRow(f, 'untracked')).join('');
   }
   box.innerHTML = html;
@@ -292,14 +292,15 @@ function _renderFileRow(f, source) {
   const statusClass = ({ M: 'm', A: 'a', D: 'd', R: 'r', '?': 'u', 'U': 'c' })[statusChar] || 'm';
   const statusLabel = ({ M: '修改', A: '新增', D: '删除', R: '重命名', '?': '新文件', 'U': '冲突' })[statusChar] || statusChar;
   const isSelected = GIT_STATE.selectedFile === f.path && GIT_STATE.selectedFileSource === source;
+  const filePathAttr = escapeHtml(f.path);
   return `
-    <div class="git-file-row ${isSelected ? 'active' : ''}" onclick="_selectFile(${JSON.stringify(f.path).replace(/"/g, '&quot;')}, '${source}')">
+    <div class="git-file-row ${isSelected ? 'active' : ''}" data-action="valueClick" data-handler="_selectFile" data-value="${filePathAttr}" data-extra-value="${source}">
       <span class="git-file-status git-status-${statusClass}" title="${statusLabel}">${statusChar}</span>
       <span class="git-file-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</span>
-      <span class="git-file-actions" onclick="event.stopPropagation()">
-        ${source !== 'staged' ? `<button class="git-btn-icon" title="暂存此文件" onclick="_stageOne(${JSON.stringify(f.path).replace(/"/g, '&quot;')})">+</button>` : ''}
-        ${source === 'staged' ? `<button class="git-btn-icon" title="取消暂存" onclick="_unstageOne(${JSON.stringify(f.path).replace(/"/g, '&quot;')})">−</button>` : ''}
-        ${source !== 'untracked' ? `<button class="git-btn-icon git-btn-danger" title="放弃此文件改动（恢复到 HEAD）" onclick="_checkoutOne(${JSON.stringify(f.path).replace(/"/g, '&quot;')})">↩</button>` : ''}
+      <span class="git-file-actions" data-action="stopPropagation" data-stop-propagation="true">
+        ${source !== 'staged' ? `<button class="git-btn-icon" title="暂存此文件" data-action="valueClick" data-handler="_stageOne" data-value="${filePathAttr}" data-stop-propagation="true">+</button>` : ''}
+        ${source === 'staged' ? `<button class="git-btn-icon" title="取消暂存" data-action="valueClick" data-handler="_unstageOne" data-value="${filePathAttr}" data-stop-propagation="true">−</button>` : ''}
+        ${source !== 'untracked' ? `<button class="git-btn-icon git-btn-danger" title="放弃此文件改动（恢复到 HEAD）" data-action="valueClick" data-handler="_checkoutOne" data-value="${filePathAttr}" data-stop-propagation="true">↩</button>` : ''}
       </span>
     </div>
   `;
@@ -337,7 +338,7 @@ function _renderCommitRow(c) {
   const dt = new Date(c.ts * 1000);
   const isSelected = GIT_STATE.selectedCommit === c.hash;
   return `
-    <div class="git-commit-row ${isSelected ? 'active' : ''}" onclick="_selectCommit('${c.hash}')">
+    <div class="git-commit-row ${isSelected ? 'active' : ''}" data-action="valueClick" data-handler="_selectCommit" data-value="${escapeHtml(c.hash)}">
       <div class="git-commit-dot"></div>
       <div class="git-commit-content">
         <div class="git-commit-subject">${escapeHtml(c.subject)}</div>
@@ -415,7 +416,7 @@ function _renderReflogRow(entry) {
           ${dateText ? `<span>${escapeHtml(dateText)}</span>` : ''}
         </div>
       </div>
-      <button class="git-btn git-btn-small git-btn-warn" onclick="_restoreReflogHash('${hash}')">
+      <button class="git-btn git-btn-small git-btn-warn" data-action="valueClick" data-handler="_restoreReflogHash" data-value="${escapeHtml(hash)}">
         恢复到这里
       </button>
     </div>
@@ -480,13 +481,13 @@ async function _selectCommit(hash) {
     <div class="git-commit-actions-bar">
       <div class="git-commit-actions-title">⚠️ 版本回退操作（针对 <code>${escapeHtml(shortHash)}</code>）</div>
       <div class="git-commit-actions-row">
-        <button class="git-btn git-btn-warn" onclick="_doRevert('${hash}')" title="创建一个反向提交以撤销此次改动，原历史保留">
+        <button class="git-btn git-btn-warn" data-action="valueClick" data-handler="_doRevert" data-value="${escapeHtml(hash)}" title="创建一个反向提交以撤销此次改动，原历史保留">
           🔄 撤销此提交
         </button>
-        <button class="git-btn git-btn-warn" onclick="_doResetMixed('${hash}', ${lostCount})" title="HEAD 移到此提交，后续 commit 丢失但改动保留在工作区">
+        <button class="git-btn git-btn-warn" data-action="valueClick" data-handler="_doResetMixed" data-value="${escapeHtml(hash)}" data-extra-value="${lostCount}" data-extra-type="number" title="HEAD 移到此提交，后续 commit 丢失但改动保留在工作区">
           ⏮ 回退至此 <span class="git-act-sub">(保留改动)</span>
         </button>
-        <button class="git-btn git-btn-danger" onclick="_doResetHard('${hash}', ${lostCount})" title="HEAD 移到此提交，后续 commit 和工作区改动全部丢弃">
+        <button class="git-btn git-btn-danger" data-action="valueClick" data-handler="_doResetHard" data-value="${escapeHtml(hash)}" data-extra-value="${lostCount}" data-extra-type="number" title="HEAD 移到此提交，后续 commit 和工作区改动全部丢弃">
           💥 强制重置 <span class="git-act-sub">(不可恢复)</span>
         </button>
       </div>
@@ -767,9 +768,9 @@ function _showGitConfigInline() {
         <input type="email" id="cfgUserEmail" placeholder="me@example.com" />
       </div>
       <div class="git-form-actions">
-        <button class="git-btn git-btn-primary" onclick="_saveGitConfig()">保存</button>
-        <button class="git-btn git-btn-danger" onclick="_clearGitConfig()">清空作者</button>
-        <button class="git-btn" onclick="document.getElementById('gitConfigInline').hidden=true">取消</button>
+        <button class="git-btn git-btn-primary" data-action="_saveGitConfig">保存</button>
+        <button class="git-btn git-btn-danger" data-action="_clearGitConfig">清空作者</button>
+        <button class="git-btn" data-action="hideTarget" data-target="gitConfigInline">取消</button>
       </div>
     </div>
   `;
@@ -1051,8 +1052,8 @@ async function _toggleBranchMenu(evt) {
   menu.innerHTML = `
     ${itemsHtml || '<div class="git-empty-state-small" style="padding:12px;">（无分支）</div>'}
     <div class="git-branch-divider"></div>
-    <div class="git-branch-item action" onclick="_doBranchCreate()"><span>➕</span><span>新建分支…</span></div>
-    <div class="git-branch-item action" onclick="_doBranchRename()"><span>✏️</span><span>重命名当前分支…</span></div>
+    <div class="git-branch-item action" data-action="_doBranchCreate"><span>➕</span><span>新建分支…</span></div>
+    <div class="git-branch-item action" data-action="_doBranchRename"><span>✏️</span><span>重命名当前分支…</span></div>
   `;
   // 点条目本身（不在按钮上）= 切换
   menu.querySelectorAll('.git-branch-item[data-name]').forEach(el => {
@@ -1177,7 +1178,7 @@ async function _openRemotePanel() {
     <div class="modal git-remote-box">
       <h2>
         <span>⚙ Git 配置</span>
-        <button class="modal-close" onclick="document.getElementById('gitRemotePanel').remove()" style="margin-left:auto;">×</button>
+        <button class="modal-close" data-action="removeTarget" data-target="gitRemotePanel" style="margin-left:auto;">×</button>
       </h2>
       <div class="git-remote-body" id="gitRemoteBody">
         <div class="git-loading">加载中…</div>
@@ -1244,8 +1245,8 @@ async function _refreshRemotePanel() {
         <div class="git-author-actions">
           <span class="git-author-note">清空不会删除已有提交；若没有全局作者，新提交会被 Git 拒绝。</span>
           <div class="git-author-buttons">
-            <button class="git-btn git-btn-primary" onclick="_savePanelUser()">💾 保存作者</button>
-            <button class="git-btn git-btn-danger" onclick="_clearGitConfig()">清空作者</button>
+            <button class="git-btn git-btn-primary" data-action="_savePanelUser">💾 保存作者</button>
+            <button class="git-btn git-btn-danger" data-action="_clearGitConfig">清空作者</button>
           </div>
         </div>
       </div>
@@ -1272,7 +1273,7 @@ async function _refreshRemotePanel() {
       <div class="git-remote-add-row">
         <input id="newRemoteName" placeholder="名称（如 origin）" />
         <input id="newRemoteUrl" placeholder="https://github.com/you/repo.git 或 git@github.com:you/repo.git" />
-        <button class="git-btn git-btn-primary" onclick="_addRemote()">➕ 添加</button>
+        <button class="git-btn git-btn-primary" data-action="_addRemote">➕ 添加</button>
       </div>
     </section>
 
@@ -1295,14 +1296,14 @@ async function _refreshRemotePanel() {
         <div class="git-proxy-grid">
           <label class="git-proxy-field">
             <span>类型</span>
-            <select id="gitProxyScheme" onchange="_updateGitProxyPreview()">
+            <select id="gitProxyScheme" data-change-action="updateGitProxyPreview">
               <option value="http" ${proxyState.scheme === 'http' || proxyState.scheme === 'https' ? 'selected' : ''}>HTTP</option>
               <option value="socks5h" ${proxyState.scheme === 'socks5h' ? 'selected' : ''}>SOCKS5</option>
             </select>
           </label>
           <label class="git-proxy-field">
             <span>本地端口</span>
-            <input id="gitProxyPort" type="number" min="1" max="65535" inputmode="numeric" value="${escapeHtml(proxyState.port)}" placeholder="7890" oninput="_updateGitProxyPreview()" />
+            <input id="gitProxyPort" type="number" min="1" max="65535" inputmode="numeric" value="${escapeHtml(proxyState.port)}" placeholder="7890" data-input-action="updateGitProxyPreview" />
           </label>
         </div>
         <div class="git-proxy-preview">
@@ -1316,8 +1317,8 @@ async function _refreshRemotePanel() {
         <div class="git-author-actions">
           <span class="git-author-note">只保存端口和代理类型，不保存账号、密码或 token。</span>
           <div class="git-author-buttons">
-            <button class="git-btn git-btn-primary" onclick="_saveGitProxyConfig()">💾 保存代理</button>
-            <button class="git-btn" onclick="_clearGitProxyConfig()">清空代理</button>
+            <button class="git-btn git-btn-primary" data-action="_saveGitProxyConfig">💾 保存代理</button>
+            <button class="git-btn" data-action="_clearGitProxyConfig">清空代理</button>
           </div>
         </div>
       </div>
@@ -1344,16 +1345,18 @@ async function _refreshRemotePanel() {
             autocomplete="off"
             spellcheck="false"
             title="远程目标分支，可与当前本地分支不同"
-            oninput="_onRemoteTargetBranchInput(this)"
-            onblur="_normalizeRemoteTargetBranchInput(this)"
+            data-input-action="valueInputTarget"
+            data-input-handler="_onRemoteTargetBranchInput"
+            data-blur-action="valueBlurTarget"
+            data-blur-handler="_normalizeRemoteTargetBranchInput"
           />
         </div>
       </label>
       <div class="git-sync-actions">
-        <button class="git-btn git-btn-primary" ${hasOrigin ? '' : 'disabled'} onclick="_doPush(false)">⬆️ 推送到远程分支</button>
-        <button class="git-btn" ${hasOrigin ? '' : 'disabled'} onclick="_doPull()">⬇️ 拉取远程分支</button>
-        <button class="git-btn" ${hasOrigin ? '' : 'disabled'} onclick="_doFetch()">🔄 抓取 (fetch)</button>
-        <button class="git-btn git-btn-warn" ${hasOrigin ? '' : 'disabled'} onclick="_doPush(true)" title="--force-with-lease，比强制推送安全">⚡ 强制推送</button>
+        <button class="git-btn git-btn-primary" ${hasOrigin ? '' : 'disabled'} data-action="valueClick" data-handler="_doPush" data-value="false" data-value-type="boolean">⬆️ 推送到远程分支</button>
+        <button class="git-btn" ${hasOrigin ? '' : 'disabled'} data-action="_doPull">⬇️ 拉取远程分支</button>
+        <button class="git-btn" ${hasOrigin ? '' : 'disabled'} data-action="_doFetch">🔄 抓取 (fetch)</button>
+        <button class="git-btn git-btn-warn" ${hasOrigin ? '' : 'disabled'} data-action="valueClick" data-handler="_doPush" data-value="true" data-value-type="boolean" title="--force-with-lease，比强制推送安全">⚡ 强制推送</button>
       </div>
       <div id="gitSyncLog" class="git-sync-log" hidden></div>
     </section>
@@ -1369,7 +1372,7 @@ async function _refreshRemotePanel() {
           <li><b>GitHub Personal Access Token</b> — 当 https:// 推送时作为密码粘贴</li>
           <li><b>GitHub CLI</b> — 终端运行 <code>gh auth login</code> 自动配置</li>
         </ul>
-        <button class="git-btn-link" onclick="_showCredHelp()">📖 查看详细教程</button>
+        <button class="git-btn-link" data-action="_showCredHelp">📖 查看详细教程</button>
       </div>
     </section>
   `;
@@ -1615,7 +1618,7 @@ function _showCredHelp() {
   dlg.innerHTML = `
     <div class="modal git-help-box">
       <h2><span>🔐 GitHub 凭证配置教程</span>
-        <button class="modal-close" onclick="this.closest('.modal-mask').remove()" style="margin-left:auto;">×</button>
+        <button class="modal-close" data-action="removeClosest" data-selector=".modal-mask" style="margin-left:auto;">×</button>
       </h2>
       <div class="git-help-body">
         <h3>方式 ① SSH Key（推荐，一次配好永久免密）</h3>

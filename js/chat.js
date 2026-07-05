@@ -1,15 +1,37 @@
+﻿const ChatStateModule = window.AgentApp.require('state');
+const chatState = ChatStateModule.state;
+const chatSaveData = ChatStateModule.saveData;
+const chatPersistSettings = ChatStateModule.persistSettings;
+const chatCurrentChat = ChatStateModule.currentChat;
+const chatByIdFromState = ChatStateModule.chatById;
+const chatIsCurrentChat = ChatStateModule.isCurrentChat;
+const chatTaskByIdFromState = ChatStateModule.chatTaskById;
+const chatIsChatGenerating = ChatStateModule.isChatGenerating;
+const chatSyncGlobalTaskState = ChatStateModule.syncGlobalTaskState;
+const chatRequestStopTask = ChatStateModule.requestStopChatTask;
+const ChatOrchestrationService = window.AgentApp.require('orchestrationService');
+
 // ============ 对话管理 + 消息渲染 + 发送 ============
+
+async function chatCallGenerationMode(mode) {
+  const selected = mode || 'normal';
+  if (selected === 'outline') return ChatOrchestrationService.callAPIWithOutline();
+  if (selected === 'plan') return ChatOrchestrationService.callAPIWithPlan();
+  if (selected === 'ppt') return ChatOrchestrationService.callAPIWithPptMode({ contextChecked: true });
+  if (selected === 'reflection') return ChatOrchestrationService.callAPIWithReflection();
+  return ChatOrchestrationService.callAPI(undefined, { contextChecked: true });
+}
 
 // ⭐ 离开当前任务所在对话时，只有会破坏该对话内容的操作才主动中止任务。
 // 网络层不卡的情况下，这能让旧任务的 catch 分支正常跑完（保留 _snap 等）
 function _abortCurrentTaskIfAny(chatId) {
-  const targetChatId = chatId || state.activeTaskChatId || state.currentId;
-  const task = (typeof chatTaskById === 'function') ? chatTaskById(targetChatId) : null;
-  const ctrl = task ? (task.abortCtrl || state.abortCtrl) : state.abortCtrl;
-  if (typeof requestStopChatTask === 'function' && requestStopChatTask(targetChatId)) {
+  const targetChatId = chatId || chatState.activeTaskChatId || chatState.currentId;
+  const task = chatTaskByIdFromState(targetChatId);
+  const ctrl = task ? (task.abortCtrl || chatState.abortCtrl) : chatState.abortCtrl;
+  if (chatRequestStopTask && chatRequestStopTask(targetChatId)) {
     // 已按对话中止
   } else {
-    state.stopRequested = true;
+    chatState.stopRequested = true;
     if (ctrl) {
       try { ctrl.abort(); } catch (e) {}
     }
@@ -32,7 +54,7 @@ function _abortCurrentTaskIfAny(chatId) {
 //   注意：计划模式的"执行计划"按钮（approveAndExecutePlan）不走这里，
 //        所以即便 usePlan 已熄灭，已生成的计划仍可正常执行
 function _consumeOneShotMode() {
-  const s = state.settings;
+  const s = chatState.settings;
   let mode = 'normal';
   if (s.useOutline) {
     mode = 'outline';
@@ -54,7 +76,7 @@ function _consumeOneShotMode() {
     // PPT 模式需要在生成期间保持开启，以便 PPT 工具可用；生成结束后由 callAPIWithPptMode 关闭并同步工具。
   }
   if (mode !== 'normal') {
-    if (typeof persistSettings === 'function') persistSettings();
+    if (chatPersistSettings) chatPersistSettings();
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
   return mode;
@@ -66,10 +88,10 @@ function _buildUserMessageFromInput(chat, text, opts = {}) {
     userMsg._midrunGuidance = true;
     userMsg._queuedAt = Date.now();
   }
-  const allAttachments = [...state.pendingAttachments];
+  const allAttachments = [...chatState.pendingAttachments];
   const pendingAIForChat = (typeof takePendingAIAttachments === 'function')
     ? takePendingAIAttachments(chat.id)
-    : (state.pendingAIAttachments || []).splice(0);
+    : (chatState.pendingAIAttachments || []).splice(0);
   if (pendingAIForChat && pendingAIForChat.length) {
     for (const a of pendingAIForChat) {
       if (!allAttachments.some(ex => ex.id === a.id)) {
@@ -86,22 +108,22 @@ function _clearComposerAfterSend(input) {
     input.value = '';
     input.style.height = 'auto';
   }
-  state.pendingAttachments = [];
+  chatState.pendingAttachments = [];
   if (typeof renderPendingAtts === 'function') renderPendingAtts();
   if (typeof updateSendBtn === 'function') updateSendBtn();
 }
 
 function _canGuideCurrentTask(chatId) {
-  const task = (typeof chatTaskById === 'function') ? chatTaskById(chatId) : null;
+  const task = chatTaskByIdFromState(chatId);
   if (!task || !task.isGenerating) return false;
   if (task.mode === 'ppt' && typeof queuePptMidrunGuidanceFromComposer === 'function') return true;
   return !task.mode || task.mode === 'chat';
 }
 
 function queueMidrunGuidance(chat, input, text) {
-  if (!chat || !input || (!text && !state.pendingAttachments.length)) return false;
+  if (!chat || !input || (!text && !chatState.pendingAttachments.length)) return false;
   if (!_canGuideCurrentTask(chat.id)) return false;
-  const task = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
+  const task = chatTaskByIdFromState(chat.id);
   if (task && task.mode === 'ppt' && typeof queuePptMidrunGuidanceFromComposer === 'function') {
     return queuePptMidrunGuidanceFromComposer(chat, input, text);
   }
@@ -126,10 +148,10 @@ function queueMidrunGuidance(chat, input, text) {
   if (typeof traceUserMessage === 'function') traceUserMessage(text);
   _clearComposerAfterSend(input);
 
-  const runningTask = (typeof chatTaskById === 'function') ? chatTaskById(chat.id) : null;
-  const ctrl = runningTask ? (runningTask.abortCtrl || state.abortCtrl) : state.abortCtrl;
+  const runningTask = chatTaskByIdFromState(chat.id);
+  const ctrl = runningTask ? (runningTask.abortCtrl || chatState.abortCtrl) : chatState.abortCtrl;
   if (runningTask) runningTask.stopRequested = true;
-  state.stopRequested = true;
+  chatState.stopRequested = true;
   if (ctrl) {
     try { ctrl.abort(); } catch (e) { console.error('[queueMidrunGuidance] 中断失败:', e); }
   }
@@ -140,7 +162,7 @@ function queueMidrunGuidance(chat, input, text) {
     try { window.cancelAutoResend(chat.id, false); } catch (e) {}
   }
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chat.id);
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(chat.id);
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof toast === 'function') toast('已发送中途引导，正在调整当前任务', 1800);
   return true;
@@ -184,7 +206,7 @@ function _inferReplyModeAfterUser(chat, idx) {
 }
 
 function _consumeOneShotModeWithFallback(fallbackMode) {
-  const s = state.settings || {};
+  const s = chatState.settings || {};
   if (s.useOutline || s.usePlan || s.useReflection || s.usePpt) {
     return (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
   }
@@ -207,17 +229,17 @@ function _setComposerDraft(input, text) {
 function renderUserMsgActions(idx) {
   return `
     <div class="msg-actions user-msg-actions">
-      <button class="msg-action user-msg-action" type="button" onclick="copyMsg(${idx})" title="复制" aria-label="复制">
+      <button class="msg-action user-msg-action" type="button" data-action="valueClick" data-handler="copyMsg" data-value="${idx}" data-value-type="number" title="复制" aria-label="复制">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M5 15V7a2 2 0 0 1 2-2h8"></path></svg>
       </button>
-      <button class="msg-action user-msg-action" type="button" onclick="editResendUserMsg(${idx})" title="编辑重发" aria-label="编辑重发">
+      <button class="msg-action user-msg-action" type="button" data-action="valueClick" data-handler="editResendUserMsg" data-value="${idx}" data-value-type="number" title="编辑重发" aria-label="编辑重发">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"></path></svg>
       </button>
     </div>`;
 }
 
 function editResendUserMsg(idx) {
-  const c = currentChat();
+  const c = chatCurrentChat();
   if (!c || !c.messages[idx] || c.messages[idx].role !== 'user') return;
   const input = document.getElementById('input');
   const msg = c.messages[idx];
@@ -226,7 +248,7 @@ function editResendUserMsg(idx) {
     msgIdx: idx,
     mode: _inferReplyModeAfterUser(c, idx)
   };
-  state.pendingAttachments = _cloneMessageAttachmentsForEdit(msg);
+  chatState.pendingAttachments = _cloneMessageAttachmentsForEdit(msg);
   if (typeof renderPendingAtts === 'function') renderPendingAtts();
   _setComposerDraft(input, _messageTextForEdit(msg));
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -234,15 +256,15 @@ function editResendUserMsg(idx) {
 }
 
 async function _abortChatForRewrite(chatId) {
-  const sameChatGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(chatId) : !!state.isGenerating;
-  if (sameChatGenerating || (typeof chatTaskById === 'function' && chatTaskById(chatId)?.abortCtrl)) {
+  const sameChatGenerating = chatIsChatGenerating ? chatIsChatGenerating(chatId) : !!chatState.isGenerating;
+  if (sameChatGenerating || chatTaskByIdFromState(chatId)?.abortCtrl) {
     if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny(chatId);
-    else if (state.abortCtrl) { try { state.abortCtrl.abort(); } catch (_) {} }
+    else if (chatState.abortCtrl) { try { chatState.abortCtrl.abort(); } catch (_) {} }
     await new Promise(r => setTimeout(r, 200));
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(chatId);
     else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
+      chatState.isGenerating = false;
+      chatState.abortCtrl = null;
     }
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
@@ -250,14 +272,14 @@ async function _abortChatForRewrite(chatId) {
 
 async function submitEditResend(input) {
   const edit = _editResendState;
-  const c = currentChat();
+  const c = chatCurrentChat();
   if (!edit || !c || edit.chatId !== c.id) {
     _editResendState = null;
     return false;
   }
   const text = input ? input.value.trim() : '';
-  if (!text && !state.pendingAttachments.length) return true;
-  if (!state.settings.apiKey) {
+  if (!text && !chatState.pendingAttachments.length) return true;
+  if (!chatState.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     openSettings();
     return true;
@@ -287,20 +309,20 @@ async function submitEditResend(input) {
   if (typeof refreshLegacyModeFlags === 'function') {
     refreshLegacyModeFlags();
   } else {
-    state._planExecuting = false;
-    state._outlineExecuting = false;
-    state._outlineForceFinish = false;
+    chatState._planExecuting = false;
+    chatState._outlineExecuting = false;
+    chatState._outlineForceFinish = false;
   }
   renderChatList();
   renderMessages();
-  saveData();
+  chatSaveData();
   if (typeof scrollBottom === 'function') requestAnimationFrame(() => scrollBottom());
 
   if (typeof autoCompressCheck === 'function') {
     const compressResult = await autoCompressCheck(c, { touchGlobalGenerating: true });
     if (compressResult === 'failed') {
       _editResendState = { ...edit };
-      state.pendingAttachments = userMsg.attachments ? userMsg.attachments.map(a => ({ ...a })) : [];
+      chatState.pendingAttachments = userMsg.attachments ? userMsg.attachments.map(a => ({ ...a })) : [];
       if (typeof renderPendingAtts === 'function') renderPendingAtts();
       _setComposerDraft(input, text);
       toast('自动压缩失败，本轮请求已取消，避免发送超长上下文', 4000);
@@ -309,21 +331,17 @@ async function submitEditResend(input) {
   }
 
   try {
-    state.stopRequested = false;
+    chatState.stopRequested = false;
     const mode = _consumeOneShotModeWithFallback(fallbackMode);
-    if (mode === 'outline') await callAPIWithOutline();
-    else if (mode === 'plan') await callAPIWithPlan();
-    else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });
-    else if (mode === 'reflection') await callAPIWithReflection();
-    else await callAPI(undefined, { contextChecked: true });
+    await chatCallGenerationMode(mode);
   } catch (e) {
     console.error('[submitEditResend] 错误:', e);
     toast('❌ 编辑重发失败：' + e.message, 3000);
   } finally {
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+    if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(c.id);
     else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
+      chatState.isGenerating = false;
+      chatState.abortCtrl = null;
     }
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
@@ -333,10 +351,10 @@ async function submitEditResend(input) {
 function newChat() {
   if (typeof discardTemporaryChat === 'function') discardTemporaryChat({ nextCurrentId: null });
   const id = 'c_' + Date.now();
-  state.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
-  state.currentId = id;
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
-  saveData();
+  chatState.chats.unshift({ id, title: '新对话', messages: [], createdAt: Date.now() });
+  chatState.currentId = id;
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(id);
+  chatSaveData();
   renderChatList();
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -346,9 +364,9 @@ function newChat() {
 
 function switchChat(id) {
   if (typeof discardTemporaryChat === 'function') discardTemporaryChat({ nextCurrentId: id });
-  state.currentId = id;
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(id);
-  saveData();
+  chatState.currentId = id;
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(id);
+  chatSaveData();
   renderChatList();
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -359,21 +377,21 @@ function switchChat(id) {
 function updateTemporaryChatButton() {
   const btn = document.getElementById('temporaryChatBtn');
   if (!btn) return;
-  const active = typeof isTemporaryChat === 'function' && isTemporaryChat(state.currentId);
+  const active = typeof isTemporaryChat === 'function' && isTemporaryChat(chatState.currentId);
   btn.classList.toggle('temporary-active', !!active);
 }
 
 function startTemporaryChat() {
-  if (typeof isTemporaryChat === 'function' && isTemporaryChat(state.currentId)) {
+  if (typeof isTemporaryChat === 'function' && isTemporaryChat(chatState.currentId)) {
     updateTemporaryChatButton();
     return;
   }
-  state.temporaryChat = typeof createTemporaryChat === 'function'
+  chatState.temporaryChat = typeof createTemporaryChat === 'function'
     ? createTemporaryChat()
     : { id: 'tmp_' + Date.now(), title: '临时会话', messages: [], createdAt: Date.now(), temporary: true };
-  state.currentId = state.temporaryChat.id;
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
-  saveData();
+  chatState.currentId = chatState.temporaryChat.id;
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(chatState.currentId);
+  chatSaveData();
   renderChatList();
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -391,7 +409,7 @@ function isTaskQueueSidebarGroupedChat(chat) {
 }
 
 function sidebarChats() {
-  return (state.chats || [])
+  return (chatState.chats || [])
     .filter(chat => chat && !chat._hiddenFromUI)
     .map((chat, index) => ({ chat, index }))
     .sort((a, b) => {
@@ -516,7 +534,7 @@ function toggleTaskQueueChatGroup(groupId) {
     if (!chat.taskQueue) continue;
     chat.taskQueue.groupExpanded = nextExpanded;
   }
-  saveData();
+  chatSaveData();
   renderChatList();
 }
 
@@ -543,7 +561,7 @@ function togglePinTaskQueueGroup(groupId, e) {
     if (shouldUnpin) delete chat.pinnedAt;
     else chat.pinnedAt = pinnedAt;
   }
-  saveData();
+  chatSaveData();
   renderChatList();
   if (typeof toast === 'function') toast(shouldUnpin ? '已取消置顶' : '已置顶');
 }
@@ -560,7 +578,7 @@ function renameTaskQueueGroup(groupId, e) {
     return;
   }
   setTaskQueueGroupMeta(groupId, { groupTitle: title.slice(0, 80) });
-  saveData();
+  chatSaveData();
   renderChatList();
   if (typeof toast === 'function') toast('已重命名');
 }
@@ -572,32 +590,32 @@ function deleteTaskQueueGroup(groupId, e) {
   if (!confirm(`删除这个任务队列对话组？\n将删除其中 ${chats.length} 个对话。`)) return;
   const ids = new Set(chats.map(c => c.id));
   for (const chat of chats) {
-    if (typeof isChatGenerating === 'function' && isChatGenerating(chat.id) && typeof _abortCurrentTaskIfAny === 'function') {
+    if (chatIsChatGenerating && chatIsChatGenerating(chat.id) && typeof _abortCurrentTaskIfAny === 'function') {
       _abortCurrentTaskIfAny(chat.id);
     }
   }
   if (typeof remoteControlForgetChat === 'function') {
     for (const chat of chats) remoteControlForgetChat(chat);
   }
-  state.chats = state.chats.filter(c => !ids.has(c.id));
-  if (state.currentId && ids.has(state.currentId)) state.currentId = sidebarChats()[0]?.id || null;
-  if (state.taskQueue && Array.isArray(state.taskQueue.items)) {
-    for (const item of state.taskQueue.items) {
+  chatState.chats = chatState.chats.filter(c => !ids.has(c.id));
+  if (chatState.currentId && ids.has(chatState.currentId)) chatState.currentId = sidebarChats()[0]?.id || null;
+  if (chatState.taskQueue && Array.isArray(chatState.taskQueue.items)) {
+    for (const item of chatState.taskQueue.items) {
       if (!item || !ids.has(item.chatId)) continue;
       item.chatId = null;
       item.sidebarGroupId = '';
       item.promptHash = '';
     }
-    if (state.taskQueue.sidebarGroupId === groupId) {
-      state.taskQueue.sidebarGroupId = null;
-      state.taskQueue.sidebarGroupStartedAt = null;
-      state.taskQueue.sidebarGroupFinalizedAt = null;
+    if (chatState.taskQueue.sidebarGroupId === groupId) {
+      chatState.taskQueue.sidebarGroupId = null;
+      chatState.taskQueue.sidebarGroupStartedAt = null;
+      chatState.taskQueue.sidebarGroupFinalizedAt = null;
     }
     if (typeof saveTaskQueue === 'function') saveTaskQueue();
     if (typeof renderTaskQueueModal === 'function') renderTaskQueueModal();
   }
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
-  saveData();
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(chatState.currentId);
+  chatSaveData();
   renderChatList();
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -606,7 +624,7 @@ function deleteTaskQueueGroup(groupId, e) {
 
 function togglePinChat(id, e) {
   if (e) e.stopPropagation();
-  const c = chatById(id);
+  const c = chatByIdFromState(id);
   if (!c) return;
   if (c.pinnedAt) {
     delete c.pinnedAt;
@@ -615,13 +633,13 @@ function togglePinChat(id, e) {
     c.pinnedAt = Date.now();
     if (typeof toast === 'function') toast('已置顶');
   }
-  saveData();
+  chatSaveData();
   renderChatList();
 }
 
 function renameChat(id, e) {
   if (e) e.stopPropagation();
-  const c = chatById(id);
+  const c = chatByIdFromState(id);
   if (!c) return;
   const raw = prompt('重命名对话', c.title || '新对话');
   if (raw === null) return;
@@ -631,7 +649,7 @@ function renameChat(id, e) {
     return;
   }
   c.title = title.slice(0, 80);
-  saveData();
+  chatSaveData();
   renderChatList();
   if (typeof toast === 'function') toast('已重命名');
 }
@@ -681,15 +699,15 @@ function deleteChat(id, e) {
   if (e) e.stopPropagation();
   if (!confirm('删除这个对话？')) return;
   // ⭐ 若删除的是正在生成的对话，先中止后台任务，避免回调写回已删除对象
-  if (typeof isChatGenerating === 'function' && isChatGenerating(id) && typeof _abortCurrentTaskIfAny === 'function') {
+  if (chatIsChatGenerating && chatIsChatGenerating(id) && typeof _abortCurrentTaskIfAny === 'function') {
     _abortCurrentTaskIfAny(id);
   }
-  const removedChat = chatById(id);
+  const removedChat = chatByIdFromState(id);
   if (typeof remoteControlForgetChat === 'function') remoteControlForgetChat(removedChat || id);
-  state.chats = state.chats.filter(c => c.id !== id);
-  if (state.currentId === id) state.currentId = sidebarChats()[0]?.id || null;
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
-  saveData();
+  chatState.chats = chatState.chats.filter(c => c.id !== id);
+  if (chatState.currentId === id) chatState.currentId = sidebarChats()[0]?.id || null;
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(chatState.currentId);
+  chatSaveData();
   renderChatList();
   renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -697,21 +715,21 @@ function deleteChat(id, e) {
 }
 
 function clearCurrentChat() {
-  const c = currentChat();
+  const c = chatCurrentChat();
   if (!c) return;
   if (!confirm('清空当前对话？')) return;
-  if (typeof isChatGenerating === 'function' && isChatGenerating(c.id) && typeof _abortCurrentTaskIfAny === 'function') {
+  if (chatIsChatGenerating && chatIsChatGenerating(c.id) && typeof _abortCurrentTaskIfAny === 'function') {
     _abortCurrentTaskIfAny(c.id);
   }
   c.messages = [];
   c.title = '新对话';
-  saveData();
+  chatSaveData();
   renderChatList();
   renderMessages();
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(c.id);
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-  const chatGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating;
+  const chatGenerating = chatIsChatGenerating ? chatIsChatGenerating(c.id) : !!chatState.isGenerating;
   if (!chatGenerating && typeof resetTaskPermission === 'function') {
     resetTaskPermission(c.id);
   }
@@ -737,8 +755,8 @@ function renderSidebarChatEntry(entry) {
 
 function renderTaskQueueSidebarGroup(entry) {
   const chats = entry.chats || [];
-  const active = chats.some(c => c.id === state.currentId);
-  const generating = chats.some(c => typeof isChatGenerating === 'function' && isChatGenerating(c.id));
+  const active = chats.some(c => c.id === chatState.currentId);
+  const generating = chats.some(c => chatIsChatGenerating && chatIsChatGenerating(c.id));
   const pinned = isTaskQueueGroupPinned(chats);
   const title = taskQueueGroupTitle(chats);
   const meta = taskQueueGroupMetaText(chats);
@@ -757,7 +775,7 @@ function renderTaskQueueSidebarGroup(entry) {
 }
 
 function renderSidebarChatItem(c, options = {}) {
-  const isGenerating = typeof isChatGenerating === 'function' && isChatGenerating(c.id);
+  const isGenerating = chatIsChatGenerating && chatIsChatGenerating(c.id);
   const isPinned = !!c.pinnedAt;
   const isConcurrent = !!(c.concurrent && c.concurrent.type === 'concurrent_requests');
   const isDebate = !!(c.debate && c.debate.type === 'debate_mode');
@@ -777,7 +795,7 @@ function renderSidebarChatItem(c, options = {}) {
         </span>
       </span>`;
   return `
-    <div class="chat-item ${c.id === state.currentId ? 'active' : ''} ${isPinned && !isTaskChild ? 'pinned' : ''} ${isTaskChild ? 'chat-group-child' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
+    <div class="chat-item ${c.id === chatState.currentId ? 'active' : ''} ${isPinned && !isTaskChild ? 'pinned' : ''} ${isTaskChild ? 'chat-group-child' : ''}" data-chat-id="${escapeHtml(c.id)}" tabindex="0" title="${escapeHtml(title)}">
       <span class="chat-item-title">${taskBadge}<span class="chat-item-name">${escapeHtml(title)}</span></span>
       ${menu}
     </div>`;
@@ -879,7 +897,7 @@ function syncChatStartState(isStartState) {
 
 function renderMessages() {
   const inner = document.getElementById('messagesInner');
-  const c = currentChat();
+  const c = chatCurrentChat();
   const hasVisibleMessages = !!(c && Array.isArray(c.messages) && c.messages.some(m => m && !m._hiddenFromUI));
   syncChatStartState(!hasVisibleMessages);
   if (typeof updateDialogTimeline === 'function') requestAnimationFrame(updateDialogTimeline);
@@ -921,8 +939,8 @@ function renderMessages() {
 // ⭐ 局部刷新：只重渲染某一条消息的整个节点，前后消息不动
 // 用于工具循环 push 新消息 / 完成后做最终高亮渲染，避免全量 renderMessages 闪烁
 function refreshMsgNode(idx, targetChat) {
-  const c = targetChat || currentChat();
-  if (targetChat && !isCurrentChat(targetChat)) return false;
+  const c = targetChat || chatCurrentChat();
+  if (targetChat && !chatIsCurrentChat(targetChat)) return false;
   if (!c || !c.messages[idx]) return false;
   const m = c.messages[idx];
   if (m._hiddenFromUI) return false;
@@ -964,8 +982,8 @@ function refreshMsgNode(idx, targetChat) {
 // ⭐ 追加新消息到末尾（不动其它消息）
 // 适用于刚 push 一条新消息（如 tool 结果、新的 assistant 占位）时
 function appendMsgNode(idx, targetChat) {
-  const c = targetChat || currentChat();
-  if (targetChat && !isCurrentChat(targetChat)) return false;
+  const c = targetChat || chatCurrentChat();
+  if (targetChat && !chatIsCurrentChat(targetChat)) return false;
   if (!c || !c.messages[idx]) return false;
   const m = c.messages[idx];
   if (m._hiddenFromUI) return false;
@@ -1001,14 +1019,14 @@ function appendMsgNode(idx, targetChat) {
 // ⭐ 局部更新：只重渲染指定消息的 plan 面板，避免整个消息列表重建
 // 解决：工具循环每秒数次 renderMessages 导致的卡顿、选中文本被清、滚动被踹的问题
 function updatePlanPanel(msgIdx, targetChat) {
-  const c = targetChat || currentChat();
-  if (targetChat && !isCurrentChat(targetChat)) return false;
+  const c = targetChat || chatCurrentChat();
+  if (targetChat && !chatIsCurrentChat(targetChat)) return false;
   if (!c || !c.messages[msgIdx] || !c.messages[msgIdx].plan) return false;
   
   const msgEl = document.querySelector(`.message[data-idx="${msgIdx}"]`);
   if (!msgEl) {
     // 消息节点不存在（如刚 push 完还没渲染），回退到全量渲染
-    if (isCurrentChat(c)) renderMessages();
+    if (chatIsCurrentChat(c)) renderMessages();
     return false;
   }
   
@@ -1028,7 +1046,7 @@ function updatePlanPanel(msgIdx, targetChat) {
     }
     } else {
     // 旧节点不存在（比如第一次出现 plan），全量重渲一次
-    if (isCurrentChat(c)) renderMessages();
+    if (chatIsCurrentChat(c)) renderMessages();
     return false;
   }
   
@@ -1037,7 +1055,7 @@ function updatePlanPanel(msgIdx, targetChat) {
 }
 
 function renderMsg(m, idx) {
-  const cur = currentChat();
+  const cur = chatCurrentChat();
   const isTaskQueue = cur && cur.taskQueue && cur.taskQueue.type === 'task_queue_item';
   const assistantLabel = isTaskQueue ? 'AI 助手' : 'Snake';
   if (m && m.debate && m.debate.kind === 'speech' && typeof renderDebateSpeechMsg === 'function') {
@@ -1057,8 +1075,8 @@ function renderMsg(m, idx) {
   }
 
   if (m._isSummary) {
-    const undoBtn = (m._compressionUndoId && typeof canUndoCompression === 'function' && canUndoCompression(m._compressionUndoId, currentChat()))
-      ? `<button class="msg-action" onclick="undoCompressionSnapshot('${escapeHtml(m._compressionUndoId)}')">↩ 撤销压缩</button>`
+    const undoBtn = (m._compressionUndoId && typeof canUndoCompression === 'function' && canUndoCompression(m._compressionUndoId, chatCurrentChat()))
+      ? `<button class="msg-action" data-action="valueClick" data-handler="undoCompressionSnapshot" data-value="${escapeHtml(m._compressionUndoId)}">↩ 撤销压缩</button>`
       : '';
     return `
       <div class="message summary-msg" data-idx="${idx}">
@@ -1067,7 +1085,7 @@ function renderMsg(m, idx) {
           <div class="msg-role">对话摘要 <span class="summary-badge">已压缩 ${m._originalCount} 条</span></div>
           <div class="msg-content">${renderMarkdown(m.content || '')}</div>
           <div class="msg-actions">
-            <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
+            <button class="msg-action" data-action="valueClick" data-handler="copyMsg" data-value="${idx}" data-value-type="number">📋 复制</button>
             ${undoBtn}
           </div>
         </div>
@@ -1092,7 +1110,7 @@ function renderMsg(m, idx) {
         <div class="msg-body">
           <div class="msg-role">工具返回：${escapeHtml(m.name || '')}</div>
           <div class="tool-call">
-            <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+            <div class="tool-call-header" data-action="toggleParentCollapsed">
               <span>📤 ${escapeHtml(m.name || 'tool')} 执行结果</span>
               <span class="tool-status ${m.status || 'success'}">${m.status === 'error' ? '失败' : '成功'}</span>
             </div>
@@ -1122,7 +1140,7 @@ function renderMsg(m, idx) {
       }
       // 图片
       if (a.type === 'image' && a.data) {
-        return `<img class="att-img" src="${a.data}" onclick="showImagePreview('${a.data}')" alt="">`;
+        return `<img class="att-img" src="${a.data}" data-action="valueClick" data-handler="showImagePreview" data-value="${escapeHtml(a.data)}" alt="">`;
       }
       // 普通文件
       return `<div class="att-file"><span class="att-file-icon">📄</span><div class="att-file-info"><div class="att-file-name">${escapeHtml(a.name)}</div><div class="att-file-size">${formatSize(a.size)} · ${escapeHtml(a.mime || '')}</div></div></div>`;
@@ -1133,7 +1151,7 @@ function renderMsg(m, idx) {
   if (m.tool_calls && m.tool_calls.length) {
     toolCallsHtml = m.tool_calls.map(tc => `
       <div class="tool-call">
-        <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="tool-call-header" data-action="toggleParentCollapsed">
           <span>🔧 调用工具：${escapeHtml(tc.function?.name || '')}</span>
         </div>
         <div class="tool-call-body">
@@ -1152,7 +1170,7 @@ function renderMsg(m, idx) {
       : '';
     reflectionHtml = `
       <div class="reflection-panel ${ref.expanded ? '' : 'collapsed'}" data-msg-idx="${idx}">
-        <button class="reflection-toggle" onclick="toggleReflectionPanel(${idx})">
+        <button class="reflection-toggle" data-action="valueClick" data-handler="toggleReflectionPanel" data-value="${idx}" data-value-type="number">
           <span>🎭 师生讨论过程</span>
           <span class="reflection-stats">${ref.turns.filter(t => t.role === 'student').length} 次学生回答 · 最终评分 ${ref.finalScore ?? '?'}/10</span>
         </button>
@@ -1203,8 +1221,8 @@ function renderMsg(m, idx) {
         ${isUser && typeof renderScheduledMeta === 'function' ? renderScheduledMeta(m) : ''}
         ${!isUser ? `
         <div class="msg-actions">
-          <button class="msg-action" onclick="copyMsg(${idx})">📋 复制</button>
-          ${m.role !== 'tool' ? `<button class="msg-action" onclick="regenerate(${idx})">🔄 重新生成</button>` : ''}
+          <button class="msg-action" data-action="valueClick" data-handler="copyMsg" data-value="${idx}" data-value-type="number">📋 复制</button>
+          ${m.role !== 'tool' ? `<button class="msg-action" data-action="valueClick" data-handler="regenerate" data-value="${idx}" data-value-type="number">🔄 重新生成</button>` : ''}
         </div>` : ''}
       </div>
       ${isUser ? renderUserMsgActions(idx) : ''}
@@ -1252,7 +1270,7 @@ function formatMsgTimer(m) {
 //   一旦漏盖，timer 就会永远按 Date.now()-_startTime 涨，并连带阻止工具流程折叠。
 //   这里做最后一道防线：任何"事实上已结束"的消息都强制盖章。
 function tickMsgTimers() {
-  const c = currentChat();
+  const c = chatCurrentChat();
   if (!c) return;
   const timers = document.querySelectorAll('.msg-timer[data-msg-idx]');
   const total = c.messages.length;
@@ -1277,7 +1295,7 @@ function tickMsgTimers() {
     // ⭐ 兜底补盖 ②：本条是最后一条 assistant，但全局已无生成任务
     //   且不在"等待用户介入"状态（如 plan 待审批、outline 暂停）→ 强制封冻
     if (!m._endTime && m.role === 'assistant' && idx === total - 1
-        && typeof state !== 'undefined' && !state.isGenerating) {
+        && chatState && !chatState.isGenerating) {
       const planWaiting    = m.plan    && ['pending_approval', 'paused', 'error', 'verifying', 'verification_failed', 'verification_exhausted'].includes(m.plan.status);
       const outlinePending = m.outline && ['paused', 'error'].includes(m.outline.status);
       if (!planWaiting && !outlinePending) {
@@ -1306,7 +1324,7 @@ function tickMsgTimers() {
   if (frozenJustNow && typeof groupToolFlows === 'function') {
     try { groupToolFlows(); } catch (e) { /* 静默 */ }
   }
-  if (frozenJustNow && typeof saveData === 'function') saveData();
+  if (frozenJustNow && chatSaveData) chatSaveData();
 }
 
 function onPickImages(e) {
@@ -1335,7 +1353,7 @@ function addAttachment(file, type) {
     const r = new FileReader();
     r.onload = e => {
       att.data = e.target.result;
-      state.pendingAttachments.push(att);
+      chatState.pendingAttachments.push(att);
       renderPendingAtts();
       if (typeof updateSendBtn === 'function') updateSendBtn();
     };
@@ -1344,7 +1362,7 @@ function addAttachment(file, type) {
     const r = new FileReader();
     r.onload = e => {
       att.text = e.target.result;
-      state.pendingAttachments.push(att);
+      chatState.pendingAttachments.push(att);
       renderPendingAtts();
       if (typeof updateSendBtn === 'function') updateSendBtn();
     };
@@ -1353,7 +1371,7 @@ function addAttachment(file, type) {
     const r = new FileReader();
     r.onload = e => {
       att.data = e.target.result;
-      state.pendingAttachments.push(att);
+      chatState.pendingAttachments.push(att);
       renderPendingAtts();
       if (typeof updateSendBtn === 'function') updateSendBtn();
     };
@@ -1368,12 +1386,12 @@ function isTextLike(file) {
 }
 
 function removeAttachment(id) {
-  state.pendingAttachments = state.pendingAttachments.filter(a => a.id !== id);
-  if (state.pendingAIAttachments) {
-    state.pendingAIAttachments = state.pendingAIAttachments.filter(a => a.id !== id);
+  chatState.pendingAttachments = chatState.pendingAttachments.filter(a => a.id !== id);
+  if (chatState.pendingAIAttachments) {
+    chatState.pendingAIAttachments = chatState.pendingAIAttachments.filter(a => a.id !== id);
   }
-  if (state.pendingAIAttachmentsByChat && state.currentId && state.pendingAIAttachmentsByChat[state.currentId]) {
-    state.pendingAIAttachmentsByChat[state.currentId] = state.pendingAIAttachmentsByChat[state.currentId].filter(a => a.id !== id);
+  if (chatState.pendingAIAttachmentsByChat && chatState.currentId && chatState.pendingAIAttachmentsByChat[chatState.currentId]) {
+    chatState.pendingAIAttachmentsByChat[chatState.currentId] = chatState.pendingAIAttachmentsByChat[chatState.currentId].filter(a => a.id !== id);
   }
   renderPendingAtts();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -1381,13 +1399,13 @@ function removeAttachment(id) {
 
 function renderPendingAtts() {
   const wrap = document.getElementById('pendingAtts');
-  if (!state.pendingAttachments.length) {
+  if (!chatState.pendingAttachments.length) {
     wrap.classList.remove('show');
     wrap.innerHTML = '';
     return;
   }
   wrap.classList.add('show');
-  wrap.innerHTML = state.pendingAttachments.map(a => {
+  wrap.innerHTML = chatState.pendingAttachments.map(a => {
     const fromAI = a._fromAI;
     const aiBadge = fromAI 
       ? '<span style="background:var(--tool);color:white;padding:1px 5px;border-radius:8px;font-size:9px;margin-left:4px;font-weight:600;">AI</span>' 
@@ -1397,7 +1415,7 @@ function renderPendingAtts() {
       <div class="pending-att" style="${borderStyle}">
         ${a.type === 'image' ? `<img src="${a.data}">` : `<span style="font-size:18px;">📄</span>`}
         <span class="name">${escapeHtml(a.name)}${aiBadge}</span>
-        <button class="remove" onclick="removeAttachment('${a.id}')">×</button>
+        <button class="remove" data-action="valueClick" data-handler="removeAttachment" data-value="${escapeHtml(a.id)}">×</button>
       </div>`;
   }).join('');
 }
@@ -1432,8 +1450,8 @@ function setupPaste() {
 
 async function onSend() {
   // 状态保护
-  const currentId = state.currentId;
-  const currentGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(currentId) : !!state.isGenerating;
+  const currentId = chatState.currentId;
+  const currentGenerating = chatIsChatGenerating ? chatIsChatGenerating(currentId) : !!chatState.isGenerating;
   const input = document.getElementById('input');
   const text = input.value.trim();
   const scheduledActive = typeof isScheduledSendActive === 'function' && isScheduledSendActive();
@@ -1443,20 +1461,20 @@ async function onSend() {
     _editResendState = null;
   }
   if (!scheduledActive && currentGenerating) {
-    const c = currentChat();
-    if (c && (text || state.pendingAttachments.length)) {
+    const c = chatCurrentChat();
+    if (c && (text || chatState.pendingAttachments.length)) {
       console.log('[onSend] 当前对话正在生成，发送中途引导...');
       if (queueMidrunGuidance(c, input, text)) return;
     }
     console.log('[onSend] 当前对话正在生成，先停止...');
     stopGenerate();
     await new Promise(r => setTimeout(r, 200));
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(currentId);
+    if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(currentId);
     if (typeof updateSendBtn === 'function') updateSendBtn();
     return;
   }
 
-  const c = currentChat();
+  const c = chatCurrentChat();
 
   // ⭐ 辩论模式发送按钮处理 —— 必须在空输入检查之前
   //    停止/空闲/错误时点发送 = 恢复辩论，不需要输入内容
@@ -1480,19 +1498,19 @@ async function onSend() {
     return;
   }
 
-  if (!text && !state.pendingAttachments.length) return;
-  if (!state.settings.apiKey) {
+  if (!text && !chatState.pendingAttachments.length) return;
+  if (!chatState.settings.apiKey) {
     alert('请先在「设置」中填写 API Key');
     openSettings();
     return;
   }
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
-  if (!currentChat()) newChat();
+  if (!chatCurrentChat()) newChat();
   
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
   
   // ⭐ 检查是否有未完成的计划模式任务（待审批、已暂停、出错状态）
-  //   注意：始终检查，不依赖 state.settings.usePlan
+  //   注意：始终检查，不依赖 chatState.settings.usePlan
   //   因为模式开关现在是"一次性"的，上次开启计划模式留下的悬挂任务必须先处理
   {
     const hasActivePlan = c.messages.some(m => 
@@ -1538,7 +1556,7 @@ async function onSend() {
     }
     renderChatList();
     renderMessages();
-    saveData();
+    chatSaveData();
     if (typeof scrollBottom === 'function') requestAnimationFrame(() => scrollBottom());
     return;
   }
@@ -1560,7 +1578,7 @@ async function onSend() {
   _clearComposerAfterSend(input);
   renderChatList();
   renderMessages();
-  saveData();
+  chatSaveData();
   
   // ⭐ 发送消息后强制滚到底：无论用户之前是否在翻看历史，
   // 都把视图带回新消息处，符合主流 chat 应用的体验。
@@ -1582,36 +1600,32 @@ async function onSend() {
   try {
     // ⭐ 双保险：每次发送/重发都清零软停止标志
     //   各 callAPIWithXxx 内部也清，但放这里更直观，避免任何遗漏路径
-    state.stopRequested = false;
+    chatState.stopRequested = false;
     // ⭐ "一次性模式"：选定本轮走哪条分支，并立刻熄灭按钮
     //   下次发送默认走普通对话，除非用户重新开启
     const mode = (typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : 'normal';
-    if (mode === 'outline') await callAPIWithOutline();
-    else if (mode === 'plan') await callAPIWithPlan();
-    else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });
-    else if (mode === 'reflection') await callAPIWithReflection();
-    else await callAPI(undefined, { contextChecked: true });
+    await chatCallGenerationMode(mode);
   } catch (e) {
     console.error('[onSend] 错误:', e);
     toast('❌ 发送失败：' + e.message, 3000);
   } finally {
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+    if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(chatState.currentId);
     else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
+      chatState.isGenerating = false;
+      chatState.abortCtrl = null;
     }
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
 
 function copyMsg(idx) {
-  const c = currentChat();
+  const c = chatCurrentChat();
   if (!c || !c.messages[idx]) return;
   navigator.clipboard.writeText(_messageTextForEdit(c.messages[idx])).then(() => toast('✓ 已复制'));
 }
 
 async function regenerate(idx) {
-  const c = currentChat();
+  const c = chatCurrentChat();
   if (!c) return;
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   const reply = c.messages[idx] || {};
@@ -1624,15 +1638,15 @@ async function regenerate(idx) {
   //   2) 同时两条 API 流并发 → 用户被双倍计费
   //   3) 两个 Promise 互相覆盖 saveData → 可能丢消息
   // 与 onSend 的处理保持一致：abort → 等一拍让 catch finally 跑完 → 再继续
-  const sameChatGenerating = (typeof isChatGenerating === 'function') ? isChatGenerating(c.id) : !!state.isGenerating;
-  if (sameChatGenerating || (typeof chatTaskById === 'function' && chatTaskById(c.id)?.abortCtrl)) {
+  const sameChatGenerating = chatIsChatGenerating ? chatIsChatGenerating(c.id) : !!chatState.isGenerating;
+  if (sameChatGenerating || chatTaskByIdFromState(c.id)?.abortCtrl) {
     if (typeof _abortCurrentTaskIfAny === 'function') _abortCurrentTaskIfAny(c.id);
-    else if (state.abortCtrl) { try { state.abortCtrl.abort(); } catch (_) {} }
+    else if (chatState.abortCtrl) { try { chatState.abortCtrl.abort(); } catch (_) {} }
     await new Promise(r => setTimeout(r, 200));
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(c.id);
+    if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(c.id);
     else {
-      state.isGenerating = false;
-      state.abortCtrl = null;
+      chatState.isGenerating = false;
+      chatState.abortCtrl = null;
     }
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
@@ -1646,21 +1660,17 @@ async function regenerate(idx) {
   if (typeof refreshLegacyModeFlags === 'function') {
     refreshLegacyModeFlags();
   } else {
-    state._planExecuting = false;
-    state._outlineExecuting = false;
-    state._outlineForceFinish = false;
+    chatState._planExecuting = false;
+    chatState._outlineExecuting = false;
+    chatState._outlineForceFinish = false;
   }
   renderMessages();
-  saveData();
+  chatSaveData();
   // ⭐ 与 onSend 行为一致：消费"一次性模式"；没有新模式时沿用原回复模式。
   const mode = (typeof _consumeOneShotModeWithFallback === 'function')
     ? _consumeOneShotModeWithFallback(fallbackMode)
     : ((typeof _consumeOneShotMode === 'function') ? _consumeOneShotMode() : fallbackMode);
-  if (mode === 'outline') await callAPIWithOutline();
-  else if (mode === 'plan') await callAPIWithPlan();
-  else if (mode === 'ppt') await callAPIWithPptMode({ contextChecked: true });
-  else if (mode === 'reflection') await callAPIWithReflection();
-  else await callAPI(undefined, { contextChecked: true });
+  await chatCallGenerationMode(mode);
 }
 
 // ============ 🆕 工具调用流程折叠 ============
@@ -1672,7 +1682,7 @@ async function regenerate(idx) {
 function groupToolFlows(innerOverride, chatOverride) {
   const inner = innerOverride || document.getElementById('messagesInner');
   if (!inner) return;
-  const c = chatOverride || currentChat();
+  const c = chatOverride || chatCurrentChat();
   if (!c) return;
   
   // ⭐ 1) 先把现有 group 解包，恢复扁平结构（同时记录展开状态以便后续恢复）
@@ -1797,4 +1807,23 @@ function groupToolFlows(innerOverride, chatOverride) {
     }
     i++;
   }
+}
+
+if (typeof window !== 'undefined' && window.AgentApp) {
+  window.AgentApp.define('chat', {
+    newChat,
+    switchChat,
+    startTemporaryChat,
+    updateTemporaryChatButton,
+    renderChatList,
+    renderMessages,
+    onSend,
+    copyMsg,
+    regenerate,
+    addAttachment,
+    removeAttachment,
+    setupDrag,
+    setupPaste,
+    groupToolFlows
+  });
 }

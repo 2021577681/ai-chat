@@ -1,13 +1,22 @@
 // ============ Dialog manager ============
 
+const DialogManagerStateModule = window.AgentApp.require('state');
+const dialogManagerState = DialogManagerStateModule.state;
+const dialogManagerSaveData = DialogManagerStateModule.saveData;
+const dialogManagerPersistSettings = DialogManagerStateModule.persistSettings;
+const dialogManagerCurrentChat = DialogManagerStateModule.currentChat;
+const dialogManagerChatById = DialogManagerStateModule.chatById;
+const dialogManagerIsChatGenerating = DialogManagerStateModule.isChatGenerating;
+const dialogManagerSyncGlobalTaskState = DialogManagerStateModule.syncGlobalTaskState;
+
 const DIALOG_MANAGER_ROOT_ID = '__root';
 let dialogManagerSelectedChatId = '';
 
 function ensureDialogManagerSettings() {
-  if (!state.settings.dialogManager || typeof state.settings.dialogManager !== 'object') {
-    state.settings.dialogManager = {};
+  if (!dialogManagerState.settings.dialogManager || typeof dialogManagerState.settings.dialogManager !== 'object') {
+    dialogManagerState.settings.dialogManager = {};
   }
-  const dm = state.settings.dialogManager;
+  const dm = dialogManagerState.settings.dialogManager;
   if (dm.timelineEnabled === undefined) dm.timelineEnabled = true;
   if (!dm.explorerViewMode || !['icons','list'].includes(dm.explorerViewMode)) dm.explorerViewMode = 'icons';
   if (!dm.explorerSortMode || !['created','name','recent'].includes(dm.explorerSortMode)) dm.explorerSortMode = 'created';
@@ -80,7 +89,7 @@ function dialogManagerUserQuestionText(msg, index) {
 }
 
 function renameTimelineNode(index) {
-  const chat = currentChat();
+  const chat = dialogManagerCurrentChat();
   if (!chat || !Array.isArray(chat.messages)) return;
   const msg = chat.messages[index];
   if (!msg || msg.role !== 'user') return;
@@ -92,7 +101,7 @@ function renameTimelineNode(index) {
   } else {
     delete msg._timelineLabel;
   }
-  if (typeof saveData === 'function') saveData();
+  dialogManagerSaveData();
   renderDialogManagerTimelinePanel();
   if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
 }
@@ -112,8 +121,8 @@ function openDialogManager() {
   const modal = document.getElementById('dialogManagerModal');
   if (!modal) return;
   modal.classList.add('show');
-  if (!dialogManagerSelectedChatId || !chatById(dialogManagerSelectedChatId)) {
-    dialogManagerSelectedChatId = state.currentId || ((state.chats || [])[0] && state.chats[0].id) || '';
+  if (!dialogManagerSelectedChatId || !dialogManagerChatById(dialogManagerSelectedChatId)) {
+    dialogManagerSelectedChatId = dialogManagerState.currentId || ((dialogManagerState.chats || [])[0] && dialogManagerState.chats[0].id) || '';
   }
   renderDialogManager();
 }
@@ -141,7 +150,7 @@ function saveDialogManagerSettings() {
   const dm = ensureDialogManagerSettings();
   const checkbox = document.getElementById('dialogTimelineEnabled');
   if (checkbox) dm.timelineEnabled = !!checkbox.checked;
-  if (typeof persistSettings === 'function') persistSettings();
+  dialogManagerPersistSettings();
   if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
   if (typeof toast === 'function') toast('已保存对话管理设置');
 }
@@ -166,7 +175,7 @@ function dialogManagerUserAnchors(chat) {
 function renderDialogManagerTimelinePanel() {
   const wrap = document.getElementById('dialogManagerTimelineList');
   if (!wrap) return;
-  const chat = currentChat();
+  const chat = dialogManagerCurrentChat();
   const anchors = dialogManagerUserAnchors(chat);
   if (!chat) {
     wrap.innerHTML = '<div class="dialog-empty">暂无当前对话</div>';
@@ -177,13 +186,13 @@ function renderDialogManagerTimelinePanel() {
     return;
   }
   wrap.innerHTML = anchors.map(anchor => `
-    <button class="dialog-timeline-row" type="button" onclick="jumpToDialogMessage(${anchor.index})">
+    <button class="dialog-timeline-row" type="button" data-action="valueClick" data-handler="jumpToDialogMessage" data-value="${anchor.index}" data-value-type="number">
       <span class="dialog-timeline-dot"></span>
       <span class="dialog-timeline-text">
         <strong>${escapeHtml(anchor.title)}</strong>
         <em>${escapeHtml(anchor.time)}</em>
       </span>
-      <span class="dialog-timeline-rename" title="重命名" onclick="event.stopPropagation();renameTimelineNode(${anchor.index})">✎</span>
+      <span class="dialog-timeline-rename" title="重命名" data-action="valueClick" data-handler="renameTimelineNode" data-value="${anchor.index}" data-value-type="number" data-stop-propagation="true">✎</span>
     </button>
   `).join('');
 }
@@ -194,8 +203,8 @@ function updateDialogTimeline() {
   const timeline = document.getElementById('dialogTimeline');
   const list = document.getElementById('dialogTimelineList');
   if (!main || !timeline || !list) return;
-  const enabled = !!state.settings.dialogManager.timelineEnabled;
-  const chat = currentChat();
+  const enabled = !!dialogManagerState.settings.dialogManager.timelineEnabled;
+  const chat = dialogManagerCurrentChat();
   const anchors = enabled ? dialogManagerUserAnchors(chat) : [];
   main.classList.toggle('dialog-timeline-visible', enabled && anchors.length > 0);
   timeline.hidden = !(enabled && anchors.length > 0);
@@ -205,7 +214,7 @@ function updateDialogTimeline() {
   }
   const activeIdx = getNearestDialogTimelineIndex(anchors);
   list.innerHTML = anchors.map((anchor, i) => `
-    <button class="dialog-timeline-point ${i === activeIdx ? 'active' : ''}" type="button" onclick="jumpToDialogMessage(${anchor.index})" data-tip="${escapeHtml(anchor.tip)}" aria-label="${escapeHtml('跳转到 ' + anchor.title)}">
+    <button class="dialog-timeline-point ${i === activeIdx ? 'active' : ''}" type="button" data-action="valueClick" data-handler="jumpToDialogMessage" data-value="${anchor.index}" data-value-type="number" data-tip="${escapeHtml(anchor.tip)}" aria-label="${escapeHtml('跳转到 ' + anchor.title)}">
       <span class="dialog-timeline-point-dot"></span>
     </button>
   `).join('');
@@ -277,7 +286,7 @@ function dialogManagerChatsByFolder() {
   const dm = ensureDialogManagerSettings();
   const folderIds = new Set(dm.folders.map(folder => folder.id));
   const groups = new Map();
-  (state.chats || []).forEach(chat => {
+  (dialogManagerState.chats || []).forEach(chat => {
     const folderId = chat.dialogFolderId && folderIds.has(chat.dialogFolderId) ? chat.dialogFolderId : '';
     if (!groups.has(folderId)) groups.set(folderId, []);
     groups.get(folderId).push(chat);
@@ -346,7 +355,7 @@ function dialogExplorerIsTaskGroupChat(chat) {
 
 function dialogManagerCleanupTaskQueueDeletedChats(deletedChats) {
   const ids = new Set((deletedChats || []).map(chat => chat && chat.id).filter(Boolean));
-  if (!ids.size || !state.taskQueue || !Array.isArray(state.taskQueue.items)) return;
+  if (!ids.size || !dialogManagerState.taskQueue || !Array.isArray(dialogManagerState.taskQueue.items)) return;
 
   const deletedGroupIds = new Set(
     (deletedChats || [])
@@ -355,7 +364,7 @@ function dialogManagerCleanupTaskQueueDeletedChats(deletedChats) {
   );
   let changed = false;
 
-  for (const item of state.taskQueue.items) {
+  for (const item of dialogManagerState.taskQueue.items) {
     if (!item || !ids.has(item.chatId)) continue;
     item.chatId = null;
     item.sidebarGroupId = '';
@@ -363,14 +372,14 @@ function dialogManagerCleanupTaskQueueDeletedChats(deletedChats) {
     changed = true;
   }
 
-  if (state.taskQueue.sidebarGroupId && deletedGroupIds.has(state.taskQueue.sidebarGroupId)) {
-    const hasRemainingGroupChat = (state.chats || []).some(chat =>
-      chat && chat.taskQueue && chat.taskQueue.groupId === state.taskQueue.sidebarGroupId
+  if (dialogManagerState.taskQueue.sidebarGroupId && deletedGroupIds.has(dialogManagerState.taskQueue.sidebarGroupId)) {
+    const hasRemainingGroupChat = (dialogManagerState.chats || []).some(chat =>
+      chat && chat.taskQueue && chat.taskQueue.groupId === dialogManagerState.taskQueue.sidebarGroupId
     );
     if (!hasRemainingGroupChat) {
-      state.taskQueue.sidebarGroupId = null;
-      state.taskQueue.sidebarGroupStartedAt = null;
-      state.taskQueue.sidebarGroupFinalizedAt = null;
+      dialogManagerState.taskQueue.sidebarGroupId = null;
+      dialogManagerState.taskQueue.sidebarGroupStartedAt = null;
+      dialogManagerState.taskQueue.sidebarGroupFinalizedAt = null;
       changed = true;
     }
   }
@@ -427,7 +436,7 @@ function renderDialogExplorerNav(dm) {
 
   if (isGroupView) {
     canGoUp = true;
-    const groupChats = (state.chats || []).filter(c =>
+    const groupChats = (dialogManagerState.chats || []).filter(c =>
       dialogExplorerIsTaskGroupChat(c) && c.taskQueue.groupId === groupId
     );
     const groupName = (typeof taskQueueGroupTitle === 'function')
@@ -454,7 +463,7 @@ function renderDialogExplorerNav(dm) {
 
   const isRoot = segments.length <= 1;
 
-  let html = `<button class="dialog-explorer-nav-btn" type="button" onclick="dialogExplorerGoUp()"${canGoUp ? '' : ' disabled'}>⬅ 返回</button>`;
+  let html = `<button class="dialog-explorer-nav-btn" type="button" data-action="dialogExplorerGoUp"${canGoUp ? '' : ' disabled'}>⬅ 返回</button>`;
   html += `<span class="dialog-explorer-nav-sep">›</span>`;
 
   segments.forEach((seg, i) => {
@@ -462,10 +471,13 @@ function renderDialogExplorerNav(dm) {
     const isLast = i === segments.length - 1;
     html += `<button class="dialog-explorer-nav-btn dialog-explorer-breadcrumb${isLast && !isRoot ? ' active' : ''}"
              type="button"
-             onclick="dialogExplorerEnterFolder('${escapeHtml(seg.id)}')"
-             ondragover="dialogExplorerBreadcrumbDragOver(event)"
-             ondragleave="dialogExplorerBreadcrumbDragLeave(event)"
-             ondrop="dialogExplorerItemDrop(event, '${escapeHtml(seg.id)}')"
+             data-action="valueClick"
+             data-handler="dialogExplorerEnterFolder"
+             data-value="${escapeHtml(seg.id)}"
+             data-dragover-action="dialogExplorerBreadcrumbDragOver"
+             data-dragleave-action="dialogExplorerBreadcrumbDragLeave"
+             data-drop-action="dialogExplorerItemDrop"
+             data-drop-value="${escapeHtml(seg.id)}"
              >${ICON_BREADCRUMB} ${escapeHtml(seg.name)}</button>`;
   });
 
@@ -476,13 +488,13 @@ function renderDialogExplorerNav(dm) {
     { value: 'name', label: '名称' },
     { value: 'recent', label: '最近修改' }
   ];
-  html += `<select class="dialog-explorer-sort" onchange="dialogExplorerToggleSort(this.value)">`;
+  html += `<select class="dialog-explorer-sort" data-change-action="valueChange" data-handler="dialogExplorerToggleSort">`;
   sortOptions.forEach(opt => {
     html += `<option value="${opt.value}"${sortMode === opt.value ? ' selected' : ''}>${opt.label}</option>`;
   });
   html += `</select>`;
-  html += `<button class="dialog-explorer-nav-btn${mode === 'icons' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('icons')">${ICON_VIEW_ICONS} 图标</button>`;
-  html += `<button class="dialog-explorer-nav-btn${mode === 'list' ? ' active' : ''}" type="button" onclick="dialogExplorerToggleView('list')">${ICON_VIEW_LIST} 列表</button>`;
+  html += `<button class="dialog-explorer-nav-btn${mode === 'icons' ? ' active' : ''}" type="button" data-action="valueClick" data-handler="dialogExplorerToggleView" data-value="icons">${ICON_VIEW_ICONS} 图标</button>`;
+  html += `<button class="dialog-explorer-nav-btn${mode === 'list' ? ' active' : ''}" type="button" data-action="valueClick" data-handler="dialogExplorerToggleView" data-value="list">${ICON_VIEW_LIST} 列表</button>`;
   nav.innerHTML = html;
 }
 
@@ -511,7 +523,7 @@ function renderDialogExplorerItems(dm) {
 
   if (isGroupView) {
     // Virtual task queue group view - read-only, show only group chats
-    const groupChats = (state.chats || []).filter(c =>
+    const groupChats = (dialogManagerState.chats || []).filter(c =>
       dialogExplorerIsTaskGroupChat(c) && !c._hiddenFromUI && c.taskQueue.groupId === groupId
     );
     const sorted = (typeof sortTaskQueueGroupChats === 'function')
@@ -526,10 +538,10 @@ function renderDialogExplorerItems(dm) {
         const title = dialogManagerChatTitle(chat);
         const count = dialogManagerVisibleMessages(chat).length;
         html += `
-          <div class="dialog-explorer-item ${chat.id === state.currentId ? 'selected' : ''}"
+          <div class="dialog-explorer-item ${chat.id === dialogManagerState.currentId ? 'selected' : ''}"
                data-explorer-type="chat" data-explorer-id="${escapeHtml(chat.id)}"
-               onclick="switchDialogManagerChat('${escapeHtml(chat.id)}')"
-               oncontextmenu="return dialogExplorerContextMenu(event, 'chat', '${escapeHtml(chat.id)}')">
+               data-action="valueClick" data-handler="switchDialogManagerChat" data-value="${escapeHtml(chat.id)}"
+               data-contextmenu-action="dialogExplorerContextMenu" data-contextmenu-value="chat" data-contextmenu-extra-value="${escapeHtml(chat.id)}">
             <span class="dialog-explorer-item-icon">${ICON_CHAT}</span>
             <span class="dialog-explorer-item-label">${escapeHtml(title)}</span>
             <span class="dialog-explorer-item-meta">${count} 条</span>
@@ -633,13 +645,13 @@ function renderDialogExplorerItems(dm) {
         html += `
           <div class="dialog-explorer-item" draggable="true"
                data-explorer-type="folder" data-explorer-id="${escapeHtml(folder.id)}"
-               onclick="dialogExplorerEnterFolder('${escapeHtml(folder.id)}')"
-               oncontextmenu="return dialogExplorerContextMenu(event, 'folder', '${escapeHtml(folder.id)}')"
-               ondragstart="dialogExplorerDragStart(event, 'folder', '${escapeHtml(folder.id)}')"
-               ondragend="dialogExplorerDragEnd(event)"
-               ondragover="dialogExplorerItemDragOver(event)"
-               ondragleave="dialogExplorerItemDragLeave(event)"
-               ondrop="dialogExplorerItemDrop(event, '${escapeHtml(folder.id)}')">
+               data-action="valueClick" data-handler="dialogExplorerEnterFolder" data-value="${escapeHtml(folder.id)}"
+               data-contextmenu-action="dialogExplorerContextMenu" data-contextmenu-value="folder" data-contextmenu-extra-value="${escapeHtml(folder.id)}"
+               data-dragstart-action="dialogExplorerDragStart" data-dragstart-value="folder" data-dragstart-extra-value="${escapeHtml(folder.id)}"
+               data-dragend-action="dialogExplorerDragEnd"
+               data-dragover-action="dialogExplorerItemDragOver"
+               data-dragleave-action="dialogExplorerItemDragLeave"
+               data-drop-action="dialogExplorerItemDrop" data-drop-value="${escapeHtml(folder.id)}">
             <span class="dialog-explorer-item-icon">${ICON_FOLDER}</span>
             <span class="dialog-explorer-item-label">${escapeHtml(folder.name)}</span>
             ${mode === 'list' ? '<span class="dialog-explorer-item-meta">文件夹</span>' : ''}
@@ -652,8 +664,8 @@ function renderDialogExplorerItems(dm) {
           html += `
             <div class="dialog-explorer-item"
                  data-explorer-type="taskGroup" data-explorer-id="${escapeHtml(vf.id)}"
-                 onclick="dialogExplorerEnterFolder('${escapeHtml(vf.id)}')"
-                 oncontextmenu="return dialogExplorerContextMenu(event, 'taskGroup', '${escapeHtml(vf.id)}')">
+                 data-action="valueClick" data-handler="dialogExplorerEnterFolder" data-value="${escapeHtml(vf.id)}"
+                 data-contextmenu-action="dialogExplorerContextMenu" data-contextmenu-value="taskGroup" data-contextmenu-extra-value="${escapeHtml(vf.id)}">
               <span class="dialog-explorer-item-icon">${ICON_TASK_GROUP}</span>
               <span class="dialog-explorer-item-label">${escapeHtml(vf.name)}</span>
               <span class="dialog-explorer-item-meta">${vf.count} 个对话</span>
@@ -663,12 +675,12 @@ function renderDialogExplorerItems(dm) {
           const title = dialogManagerChatTitle(chat);
           const count = dialogManagerVisibleMessages(chat).length;
           html += `
-            <div class="dialog-explorer-item ${chat.id === state.currentId ? 'selected' : ''}" draggable="true"
+            <div class="dialog-explorer-item ${chat.id === dialogManagerState.currentId ? 'selected' : ''}" draggable="true"
                  data-explorer-type="chat" data-explorer-id="${escapeHtml(chat.id)}"
-                 onclick="switchDialogManagerChat('${escapeHtml(chat.id)}')"
-                 oncontextmenu="return dialogExplorerContextMenu(event, 'chat', '${escapeHtml(chat.id)}')"
-                 ondragstart="dialogExplorerDragStart(event, 'chat', '${escapeHtml(chat.id)}')"
-                 ondragend="dialogExplorerDragEnd(event)">
+                 data-action="valueClick" data-handler="switchDialogManagerChat" data-value="${escapeHtml(chat.id)}"
+                 data-contextmenu-action="dialogExplorerContextMenu" data-contextmenu-value="chat" data-contextmenu-extra-value="${escapeHtml(chat.id)}"
+                 data-dragstart-action="dialogExplorerDragStart" data-dragstart-value="chat" data-dragstart-extra-value="${escapeHtml(chat.id)}"
+                 data-dragend-action="dialogExplorerDragEnd">
               <span class="dialog-explorer-item-icon">${ICON_CHAT}</span>
               <span class="dialog-explorer-item-label">${escapeHtml(title)}</span>
               <span class="dialog-explorer-item-meta">${count} 条</span>
@@ -705,14 +717,14 @@ function renderDialogExplorerItems(dm) {
 function dialogExplorerToggleView(mode) {
   const dm = ensureDialogManagerSettings();
   dm.explorerViewMode = mode;
-  persistSettings();
+  dialogManagerPersistSettings();
   renderDialogManagerFolders();
 }
 
 function dialogExplorerToggleSort(mode) {
   const dm = ensureDialogManagerSettings();
   dm.explorerSortMode = mode;
-  persistSettings();
+  dialogManagerPersistSettings();
   renderDialogManagerFolders();
 }
 
@@ -757,14 +769,14 @@ function dialogExplorerDrop(id, type, targetFolderId) {
       renderDialogManagerFolders();
       return;
     }
-    const chat = chatById(id);
+    const chat = dialogManagerChatById(id);
     if (!chat) return;
     const oldFolderId = chat.dialogFolderId || '';
     if (targetId) chat.dialogFolderId = targetId;
     else delete chat.dialogFolderId;
     touchFolder(oldFolderId);
     touchFolder(targetId);
-    saveData();
+    dialogManagerSaveData();
     renderChatList();
     renderDialogManagerFolders();
   } else if (type === 'folder') {
@@ -797,7 +809,7 @@ function dialogExplorerDrop(id, type, targetFolderId) {
     folder._modifiedAt = Date.now();
     touchFolder(oldParentId);
     touchFolder(targetId);
-    persistSettings();
+    dialogManagerPersistSettings();
     renderDialogManagerFolders();
   }
 }
@@ -970,7 +982,7 @@ function dialogExplorerNewFolder() {
     _modifiedAt: now
   });
   touchFolder(dialogManagerCurrentFolderId);
-  persistSettings();
+  dialogManagerPersistSettings();
   renderDialogManagerFolders();
   // Immediately trigger rename
   setTimeout(() => dialogExplorerRenameFolder(id), 50);
@@ -992,7 +1004,7 @@ function dialogExplorerRenameFolder(folderId) {
   }
   folder.name = name;
   folder._modifiedAt = Date.now();
-  persistSettings();
+  dialogManagerPersistSettings();
   renderDialogManagerFolders();
 }
 
@@ -1017,14 +1029,14 @@ function dialogExplorerDeleteFolder(folderId) {
   const childFolderCount = Math.max(0, allIds.length - 1);
 
   // Count chats to be deleted
-  const affectedChats = (state.chats || []).filter(c => allIds.includes(c.dialogFolderId || ''));
+  const affectedChats = (dialogManagerState.chats || []).filter(c => allIds.includes(c.dialogFolderId || ''));
   const totalChats = affectedChats.length;
 
   if (!confirm(`删除文件夹"${folder.name}"？\n将级联删除 ${childFolderCount} 个子文件夹和 ${totalChats} 个对话，不可恢复。`)) return;
 
   // Abort generating chats before deletion
   affectedChats.forEach(c => {
-    if (typeof isChatGenerating === 'function' && isChatGenerating(c.id) && typeof _abortCurrentTaskIfAny === 'function') {
+    if (dialogManagerIsChatGenerating(c.id) && typeof _abortCurrentTaskIfAny === 'function') {
       _abortCurrentTaskIfAny(c.id);
     }
   });
@@ -1034,20 +1046,20 @@ function dialogExplorerDeleteFolder(folderId) {
   if (typeof remoteControlForgetChat === 'function') {
     for (const chat of affectedChats) remoteControlForgetChat(chat);
   }
-  state.chats = (state.chats || []).filter(c => !deleteIds.has(c.id));
-  if (deleteIds.has(state.currentId)) {
-    state.currentId = ((state.chats || []).find(c => c && !c._hiddenFromUI) || {}).id || null;
+  dialogManagerState.chats = (dialogManagerState.chats || []).filter(c => !deleteIds.has(c.id));
+  if (deleteIds.has(dialogManagerState.currentId)) {
+    dialogManagerState.currentId = ((dialogManagerState.chats || []).find(c => c && !c._hiddenFromUI) || {}).id || null;
   }
   dialogManagerCleanupTaskQueueDeletedChats(affectedChats);
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  dialogManagerSyncGlobalTaskState(dialogManagerState.currentId);
 
   // Delete all descendant folders
   const parentId = folder.parentId || '';
   dm.folders = dm.folders.filter(f => !allIds.includes(f.id));
 
   touchFolder(parentId);
-  persistSettings();
-  saveData();
+  dialogManagerPersistSettings();
+  dialogManagerSaveData();
   renderChatList();
   if (typeof renderMessages === 'function') renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
@@ -1058,7 +1070,7 @@ function dialogExplorerDeleteFolder(folderId) {
 // --- Chat CRUD (syncs with sidebar) ---
 
 function dialogExplorerRenameChat(chatId) {
-  const chat = chatById(chatId);
+  const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   const raw = prompt('重命名对话', chat.title || '新对话');
   if (raw === null) return;
@@ -1066,14 +1078,14 @@ function dialogExplorerRenameChat(chatId) {
   if (!title) { if (typeof toast === 'function') toast('名称不能为空'); return; }
   chat.title = title.slice(0, 80);
   touchFolder(chat.dialogFolderId || '');
-  saveData();
+  dialogManagerSaveData();
   renderChatList();
   renderDialogManagerFolders();
   if (typeof toast === 'function') toast('已重命名');
 }
 
 function dialogExplorerExportChat(chatId, format) {
-  const chat = chatById(chatId);
+  const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   dialogManagerSelectedChatId = chatId;
   exportDialogManagedChat(format);
@@ -1115,12 +1127,12 @@ function dialogExplorerFolderAndDescendantIds(folderId) {
 
 function dialogExplorerChatsInFolderTree(folderId) {
   const folderIds = dialogExplorerFolderAndDescendantIds(folderId);
-  return (state.chats || []).filter(chat => chat && folderIds.has(chat.dialogFolderId || ''));
+  return (dialogManagerState.chats || []).filter(chat => chat && folderIds.has(chat.dialogFolderId || ''));
 }
 
 function dialogExplorerTargetHidden(type, id) {
   if (type === 'chat') {
-    const chat = chatById(id);
+    const chat = dialogManagerChatById(id);
     return !!(chat && chat._hiddenFromUI);
   }
   if (type === 'folder') {
@@ -1132,25 +1144,25 @@ function dialogExplorerTargetHidden(type, id) {
 
 function dialogExplorerRefreshAfterVisibilityChange(folderId) {
   if (folderId) touchFolder(folderId);
-  saveData();
+  dialogManagerSaveData();
   renderChatList();
   if (typeof renderMessages === 'function') renderMessages();
   if (typeof updateSendBtn === 'function') updateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-  if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(state.currentId);
+  dialogManagerSyncGlobalTaskState(dialogManagerState.currentId);
   renderDialogManagerFolders();
 }
 
 function dialogExplorerAfterHideChats(hiddenIds, folderId) {
   if (!hiddenIds || !hiddenIds.size) return;
-  if (state.currentId && hiddenIds.has(state.currentId)) {
-    state.currentId = (typeof sidebarChats === 'function' ? sidebarChats() : (state.chats || []).filter(c => c && !c._hiddenFromUI))[0]?.id || null;
+  if (dialogManagerState.currentId && hiddenIds.has(dialogManagerState.currentId)) {
+    dialogManagerState.currentId = (typeof sidebarChats === 'function' ? sidebarChats() : (dialogManagerState.chats || []).filter(c => c && !c._hiddenFromUI))[0]?.id || null;
   }
   dialogExplorerRefreshAfterVisibilityChange(folderId);
 }
 
 function dialogExplorerHideChat(chatId) {
-  const chat = chatById(chatId);
+  const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   if (chat._hiddenFromUI) {
     if (typeof toast === 'function') toast('该对话已隐藏');
@@ -1177,7 +1189,7 @@ function dialogExplorerHideFolderChats(folderId) {
 }
 
 function dialogExplorerUnhideChat(chatId) {
-  const chat = chatById(chatId);
+  const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   if (!chat._hiddenFromUI) {
     if (typeof toast === 'function') toast('该对话未隐藏');
@@ -1204,16 +1216,16 @@ function dialogExplorerUnhideFolderChats(folderId) {
 }
 
 function dialogExplorerDeleteChat(chatId) {
-  const chat = chatById(chatId);
+  const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   const folderId = chat.dialogFolderId || '';
   if (typeof deleteChat === 'function') {
     deleteChat(chatId);
   } else {
     if (!confirm(`删除对话"${chat.title || '新对话'}"？`)) return;
-    state.chats = (state.chats || []).filter(c => c.id !== chatId);
-    if (state.currentId === chatId) state.currentId = ((state.chats || [])[0] && state.chats[0].id) || '';
-    saveData();
+    dialogManagerState.chats = (dialogManagerState.chats || []).filter(c => c.id !== chatId);
+    if (dialogManagerState.currentId === chatId) dialogManagerState.currentId = ((dialogManagerState.chats || [])[0] && dialogManagerState.chats[0].id) || '';
+    dialogManagerSaveData();
     renderChatList();
     if (typeof toast === 'function') toast('已删除');
   }
@@ -1222,7 +1234,7 @@ function dialogExplorerDeleteChat(chatId) {
 }
 
 function switchDialogManagerChat(chatId) {
-  if (!chatById(chatId)) return;
+  if (!dialogManagerChatById(chatId)) return;
   dialogManagerSelectedChatId = chatId;
   switchChat(chatId);
   closeDialogManagerSurface();
@@ -1231,15 +1243,15 @@ function switchDialogManagerChat(chatId) {
 function renderDialogManagerExport() {
   const select = document.getElementById('dialogExportChatSelect');
   if (!select) return;
-  const chats = state.chats || [];
+  const chats = dialogManagerState.chats || [];
   if (!chats.length) {
     select.innerHTML = '<option value="">暂无对话</option>';
     select.disabled = true;
     return;
   }
   select.disabled = false;
-  if (!dialogManagerSelectedChatId || !chatById(dialogManagerSelectedChatId)) {
-    dialogManagerSelectedChatId = state.currentId || chats[0].id;
+  if (!dialogManagerSelectedChatId || !dialogManagerChatById(dialogManagerSelectedChatId)) {
+    dialogManagerSelectedChatId = dialogManagerState.currentId || chats[0].id;
   }
   select.innerHTML = chats.map(chat => {
     const selected = chat.id === dialogManagerSelectedChatId ? ' selected' : '';
@@ -1254,7 +1266,7 @@ function setDialogExportChat(chatId) {
 function selectedDialogExportChat() {
   const select = document.getElementById('dialogExportChatSelect');
   const id = select ? select.value : dialogManagerSelectedChatId;
-  return chatById(id);
+  return dialogManagerChatById(id);
 }
 
 function exportDialogManagedChat(format) {
@@ -1365,9 +1377,9 @@ function renderPromptLibrary() {
       </div>
       <div class="prompt-card-content">${escapeHtml((prompt.content || '').slice(0, 220))}</div>
       <div class="prompt-card-actions">
-        <button class="btn btn-primary" type="button" onclick="applyPromptToChat('${escapeHtml(prompt.id)}')">应用</button>
-        <button class="btn" type="button" onclick="editPrompt('${escapeHtml(prompt.id)}')">编辑</button>
-        <button class="btn" type="button" onclick="deletePrompt('${escapeHtml(prompt.id)}')">删除</button>
+        <button class="btn btn-primary" type="button" data-action="valueClick" data-handler="applyPromptToChat" data-value="${escapeHtml(prompt.id)}">应用</button>
+        <button class="btn" type="button" data-action="valueClick" data-handler="editPrompt" data-value="${escapeHtml(prompt.id)}">编辑</button>
+        <button class="btn" type="button" data-action="valueClick" data-handler="deletePrompt" data-value="${escapeHtml(prompt.id)}">删除</button>
       </div>
     </div>
   `).join('');
@@ -1409,7 +1421,7 @@ function savePromptFromUi() {
       updatedAt: now
     });
   }
-  persistSettings();
+  dialogManagerPersistSettings();
   clearPromptEditor();
   renderPromptLibrary();
 }
@@ -1433,7 +1445,7 @@ function deletePrompt(promptId) {
   if (!prompt) return;
   if (!confirm(`删除提示词"${prompt.title}"？`)) return;
   dm.prompts = dm.prompts.filter(item => item.id !== promptId);
-  persistSettings();
+  dialogManagerPersistSettings();
   renderPromptLibrary();
 }
 
@@ -1441,7 +1453,7 @@ function applyPromptToChat(promptId) {
   const dm = ensureDialogManagerSettings();
   const prompt = dm.prompts.find(item => item.id === promptId);
   if (!prompt) return;
-  if (!currentChat()) newChat();
+  if (!dialogManagerCurrentChat()) newChat();
   if (typeof closeSettingsPage === 'function') closeSettingsPage();
   else closeDialogManager();
   const input = document.getElementById('input');
@@ -1547,3 +1559,41 @@ window.dialogExplorerBreadcrumbDragLeave = dialogExplorerBreadcrumbDragLeave;
 window.dialogExplorerHandleContextAction = dialogExplorerHandleContextAction;
 window.dialogExplorerToggleView = dialogExplorerToggleView;
 window.dialogExplorerToggleSort = dialogExplorerToggleSort;
+
+window.AgentApp.define('dialogManager', {
+  DIALOG_MANAGER_ROOT_ID,
+  ensureDialogManagerSettings,
+  dialogManagerChatTitle,
+  dialogManagerVisibleMessages,
+  dialogManagerPlainText,
+  openDialogManager,
+  closeDialogManager,
+  renderDialogManager,
+  saveDialogManagerSettings,
+  updateDialogTimeline,
+  jumpToDialogMessage,
+  renameTimelineNode,
+  switchDialogManagerChat,
+  setDialogExportChat,
+  selectedDialogExportChat,
+  exportDialogManagedChat,
+  savePromptFromUi,
+  clearPromptEditor,
+  editPrompt,
+  deletePrompt,
+  applyPromptToChat,
+  initDialogManager,
+  dialogExplorerEnterFolder,
+  dialogExplorerGoUp,
+  dialogExplorerContextMenu,
+  dialogExplorerDragStart,
+  dialogExplorerDragEnd,
+  dialogExplorerItemDragOver,
+  dialogExplorerItemDragLeave,
+  dialogExplorerItemDrop,
+  dialogExplorerBreadcrumbDragOver,
+  dialogExplorerBreadcrumbDragLeave,
+  dialogExplorerHandleContextAction,
+  dialogExplorerToggleView,
+  dialogExplorerToggleSort
+});

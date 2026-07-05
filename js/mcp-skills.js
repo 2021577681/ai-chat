@@ -1,5 +1,11 @@
 // ============ MCP + Skill 集成 ============
 
+const McpSkillsStateModule = window.AgentApp.require('state');
+const McpSkillsUiService = window.AgentApp.require('uiService');
+const mcpSkillsState = McpSkillsStateModule.state;
+const mcpSkillsPersistSettings = McpSkillsStateModule.persistSettings;
+const mcpSkillsPersistTools = McpSkillsStateModule.persistTools;
+
 const MCP_SKILL_DEFAULTS = {
   mcpServers: [],
   skillRoots: ['skill'],
@@ -18,10 +24,10 @@ function isLegacySkillRoots(roots) {
 let _editingMcpServerId = '';
 
 function ensureMcpSkillSettings() {
-  if (!state.settings.mcpSkill || typeof state.settings.mcpSkill !== 'object') {
-    state.settings.mcpSkill = JSON.parse(JSON.stringify(MCP_SKILL_DEFAULTS));
+  if (!mcpSkillsState.settings.mcpSkill || typeof mcpSkillsState.settings.mcpSkill !== 'object') {
+    mcpSkillsState.settings.mcpSkill = JSON.parse(JSON.stringify(MCP_SKILL_DEFAULTS));
   }
-  const cfg = state.settings.mcpSkill;
+  const cfg = mcpSkillsState.settings.mcpSkill;
   if (!Array.isArray(cfg.mcpServers)) cfg.mcpServers = [];
   const rootsWereLegacy = isLegacySkillRoots(cfg.skillRoots);
   if (!Array.isArray(cfg.skillRoots) || rootsWereLegacy) {
@@ -46,7 +52,7 @@ function openMcpSkillSettings() {
 function closeMcpSkillSettings() {
   const modal = document.getElementById('mcpSkillModal');
   if (modal) modal.classList.remove('show');
-  persistSettings();
+  mcpSkillsPersistSettings();
   if (typeof renderToolList === 'function') renderToolList();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
@@ -112,17 +118,17 @@ function renderMcpServerList() {
     const args = (server.args || []).join(' ');
     return `
       <div class="tool-item">
-        <div class="tool-item-header" onclick="this.parentElement.classList.toggle('expanded')">
+        <div class="tool-item-header" data-action="toggleParentCollapsed">
           <span style="font-size:18px;">🔌</span>
           <span class="tool-item-name">${escapeHtml(server.name)}</span>
           <span class="tool-item-desc">${server.enabled ? '启用' : '禁用'} · ${escapeHtml(server.command)} ${escapeHtml(args)}</span>
-          <button class="tool-toggle-btn" onclick="event.stopPropagation();toggleMcpServer('${escapeHtml(server.id)}')">${server.enabled ? '停用' : '启用'}</button>
-          <button class="tool-toggle-btn" onclick="event.stopPropagation();editMcpServer('${escapeHtml(server.id)}')">编辑</button>
-          <button class="tool-toggle-btn" onclick="event.stopPropagation();deleteMcpServer('${escapeHtml(server.id)}')">×</button>
+          <button class="tool-toggle-btn" data-action="valueClick" data-handler="toggleMcpServer" data-value="${escapeHtml(server.id)}" data-stop-propagation="true">${server.enabled ? '停用' : '启用'}</button>
+          <button class="tool-toggle-btn" data-action="valueClick" data-handler="editMcpServer" data-value="${escapeHtml(server.id)}" data-stop-propagation="true">编辑</button>
+          <button class="tool-toggle-btn" data-action="valueClick" data-handler="deleteMcpServer" data-value="${escapeHtml(server.id)}" data-stop-propagation="true">×</button>
         </div>
         <div class="tool-item-body">
           <pre style="background:var(--bg-input);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;">${escapeHtml(JSON.stringify(server, null, 2))}</pre>
-          <button class="btn" onclick="discoverMcpServer('${escapeHtml(server.id)}')">🔍 测试并列出工具</button>
+          <button class="btn" data-action="valueClick" data-handler="discoverMcpServer" data-value="${escapeHtml(server.id)}">🔍 测试并列出工具</button>
         </div>
       </div>`;
   }).join('');
@@ -165,16 +171,16 @@ function saveMcpServer() {
   const cfg = ensureMcpSkillSettings();
   const server = readMcpServerForm();
   if (!server.command) {
-    toast('请填写 MCP server command');
+    McpSkillsUiService.toast('请填写 MCP server command');
     return;
   }
   const idx = cfg.mcpServers.findIndex(s => s.id === (_editingMcpServerId || server.id));
   if (idx >= 0) cfg.mcpServers[idx] = server;
   else cfg.mcpServers.push(server);
-  persistSettings();
+  mcpSkillsPersistSettings();
   clearMcpServerForm();
   renderMcpServerList();
-  toast('已保存 MCP 服务器');
+  McpSkillsUiService.toast('已保存 MCP 服务器');
 }
 
 function editMcpServer(id) {
@@ -191,9 +197,9 @@ function deleteMcpServer(id) {
   if (!confirm('删除这个 MCP 服务器配置？已同步的工具也会移除。')) return;
   const cfg = ensureMcpSkillSettings();
   cfg.mcpServers = cfg.mcpServers.filter(s => s.id !== id);
-  state.tools = state.tools.filter(t => !(t._mcp && t._mcp.serverId === id));
-  persistSettings();
-  persistTools();
+  mcpSkillsState.tools = mcpSkillsState.tools.filter(t => !(t._mcp && t._mcp.serverId === id));
+  mcpSkillsPersistSettings();
+  mcpSkillsPersistTools();
   renderMcpServerList();
   if (typeof renderToolList === 'function') renderToolList();
 }
@@ -204,11 +210,11 @@ function toggleMcpServer(id) {
   if (!server) return;
   server.enabled = !server.enabled;
   if (server.enabled === false) {
-    state.tools = state.tools.filter(t => !(t._mcp && t._mcp.serverId === id));
-    persistTools();
+    mcpSkillsState.tools = mcpSkillsState.tools.filter(t => !(t._mcp && t._mcp.serverId === id));
+    mcpSkillsPersistTools();
     if (typeof renderToolList === 'function') renderToolList();
   }
-  persistSettings();
+  mcpSkillsPersistSettings();
   renderMcpServerList();
 }
 
@@ -226,12 +232,12 @@ async function discoverMcpServer(id) {
   );
   if (typeof r === 'string') {
     if (box) box.textContent = r;
-    toast(r, 4000);
+    McpSkillsUiService.toast(r, 4000);
     return;
   }
   if (!r.ok) {
     if (box) box.textContent = `失败：${r.error}`;
-    toast('MCP 连接失败：' + r.error, 4000);
+    McpSkillsUiService.toast('MCP 连接失败：' + r.error, 4000);
     return;
   }
   const lines = (r.tools || []).map(t => `- ${t.name}: ${t.description || ''}`).join('\n');
@@ -239,7 +245,7 @@ async function discoverMcpServer(id) {
 }
 
 function isMcpTool(nameOrTool) {
-  const tool = typeof nameOrTool === 'object' ? nameOrTool : state.tools.find(t => t.name === nameOrTool);
+  const tool = typeof nameOrTool === 'object' ? nameOrTool : mcpSkillsState.tools.find(t => t.name === nameOrTool);
   return !!(tool && tool._mcp);
 }
 
@@ -266,14 +272,14 @@ async function syncMcpTools() {
   const cfg = ensureMcpSkillSettings();
   const enabled = cfg.mcpServers.filter(s => s.enabled !== false);
   if (!enabled.length) {
-    toast('没有启用的 MCP 服务器');
+    McpSkillsUiService.toast('没有启用的 MCP 服务器');
     return;
   }
   const box = document.getElementById('mcpSyncResult');
   if (box) box.textContent = '正在同步 MCP 工具...';
 
-  const used = new Set(state.tools.filter(t => !t._mcp).map(t => t.name));
-  const nextTools = state.tools.filter(t => !t._mcp);
+  const used = new Set(mcpSkillsState.tools.filter(t => !t._mcp).map(t => t.name));
+  const nextTools = mcpSkillsState.tools.filter(t => !t._mcp);
   let added = 0;
   const errors = [];
 
@@ -313,13 +319,13 @@ async function syncMcpTools() {
     }
   }
 
-  state.tools = nextTools;
-  persistTools();
+  mcpSkillsState.tools = nextTools;
+  mcpSkillsPersistTools();
   if (typeof renderToolList === 'function') renderToolList();
   if (box) {
     box.textContent = `已同步 ${added} 个 MCP 工具${errors.length ? '\n\n失败：\n' + errors.join('\n') : ''}`;
   }
-  toast(`已同步 ${added} 个 MCP 工具`);
+  McpSkillsUiService.toast(`已同步 ${added} 个 MCP 工具`);
 }
 
 async function callMcpTool(serverId, toolName, args) {
@@ -371,7 +377,7 @@ function saveSkillRootsFromUi() {
   cfg.skillRoots = roots.length ? roots : ['skill'];
   const useEl = document.getElementById('skillUseEnabled');
   if (useEl) cfg.useSkills = useEl.checked;
-  persistSettings();
+  mcpSkillsPersistSettings();
 }
 
 async function scanSkills() {
@@ -399,7 +405,7 @@ async function scanSkills() {
       enabled: previous.has(skill.path) ? previous.get(skill.path) : false
     };
   });
-  persistSettings();
+  mcpSkillsPersistSettings();
   renderSkillList();
   const errText = (r.errors || []).map(e => `${e.root}: ${e.error}`).join('\n');
   if (box) box.textContent = `找到 ${cfg.skills.length} 个 Skill${errText ? '\n\n部分路径跳过：\n' + errText : ''}`;
@@ -414,11 +420,10 @@ function renderSkillList() {
     return;
   }
   el.innerHTML = cfg.skills.map(skill => {
-    const pathArg = JSON.stringify(skill.path).replace(/"/g, '&quot;');
     return `
     <label class="tool-item" style="display:block;cursor:pointer;">
       <div class="tool-item-header">
-        <input type="checkbox" ${skill.enabled ? 'checked' : ''} onchange="toggleSkill(${pathArg}, this.checked)">
+        <input type="checkbox" ${skill.enabled ? 'checked' : ''} data-change-action="valueChange" data-handler="toggleSkill" data-value="${escapeHtml(skill.path)}" data-checked-arg="true">
         <span style="font-size:18px;">📚</span>
         <span class="tool-item-name">${escapeHtml(skill.name || skill.path)}</span>
         <span class="tool-item-desc">${escapeHtml(skill.description || skill.path)}</span>
@@ -437,7 +442,7 @@ function toggleSkill(path, enabled) {
   const skill = cfg.skills.find(s => s.path === path);
   if (!skill) return;
   skill.enabled = !!enabled;
-  persistSettings();
+  mcpSkillsPersistSettings();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
 }
 
@@ -481,7 +486,7 @@ function withActiveSkillPrompt(basePrompt) {
 }
 
 function getEffectiveSystemPrompt() {
-  return withActiveSkillPrompt(state.settings.systemPrompt || '');
+  return withActiveSkillPrompt(mcpSkillsState.settings.systemPrompt || '');
 }
 
 window.openMcpSkillSettings = openMcpSkillSettings;
@@ -503,3 +508,26 @@ window.getActiveSkillPrompt = getActiveSkillPrompt;
 window.getEffectiveSystemPrompt = getEffectiveSystemPrompt;
 window.withActiveSkillPrompt = withActiveSkillPrompt;
 window.isMcpTool = isMcpTool;
+
+window.AgentApp.define('mcpSkills', {
+  ensureMcpSkillSettings,
+  openMcpSkillSettings,
+  closeMcpSkillSettings,
+  switchMcpSkillTab,
+  saveMcpServer,
+  clearMcpServerForm,
+  editMcpServer,
+  deleteMcpServer,
+  toggleMcpServer,
+  discoverMcpServer,
+  syncMcpTools,
+  callMcpTool,
+  readSkill,
+  scanSkills,
+  saveSkillRootsFromUi,
+  toggleSkill,
+  getActiveSkillPrompt,
+  getEffectiveSystemPrompt,
+  withActiveSkillPrompt,
+  isMcpTool
+});

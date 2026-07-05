@@ -1,5 +1,15 @@
-// ============ 本地 Agent 工具集 ============
+﻿// ============ 本地 Agent 工具集 ============
 const TERMINAL_PERMS_KEY = 'aichat_terminal_perms_v1';
+const TerminalStateModule = window.AgentApp.require('state');
+const terminalState = TerminalStateModule.state;
+const terminalSaveData = TerminalStateModule.saveData;
+const terminalCurrentChat = TerminalStateModule.currentChat;
+const terminalChatById = TerminalStateModule.chatById;
+const terminalIsChatTaskMode = TerminalStateModule.isChatTaskMode;
+const terminalChatTaskById = TerminalStateModule.chatTaskById;
+const terminalIsChatGenerating = TerminalStateModule.isChatGenerating;
+const terminalSyncGlobalTaskState = TerminalStateModule.syncGlobalTaskState;
+const TerminalOrchestrationService = window.AgentApp.require('orchestrationService');
 
 // ⭐ 操作类别定义（共 9 类需弹窗的操作）
 const PERMISSION_CATEGORIES = {
@@ -180,7 +190,7 @@ function clearAllPermanentPermissions() {
   savePermanentPerms({});
 }
 function clearTaskPermissions(chatId) {
-  const id = chatId || (typeof state !== 'undefined' ? state.currentId : '');
+  const id = chatId || (typeof terminalState !== 'undefined' ? terminalState.currentId : '');
   if (id && TERMINAL_CONFIG.taskAllowByChat) delete TERMINAL_CONFIG.taskAllowByChat[id];
   else TERMINAL_CONFIG.taskAllowByChat = {};
   TERMINAL_CONFIG.taskAllow = {};
@@ -198,7 +208,7 @@ function resolveToolChatId(context) {
     if (ctx.chatId) return ctx.chatId;
     if (ctx.chat && ctx.chat.id) return ctx.chat.id;
   }
-  return (state && (state.currentId || state.activeTaskChatId)) || '';
+  return (terminalState && (terminalState.currentId || terminalState.activeTaskChatId)) || '';
 }
 
 function getTaskAllowForChat(chatId) {
@@ -216,10 +226,10 @@ function getAgentSessionId(context) {
 }
 
 function ensurePendingAIAttachmentBuckets() {
-  if (!state.pendingAIAttachmentsByChat || typeof state.pendingAIAttachmentsByChat !== 'object') {
-    state.pendingAIAttachmentsByChat = {};
+  if (!terminalState.pendingAIAttachmentsByChat || typeof terminalState.pendingAIAttachmentsByChat !== 'object') {
+    terminalState.pendingAIAttachmentsByChat = {};
   }
-  return state.pendingAIAttachmentsByChat;
+  return terminalState.pendingAIAttachmentsByChat;
 }
 
 function pendingAIAttachmentsForChat(chatId, create = true) {
@@ -238,8 +248,8 @@ function takePendingAIAttachments(chatId) {
   const buckets = ensurePendingAIAttachmentBuckets();
   const scoped = Array.isArray(buckets[id]) ? buckets[id].splice(0) : [];
   if (buckets[id] && buckets[id].length === 0) delete buckets[id];
-  if (id === (state.currentId || '') && Array.isArray(state.pendingAIAttachments) && state.pendingAIAttachments.length) {
-    const legacy = state.pendingAIAttachments.splice(0);
+  if (id === (terminalState.currentId || '') && Array.isArray(terminalState.pendingAIAttachments) && terminalState.pendingAIAttachments.length) {
+    const legacy = terminalState.pendingAIAttachments.splice(0);
     return scoped.concat(legacy);
   }
   return scoped;
@@ -249,10 +259,10 @@ function clearPendingAIAttachments(chatId) {
   const buckets = ensurePendingAIAttachmentBuckets();
   if (chatId) {
     delete buckets[chatId];
-    if (chatId === state.currentId) state.pendingAIAttachments = [];
+    if (chatId === terminalState.currentId) terminalState.pendingAIAttachments = [];
   } else {
-    state.pendingAIAttachmentsByChat = {};
-    state.pendingAIAttachments = [];
+    terminalState.pendingAIAttachmentsByChat = {};
+    terminalState.pendingAIAttachments = [];
   }
 }
 
@@ -293,10 +303,10 @@ let _termConfirmAutoAllowTimer = null;
 let _termConfirmAutoAllowTick = null;
 
 function isOutlinePermissionAutoAllowContext(context) {
-  if (typeof state === 'undefined' || !state.settings || !state.settings.outlinePermissionAutoAllow) return false;
+  if (typeof terminalState === 'undefined' || !terminalState.settings || !terminalState.settings.outlinePermissionAutoAllow) return false;
   const chatId = resolveToolChatId(context);
   const hasOutlineContext = !!(context && typeof context === 'object' && context.outline);
-  const isOutlineTask = !!(chatId && typeof isChatTaskMode === 'function' && isChatTaskMode(chatId, 'outline'));
+  const isOutlineTask = !!(chatId && terminalIsChatTaskMode(chatId, 'outline'));
   return hasOutlineContext || isOutlineTask;
 }
 
@@ -375,7 +385,7 @@ function resolveTermConfirmRequest(result) {
 function remotePermissionChatLabel(chatId) {
   const id = chatId || '';
   try {
-    const chats = (typeof state !== 'undefined' && Array.isArray(state.chats)) ? state.chats : [];
+    const chats = (typeof terminalState !== 'undefined' && Array.isArray(terminalState.chats)) ? terminalState.chats : [];
     const chat = chats.find(c => c && c.id === id);
     if (chat && chat.remoteControl && chat.remoteControl.id) return String(chat.remoteControl.id);
     if (chat && chat.title) return chat.title;
@@ -906,9 +916,9 @@ function gitCommitMessageFromTokens(tokens) {
 
 function aiGitToolsAvailable() {
   if (typeof gitToolsEnabled === 'function') return gitToolsEnabled();
-  if (!state || !Array.isArray(state.tools)) return false;
+  if (!terminalState || !Array.isArray(terminalState.tools)) return false;
   const names = new Set(['note_status', 'note_history', 'note_diff', 'note_snapshot', 'note_restore']);
-  return state.tools.some(t => t && names.has(t.name));
+  return terminalState.tools.some(t => t && names.has(t.name));
 }
 
 async function routeGitExecuteCommand(command, context) {
@@ -1278,7 +1288,7 @@ async function generatePptWithProgress(data, context = {}) {
 // ⭐ 网络搜索（通过本地后端 → 多搜索源自动回退）
 async function webSearch(query, maxResults, region, context) {
   const engine = (context && (context.engine || context.source)) || undefined;
-  const s = (typeof state !== 'undefined' && state.settings) ? state.settings : {};
+  const s = (typeof terminalState !== 'undefined' && terminalState.settings) ? terminalState.settings : {};
   const proxyEnabled = context && context.proxy_enabled !== undefined ? !!context.proxy_enabled : !!s.searchProxyEnabled;
   const proxyUrl = (context && context.proxy_url) || s.searchProxyUrl || '';
   const r = await callAgentBackend('web_search', {
@@ -1665,9 +1675,9 @@ async function attachFileForAI(path, description, context) {
   if (TERMINAL_CONFIG.autoAnalyzeAfterAttach) {
     // ⭐ 大纲模式：附件由大纲循环内部消化，跳过 autoResend
     // 否则 autoResend 会在大纲结束后另起一段新 AI 回复
-    const outlineTask = typeof isChatTaskMode === 'function' ? isChatTaskMode(chatId, 'outline') : state._outlineExecuting;
+    const outlineTask = terminalIsChatTaskMode(chatId, 'outline');
     if (outlineTask) {
-      // 附件已存到 state.pendingAIAttachments，大纲循环下一轮会读取并注入到上下文
+      // 附件已存到 terminalState.pendingAIAttachments，大纲循环下一轮会读取并注入到上下文
       return `✅ 已加载 ${r.name}（${(r.size / 1024).toFixed(1)} KB）\n\n` +
              `📌 系统：附件已加入对话上下文。如还需加载其他文件请继续调用 attach_file，否则继续推进任务。`;
     }
@@ -1676,8 +1686,8 @@ async function attachFileForAI(path, description, context) {
            `📌 系统：附件已加入。如果还要加载其他文件，请继续调用 attach_file；否则简短回复完成。前端会自动重发让你看到附件。`;
   } else {
     attachment._hidden = false;
-    if (chatId === state.currentId) {
-      state.pendingAttachments.push(attachment);
+    if (chatId === terminalState.currentId) {
+      terminalState.pendingAttachments.push(attachment);
       renderPendingAtts();
     }
     return `✅ 已加载 ${r.name}\n请告诉用户："已加载 ${r.name}，请再发一句话我就能看到了。"`;
@@ -1712,10 +1722,8 @@ async function tryAutoResend(chatId) {
   chatId = chatId || resolveToolChatId() || 'default';
   const mySeq = _autoResendCancelSeqByChat[chatId] || 0;
   const isCancelled = () => mySeq !== (_autoResendCancelSeqByChat[chatId] || 0)
-    || !!(typeof chatTaskById === 'function' && chatTaskById(chatId)?.stopRequested);
-  const isGenerating = () => (typeof isChatGenerating === 'function')
-    ? isChatGenerating(chatId)
-    : (state.currentId === chatId && state.isGenerating);
+    || !!(terminalChatTaskById(chatId)?.stopRequested);
+  const isGenerating = () => terminalIsChatGenerating(chatId);
 
   if (_autoResendInProgressByChat[chatId]) {
     console.log('[auto-resend] already running for chat:', chatId);
@@ -1758,7 +1766,7 @@ async function tryAutoResend(chatId) {
     }
   } finally {
     delete _autoResendInProgressByChat[chatId];
-    if (typeof syncGlobalTaskState === 'function') syncGlobalTaskState(chatId);
+    terminalSyncGlobalTaskState(chatId);
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
@@ -1766,13 +1774,13 @@ async function sendHiddenMessage(text, chatId) {
   console.log('[隐藏发送] === 开始 ===');
   console.log('[隐藏发送] 文本:', text);
   
-  const c = chatId ? chatById(chatId) : currentChat();
+  const c = chatId ? terminalChatById(chatId) : terminalCurrentChat();
   if (!c) {
     console.error('[隐藏发送] 没有当前对话');
     return;
   }
   
-  if (!state.settings.apiKey) {
+  if (!terminalState.settings.apiKey) {
     console.error('[隐藏发送] 没有 API Key');
     toast('请先配置 API Key');
     return;
@@ -1797,7 +1805,7 @@ async function sendHiddenMessage(text, chatId) {
   c.messages.push(hiddenUserMsg);
   
   try {
-    saveData();
+    terminalSaveData();
   } catch (e) {
     console.warn('[隐藏发送] saveData 失败（继续发送）:', e.message);
   }
@@ -1805,14 +1813,14 @@ async function sendHiddenMessage(text, chatId) {
   try {
     console.log('[隐藏发送] 调用普通 API（避免触发新 Plan/师生）...');
     // ⭐ 关键修复：永远用普通 callAPI，不要触发 Plan 或师生模式
-    await callAPI(undefined, { chatId: c.id, suppressCompletionSound: true });
+    await TerminalOrchestrationService.callAPI(undefined, { chatId: c.id, suppressCompletionSound: true });
     console.log('[隐藏发送] ✓ API 调用完成');
   } catch (e) {
     console.error('[隐藏发送] API 出错:', e);
     throw e;
   } finally {
-    state.isGenerating = false;
-    state.abortCtrl = null;
+    terminalState.isGenerating = false;
+    terminalState.abortCtrl = null;
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
 }
@@ -1825,7 +1833,7 @@ function toggleAutoAnalyze() {
 }
 
 function resetTaskPermission(chatId) {
-  chatId = chatId || (typeof state !== 'undefined' ? state.currentId : '') || resolveToolChatId();
+  chatId = chatId || (typeof terminalState !== 'undefined' ? terminalState.currentId : '') || resolveToolChatId();
   // ⭐ 任务级权限按类别清空（永久权限不动）
   if (chatId) delete TERMINAL_CONFIG.taskAllowByChat[chatId];
   else {
@@ -1854,7 +1862,7 @@ function cancelAutoResend(chatId) {
     cancelAutoResendForChat(chatId, true);
     return;
   }
-  // ⭐ 递增取消版本，让已经启动但正在等待 state.isGenerating=false 的 tryAutoResend 失效
+  // ⭐ 递增取消版本，让已经启动但正在等待 terminalState.isGenerating=false 的 tryAutoResend 失效
   _autoResendCancelSeq++;
   if (_autoResendTimer) {
     try { clearTimeout(_autoResendTimer); } catch (e) {}
@@ -1863,10 +1871,10 @@ function cancelAutoResend(chatId) {
   _pendingAutoResend = null;
   _autoResendInProgress = false;
   // 清掉 AI 准备好但尚未"自动重发"出去的隐藏附件
-  if (typeof state !== 'undefined' && Array.isArray(state.pendingAIAttachments)) {
-    state.pendingAIAttachments = [];
+  if (typeof terminalState !== 'undefined' && Array.isArray(terminalState.pendingAIAttachments)) {
+    terminalState.pendingAIAttachments = [];
   }
-  if (typeof state !== 'undefined') state.pendingAIAttachmentsByChat = {};
+  if (typeof terminalState !== 'undefined') terminalState.pendingAIAttachmentsByChat = {};
 }
 window.cancelAutoResend = cancelAutoResend;
 
@@ -1876,14 +1884,14 @@ function forceUnstuck() {
   _autoResendCancelSeq++;
   _autoResendCancelSeqByChat = {};
   
-  state.isGenerating = false;
-  state.abortCtrl = null;
-  state.pendingAIAttachments = [];
-  state.pendingAIAttachmentsByChat = {};
+  terminalState.isGenerating = false;
+  terminalState.abortCtrl = null;
+  terminalState.pendingAIAttachments = [];
+  terminalState.pendingAIAttachmentsByChat = {};
   // ⭐ 之前漏了这俩，导致 forceUnstuck 后大纲/Plan 仍然卡住 onSend
-  state._outlineExecuting = false;
-  state._planExecuting = false;
-  state._outlineForceFinish = false;
+  terminalState._outlineExecuting = false;
+  terminalState._planExecuting = false;
+  terminalState._outlineForceFinish = false;
   
   if (_autoResendTimer) {
     clearTimeout(_autoResendTimer);
@@ -1903,3 +1911,90 @@ function forceUnstuck() {
 }
 
 window.forceUnstuck = forceUnstuck;
+
+window.AgentApp.define('terminal', {
+  TERMINAL_CONFIG,
+  PERMISSION_CATEGORIES,
+  ACTION_TO_CATEGORY,
+  loadPermanentPerms,
+  savePermanentPerms,
+  setPermanentPermission,
+  clearAllPermanentPermissions,
+  clearTaskPermissions,
+  resolveToolChatId,
+  getTaskAllowForChat,
+  getAgentSessionId,
+  ensurePendingAIAttachmentBuckets,
+  pendingAIAttachmentsForChat,
+  pushPendingAIAttachment,
+  takePendingAIAttachments,
+  clearPendingAIAttachments,
+  cancelAutoResendForChat,
+  isOutlinePermissionAutoAllowContext,
+  formatAutoAllowRemaining,
+  cleanupTermConfirmAutoAllowTimer,
+  startTermConfirmAutoAllowTimer,
+  termAskConfirm,
+  processNextTermConfirmRequest,
+  resolveTermConfirmRequest,
+  remotePermissionChatLabel,
+  isRemotePermissionNotifyEnabled,
+  notifyRemotePermissionRequest,
+  remotePermissionCommandAction,
+  handleRemotePermissionCommand,
+  beginTermConfirmRequest,
+  cleanupTermConfirmAbortListener,
+  termConfirmAccept,
+  termConfirmAcceptAll,
+  termConfirmReject,
+  termConfirmRejectAll,
+  callAgentBackend,
+  getToolCheckpointId,
+  withCheckpointParam,
+  checkpointMetaFromResponse,
+  countTextLinesForDiff,
+  bindCheckpointToToolContext,
+  tokenizeShellLikeCommand,
+  commandHasShellOperators,
+  splitGitPathspec,
+  gitCommitFromTokens,
+  gitCommitMessageFromTokens,
+  aiGitToolsAvailable,
+  routeGitExecuteCommand,
+  executeTerminalCommand,
+  readFile,
+  writeFile,
+  appendFile,
+  editFile,
+  applyPatch,
+  deleteFile,
+  listCheckpoints,
+  restoreCheckpoint,
+  listDir,
+  searchInFiles,
+  generatePpt,
+  pptTaskRequest,
+  startPptTask,
+  pollPptTask,
+  controlPptTask,
+  generatePptWithProgress,
+  webSearch,
+  fetchUrl,
+  aiScreenshot,
+  aiListWindows,
+  formatFileSize,
+  callGit,
+  aiGitStatus,
+  aiGitHistory,
+  aiGitDiff,
+  aiGitSnapshot,
+  aiGitRestore,
+  attachFileForAI,
+  scheduleAutoResend,
+  tryAutoResend,
+  sendHiddenMessage,
+  toggleAutoAnalyze,
+  resetTaskPermission,
+  cancelAutoResend,
+  forceUnstuck
+});

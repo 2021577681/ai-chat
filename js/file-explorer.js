@@ -1191,6 +1191,14 @@ function setFileEditorCodePreview(enabled) {
   if (!nextEnabled && textarea && !textarea.disabled) textarea.focus();
 }
 
+function toggleFileEditorMarkdownPreview() {
+  setFileEditorMarkdownPreview(!FILE_EXPLORER_STATE.editorMarkdownPreview);
+}
+
+function toggleFileEditorCodePreview() {
+  setFileEditorCodePreview(!FILE_EXPLORER_STATE.editorCodePreview);
+}
+
 async function openTextInMainPanel(path, initialContent = null, initialSize = null) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerTextFile(normalizedPath)) {
@@ -1218,10 +1226,10 @@ async function openTextInMainPanel(path, initialContent = null, initialSize = nu
   body.appendChild(shell);
   body.appendChild(preview);
   footer.innerHTML = `
-    <button class="btn" type="button" onclick="copyInlineFileContent()">复制内容</button>
-    ${isMarkdown ? '<button class="btn" type="button" id="inlineMarkdownToggle" onclick="toggleInlineMarkdownPreview()">Markdown 预览</button>' : ''}
-    ${isPython ? '<button class="btn" type="button" id="inlinePythonToggle" onclick="toggleInlinePythonPreview()">Python 高亮预览</button>' : ''}
-    <button class="btn" type="button" onclick="reloadInlineFilePanel()">重新读取</button>
+    <button class="btn" type="button" data-action="copyInlineFileContent">复制内容</button>
+    ${isMarkdown ? '<button class="btn" type="button" id="inlineMarkdownToggle" data-action="toggleInlineMarkdownPreview">Markdown 预览</button>' : ''}
+    ${isPython ? '<button class="btn" type="button" id="inlinePythonToggle" data-action="toggleInlinePythonPreview">Python 高亮预览</button>' : ''}
+    <button class="btn" type="button" data-action="reloadInlineFilePanel">重新读取</button>
   `;
   const setContent = (content, disabled = false) => {
     const cm = FILE_EXPLORER_STATE.inlineCodeMirror;
@@ -1316,8 +1324,8 @@ async function openPdfInMainPanel(path, existingUrl = '') {
   frame.title = 'PDF 阅读器';
   body.appendChild(frame);
   footer.innerHTML = `
-    <button class="btn" type="button" onclick="reloadInlineFilePanel()">重新读取</button>
-    <button class="btn" type="button" onclick="openInlineFileInNewTab()">新标签打开</button>
+    <button class="btn" type="button" data-action="reloadInlineFilePanel">重新读取</button>
+    <button class="btn" type="button" data-action="openInlineFileInNewTab">新标签打开</button>
   `;
   setInlineFileStatus('正在读取...', 'loading');
   try {
@@ -2056,6 +2064,9 @@ window.openTextInMainPanel = openTextInMainPanel;
 window.openPdfInMainPanel = openPdfInMainPanel;
 window.closeInlineFilePanel = closeInlineFilePanel;
 window.setFileEditorMarkdownPreview = setFileEditorMarkdownPreview;
+window.setFileEditorCodePreview = setFileEditorCodePreview;
+window.toggleFileEditorMarkdownPreview = toggleFileEditorMarkdownPreview;
+window.toggleFileEditorCodePreview = toggleFileEditorCodePreview;
 window.reloadInlineFilePanel = reloadInlineFilePanel;
 window.copyInlineFileContent = copyInlineFileContent;
 window.openInlineFileInNewTab = openInlineFileInNewTab;

@@ -544,18 +544,18 @@ class FilesMixin:
         return _ensure_prewrite_checkpoint(
             paths,
             checkpoint_id=(body or {}).get('checkpoint_id') or (body or {}).get('checkpointId'),
-            session_id=getattr(self, 'session_id', ''),
+            session_id=self.request_context.session_id,
             reason=action or 'before_code_mutation'
         )
 
     def handle_read_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         print(f'📖 [读文件] {path}')
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'文件不存在: {path}'})
         if not os.path.isfile(path):
-            return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'不是文件: {path}'})
         try:
             start_line = body.get('start_line')
             end_line = body.get('end_line')
@@ -565,16 +565,16 @@ class FilesMixin:
                     start = max(1, int(start_line or 1))
                     end = int(end_line) if end_line is not None else None
                 except (TypeError, ValueError):
-                    return self._send_json(200, {'ok': False, 'error': 'start_line/end_line 必须是数字'})
+                    return self.response.json(200, {'ok': False, 'error': 'start_line/end_line 必须是数字'})
                 if end is not None and end < start:
-                    return self._send_json(200, {'ok': False, 'error': 'end_line 不能小于 start_line'})
+                    return self.response.json(200, {'ok': False, 'error': 'end_line 不能小于 start_line'})
             else:
                 start, end = 1, None
 
             size = os.path.getsize(path)
             max_read_chars = 1024 * 1024
             if size > max_read_chars and not has_range:
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': False,
                     'error': f'文件过大（{size}字节）。请指定 start_line/end_line 分段读取；如果是图片/PDF，请用 attach_file 工具。'
                 })
@@ -603,7 +603,7 @@ class FilesMixin:
                 content = ''.join(parts)
                 if truncated:
                     content += '\n\n[内容已截断：单次 read_note 最多返回约 1MB。请缩小 start_line/end_line 范围继续读取。]'
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': True,
                     'path': path,
                     'content': content,
@@ -620,25 +620,25 @@ class FilesMixin:
                 s = start - 1
                 e = min(len(lines), end or len(lines))
                 content = '\n'.join(lines[s:e])
-            self._send_json(200, {'ok': True, 'path': path, 'content': content, 'size': size})
+            self.response.json(200, {'ok': True, 'path': path, 'content': content, 'size': size})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 读文件（二进制 → base64） ============
     def handle_read_file_binary(self, body):
         """读取任意文件并返回 base64（用于图片/PDF 等二进制文件）"""
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'文件不存在: {path}'})
         if not os.path.isfile(path):
-            return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'不是文件: {path}'})
 
         try:
             size = os.path.getsize(path)
             max_size = 20 * 1024 * 1024
             if size > max_size:
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': False,
                     'error': f'文件过大（{size / 1024 / 1024:.1f}MB），上限 {max_size / 1024 / 1024:.0f}MB'
                 })
@@ -691,7 +691,7 @@ class FilesMixin:
             print(f'   🏷️  MIME: {mime}')
             print(f'   🖼️  是图片: {is_image}')
 
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'path': path,
                 'name': name,
@@ -702,12 +702,12 @@ class FilesMixin:
             })
         except Exception as e:
             print(f'   ❌ 失败: {e}')
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 写文件 ============
     def handle_write_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         content = body.get('content', '')
         print(f'✍️  [写文件] {path} ({len(content)} 字符)')
         try:
@@ -728,7 +728,7 @@ class FilesMixin:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f'   ✅ 成功！')
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True, 'path': path,
                 'action': '覆盖' if existed else '创建',
                 'bytes_written': len(content.encode('utf-8')),
@@ -738,12 +738,12 @@ class FilesMixin:
             })
         except Exception as e:
             print(f'   ❌ 失败: {e}')
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 追加文件 ============
     def handle_append_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         content = body.get('content', '')
         print(f'📝 [追加] {path} (+{len(content)} 字符)')
         try:
@@ -753,34 +753,34 @@ class FilesMixin:
                 os.makedirs(parent, exist_ok=True)
             with open(path, 'a', encoding='utf-8') as f:
                 f.write(content)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True, 'path': path,
                 'bytes_appended': len(content.encode('utf-8')),
                 'checkpoint_id': checkpoint['id'] if checkpoint else None,
                 'checkpoint': checkpoint
             })
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 精确编辑 ============
     def handle_edit_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         old_text = body.get('old_text', '')
         new_text = body.get('new_text', '')
         print(f'✏️  [编辑] {path}')
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'文件不存在: {path}'})
         if not old_text:
-            return self._send_json(200, {'ok': False, 'error': 'old_text 不能为空'})
+            return self.response.json(200, {'ok': False, 'error': 'old_text 不能为空'})
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
             count = content.count(old_text)
             if count == 0:
-                return self._send_json(200, {'ok': False, 'error': f'未找到要替换的文本'})
+                return self.response.json(200, {'ok': False, 'error': f'未找到要替换的文本'})
             if count > 1:
-                return self._send_json(200, {
+                return self.response.json(200, {
                     'ok': False,
                     'error': f'找到 {count} 处匹配，请提供更具体的上下文'
                 })
@@ -788,21 +788,21 @@ class FilesMixin:
             checkpoint = self._checkpoint_before_mutation([path], body, 'edit_file')
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'path': path,
                 'checkpoint_id': checkpoint['id'] if checkpoint else None,
                 'checkpoint': checkpoint
             })
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ Patch 编辑 ============
     def handle_apply_patch(self, body):
         patch_text = body.get('patch', '')
         dry_run = bool(body.get('dry_run', False))
         if not patch_text.strip():
-            return self._send_json(200, {'ok': False, 'error': 'patch 不能为空'})
+            return self.response.json(200, {'ok': False, 'error': 'patch 不能为空'})
         print(f'🧩 [Apply Patch] dry_run={dry_run}, {len(patch_text)} 字符')
         try:
             file_patches = _parse_unified_patch(patch_text)
@@ -811,9 +811,9 @@ class FilesMixin:
                 target_rel = fp['new_path'] if fp['new_path'] != '/dev/null' else fp['old_path']
                 target, err = check_path_or_error(target_rel, must_exist=False)
                 if err:
-                    return self._send_json(200, {'ok': False, 'error': err})
+                    return self.response.json(200, {'ok': False, 'error': err})
                 if fp['new_path'] == '/dev/null':
-                    return self._send_json(200, {'ok': False, 'error': '当前 apply_patch 暂不支持删除文件，请使用 delete_note'})
+                    return self.response.json(200, {'ok': False, 'error': '当前 apply_patch 暂不支持删除文件，请使用 delete_note'})
                 new_content, stats = _apply_file_patch(target, fp)
                 prepared.append({
                     'path': target,
@@ -843,7 +843,7 @@ class FilesMixin:
                 'hunks': item['stats']['hunks'],
                 'action': '修改' if item['stats']['existed'] else '创建'
             } for item in prepared]
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': True,
                 'dry_run': dry_run,
                 'files': files,
@@ -852,56 +852,56 @@ class FilesMixin:
                 'message': ('Patch 预检通过' if dry_run else 'Patch 已应用')
             })
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 删除 ============
     def handle_list_checkpoints(self, body):
         try:
             limit = body.get('limit', 20)
             checkpoints = _list_checkpoints(limit)
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': True,
                 'checkpoints': checkpoints,
                 'count': len(checkpoints)
             })
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_restore_checkpoint(self, body):
         checkpoint_id = body.get('checkpoint_id') or body.get('checkpointId') or ''
         force = bool(body.get('force', False))
         if not checkpoint_id:
-            return self._send_json(200, {'ok': False, 'error': 'checkpoint_id 不能为空'})
+            return self.response.json(200, {'ok': False, 'error': 'checkpoint_id 不能为空'})
         try:
             result = _restore_checkpoint(
                 checkpoint_id,
                 force=force,
-                session_id=getattr(self, 'session_id', '')
+                session_id=self.request_context.session_id
             )
             ok = bool(result.get('ok'))
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': ok,
                 **result
             })
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': str(e)})
+            return self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_create_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         content = body.get('content', '')
         print(f'📄 [新建文件] {path}')
         if os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': '路径已存在'})
+            return self.response.json(200, {'ok': False, 'error': '路径已存在'})
         try:
             parent = os.path.dirname(path)
             if parent:
                 if not os.path.isdir(parent):
-                    return self._send_json(200, {'ok': False, 'error': '父目录不存在'})
+                    return self.response.json(200, {'ok': False, 'error': '父目录不存在'})
             checkpoint = self._checkpoint_before_mutation([path], body, 'create_file')
             with open(path, 'x', encoding='utf-8') as f:
                 f.write(content)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'path': path,
                 'type': 'file',
@@ -910,23 +910,23 @@ class FilesMixin:
                 'checkpoint': checkpoint
             })
         except FileExistsError:
-            self._send_json(200, {'ok': False, 'error': '路径已存在'})
+            self.response.json(200, {'ok': False, 'error': '路径已存在'})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_create_dir(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         print(f'📁 [新建文件夹] {path}')
         if os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': '路径已存在'})
+            return self.response.json(200, {'ok': False, 'error': '路径已存在'})
         try:
             parent = os.path.dirname(path)
             if parent and not os.path.isdir(parent):
-                return self._send_json(200, {'ok': False, 'error': '父目录不存在'})
+                return self.response.json(200, {'ok': False, 'error': '父目录不存在'})
             checkpoint = self._checkpoint_before_mutation([path], body, 'create_dir')
             os.makedirs(path, exist_ok=False)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'path': path,
                 'type': 'dir',
@@ -934,28 +934,28 @@ class FilesMixin:
                 'checkpoint': checkpoint
             })
         except FileExistsError:
-            self._send_json(200, {'ok': False, 'error': '路径已存在'})
+            self.response.json(200, {'ok': False, 'error': '路径已存在'})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_rename_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         new_path, err = check_path_or_error(body.get('new_path') or body.get('newPath') or '')
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         print(f'✏️  [重命名] {path} -> {new_path}')
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': '路径不存在'})
+            return self.response.json(200, {'ok': False, 'error': '路径不存在'})
         if os.path.exists(new_path):
-            return self._send_json(200, {'ok': False, 'error': '目标路径已存在'})
+            return self.response.json(200, {'ok': False, 'error': '目标路径已存在'})
         try:
             src_parent = os.path.dirname(os.path.realpath(path))
             dst_parent = os.path.dirname(os.path.realpath(new_path))
             if src_parent != dst_parent:
-                return self._send_json(200, {'ok': False, 'error': '仅支持在同一目录内重命名'})
+                return self.response.json(200, {'ok': False, 'error': '仅支持在同一目录内重命名'})
             checkpoint = self._checkpoint_before_mutation([path, new_path], body, 'rename_file')
             os.rename(path, new_path)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'path': path,
                 'new_path': new_path,
@@ -964,14 +964,14 @@ class FilesMixin:
                 'checkpoint': checkpoint
             })
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     def handle_delete_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         print(f'🗑️  [删除] {path}')
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': '路径不存在'})
+            return self.response.json(200, {'ok': False, 'error': '路径不存在'})
         try:
             checkpoint = self._checkpoint_before_mutation([path], body, 'delete_file')
             if os.path.isfile(path):
@@ -984,7 +984,7 @@ class FilesMixin:
                 except Exception:
                     removed_lines = 0
                 os.remove(path)
-                self._send_json(200, {
+                self.response.json(200, {
                     'ok': True,
                     'path': path,
                     'type': 'file',
@@ -994,9 +994,9 @@ class FilesMixin:
                 })
             elif os.path.isdir(path):
                 if os.listdir(path):
-                    return self._send_json(200, {'ok': False, 'error': '目录非空'})
+                    return self.response.json(200, {'ok': False, 'error': '目录非空'})
                 os.rmdir(path)
-                self._send_json(200, {
+                self.response.json(200, {
                     'ok': True,
                     'path': path,
                     'type': 'dir',
@@ -1004,15 +1004,15 @@ class FilesMixin:
                     'checkpoint': checkpoint
                 })
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 列目录 ============
     def handle_list_dir(self, body):
         path, err = check_path_or_error(body.get('path', '') or '.')
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         print(f'📁 [列目录] {path}')
         if not os.path.isdir(path):
-            return self._send_json(200, {'ok': False, 'error': f'不是目录: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'不是目录: {path}'})
         try:
             entries = []
             for name in sorted(os.listdir(path)):
@@ -1029,20 +1029,20 @@ class FilesMixin:
                     })
                 except:
                     pass
-            self._send_json(200, {'ok': True, 'path': path, 'entries': entries})
+            self.response.json(200, {'ok': True, 'path': path, 'entries': entries})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 搜索 ============
     def handle_search(self, body):
         path, err = check_path_or_error(body.get('path', '') or '.')
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         pattern = body.get('pattern', '')
         file_glob = body.get('file_glob', '*')
         max_results = min(int(body.get('max_results', 50)), 200)
         print(f'🔍 [搜索] "{pattern}" in {path}')
         if not pattern:
-            return self._send_json(200, {'ok': False, 'error': 'pattern 不能为空'})
+            return self.response.json(200, {'ok': False, 'error': 'pattern 不能为空'})
         try:
             regex = re.compile(pattern, re.IGNORECASE)
         except:
@@ -1074,19 +1074,19 @@ class FilesMixin:
                         break
                 if len(results) >= max_results:
                     break
-            self._send_json(200, {'ok': True, 'pattern': pattern, 'results': results})
+            self.response.json(200, {'ok': True, 'pattern': pattern, 'results': results})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 文件信息 ============
     def handle_file_info(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': '路径不存在'})
+            return self.response.json(200, {'ok': False, 'error': '路径不存在'})
         try:
             st = os.stat(path)
-            self._send_json(200, {
+            self.response.json(200, {
                 'ok': True,
                 'path': path,
                 'type': 'dir' if os.path.isdir(path) else 'file',
@@ -1094,18 +1094,18 @@ class FilesMixin:
                 'modified': st.st_mtime
             })
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': str(e)})
+            self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 编译 TeX 文件为 PDF ============
     def handle_compile_tex(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'文件不存在: {path}'})
         if not os.path.isfile(path):
-            return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'不是文件: {path}'})
         if not path.lower().endswith('.tex'):
-            return self._send_json(200, {'ok': False, 'error': '仅支持编译 .tex 文件'})
+            return self.response.json(200, {'ok': False, 'error': '仅支持编译 .tex 文件'})
 
         xelatex = shutil.which('xelatex')
         install_hint = (
@@ -1113,7 +1113,7 @@ class FilesMixin:
             '然后重启本地服务后再试。'
         )
         if not xelatex:
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': '本机环境不支持 TeX 编译：找不到 xelatex',
                 'install_hint': install_hint,
@@ -1137,42 +1137,42 @@ class FilesMixin:
                 timeout=120
             )
         except subprocess.TimeoutExpired:
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': 'xelatex 编译超时（超过 120 秒）',
                 'install_hint': ''
             })
         except FileNotFoundError:
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': '本机环境不支持 TeX 编译：找不到 xelatex',
                 'install_hint': install_hint,
                 'missing': 'xelatex'
             })
         except Exception as e:
-            return self._send_json(200, {'ok': False, 'error': f'调用 xelatex 失败: {e}'})
+            return self.response.json(200, {'ok': False, 'error': f'调用 xelatex 失败: {e}'})
 
         if proc.returncode != 0 or not os.path.exists(pdf_abs):
             output = ((proc.stdout or '') + '\n' + (proc.stderr or '')).strip()
             if len(output) > 4000:
                 output = output[-4000:]
-            return self._send_json(200, {
+            return self.response.json(200, {
                 'ok': False,
                 'error': 'xelatex 编译失败' + (f':\n{output}' if output else ''),
                 'returncode': proc.returncode
             })
 
         rel_pdf = os.path.relpath(pdf_abs, config.WORKSPACE_ROOT).replace(os.sep, '/')
-        self._send_json(200, {'ok': True, 'path': path, 'pdf_path': rel_pdf})
+        self.response.json(200, {'ok': True, 'path': path, 'pdf_path': rel_pdf})
 
     # ============ 使用系统默认应用打开文件 ============
     def handle_open_file_default(self, body):
         path, err = check_path_or_error(body.get('path', ''))
-        if err: return self._send_json(200, {'ok': False, 'error': err})
+        if err: return self.response.json(200, {'ok': False, 'error': err})
         if not os.path.exists(path):
-            return self._send_json(200, {'ok': False, 'error': f'文件不存在: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'文件不存在: {path}'})
         if not os.path.isfile(path):
-            return self._send_json(200, {'ok': False, 'error': f'不是文件: {path}'})
+            return self.response.json(200, {'ok': False, 'error': f'不是文件: {path}'})
 
         try:
             if sys.platform == 'win32':
@@ -1192,8 +1192,8 @@ class FilesMixin:
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL
                 )
-            self._send_json(200, {'ok': True, 'path': path, 'platform': sys.platform})
+            self.response.json(200, {'ok': True, 'path': path, 'platform': sys.platform})
         except FileNotFoundError as e:
-            self._send_json(200, {'ok': False, 'error': f'系统打开命令不可用: {e}'})
+            self.response.json(200, {'ok': False, 'error': f'系统打开命令不可用: {e}'})
         except Exception as e:
-            self._send_json(200, {'ok': False, 'error': f'无法使用默认应用打开文件: {e}'})
+            self.response.json(200, {'ok': False, 'error': f'无法使用默认应用打开文件: {e}'})
