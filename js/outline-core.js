@@ -251,7 +251,7 @@ function outlinePromptVars(extra = {}) {
 function buildOutlineSystemPromptForProfile(basePrompt, history, taskProfile) {
   const prompt = outlineTemplate(basePrompt || DEFAULT_OUTLINE_SYSTEM_PROMPT, outlinePromptVars());
   if (!outlineShouldUseCodeProfile(taskProfile, history)) return prompt;
-  let extra = outlinePromptSetting('outlineCodeTaskPrompt', CODE_TASK_OUTLINE_PROFILE_PROMPT);
+  let extra = outlinePromptText('outlineCodeTaskPrompt', CODE_TASK_OUTLINE_PROFILE_PROMPT, outlinePromptVars());
   if (taskProfile && taskProfile.suggestedCommands && taskProfile.suggestedCommands.length) {
     extra += `\n\n【建议验证命令】\n${taskProfile.suggestedCommands.map(x => `- ${x}`).join('\n')}`;
   }
@@ -1870,11 +1870,16 @@ function consumePendingAttachments(conversationMessages, outlineObj, chatId) {
 // ============ 大纲工具处理（本地虚拟工具，不发请求）============
 
 function handleOutlineTool(name, args, outline) {
+  args = args || {};
   if (name === 'save_outline') {
-    const items = Array.isArray(args.items) ? args.items : [];
+    const rawItems = Array.isArray(args.items) ? args.items : [];
+    const existingItems = Array.isArray(outline.items) ? outline.items : [];
+    const isInitialOutline = existingItems.length === 0;
+    const maxInitialItems = outlineMaxItemsSetting();
+    const items = isInitialOutline ? rawItems.slice(0, maxInitialItems) : rawItems;
     // 保留旧条目的 toolCalls（按 id 匹配）
     const oldMap = {};
-    for (const it of (outline.items || [])) oldMap[it.id] = it;
+    for (const it of existingItems) oldMap[it.id] = it;
     
     outline.items = items.map(it => {
       const id = String(it.id || ('a' + Math.random().toString(36).slice(2, 6)));
@@ -1888,6 +1893,10 @@ function handleOutlineTool(name, args, outline) {
         toolCalls: old ? (old.toolCalls || []) : []
       };
     });
+    const truncatedCount = rawItems.length - items.length;
+    if (isInitialOutline && truncatedCount > 0) {
+      return { ok: true, value: `✓ 已保存大纲（${outline.items.length} 项，已按初始上限 ${maxInitialItems} 截断 ${truncatedCount} 项）` };
+    }
     return { ok: true, value: `✓ 已保存大纲（${outline.items.length} 项）` };
   }
   

@@ -1761,6 +1761,199 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
             msg=f'responses input sequence runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
         )
 
+    @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
+    def test_temporary_chat_stop_does_not_abort_background_chat(self):
+        script = textwrap.dedent(
+            r"""
+            const assert = require('assert');
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const root = process.cwd();
+            const elements = {};
+            const sandbox = {
+              console,
+              storage: { get() { return null; }, set() {}, remove() {}, flush() {} },
+              confirm() { return true; },
+              document: {
+                querySelectorAll() { return []; },
+                getElementById(id) {
+                  if (!elements[id]) {
+                    elements[id] = {
+                      id,
+                      value: '',
+                      textContent: '',
+                      classList: { add() {}, remove() {}, toggle() {} }
+                    };
+                  }
+                  return elements[id];
+                }
+              }
+            };
+            sandbox.window = sandbox;
+            sandbox.globalThis = sandbox;
+            sandbox.addEventListener = () => {};
+            vm.createContext(sandbox);
+
+            function run(file) {
+              const code = fs.readFileSync(path.join(root, file), 'utf8');
+              vm.runInContext(code, sandbox, { filename: file });
+            }
+
+            run('js/app-context.js');
+            sandbox.AgentApp.define('uiService', {
+              toast() {},
+              updateSendBtn() {},
+              renderChatList() {},
+              renderMessages() {}
+            });
+            run('js/config.js');
+            run('js/state.js');
+            run('js/api-stream.js');
+
+            const stateModule = sandbox.AgentApp.require('state');
+            const apiStream = sandbox.AgentApp.require('apiStream');
+            const state = stateModule.state;
+            const original = { id: 'chat-original', title: 'original', messages: [] };
+            state.chats = [original];
+            state.currentId = original.id;
+
+            let aborted = false;
+            const ctrl = {
+              signal: { aborted: false },
+              abort() {
+                aborted = true;
+                this.signal.aborted = true;
+              }
+            };
+            stateModule.beginChatTask(original.id, ctrl, { resetStop: true });
+            assert.strictEqual(state.abortCtrl, ctrl);
+            assert.strictEqual(state.activeTaskChatId, original.id);
+
+            state.temporaryChat = stateModule.createTemporaryChat();
+            state.currentId = state.temporaryChat.id;
+            stateModule.syncGlobalTaskState(state.currentId);
+            assert.strictEqual(state.activeTaskChatId, original.id);
+            assert.strictEqual(state.abortCtrl, null);
+            assert.strictEqual(state.stopRequested, false);
+
+            apiStream.stopGenerate();
+            assert.strictEqual(aborted, false);
+            assert.strictEqual(ctrl.signal.aborted, false);
+            assert.strictEqual(stateModule.chatTaskById(original.id).stopRequested, false);
+          """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / 'temporary_chat_background_abort_test.js'
+            script_path.write_text(script, encoding='utf-8')
+            completed = subprocess.run(
+                ['node', str(script_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f'temporary chat background abort runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
+        )
+
+    @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
+    def test_outline_save_enforces_initial_item_limit(self):
+        script = textwrap.dedent(
+            r"""
+            const assert = require('assert');
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const root = process.cwd();
+            const sandbox = { console };
+            sandbox.window = sandbox;
+            sandbox.globalThis = sandbox;
+            vm.createContext(sandbox);
+
+            function run(file) {
+              const code = fs.readFileSync(path.join(root, file), 'utf8');
+              vm.runInContext(code, sandbox, { filename: file });
+            }
+
+            run('js/app-context.js');
+            sandbox.AgentApp.define('state', {
+              state: { settings: { outlineMaxItems: 4 }, pendingAttachments: [], pendingAIAttachments: [] },
+              saveData() {},
+              currentChat() { return null; },
+              chatById() { return null; },
+              isCurrentChat() { return false; },
+              isChatGenerating() { return false; },
+              beginChatTask() { return {}; },
+              setChatTaskMode() {},
+              updateChatTaskController() {},
+              clearChatTask() {},
+              activeTaskChat() { return null; }
+            });
+            sandbox.AgentApp.define('orchestrationService', {});
+            sandbox.AgentApp.define('uiService', {
+              toast() {},
+              renderMessages() {},
+              refreshMsgNode() {},
+              updateSendBtn() {}
+            });
+
+            run('js/outline-prompts.js');
+            run('js/outline-core.js');
+
+            const outlineCore = sandbox.AgentApp.require('outlineCore');
+            const codePrompt = outlineCore.buildOutlineSystemPromptForProfile('', [], { domain: 'coding' });
+            assert.match(codePrompt, /不超过 4 项/);
+            const sixItems = Array.from({ length: 6 }, (_, idx) => ({
+              id: `a${idx + 1}`,
+              title: `step ${idx + 1}`,
+              status: 'pending'
+            }));
+            const outline = { items: [] };
+            const result = outlineCore.handleOutlineTool('save_outline', { items: sixItems }, outline);
+            assert.strictEqual(result.ok, true);
+            assert.strictEqual(outline.items.length, 4);
+            assert.deepStrictEqual(outline.items.map(item => item.id), ['a1', 'a2', 'a3', 'a4']);
+            assert.match(result.value, /初始上限 4/);
+            assert.match(result.value, /截断 2 项/);
+
+            const appendResult = outlineCore.handleOutlineTool(
+              'append_outline',
+              { id: 'a5', title: 'extra step' },
+              outline
+            );
+            assert.strictEqual(appendResult.ok, true);
+            assert.strictEqual(outline.items.length, 5);
+
+            const rewritten = sixItems.map((item, idx) => ({ ...item, id: `b${idx + 1}` }));
+            const rewriteResult = outlineCore.handleOutlineTool('save_outline', { items: rewritten }, outline);
+            assert.strictEqual(rewriteResult.ok, true);
+            assert.strictEqual(outline.items.length, 6);
+            assert.doesNotMatch(rewriteResult.value, /截断/);
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / 'outline_initial_item_limit_test.js'
+            script_path.write_text(script, encoding='utf-8')
+            completed = subprocess.run(
+                ['node', str(script_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f'outline initial item limit runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

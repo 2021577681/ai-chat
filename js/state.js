@@ -968,8 +968,10 @@ function syncGlobalTaskState(preferredChatId) {
   const mirrorTask = currentTask || fallbackTask;
   state.isGenerating = !!(currentTask && currentTask.isGenerating);
   state.activeTaskChatId = mirrorTask ? mirrorTask.chatId : null;
-  state.abortCtrl = mirrorTask ? mirrorTask.abortCtrl : null;
-  state.stopRequested = mirrorTask ? !!mirrorTask.stopRequested : false;
+  // Only the current chat owns the legacy global abort/stop mirrors.
+  // Background tasks remain addressable by chatTasks/activeTaskChatId.
+  state.abortCtrl = currentTask ? currentTask.abortCtrl : null;
+  state.stopRequested = currentTask ? !!currentTask.stopRequested : false;
   refreshLegacyModeFlags();
 }
 

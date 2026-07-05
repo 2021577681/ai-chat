@@ -28,11 +28,18 @@ async function acceptGitDanger(page) {
 }
 
 async function openGitBranchMenu(page) {
-  await page
+  const trigger = page
     .locator('[data-action="_toggleBranchMenu"]')
-    .filter({ has: page.locator('#gitBranchInlineBadge') })
-    .click();
-  await expect(page.locator('#gitBranchMenu')).not.toHaveAttribute('hidden', '');
+    .filter({ has: page.locator('#gitBranchInlineBadge') });
+  await trigger.click();
+  const menu = page.locator('#gitBranchMenu');
+  await expect(menu).not.toHaveAttribute('hidden', '');
+  const triggerBox = await trigger.boundingBox();
+  const menuBox = await menu.boundingBox();
+  expect(triggerBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(Math.abs((menuBox.x + menuBox.width) - (triggerBox.x + triggerBox.width))).toBeLessThan(36);
+  expect(menuBox.y).toBeGreaterThanOrEqual(triggerBox.y - 4);
 }
 
 async function openLmsPanel(page) {

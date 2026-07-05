@@ -1030,16 +1030,41 @@ function _currentDirtyLossList() {
 }
 
 // ---------- 分支下拉菜单 ----------
+function _positionBranchMenu(menu, trigger) {
+  if (!menu || !trigger || typeof trigger.getBoundingClientRect !== 'function') return;
+  const rect = trigger.getBoundingClientRect();
+  const gap = 8;
+  const margin = 12;
+  const viewportW = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+  const viewportH = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+  const menuW = Math.min(Math.max(menu.offsetWidth || 280, 280), Math.max(180, viewportW - margin * 2));
+  const menuH = Math.min(menu.scrollHeight || menu.offsetHeight || 320, Math.max(160, viewportH - margin * 2));
+  let left = rect.right - menuW;
+  left = Math.max(margin, Math.min(left, viewportW - menuW - margin));
+  let top = rect.bottom + gap;
+  if (top + menuH > viewportH - margin) {
+    top = Math.max(margin, rect.top - menuH - gap);
+  }
+  menu.style.width = `${menuW}px`;
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+}
+
 async function _toggleBranchMenu(evt) {
   if (evt) evt.stopPropagation();
   const menu = document.getElementById('gitBranchMenu');
   if (!menu) return;
   if (!menu.hidden) { menu.hidden = true; return; }
+  const trigger = evt && evt.target && evt.target.closest
+    ? evt.target.closest('[data-action="_toggleBranchMenu"]')
+    : null;
   menu.innerHTML = `<div class="git-loading" style="padding:12px;">加载分支…</div>`;
   menu.hidden = false;
+  _positionBranchMenu(menu, trigger || document.getElementById('gitBranchBadge'));
   const r = await callGit('branch_list');
   if (!r.ok) {
     menu.innerHTML = `<div class="git-error">❌ ${escapeHtml(r.error || '')}</div>`;
+    _positionBranchMenu(menu, trigger || document.getElementById('gitBranchBadge'));
     return;
   }
   const branches = r.branches || [];
@@ -1062,6 +1087,7 @@ async function _toggleBranchMenu(evt) {
     <div class="git-branch-item action" data-action="_doBranchCreate"><span>➕</span><span>新建分支…</span></div>
     <div class="git-branch-item action" data-action="_doBranchRename"><span>✏️</span><span>重命名当前分支…</span></div>
   `;
+  _positionBranchMenu(menu, trigger || document.getElementById('gitBranchBadge'));
   // 点条目本身（不在按钮上）= 切换
   menu.querySelectorAll('.git-branch-item[data-name]').forEach(el => {
     el.addEventListener('click', (e) => {
