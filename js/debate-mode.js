@@ -11,6 +11,7 @@ const debateBeginChatTask = DebateStateModule.beginChatTask;
 const debateSetChatTaskMode = DebateStateModule.setChatTaskMode;
 const debateClearChatTask = DebateStateModule.clearChatTask;
 const DebateOrchestrationService = window.AgentApp.require('orchestrationService');
+const DebateUiService = window.AgentApp.require('uiService');
 
 const DEBATE_RUNTIME = {};
 const DEBATE_REVIEW_TIMEOUT_SLIDER_MAX = 120;
@@ -441,13 +442,13 @@ function _debateValidateRole(role, cfg) {
 async function startDebateFromUi() {
   const settings = _debateCollectSettingsFromUi();
   if (!settings.topic) {
-    if (typeof toast === 'function') toast('请先填写辩题');
+    DebateUiService.toast('请先填写辩题');
     return;
   }
   for (const role of ['pro', 'con', 'judge']) {
     const err = _debateValidateRole(role, settings[role]);
     if (err) {
-      if (typeof toast === 'function') toast(err, 4000);
+      DebateUiService.toast(err, 4000);
       return;
     }
   }
@@ -464,7 +465,7 @@ async function startDebateFromUi() {
   if (typeof switchChat === 'function') switchChat(chat.id);
   startDebate(chat.id).catch(e => {
     console.error('[debate] start failed:', e);
-    if (typeof toast === 'function') toast('辩论启动失败：' + (e.message || e), 5000);
+    DebateUiService.toast('辩论启动失败：' + (e.message || e), 5000);
   });
 }
 
@@ -502,8 +503,8 @@ function _debateCreateChat(settings) {
   debateState.chats.unshift(chat);
   debateState.currentId = id;
   debateSaveData();
-  if (typeof renderChatList === 'function') renderChatList();
-  if (typeof renderMessages === 'function') renderMessages();
+  DebateUiService.renderChatList();
+  DebateUiService.renderMessages();
   return chat;
 }
 
@@ -527,9 +528,9 @@ function _debateEnsureRound(meta, roundNo) {
 }
 
 function _debateRenderRefresh(chat) {
-  if (debateIsCurrentChat(chat)) renderMessages();
-  if (typeof renderChatList === 'function') renderChatList();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (debateIsCurrentChat(chat)) DebateUiService.renderMessages();
+  DebateUiService.renderChatList();
+  DebateUiService.updateSendBtn();
   if (document.getElementById('debateModeModal')) renderDebateModeModal();
 }
 
@@ -600,14 +601,14 @@ function requestStopDebate(chatId) {
 function stopCurrentDebate() {
   const chatId = debateState.currentId;
   if (!requestStopDebate(chatId)) {
-    if (typeof toast === 'function') toast('当前没有正在运行的辩论');
+    DebateUiService.toast('当前没有正在运行的辩论');
   }
 }
 
 function continueCurrentDebate() {
   const chatId = debateState.currentId;
-  if (!continueDebate(chatId) && typeof toast === 'function') {
-    toast('当前没有可继续的辩论');
+  if (!continueDebate(chatId)) {
+    DebateUiService.toast('当前没有可继续的辩论');
   }
 }
 
@@ -624,7 +625,7 @@ function continueDebate(chatId) {
   }
   if (chat.debate.status === 'waiting_manual') {
     if (typeof switchChat === 'function') switchChat(chat.id);
-    if (typeof toast === 'function') toast('该辩论正在等待人工审核，请使用评委卡片按钮');
+    DebateUiService.toast('该辩论正在等待人工审核，请使用评委卡片按钮');
     return true;
   }
   chat.debate.status = 'running';
@@ -634,7 +635,7 @@ function continueDebate(chatId) {
   if (typeof switchChat === 'function') switchChat(chat.id);
   startDebate(chat.id).catch(e => {
     console.error('[debate] continue failed:', e);
-    if (typeof toast === 'function') toast('继续辩论失败：' + (e.message || e), 5000);
+    DebateUiService.toast('继续辩论失败：' + (e.message || e), 5000);
   });
   return true;
 }
@@ -708,7 +709,7 @@ function _debatePauseWaitingManual(chat) {
   debateClearChatTask(chat.id);
   debateSaveData();
   _debateRenderRefresh(chat);
-  if (typeof toast === 'function') toast('已暂停辩论审核倒计时');
+  DebateUiService.toast('已暂停辩论审核倒计时');
   return true;
 }
 
@@ -759,7 +760,7 @@ function _debateResumeWaitingManual(chat) {
   debateSaveData();
   if (typeof switchChat === 'function') switchChat(chat.id);
   _debateRenderRefresh(chat);
-  if (typeof toast === 'function') toast('已恢复辩论人工审核');
+  DebateUiService.toast('已恢复辩论人工审核');
   return true;
 }
 
@@ -1000,7 +1001,7 @@ function debateManualPass(chatId) {
   const chat = debateChatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   if (isDebateCompressing(chat.id)) {
-    if (typeof toast === 'function') toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
+    DebateUiService.toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
     return;
   }
   _debateClearFinalJudgeTimeout(chat);
@@ -1012,7 +1013,7 @@ function debateManualPass(chatId) {
   _debateRenderRefresh(chat);
   startDebate(chat.id).catch(e => {
     console.error('[debate] manual continue failed:', e);
-    if (typeof toast === 'function') toast('继续辩论失败：' + (e.message || e), 5000);
+    DebateUiService.toast('继续辩论失败：' + (e.message || e), 5000);
   });
 }
 
@@ -1020,7 +1021,7 @@ function debateManualWin(chatId, side) {
   const chat = debateChatById(chatId);
   if (!chat || !chat.debate || chat.debate.status !== 'waiting_manual') return;
   if (isDebateCompressing(chat.id)) {
-    if (typeof toast === 'function') toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
+    DebateUiService.toast('辩论历史正在压缩，完成后再操作评委卡片', 3000);
     return;
   }
   _debateClearFinalJudgeTimeout(chat);
@@ -1035,7 +1036,7 @@ function debateManualWin(chatId, side) {
   if (chat.debate.status !== 'completed') {
     startDebate(chat.id).catch(e => {
       console.error('[debate] manual win continue failed:', e);
-      if (typeof toast === 'function') toast('继续辩论失败：' + (e.message || e), 5000);
+      DebateUiService.toast('继续辩论失败：' + (e.message || e), 5000);
     });
   }
 }
@@ -1255,12 +1256,12 @@ async function _debateCompressRound(chat, round, options = {}) {
 async function compressDebateChat(chat, options = {}) {
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
   if (isDebateCompressing(chat.id)) {
-    if (options.reason === 'manual' && typeof toast === 'function') toast('辩论历史正在压缩，请稍等', 3000);
+    if (options.reason === 'manual') DebateUiService.toast('辩论历史正在压缩，请稍等', 3000);
     return false;
   }
   const rounds = _debateStaleCompressibleRounds(chat);
   if (!rounds.length) {
-    if (options.reason === 'manual' && typeof toast === 'function') toast('当前没有可压缩的已完成旧局');
+    if (options.reason === 'manual') DebateUiService.toast('当前没有可压缩的已完成旧局');
     return false;
   }
 
@@ -1289,7 +1290,7 @@ async function compressDebateChat(chat, options = {}) {
         foregroundTaskCreated = true;
         debateSetChatTaskMode(chat.id, 'debate_compress');
       }
-      if (typeof updateSendBtn === 'function') updateSendBtn();
+      DebateUiService.updateSendBtn();
     }
 
     let compressed = 0;
@@ -1301,17 +1302,15 @@ async function compressDebateChat(chat, options = {}) {
       _debateRenderRefresh(chat);
     }
     if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
-    if (typeof toast === 'function') {
-      toast(`✓ 已逐局压缩 ${compressed} 局辩论历史`, 3000);
-    }
+    DebateUiService.toast(`✓ 已逐局压缩 ${compressed} 局辩论历史`, 3000);
     return compressed > 0;
   } catch (e) {
     if (e && e.name === 'AbortError') {
-      if (typeof toast === 'function' && options.reason === 'manual') toast('已停止辩论压缩', 2000);
+      if (options.reason === 'manual') DebateUiService.toast('已停止辩论压缩', 2000);
       throw e;
     }
     console.error('[debate] compression failed:', e);
-    if (typeof toast === 'function') toast('辩论压缩失败：' + (e.message || e), 4000);
+    DebateUiService.toast('辩论压缩失败：' + (e.message || e), 4000);
     return false;
   } finally {
     if (chat && chat.debate) {
@@ -1323,7 +1322,7 @@ async function compressDebateChat(chat, options = {}) {
       if (foregroundTaskCreated) {
         debateClearChatTask(chat.id);
       }
-      if (typeof updateSendBtn === 'function') updateSendBtn();
+      DebateUiService.updateSendBtn();
     }
     _debateResumeManualWaitAfterCompression(chat, pausedManualWait);
   }
@@ -1332,17 +1331,17 @@ async function compressDebateChat(chat, options = {}) {
 async function manualCompressDebate(chat) {
   if (!chat || !chat.debate || chat.debate.type !== 'debate_mode') return false;
   if (isDebateCompressing(chat.id)) {
-    if (typeof toast === 'function') toast('辩论历史正在压缩，请稍等', 3000);
+    DebateUiService.toast('辩论历史正在压缩，请稍等', 3000);
     return false;
   }
   const roleErr = _debateValidateRole('judge', _debateNormalizeRoleConfig((chat.debate.roles && chat.debate.roles.judge) || {}));
   if (roleErr) {
-    if (typeof toast === 'function') toast(roleErr, 4000);
+    DebateUiService.toast(roleErr, 4000);
     return false;
   }
   const rounds = _debateStaleCompressibleRounds(chat);
   if (!rounds.length) {
-    if (typeof toast === 'function') toast('当前没有可压缩的已完成旧局');
+    DebateUiService.toast('当前没有可压缩的已完成旧局');
     return false;
   }
   const ok = confirm(
@@ -1374,13 +1373,11 @@ async function autoCompressDebateCheck(chat, options = {}) {
 
   const rounds = _debateStaleCompressibleRounds(chat);
   if (!rounds.length) {
-    if (typeof toast === 'function') toast('辩论上下文接近上限，但没有可压缩的已完成旧局（当前局不会压缩）', 4000);
+    DebateUiService.toast('辩论上下文接近上限，但没有可压缩的已完成旧局（当前局不会压缩）', 4000);
     return false;
   }
-  if (typeof toast === 'function') {
-    const reason = pct >= threshold ? `辩论上下文已达 ${Math.round(pct)}%` : `辩论剩余上下文不足 ${formatNumber(reserve)} token`;
-    toast(`📦 ${reason}，正在按局压缩旧局...`, 3000);
-  }
+  const reason = pct >= threshold ? `辩论上下文已达 ${Math.round(pct)}%` : `辩论剩余上下文不足 ${formatNumber(reserve)} token`;
+  DebateUiService.toast(`📦 ${reason}，正在按局压缩旧局...`, 3000);
   const ok = await compressDebateChat(chat, {
     reason: 'auto',
     signal: options.signal,
@@ -1410,8 +1407,8 @@ function _debateRefreshMessage(chat, msg, forceSave = false) {
     return;
   }
   // ⭐ forceSave 表示流式已结束：完整替换节点（清光标 + 跑 KaTeX），跟 refreshMsgNode 行为一致
-  if (forceSave && typeof refreshMsgNode === 'function') {
-    refreshMsgNode(idx, chat);
+  if (forceSave && DebateUiService.has('refreshMsgNode')) {
+    DebateUiService.refreshMsgNode(idx, chat);
     return;
   }
   // ⭐ 当前对话流式刷新：只改 .msg-content 的 innerHTML（与 _flushLastMsg 一致），不重建整条消息
@@ -1424,7 +1421,7 @@ function _debateRefreshMessage(chat, msg, forceSave = false) {
     wrap.innerHTML = renderFn(msg.content || '') + '<span class="cursor"></span>';
     const msgNode = wrap.closest('.message');
     if (msgNode) postRender(msgNode, { skipMath: true });
-    if (shouldFollow && typeof scrollBottom === 'function') scrollBottom();
+    if (shouldFollow) DebateUiService.scrollBottom();
   } else {
     // 节点还不存在（消息刚 push），全量渲染
     _debateRenderRefresh(chat);
@@ -1938,7 +1935,7 @@ async function _debateHandleMaxExchanges(chat, round, runtime) {
     debateClearChatTask(chat.id);
     debateSaveData();
     _debateRenderRefresh(chat);
-    if (typeof toast === 'function') toast('终审裁决调用失败：' + (e.message || String(e)), 5000);
+    DebateUiService.toast('终审裁决调用失败：' + (e.message || String(e)), 5000);
     return;
   }
 }
@@ -2005,7 +2002,7 @@ function _debateFinalJudgeTimeout(chatId) {
   _debateAdvanceRound(chat);
   debateSaveData();
   _debateRenderRefresh(chat);
-  if (typeof toast === 'function') toast(`超时未响应，已按评委裁决自动判${_debateSideName(pick)}胜利`, 4000);
+  DebateUiService.toast(`超时未响应，已按评委裁决自动判${_debateSideName(pick)}胜利`, 4000);
   if (chat.debate.status !== 'completed') {
     startDebate(chat.id).catch(e => {
       console.error('[debate] final judge timeout continue failed:', e);
@@ -2025,7 +2022,7 @@ function _debateManualPassTimeout(chatId) {
   chat.debate.updatedAt = Date.now();
   debateSaveData();
   _debateRenderRefresh(chat);
-  if (typeof toast === 'function') toast('人工审核超时未操作，已默认通过', 3000);
+  DebateUiService.toast('人工审核超时未操作，已默认通过', 3000);
   startDebate(chat.id).catch(e => {
     console.error('[debate] manual threshold timeout continue failed:', e);
   });

@@ -3,6 +3,7 @@
 // 项目 PPT 工作流：需求理解/澄清 → 叙事弧大纲 → 选择风格/主题 → 登记版式 → HTML 模板页 → 浏览器截图 → PPT 图片页 → 导出。
 
 const PptModeStateModule = window.AgentApp.require('state');
+const PptModeUiService = window.AgentApp.require('uiService');
 const pptModeState = PptModeStateModule.state;
 const pptModeSaveData = PptModeStateModule.saveData;
 const pptModePersistSettings = PptModeStateModule.persistSettings;
@@ -14,6 +15,14 @@ const pptModeSyncGlobalTaskState = PptModeStateModule.syncGlobalTaskState;
 const pptModeChatTaskById = PptModeStateModule.chatTaskById;
 const pptModeClearChatTask = PptModeStateModule.clearChatTask;
 const PptModeOrchestrationService = window.AgentApp.require('orchestrationService');
+
+function pptModeRefreshMessage(idx, chat) {
+  if (PptModeUiService.has('refreshMsgNode')) {
+    PptModeUiService.refreshMsgNode(idx, chat);
+  } else {
+    PptModeUiService.renderMessages();
+  }
+}
 
 const DEFAULT_PPT_UNDERSTAND_PROMPT = [
   '你是 项目 PPT 工作流 的演示策划总监。请理解用户要做的 PPT 主题、内容、用途、受众和语气，并为 PPT 自动命名。',
@@ -229,12 +238,12 @@ function disablePptModeUi(options = {}) {
   syncPptComposerHint();
   if (options.persist !== false) pptModePersistSettings();
   if (options.renderTools !== false && typeof renderToolList === 'function') renderToolList();
-  if (options.updateSend !== false && typeof updateSendBtn === 'function') updateSendBtn();
+  if (options.updateSend !== false) PptModeUiService.updateSendBtn();
 }
 
 async function fallbackToNormalChatFromPptMode(options = {}) {
   disablePptModeUi();
-  if (typeof toast === 'function') toast('已关闭 PPT 模式，改用普通聊天回答', 2200);
+  PptModeUiService.toast('已关闭 PPT 模式，改用普通聊天回答', 2200);
   await PptModeOrchestrationService.callAPI(undefined, { contextChecked: !!options.contextChecked });
 }
 
@@ -618,8 +627,9 @@ function refreshPptModeMessage(msgIdx, chat, options = {}) {
       existingPanel.replaceWith(newPanel);
       if (typeof postRender === 'function') postRender(newPanel);
     }
-  } else if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, chat);
-  else if (typeof renderMessages === 'function') renderMessages();
+  } else {
+    pptModeRefreshMessage(msgIdx, chat);
+  }
   pptModeSaveData();
 }
 
@@ -805,7 +815,7 @@ function savePptSettings() {
   syncPptComposerHint();
   pptModePersistSettings();
   closePptSettings();
-  if (typeof toast === 'function') toast('✓ PPT 设置已保存');
+  PptModeUiService.toast('✓ PPT 设置已保存');
 }
 
 function resetPptPromptsToDefault() {
@@ -886,8 +896,8 @@ function takePptGuidanceAttachments(chat) {
     if (att && !out.some(ex => ex && ex.id === att.id)) out.push({ ...att });
   }
   pptModeState.pendingAttachments = [];
-  if (typeof renderPendingAtts === 'function') renderPendingAtts();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  PptModeUiService.renderPendingAttachments();
+  PptModeUiService.updateSendBtn();
   return out;
 }
 
@@ -908,7 +918,7 @@ function handlePptGuidancePaste(e) {
       }
     }
   }
-  if (added && typeof toast === 'function') toast(`已加入 ${added} 个附件，点击继续后会发送给 PPT 流程`, 1800);
+  if (added) PptModeUiService.toast(`已加入 ${added} 个附件，点击继续后会发送给 PPT 流程`, 1800);
 }
 
 function handlePptGuidanceDragOver(e) {
@@ -923,7 +933,7 @@ function handlePptGuidanceDrop(e) {
     addAttachment(f, f.type && f.type.startsWith('image/') ? 'image' : 'file');
     added += 1;
   }
-  if (added && typeof toast === 'function') toast(`已加入 ${added} 个附件，点击继续后会发送给 PPT 流程`, 1800);
+  if (added) PptModeUiService.toast(`已加入 ${added} 个附件，点击继续后会发送给 PPT 流程`, 1800);
 }
 
 function renderPptStepMeta(metaObj) {
@@ -1088,8 +1098,7 @@ function togglePptPanel(idx) {
   const msg = c && c.messages && c.messages[idx];
   if (!msg || !msg.pptMode) return;
   msg.pptMode.expanded = msg.pptMode.expanded === false;
-  if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
-  else if (typeof renderMessages === 'function') renderMessages();
+  pptModeRefreshMessage(idx, c);
   pptModeSaveData();
 }
 
@@ -1110,7 +1119,7 @@ async function resumePptTaskFromPanel(idx, skipGuidance = false) {
   pptModeBeginChatTask(c.id, ctrl, { resetStop: true });
   pptModeSetChatTaskMode(c.id, 'ppt');
   pptModeSyncGlobalTaskState(c.id);
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  PptModeUiService.updateSendBtn();
   let since = msg.pptMode.progressIndex || 0;
   try {
     if (hasGuidance) {
@@ -1171,7 +1180,7 @@ async function resumePptTaskFromPanel(idx, skipGuidance = false) {
       pptModeClearChatTask(c.id);
     }
     pptModeSyncGlobalTaskState(c.id);
-    if (typeof updateSendBtn === 'function') updateSendBtn();
+    PptModeUiService.updateSendBtn();
   }
 }
 
@@ -1238,10 +1247,10 @@ function queuePptMidrunGuidanceFromComposer(chat, input, text) {
       refreshPptModeMessage(idx, chat);
     }
   }).catch(err => {
-    if (typeof toast === 'function') toast(`PPT 留言发送失败：${err && err.message ? err.message : err}`, 3000);
+    PptModeUiService.toast(`PPT 留言发送失败：${err && err.message ? err.message : err}`, 3000);
   });
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast('已发送到 PPT 流程，后续步骤会读取这条补充', 1800);
+  PptModeUiService.updateSendBtn();
+  PptModeUiService.toast('已发送到 PPT 流程，后续步骤会读取这条补充', 1800);
   return true;
 }
 
@@ -1266,14 +1275,14 @@ async function callAPIWithPptMode(options = {}) {
   };
   c.messages.push(aiMsg);
   const msgIdx = c.messages.length - 1;
-  renderMessages();
+  PptModeUiService.renderMessages();
   pptModeSaveData();
 
   const ctrl = new AbortController();
   pptModeBeginChatTask(c.id, ctrl, { resetStop: true });
   pptModeSetChatTaskMode(c.id, 'ppt');
   pptModeSyncGlobalTaskState(c.id);
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  PptModeUiService.updateSendBtn();
 
   try {
     setPptOnlyActive(aiMsg.pptMode, 'understand', '正在理解用户主题、内容、用途、受众和页数，并由 AI 命名 PPT。', {
@@ -1428,9 +1437,8 @@ async function callAPIWithPptMode(options = {}) {
     if (typeof renderToolList === 'function') renderToolList();
     pptModeClearChatTask(c.id);
     pptModeSaveData();
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-    else renderMessages();
-    if (typeof updateSendBtn === 'function') updateSendBtn();
+    pptModeRefreshMessage(msgIdx, c);
+    PptModeUiService.updateSendBtn();
   }
 }
 

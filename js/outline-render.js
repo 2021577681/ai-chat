@@ -6,6 +6,7 @@
 // ============ UI 渲染 ============
 
 const OutlineRenderStateModule = window.AgentApp.require('state');
+const OutlineRenderUiService = window.AgentApp.require('uiService');
 const outlineRenderState = OutlineRenderStateModule.state;
 const outlineRenderSaveData = OutlineRenderStateModule.saveData;
 const outlineRenderPersistSettings = OutlineRenderStateModule.persistSettings;
@@ -20,6 +21,20 @@ const outlineRenderUpdateChatTaskController = OutlineRenderStateModule.updateCha
 const outlineRenderRequestStopChatTask = OutlineRenderStateModule.requestStopChatTask;
 const outlineRenderClearChatTask = OutlineRenderStateModule.clearChatTask;
 const OutlineRenderOrchestrationService = window.AgentApp.require('orchestrationService');
+
+function outlineRenderRefreshMessage(idx, chat) {
+  if (OutlineRenderUiService.has('refreshMsgNode')) {
+    OutlineRenderUiService.refreshMsgNode(idx, chat);
+  } else if (!chat || outlineRenderIsCurrentChat(chat.id)) {
+    OutlineRenderUiService.renderMessages();
+  }
+}
+
+function outlineRenderRenderMessagesIfCurrent(chat) {
+  if (!chat || outlineRenderIsCurrentChat(chat.id)) {
+    OutlineRenderUiService.renderMessages();
+  }
+}
 
 function renderOutlinePanel(m, idx) {
   if (!m.outline) return '';
@@ -350,8 +365,7 @@ function toggleOutlineDiffSummary(idx) {
   const c = outlineRenderCurrentChat();
   if (!c || !c.messages[idx] || !c.messages[idx].outline || !c.messages[idx].outline.diffSummary) return;
   c.messages[idx].outline.diffSummary.expanded = !c.messages[idx].outline.diffSummary.expanded;
-  if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
-  else if (typeof renderMessages === 'function') renderMessages();
+  outlineRenderRefreshMessage(idx, c);
   outlineRenderSaveData();
 }
 
@@ -371,13 +385,12 @@ async function restoreOutlineCheckpoint(idx) {
       undoCheckpointId,
       redoCheckpointId: result.safetyCheckpoint && result.safetyCheckpoint.id
     };
-    if (typeof toast === 'function') toast('已撤销修改');
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
-    else if (typeof renderMessages === 'function') renderMessages();
+    OutlineRenderUiService.toast('已撤销修改');
+    outlineRenderRefreshMessage(idx, c);
     outlineRenderSaveData();
-  } else if (typeof toast === 'function') {
+  } else {
     const text = typeof result === 'string' ? result : ((result && result.text) || '恢复 checkpoint 失败');
-    toast(text.slice(0, 180), 5000);
+    OutlineRenderUiService.toast(text.slice(0, 180), 5000);
   }
 }
 
@@ -395,7 +408,7 @@ async function redoOutlineCheckpoint(idx) {
     const skippedCount = Array.isArray(result.skipped) ? result.skipped.length : 0;
     if (!restoredCount && !deletedCount && skippedCount) {
       const reason = result.skipped.slice(0, 3).map(x => `${x.path || '?'}: ${x.reason || '?'}`).join('；');
-      if (typeof toast === 'function') toast(`重做未恢复文件：${reason}`, 6000);
+      OutlineRenderUiService.toast(`重做未恢复文件：${reason}`, 6000);
       return;
     }
     outline.restoreState = {
@@ -404,13 +417,12 @@ async function redoOutlineCheckpoint(idx) {
       undoCheckpointId: result.safetyCheckpoint && result.safetyCheckpoint.id,
       redoCheckpointId,
     };
-    if (typeof toast === 'function') toast('已重做修改');
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
-    else if (typeof renderMessages === 'function') renderMessages();
+    OutlineRenderUiService.toast('已重做修改');
+    outlineRenderRefreshMessage(idx, c);
     outlineRenderSaveData();
-  } else if (typeof toast === 'function') {
+  } else {
     const text = typeof result === 'string' ? result : ((result && result.text) || '重做 checkpoint 失败');
-    toast(text.slice(0, 180), 5000);
+    OutlineRenderUiService.toast(text.slice(0, 180), 5000);
   }
 }
 
@@ -431,7 +443,7 @@ function updateOutlinePanel(msgIdx, targetChat) {
   
   const msgEl = document.querySelector(`.message[data-idx="${msgIdx}"]`);
   if (!msgEl) {
-    if (typeof renderMessages === 'function' && outlineRenderIsCurrentChat(c.id)) renderMessages();
+    outlineRenderRenderMessagesIfCurrent(c);
     return false;
   }
   
@@ -462,7 +474,7 @@ function updateOutlinePanel(msgIdx, targetChat) {
       }
     }
   } else {
-    if (typeof renderMessages === 'function' && outlineRenderIsCurrentChat(c.id)) renderMessages();
+    outlineRenderRenderMessagesIfCurrent(c);
     return false;
   }
   
@@ -576,19 +588,19 @@ function saveOutlineSettings() {
     else btn.classList.remove('outline-active');
   }
   
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  OutlineRenderUiService.updateSendBtn();
   closeOutlineSettings();
-  if (typeof toast === 'function') toast('✓ 已保存');
+  OutlineRenderUiService.toast('✓ 已保存');
 }
 
 function resetOutlinePrompt() {
   resetOutlinePromptField('outline_systemPrompt');
-  if (typeof toast === 'function') toast('✓ 已恢复默认提示词');
+  OutlineRenderUiService.toast('✓ 已恢复默认提示词');
 }
 
 function resetAllOutlinePrompts() {
   for (const [id] of OUTLINE_PROMPT_FIELDS) resetOutlinePromptField(id);
-  if (typeof toast === 'function') toast('✓ 已恢复全部大纲提示词默认值');
+  OutlineRenderUiService.toast('✓ 已恢复全部大纲提示词默认值');
 }
 
 // ============ 用户介入操作 ============
@@ -600,18 +612,18 @@ async function resumeOutline(msgIdx) {
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
   
   if (outlineRenderIsChatGenerating(c.id)) {
-    if (typeof toast === 'function') toast('⏳ 已有任务在执行中', 3000);
+    OutlineRenderUiService.toast('⏳ 已有任务在执行中', 3000);
     return;
   }
   
   const aiMsg = c.messages[msgIdx];
   if (aiMsg.outline.status !== 'paused' && aiMsg.outline.status !== 'error') {
-    if (typeof toast === 'function') toast('该任务不处于可恢复状态', 2500);
+    OutlineRenderUiService.toast('该任务不处于可恢复状态', 2500);
     return;
   }
   
   if (!aiMsg.outline._snap) {
-    if (typeof toast === 'function') toast('❌ 任务状态已丢失（可能因刷新页面），无法继续', 4000);
+    OutlineRenderUiService.toast('❌ 任务状态已丢失（可能因刷新页面），无法继续', 4000);
     return;
   }
   
@@ -664,10 +676,9 @@ async function finishOutlineNow(msgIdx, options = {}) {
     aiMsg.outline.inProgress = true;
     aiMsg.outline.progressText = '🏁 已请求立即收尾，正在停止当前轮...';
     aiMsg.outline.expanded = true;
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-    else if (typeof renderMessages === 'function' && outlineRenderIsCurrentChat(c.id)) renderMessages();
+    outlineRenderRefreshMessage(msgIdx, c);
     outlineRenderSaveData();
-    if (typeof toast === 'function') toast('🏁 已请求收尾，正在停止当前轮并整理最终回答', 3000);
+    OutlineRenderUiService.toast('🏁 已请求收尾，正在停止当前轮并整理最终回答', 3000);
     if (outlineRenderRequestStopChatTask(taskChatId)) {
       // 已按对话中止当前轮，catch 分支会进入收尾
     } else if (outlineRenderState.abortCtrl) {
@@ -687,7 +698,7 @@ async function finishOutlineNow(msgIdx, options = {}) {
       return;
     }
     if (!aiMsg.outline._snap) {
-      if (typeof toast === 'function') toast('❌ 任务状态已丢失，无法收尾', 4000);
+      OutlineRenderUiService.toast('❌ 任务状态已丢失，无法收尾', 4000);
       return;
     }
     
@@ -695,15 +706,15 @@ async function finishOutlineNow(msgIdx, options = {}) {
     outlineRenderBeginChatTask(taskChatId, abortCtrl, { resetStop: true });
     outlineRenderSetChatTaskMode(taskChatId, 'outline', { outlineForceFinish: false });
     outlineRenderUpdateChatTaskController(taskChatId, abortCtrl);
-    if (typeof updateSendBtn === 'function') updateSendBtn();
-    if (typeof renderChatList === 'function') renderChatList();
+    OutlineRenderUiService.updateSendBtn();
+    OutlineRenderUiService.renderChatList();
     
     aiMsg.outline.status = 'truncated';
     aiMsg.outline.inProgress = true;
     aiMsg.outline.finishRequested = true;
     aiMsg.outline.progressText = '🏁 正在整理最终回答...';
     aiMsg.outline.expanded = true;
-    if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
+    outlineRenderRefreshMessage(msgIdx, c);
     
     const snap = aiMsg.outline._snap;
     let shouldClearSnap = false;
@@ -738,12 +749,12 @@ async function finishOutlineNow(msgIdx, options = {}) {
       aiMsg.outline.expanded = false;
       shouldClearSnap = true;
       delete aiMsg.outline.finishRequested;
-      if (typeof toast === 'function') toast('🏁 已收尾', 3000);
+      OutlineRenderUiService.toast('🏁 已收尾', 3000);
     } catch (e) {
       if (e.name === 'AbortError') {
         aiMsg.outline.status = 'paused';  // 收尾过程被中断 → 回退到暂停
         delete aiMsg.outline.finishRequested;
-        if (typeof toast === 'function') toast('⏹ 收尾被中断', 3000);
+        OutlineRenderUiService.toast('⏹ 收尾被中断', 3000);
       } else {
         aiMsg.outline.status = 'error';
         delete aiMsg.outline.finishRequested;
@@ -755,16 +766,15 @@ async function finishOutlineNow(msgIdx, options = {}) {
       if (shouldClearSnap) delete aiMsg.outline._snap;
       aiMsg._endTime = Date.now();
       outlineRenderClearChatTask(taskChatId);
-      if (typeof updateSendBtn === 'function') updateSendBtn();
-      if (typeof renderChatList === 'function') renderChatList();
-      if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx, c);
-      else if (typeof renderMessages === 'function' && outlineRenderIsCurrentChat(c.id)) renderMessages();
+      OutlineRenderUiService.updateSendBtn();
+      OutlineRenderUiService.renderChatList();
+      outlineRenderRefreshMessage(msgIdx, c);
       outlineRenderSaveData();
     }
     return;
   }
   
-  if (typeof toast === 'function') toast('当前任务状态不支持收尾操作', 2500);
+  OutlineRenderUiService.toast('当前任务状态不支持收尾操作', 2500);
 }
 
 // ⭐ 硬中断：当 fetch 卡死、abort 信号失效时的逃生通道
@@ -800,11 +810,10 @@ function _hardAbortOutline(msgIdx) {
   }
   if (!aiMsg._endTime) aiMsg._endTime = Date.now();
   
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
-  else if (typeof renderMessages === 'function') renderMessages();
+  OutlineRenderUiService.updateSendBtn();
+  outlineRenderRefreshMessage(msgIdx);
   outlineRenderSaveData();
-  if (typeof toast === 'function') toast('🛑 已强制中断', 3000);
+  OutlineRenderUiService.toast('🛑 已强制中断', 3000);
 }
 
 // ❌ 取消（彻底放弃）
@@ -832,10 +841,9 @@ function cancelOutline(msgIdx) {
   }
   
   if (!aiMsg._endTime) aiMsg._endTime = Date.now();
-  if (typeof refreshMsgNode === 'function') refreshMsgNode(msgIdx);
-  else if (typeof renderMessages === 'function') renderMessages();
+  outlineRenderRefreshMessage(msgIdx);
   outlineRenderSaveData();
-  if (typeof toast === 'function') toast('任务已取消', 2000);
+  OutlineRenderUiService.toast('任务已取消', 2000);
 }
 
 function toggleOutline() {
@@ -863,8 +871,8 @@ function toggleOutline() {
     else btn.classList.remove('outline-active');
   }
   outlineRenderPersistSettings();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof toast === 'function') toast(s.useOutline ? '✓ 已启用大纲模式' : '✓ 已关闭大纲模式');
+  OutlineRenderUiService.updateSendBtn();
+  OutlineRenderUiService.toast(s.useOutline ? '✓ 已启用大纲模式' : '✓ 已关闭大纲模式');
 }
 
 window.AgentApp.define('outlineRender', {

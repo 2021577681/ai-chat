@@ -520,6 +520,8 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .message:hover .msg-actions{opacity:1}
 .msg-action{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:12px;padding:2px 6px;border-radius:4px}
 .msg-action:hover{background:var(--bg-hover);color:var(--text)}
+.msg-action.danger{color:var(--danger)}
+.msg-action.danger:hover{background:rgba(239,68,68,.08);color:var(--danger)}
 .user-msg-actions{justify-content:flex-end;align-items:center;gap:4px;opacity:1}
 .user-msg-action{
   width:24px;

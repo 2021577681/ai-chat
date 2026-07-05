@@ -1,6 +1,9 @@
 const StateConfig = (typeof window !== 'undefined' && window.AgentApp)
   ? window.AgentApp.require('config')
   : null;
+const StateUiService = (typeof window !== 'undefined' && window.AgentApp)
+  ? window.AgentApp.require('uiService')
+  : null;
 const STATE_REFLECTION_PRESETS = StateConfig ? StateConfig.REFLECTION_PRESETS : REFLECTION_PRESETS;
 const STATE_PLAN_PRESETS = StateConfig ? StateConfig.PLAN_PRESETS : PLAN_PRESETS;
 const STATE_BUILTIN_TOOLS = StateConfig ? StateConfig.BUILTIN_TOOLS : BUILTIN_TOOLS;
@@ -17,6 +20,12 @@ const STORAGE_KEYS = StateConfig
       tools: TOOLS_KEY,
       builtinToolsLoaded: BUILTIN_TOOLS_LOADED_KEY
     };
+
+function stateToast(message, ms) {
+  if (StateUiService && typeof StateUiService.toast === 'function') {
+    StateUiService.toast(message, ms);
+  }
+}
 
 // ============ 全局状态 ============
 let state = {
@@ -631,9 +640,7 @@ function saveData() {
     }
   } catch (e) {
     console.error('[saveData] 严重错误:', e);
-    if (typeof toast === 'function') {
-      toast('⚠️ 保存失败：' + e.message, 5000);
-    }
+    stateToast('⚠️ 保存失败：' + e.message, 5000);
   }
 }
 
@@ -668,9 +675,7 @@ function handleStorageQuotaExceeded() {
     try {
       const payload = serializeChatsWithStrippedAttachments();
       storage.set(STORAGE_KEYS.store, payload);
-      if (typeof toast === 'function') {
-        toast(`⚠️ 存储已满，已自动删除 ${oldCount - 10} 个旧对话`, 5000);
-      }
+      stateToast(`⚠️ 存储已满，已自动删除 ${oldCount - 10} 个旧对话`, 5000);
       return;
     } catch (e) {
       console.warn('[紧急清理] 删除旧对话后仍超限');
@@ -710,15 +715,11 @@ function handleStorageQuotaExceeded() {
       currentId: state.currentId
     });
     storage.set(STORAGE_KEYS.store, payload);
-    if (typeof toast === 'function') {
-      toast('⚠️ 存储空间不足，已清理所有附件', 5000);
-    }
+    stateToast('⚠️ 存储空间不足，已清理所有附件', 5000);
   } catch (e) {
     // 策略 4：放弃保存对话历史，但保证设置不丢
     console.error('[紧急清理] 完全无法保存对话:', e);
-    if (typeof toast === 'function') {
-      toast('❌ 存储已满，本次对话无法保存。建议清空旧对话。', 8000);
-    }
+    stateToast('❌ 存储已满，本次对话无法保存。建议清空旧对话。', 8000);
   }
 }
 
@@ -998,7 +999,7 @@ function resetBuiltinTools() {
   persistTools();
   storage.set(STORAGE_KEYS.builtinToolsLoaded, JSON.stringify(STATE_BUILTIN_TOOLS.map(t => t.name)));
   if (typeof renderToolList === 'function') renderToolList();
-  if (typeof toast === 'function') toast('✓ 内置工具已重置');
+  stateToast('✓ 内置工具已重置');
 }
 
 // ⭐ 工具：手动清理大附件（控制台可调用）
@@ -1025,9 +1026,7 @@ function cleanupStorage() {
   }
   
   saveData();
-  if (typeof toast === 'function') {
-    toast(`✓ 已清理 ${cleared} 个附件，释放 ${savedMB.toFixed(1)} MB`, 4000);
-  }
+  stateToast(`✓ 已清理 ${cleared} 个附件，释放 ${savedMB.toFixed(1)} MB`, 4000);
   console.log(`[清理] 共清理 ${cleared} 个附件，约 ${savedMB.toFixed(1)} MB`);
 }
 

@@ -1,5 +1,11 @@
 // ============ Sidebar File Explorer ============
 
+const FileExplorerUiService = window.AgentApp.require('uiService');
+
+function fileExplorerToast(message, ms) {
+  FileExplorerUiService.toast(message, ms);
+}
+
 const FILE_EXPLORER_STATE = {
   visible: false,
   path: '.',
@@ -1000,7 +1006,7 @@ function enforceInlineFileResponsive() {
   if (!panel || panel.hidden) return;
   if (!inlineFileCanStayOpen()) {
     closeInlineFilePanel();
-    if (typeof toast === 'function') toast('窗口较窄，已关闭文件内容列');
+    fileExplorerToast('窗口较窄，已关闭文件内容列');
   }
 }
 
@@ -1031,7 +1037,7 @@ function showInlineFilePanel(kind, path) {
     FILE_EXPLORER_STATE.inlineChatWidth = 50;
   }
   if (!inlineFileCanStayOpen()) {
-    if (typeof toast === 'function') toast(inlineFileOpenBlockedMessage());
+    fileExplorerToast(inlineFileOpenBlockedMessage());
     return false;
   }
   const mainContent = document.getElementById('mainContent');
@@ -1202,7 +1208,7 @@ function toggleFileEditorCodePreview() {
 async function openTextInMainPanel(path, initialContent = null, initialSize = null) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerTextFile(normalizedPath)) {
-    if (typeof toast === 'function') toast('暂只支持文本类文件');
+    fileExplorerToast('暂只支持文本类文件');
     return false;
   }
   if (!showInlineFilePanel('text', normalizedPath)) return false;
@@ -1312,7 +1318,7 @@ function toggleInlinePythonPreview(force) {
 async function openPdfInMainPanel(path, existingUrl = '') {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerPdfFile(normalizedPath)) {
-    if (typeof toast === 'function') toast('仅支持 PDF 文件');
+    fileExplorerToast('仅支持 PDF 文件');
     return false;
   }
   if (!showInlineFilePanel('pdf', normalizedPath)) return false;
@@ -1359,7 +1365,7 @@ function copyInlineFileContent() {
   const value = inlineFileCurrentValue();
   if (value === null || value === undefined) return;
   navigator.clipboard.writeText(value).then(() => {
-    if (typeof toast === 'function') toast('内容已复制');
+    fileExplorerToast('内容已复制');
   });
 }
 
@@ -1426,7 +1432,7 @@ function closeFileEditor(force = false) {
 async function openFileEditor(path) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerTextFile(normalizedPath)) {
-    if (typeof toast === 'function') toast('暂只支持文本类文件');
+    fileExplorerToast('暂只支持文本类文件');
     return;
   }
   const modal = document.getElementById('fileEditorModal');
@@ -1510,7 +1516,7 @@ async function saveFileEditor() {
     if (FILE_EXPLORER_STATE.editorCodePreview) updateFileEditorCodePreview();
     if (FILE_EXPLORER_STATE.editorPythonMode) refreshFileEditorCodeMirror() || renderPythonEditor();
     setFileEditorStatus(`已保存 ${formatSize(Number(r.bytes_written || 0))}`, 'ok');
-    if (typeof toast === 'function') toast('文件已保存');
+    fileExplorerToast('文件已保存');
     if (FILE_EXPLORER_STATE.visible) refreshFileExplorer();
   } catch (e) {
     setFileEditorStatus(e.message || String(e), 'error');
@@ -1522,7 +1528,7 @@ function copyFileEditorContent() {
   const textarea = fileEditorTextarea();
   if (!textarea) return;
   navigator.clipboard.writeText(textarea.value).then(() => {
-    if (typeof toast === 'function') toast('内容已复制');
+    fileExplorerToast('内容已复制');
   });
 }
 
@@ -1533,11 +1539,9 @@ async function openFileWithSystemDefault(path) {
     const r = await callAgentBackend('open_file_default', { path: normalizedPath });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '系统默认应用打开失败');
-    if (typeof toast === 'function') toast(`已使用系统默认应用打开：${fileExplorerBasename(normalizedPath)}`);
+    fileExplorerToast(`已使用系统默认应用打开：${fileExplorerBasename(normalizedPath)}`);
   } catch (e) {
-    if (typeof toast === 'function') {
-      toast(`无法使用系统默认应用打开：${e.message || String(e)}`);
-    }
+    fileExplorerToast(`无法使用系统默认应用打开：${e.message || String(e)}`);
   }
 }
 
@@ -1568,11 +1572,11 @@ function fileExplorerBasename(path) {
 async function compileTexFile(path = FILE_EXPLORER_STATE.contextPath) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerTexFile(normalizedPath)) {
-    if (typeof toast === 'function') toast('仅支持编译 .tex 文件');
+    fileExplorerToast('仅支持编译 .tex 文件');
     return;
   }
   try {
-    if (typeof toast === 'function') toast('正在调用 xelatex 编译...');
+    fileExplorerToast('正在调用 xelatex 编译...');
     if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
     const r = await callAgentBackend('compile_tex', { path: normalizedPath }, { skipConfirm: true });
     if (typeof r === 'string') throw new Error(r);
@@ -1581,12 +1585,12 @@ async function compileTexFile(path = FILE_EXPLORER_STATE.contextPath) {
       throw new Error(((r && r.error) || 'TeX 编译失败') + installHint);
     }
     const pdfPath = normalizeExplorerPath(r.pdf_path || normalizedPath.replace(/\.tex$/i, '.pdf'));
-    if (typeof toast === 'function') toast('编译完成，正在打开 PDF...');
+    fileExplorerToast('编译完成，正在打开 PDF...');
     if (FILE_EXPLORER_STATE.visible) refreshFileExplorer();
     await openPdfViewer(pdfPath);
   } catch (e) {
     const message = e.message || String(e);
-    if (typeof toast === 'function') toast(message, 6000);
+    if (FileExplorerUiService.has('toast')) fileExplorerToast(message, 6000);
     else alert(message);
   }
 }
@@ -1620,7 +1624,7 @@ function dataUrlToBlob(dataUrl) {
 async function openPdfViewer(path) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerPdfFile(normalizedPath)) {
-    if (typeof toast === 'function') toast('仅支持 PDF 文件');
+    fileExplorerToast('仅支持 PDF 文件');
     return;
   }
   const modal = document.getElementById('pdfViewerModal');
@@ -1682,7 +1686,7 @@ function clearImageViewerObjectUrl() {
 async function openImageViewer(path) {
   const normalizedPath = normalizeExplorerPath(path);
   if (!isFileExplorerImageFile(normalizedPath)) {
-    if (typeof toast === 'function') toast('仅支持图片文件');
+    fileExplorerToast('仅支持图片文件');
     return;
   }
   const modal = document.getElementById('imageViewerModal');
@@ -1768,7 +1772,7 @@ async function openMediaViewer(path) {
   const normalizedPath = normalizeExplorerPath(path);
   const kind = isFileExplorerVideoFile(normalizedPath) ? 'video' : (isFileExplorerAudioFile(normalizedPath) ? 'audio' : '');
   if (!kind) {
-    if (typeof toast === 'function') toast('仅支持音频/视频文件');
+    fileExplorerToast('仅支持音频/视频文件');
     return;
   }
 
@@ -1890,18 +1894,18 @@ async function createFileExplorerFile(basePath = FILE_EXPLORER_STATE.contextPath
   if (name === null) return;
   const path = uniqueExplorerChildPath(basePath, name);
   if (!path) {
-    if (typeof toast === 'function') toast('文件名不能为空，且不能包含路径分隔符');
+    fileExplorerToast('文件名不能为空，且不能包含路径分隔符');
     return;
   }
   try {
     const r = await callAgentBackend('create_file', { path, content: '' }, { skipConfirm: true });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '新建文件失败');
-    if (typeof toast === 'function') toast('已新建文件');
+    fileExplorerToast('已新建文件');
     await loadFileExplorer(basePath || FILE_EXPLORER_STATE.path);
     openFileEditor(path);
   } catch (e) {
-    if (typeof toast === 'function') toast(e.message || String(e));
+    fileExplorerToast(e.message || String(e));
   }
 }
 
@@ -1910,17 +1914,17 @@ async function createFileExplorerFolder(basePath = FILE_EXPLORER_STATE.contextPa
   if (name === null) return;
   const path = uniqueExplorerChildPath(basePath, name);
   if (!path) {
-    if (typeof toast === 'function') toast('文件夹名不能为空，且不能包含路径分隔符');
+    fileExplorerToast('文件夹名不能为空，且不能包含路径分隔符');
     return;
   }
   try {
     const r = await callAgentBackend('create_dir', { path }, { skipConfirm: true });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '新建文件夹失败');
-    if (typeof toast === 'function') toast('已新建文件夹');
+    fileExplorerToast('已新建文件夹');
     refreshFileExplorer();
   } catch (e) {
-    if (typeof toast === 'function') toast(e.message || String(e));
+    fileExplorerToast(e.message || String(e));
   }
 }
 
@@ -1932,10 +1936,10 @@ async function switchFileExplorerWorkspace(path = FILE_EXPLORER_STATE.contextPat
     if (!r || !r.ok) throw new Error((r && r.error) || '切换工作区失败');
     FILE_EXPLORER_STATE.path = '.';
     FILE_EXPLORER_STATE.entries = [];
-    if (typeof toast === 'function') toast('已切换工作区');
+    fileExplorerToast('已切换工作区');
     await loadFileExplorer('.');
   } catch (e) {
-    if (typeof toast === 'function') toast(e.message || String(e));
+    fileExplorerToast(e.message || String(e));
   }
 }
 
@@ -1943,9 +1947,9 @@ async function copyFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
   const normalizedPath = normalizeExplorerPath(path);
   try {
     await navigator.clipboard.writeText(normalizedPath);
-    if (typeof toast === 'function') toast('路径已复制');
+    fileExplorerToast('路径已复制');
   } catch (e) {
-    if (typeof toast === 'function') toast('复制失败：' + (e.message || String(e)));
+    fileExplorerToast('复制失败：' + (e.message || String(e)));
   }
 }
 
@@ -1956,7 +1960,7 @@ async function renameFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
   if (nextName === null) return;
   const newPath = siblingExplorerPath(normalizedPath, nextName);
   if (!newPath) {
-    if (typeof toast === 'function') toast('名称不能为空，且不能包含路径分隔符');
+    fileExplorerToast('名称不能为空，且不能包含路径分隔符');
     return;
   }
   if (newPath === normalizedPath) return;
@@ -1968,10 +1972,10 @@ async function renameFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
     if (FILE_EXPLORER_STATE.pdfPath === normalizedPath) FILE_EXPLORER_STATE.pdfPath = newPath;
     if (FILE_EXPLORER_STATE.imagePath === normalizedPath) FILE_EXPLORER_STATE.imagePath = newPath;
     if (FILE_EXPLORER_STATE.mediaPath === normalizedPath) FILE_EXPLORER_STATE.mediaPath = newPath;
-    if (typeof toast === 'function') toast('已重命名');
+    fileExplorerToast('已重命名');
     refreshFileExplorer();
   } catch (e) {
-    if (typeof toast === 'function') toast(e.message || String(e));
+    fileExplorerToast(e.message || String(e));
   }
 }
 
@@ -1985,10 +1989,10 @@ async function deleteFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
     if (FILE_EXPLORER_STATE.pdfPath === normalizedPath) closePdfViewer();
     if (FILE_EXPLORER_STATE.imagePath === normalizedPath) closeImageViewer();
     if (FILE_EXPLORER_STATE.mediaPath === normalizedPath) closeMediaViewer();
-    if (typeof toast === 'function') toast('已删除');
+    fileExplorerToast('已删除');
     refreshFileExplorer();
   } catch (e) {
-    if (typeof toast === 'function') toast(e.message || String(e));
+    fileExplorerToast(e.message || String(e));
   }
 }
 
@@ -2072,3 +2076,32 @@ window.copyInlineFileContent = copyInlineFileContent;
 window.openInlineFileInNewTab = openInlineFileInNewTab;
 window.toggleInlineMarkdownPreview = toggleInlineMarkdownPreview;
 window.toggleInlineFileSide = toggleInlineFileSide;
+
+window.AgentApp.define('fileExplorer', {
+  FILE_EXPLORER_STATE,
+  normalizeExplorerPath,
+  joinExplorerPath,
+  parentExplorerPath,
+  renderFileExplorer,
+  loadFileExplorer,
+  refreshFileExplorer,
+  resetFileExplorerToRoot,
+  toggleSidebarExplorer,
+  setSidebarExplorerMode,
+  openFileExplorerPath,
+  openFileEditor,
+  closeFileEditor,
+  saveFileEditor,
+  openPdfViewer,
+  openImageViewer,
+  openMediaViewer,
+  openCurrentFileInMainPanel,
+  openTextInMainPanel,
+  openPdfInMainPanel,
+  closeInlineFilePanel,
+  createFileExplorerFile,
+  createFileExplorerFolder,
+  renameFileExplorerPath,
+  deleteFileExplorerPath,
+  switchFileExplorerWorkspace
+});

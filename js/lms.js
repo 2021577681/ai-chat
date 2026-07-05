@@ -723,6 +723,46 @@ function lmsRenderAttendance(data) {
   return parts.join('\n');
 }
 
+window.AgentApp.define('lms', {
+  LMS_COOKIE_KEY,
+  LMS_CACHE_KEY,
+  LMS_UPLOAD_CACHE,
+  lmsGetCookie,
+  lmsSetCookie,
+  lmsParseSession,
+  lmsApiGet,
+  lmsLoginRequest,
+  lmsApplyLoginCookie,
+  lmsScoreQuery,
+  lmsScheduleQuery,
+  lmsEmptyRoomsQuery,
+  lmsAttendanceQuery,
+  lmsJudgeQuery,
+  lmsTrainingPlanQuery,
+  lmsRenderCourses,
+  lmsRenderTodos,
+  lmsRenderHomeworkDetail,
+  lmsRenderMaterials,
+  lmsRenderScores,
+  lmsRenderSchedule,
+  lmsRenderEmptyRooms,
+  lmsRenderAttendance,
+  lmsRenderTrainingPlan,
+  lmsToolScores,
+  lmsToolSchedule,
+  lmsToolEmptyRooms,
+  lmsToolAttendance,
+  lmsToolTrainingPlan,
+  lmsToolStatus,
+  lmsToolCourses,
+  lmsToolTodos,
+  lmsToolHomework,
+  lmsToolMaterials,
+  lmsToolFindCourse,
+  lmsToolDownload,
+  lmsToolSetCookie
+});
+
 function lmsMarkdownCell(value) {
   if (value === null || value === undefined || value === '') return '-';
   return String(value).replace(/\|/g, '\\|').replace(/\s*\n+\s*/g, ' ').trim() || '-';

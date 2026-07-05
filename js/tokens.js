@@ -1,6 +1,7 @@
 // ============ Token 估算 & 精确计数 & 上下文管理 ============
 
 const TokensStateModule = window.AgentApp.require('state');
+const TokensUiService = window.AgentApp.require('uiService');
 const tokensState = TokensStateModule.state;
 const tokensSaveData = TokensStateModule.saveData;
 const tokensCurrentChat = TokensStateModule.currentChat;
@@ -589,7 +590,7 @@ function formatNumber(n) {
 function showTokenDetails() {
   const c = tokensCurrentChat();
   if (!c || !c.messages.length) {
-    toast('当前没有对话');
+    TokensUiService.toast('当前没有对话');
     return;
   }
   
@@ -719,7 +720,7 @@ function resetTokenStats() {
   }
   updateTokenDisplay();
   document.getElementById('tokenDetailModal').classList.remove('show');
-  toast('已重置');
+  TokensUiService.toast('已重置');
 }
 
 // ============ 压缩对话 ============
@@ -764,12 +765,12 @@ function undoCompressionSnapshot(undoId) {
   const c = tokensCurrentChat();
   const snap = undoId ? _compressionUndoSnapshots[undoId] : null;
   if (!c || !snap || (snap.chatId && snap.chatId !== c.id)) {
-    toast('压缩快照已失效，无法撤销');
+    TokensUiService.toast('压缩快照已失效，无法撤销');
     return;
   }
   const summaryIdx = c.messages.findIndex(m => m && m._isSummary && m._compressionUndoId === undoId);
   if (summaryIdx < 0) {
-    toast('未找到对应的压缩摘要，无法撤销');
+    TokensUiService.toast('未找到对应的压缩摘要，无法撤销');
     return;
   }
   if (!confirm(`撤销这次压缩？\n\n会把摘要还原为原来的 ${snap.compressedMessages.length} 条消息，摘要之后的新消息会保留。`)) {
@@ -785,11 +786,11 @@ function undoCompressionSnapshot(undoId) {
   stats.time = 0;
   
   tokensSaveData();
-  renderChatList();
-  renderMessages();
+  TokensUiService.renderChatList();
+  TokensUiService.renderMessages();
   updateTokenDisplay();
   if (typeof scheduleAccurateTokenCount === 'function') scheduleAccurateTokenCount(c.id);
-  toast(`已撤销压缩，恢复 ${restored.length} 条消息`);
+  TokensUiService.toast(`已撤销压缩，恢复 ${restored.length} 条消息`);
 }
 
 function compressionString(value) {
@@ -820,6 +821,10 @@ const COMPRESSION_REQUIRED_HEADINGS = [
   '下一步建议',
   '可丢弃上下文'
 ];
+
+function normalizeCompressionHeading(text) {
+  return compressionString(text).replace(/[锛?]+$/, '').trim();
+}
 
 function compressHeadingSet(text) {
   const headings = new Set();
@@ -910,7 +915,7 @@ function compressionMissingRefs(summary, refs) {
 
 function compressionValidateSummary(summary, refs) {
   const headings = compressHeadingSet(summary);
-  const missingHeadings = COMPRESSION_REQUIRED_HEADINGS.filter(h => !headings.has(h));
+  const missingHeadings = COMPRESSION_REQUIRED_HEADINGS.filter(h => !headings.has(h) && !headings.has(normalizeCompressionHeading(h)));
   const missingRefs = compressionMissingRefs(summary, refs);
   const missingRefCount = missingRefs.artifactIds.length + missingRefs.checkpointIds.length + missingRefs.filePaths.length;
   return {
@@ -1155,20 +1160,20 @@ function formatMessageForCompression(m, idx) {
 
 async function manualCompress() {
   const c = tokensCurrentChat();
-  if (!c || c.messages.length < 4) { toast('对话太短，无需压缩'); return; }
+  if (!c || c.messages.length < 4) { TokensUiService.toast('对话太短，无需压缩'); return; }
   if (c.debate && c.debate.type === 'debate_mode' && typeof manualCompressDebate === 'function') {
     if (typeof isDebateRunning === 'function' && isDebateRunning(c.id)) {
-      toast('辩论正在发言或评审，请稍等');
+      TokensUiService.toast('辩论正在发言或评审，请稍等');
       return;
     }
     await manualCompressDebate(c);
     return;
   }
   if (tokensIsChatGenerating(c.id)) {
-    toast('此对话已有任务正在执行，请稍等');
+    TokensUiService.toast('此对话已有任务正在执行，请稍等');
     return;
   }
-  if (!tokensState.settings.apiKey) { toast('请先配置 API Key'); return; }
+  if (!tokensState.settings.apiKey) { TokensUiService.toast('请先配置 API Key'); return; }
   if (!confirm(`确定要压缩当前对话历史吗？\n\n会保留最近 ${tokensState.settings.compressKeepLast || 4} 条消息，前面的对话会被 AI 总结成结构化摘要。\n\n压缩完成后可在摘要卡片撤销（刷新页面前有效）。`)) return;
   await compressChat(c, { reason: 'manual', touchGlobalGenerating: true });
 }
@@ -1197,7 +1202,7 @@ async function autoCompressCheck(chat = null, options = {}) {
     const reason = pct >= threshold
       ? `上下文已达 ${Math.round(pct)}%`
       : `剩余上下文不足 ${formatNumber(reserve)} token`;
-    toast(`📦 ${reason}，自动压缩中...`, 3000);
+    TokensUiService.toast(`📦 ${reason}，自动压缩中...`, 3000);
     const ok = await compressChat(c, {
       reason: 'auto',
       estimatedBefore: tokens,
@@ -1252,9 +1257,7 @@ async function ensureContextBeforeAgentRun(chat = null, options = {}) {
   });
   if (result === 'failed') {
     const label = options.label ? `（${options.label}）` : '';
-    if (typeof toast === 'function') {
-      toast(`自动压缩失败${label}，已暂停本次请求以避免超长上下文`, 4000);
-    }
+    TokensUiService.toast(`自动压缩失败${label}，已暂停本次请求以避免超长上下文`, 4000);
     return false;
   }
   return true;
@@ -1269,7 +1272,7 @@ async function compressChat(chat, options = {}) {
   const taskChatId = options.chatId || (chat && chat.id) || '';
   const isVisible = tokensIsCurrentChat(chat.id);
   const renderCompressionView = () => {
-    if (isVisible && typeof renderMessages === 'function') renderMessages();
+    if (isVisible) TokensUiService.renderMessages();
   };
   const shouldTouchGlobalGenerating = options.touchGlobalGenerating === true;
   const foregroundAbortCtrl = shouldTouchGlobalGenerating && !options.signal ? new AbortController() : null;
@@ -1308,11 +1311,11 @@ async function compressChat(chat, options = {}) {
   }
   
   if (cutIdx < 0) {
-    toast('对话里没有任何 user 消息，无法压缩');
+    TokensUiService.toast('对话里没有任何 user 消息，无法压缩');
     return false;
   }
   if (cutIdx <= 0) {
-    toast('对话太短，无需压缩');
+    TokensUiService.toast('对话太短，无需压缩');
     return false;
   }
   
@@ -1326,7 +1329,7 @@ async function compressChat(chat, options = {}) {
     .join('\n\n');
   const realMessages = toCompress.filter(m => !m._isSummary && !m._isCompressing);
   if (!realMessages.length) {
-    toast('没有新的历史内容需要压缩');
+    TokensUiService.toast('没有新的历史内容需要压缩');
     return false;
   }
   const requiredRefs = compressionCollectRequiredRefs(toCompress);
@@ -1390,7 +1393,7 @@ ${conversationText}
         tokensState.isGenerating = true;
         if (foregroundAbortCtrl) tokensState.abortCtrl = foregroundAbortCtrl;
       }
-      updateSendBtn();
+      TokensUiService.updateSendBtn();
     }
     const summary = await tokensApiCore().callOnceWithRole(
       [{ role: 'user', content: compressPrompt }],
@@ -1461,16 +1464,16 @@ ${feedback}
     if (isVisible && typeof updateTokenDisplay === 'function') updateTokenDisplay();
     scheduleAccurateTokenCount(chat.id);
     const saved = Math.max(0, estimatedBefore - summaryMsg._estimatedAfter);
-    toast(`✓ 已压缩 ${toCompress.length} 条消息，预计节省 ${formatNumber(saved)} token`);
+    TokensUiService.toast(`✓ 已压缩 ${toCompress.length} 条消息，预计节省 ${formatNumber(saved)} token`);
     return true;
   } catch (e) {
     delete _compressionUndoSnapshots[undoId];
     removeCompressingPlaceholder();
     renderCompressionView();
     if (e && e.name === 'AbortError') {
-      if (typeof toast === 'function') toast('已停止压缩', 2000);
+      TokensUiService.toast('已停止压缩', 2000);
     } else {
-      toast(`❌ 压缩失败：${e.message}`, 3000);
+      TokensUiService.toast(`❌ 压缩失败：${e.message}`, 3000);
     }
     return false;
   } finally {
@@ -1485,7 +1488,7 @@ ${feedback}
     } else {
       tokensSyncGlobalTaskState(tokensState.currentId);
     }
-    updateSendBtn();
+    TokensUiService.updateSendBtn();
   }
 }
 

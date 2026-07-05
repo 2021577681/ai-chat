@@ -5,6 +5,8 @@
 // 加载顺序：在 terminal.js 之后即可
 
 // 当前面板状态（每次打开重新刷新）
+const GitPanelUiService = window.AgentApp.require('uiService');
+
 const GIT_HISTORY_LIMIT = 100;
 
 const GIT_STATE = {
@@ -116,6 +118,9 @@ async function _refreshGitPanel() {
         <span class="git-user-value" title="${escapeHtml(userTitle)}">${escapeHtml(userTitle)}</span>
       </div>
       <div class="git-user-actions">
+        <button class="git-btn git-btn-small git-branch-inline-btn" data-action="_toggleBranchMenu" title="Branch menu">
+          <span id="gitBranchInlineBadge">🌿 ${escapeHtml(currentBranch || '(unknown)')} ▾</span>
+        </button>
         <button class="git-btn git-btn-small" data-action="_openRemotePanel" title="配置 origin、推送、拉取和凭证说明">🌐 远程仓库</button>
         <button class="git-btn git-btn-small" data-action="_showGitConfigInline" title="修改当前仓库的 user.name / user.email">👤 修改</button>
       </div>
@@ -183,6 +188,8 @@ async function _refreshGitPanel() {
 function _setBranchBadge(name) {
   const el = document.getElementById('gitBranchBadge');
   if (el) el.innerHTML = `🌿 ${escapeHtml(name)} ▾`;
+  const inline = document.getElementById('gitBranchInlineBadge');
+  if (inline) inline.innerHTML = `🌿 ${escapeHtml(name)} ▾`;
 }
 
 function _syncReflogPanelState() {
@@ -244,16 +251,16 @@ async function _doInit() {
   const createInitialCommit = document.getElementById('initCreateCommit').checked;
   const initialCommitMessage = document.getElementById('initCommitMsg').value.trim() || 'Initial commit';
   if (!userName || !userEmail) {
-    toast('⚠️ 请填写用户名和邮箱');
+    GitPanelUiService.toast('⚠️ 请填写用户名和邮箱');
     return;
   }
-  toast('🌱 正在初始化…');
+  GitPanelUiService.toast('🌱 正在初始化…');
   const r = await callGit('init', { userName, userEmail, createGitignore, createInitialCommit, initialCommitMessage });
   if (!r.ok) {
-    toast('❌ 初始化失败：' + (r.error || '未知错误'), 5000);
+    GitPanelUiService.toast('❌ 初始化失败：' + (r.error || '未知错误'), 5000);
     return;
   }
-  toast('✅ Git 仓库已就绪');
+  GitPanelUiService.toast('✅ Git 仓库已就绪');
   await _refreshGitPanel();
 }
 
@@ -518,21 +525,21 @@ function _renderDiff(text) {
 // ============ 操作：暂存 / 取消 / 撤销 / 提交 ============
 async function _stageOne(path) {
   const r = await callGit('add', { files: [path] });
-  if (!r.ok) return toast('❌ ' + (r.error || ''));
-  toast('✓ 已暂存');
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''));
+  GitPanelUiService.toast('✓ 已暂存');
   await _loadStatus();
 }
 async function _unstageOne(path) {
   const r = await callGit('unstage', { files: [path] });
-  if (!r.ok) return toast('❌ ' + (r.error || ''));
-  toast('✓ 已取消暂存');
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''));
+  GitPanelUiService.toast('✓ 已取消暂存');
   await _loadStatus();
 }
 async function _checkoutOne(path) {
   if (!confirm(`确定放弃文件 "${path}" 的所有改动？\n\n该文件会恢复到 HEAD 时的状态，未保存的修改将丢失。`)) return;
   const r = await callGit('checkout_file', { files: [path] });
-  if (!r.ok) return toast('❌ ' + (r.error || ''));
-  toast('✓ 已恢复');
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''));
+  GitPanelUiService.toast('✓ 已恢复');
   GIT_STATE.selectedFile = null;
   document.getElementById('gitDetail').innerHTML = `<div class="git-empty-state-small">已撤销，请选择其他文件</div>`;
   await _loadStatus();
@@ -541,24 +548,24 @@ async function _stageAll() {
   const all = (GIT_STATE.status.unstaged || []).map(f => f.path);
   if (!all.length) return;
   const r = await callGit('add', { files: all });
-  if (!r.ok) return toast('❌ ' + (r.error || ''));
-  toast(`✓ 已暂存 ${all.length} 个文件`);
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''));
+  GitPanelUiService.toast(`✓ 已暂存 ${all.length} 个文件`);
   await _loadStatus();
 }
 async function _unstageAll() {
   const all = (GIT_STATE.status.staged || []).map(f => f.path);
   if (!all.length) return;
   const r = await callGit('unstage', { files: all });
-  if (!r.ok) return toast('❌ ' + (r.error || ''));
-  toast(`✓ 已取消 ${all.length} 个文件`);
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''));
+  GitPanelUiService.toast(`✓ 已取消 ${all.length} 个文件`);
   await _loadStatus();
 }
 async function _stageUntracked() {
   const all = (GIT_STATE.status.untracked || []).map(f => f.path);
   if (!all.length) return;
   const r = await callGit('add', { files: all });
-  if (!r.ok) return toast('❌ ' + (r.error || ''));
-  toast(`✓ 已添加 ${all.length} 个新文件`);
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''));
+  GitPanelUiService.toast(`✓ 已添加 ${all.length} 个新文件`);
   await _loadStatus();
 }
 
@@ -710,14 +717,14 @@ async function _commitFromForm() {
   const msgEl = document.getElementById('gitCommitMsg');
   const msg = (msgEl.value || '').trim();
   if (!msg) {
-    toast('⚠️ 请输入提交信息');
+    GitPanelUiService.toast('⚠️ 请输入提交信息');
     msgEl.focus();
     return { ok: false };
   }
   const all = document.getElementById('gitCommitAll').checked;
   const r = await callGit('commit', { message: msg, all });
   if (!r.ok) {
-    toast('❌ 提交失败：' + (r.error || ''), 5000);
+    GitPanelUiService.toast('❌ 提交失败：' + (r.error || ''), 5000);
     return { ok: false, error: r.error || '' };
   }
   return { ok: true, msgEl, output: r.output || '' };
@@ -726,7 +733,7 @@ async function _commitFromForm() {
 async function _onCommit() {
   const result = await _commitFromForm();
   if (!result.ok) return;
-  toast('✅ 已提交');
+  GitPanelUiService.toast('✅ 已提交');
   result.msgEl.value = '';
   await Promise.all([_loadStatus(), _loadHistory()]);
 }
@@ -736,7 +743,7 @@ async function _onCommitAndPush() {
   const remoteCheck = await _hasOriginRemote();
   if (!remoteCheck.ok) {
     _setCommitRemoteLog('❌ ' + remoteCheck.error, true);
-    toast('❌ 无法推送：未配置 origin', 4000);
+    GitPanelUiService.toast('❌ 无法推送：未配置 origin', 4000);
     return;
   }
 
@@ -786,11 +793,11 @@ function _showGitConfigInline() {
 async function _saveGitConfig() {
   const name = document.getElementById('cfgUserName').value.trim();
   const email = document.getElementById('cfgUserEmail').value.trim();
-  if (!name || !email) return toast('⚠️ 请填写完整');
+  if (!name || !email) return GitPanelUiService.toast('⚠️ 请填写完整');
   const r1 = await callGit('config_set', { key: 'user.name', value: name });
   const r2 = await callGit('config_set', { key: 'user.email', value: email });
-  if (!r1.ok || !r2.ok) return toast('❌ 保存失败');
-  toast('✓ 已保存');
+  if (!r1.ok || !r2.ok) return GitPanelUiService.toast('❌ 保存失败');
+  GitPanelUiService.toast('✓ 已保存');
   await _refreshGitPanel();
 }
 
@@ -799,8 +806,8 @@ async function _clearGitConfig() {
   if (!ok) return;
   const r1 = await callGit('config_set', { key: 'user.name', value: '' });
   const r2 = await callGit('config_set', { key: 'user.email', value: '' });
-  if (!r1.ok || !r2.ok) return toast('❌ 清空失败');
-  toast('✓ 已清空本仓库作者');
+  if (!r1.ok || !r2.ok) return GitPanelUiService.toast('❌ 清空失败');
+  GitPanelUiService.toast('✓ 已清空本仓库作者');
   const panel = document.getElementById('gitRemotePanel');
   if (panel) await _refreshRemotePanel();
   await _refreshGitPanel();
@@ -895,13 +902,13 @@ async function _doRevert(hash) {
     danger: false,
   });
   if (!ok) return;
-  toast('🔄 正在撤销…');
+  GitPanelUiService.toast('🔄 正在撤销…');
   const r = await callGit('revert', { commit: hash });
   if (!r.ok) {
-    toast('❌ 撤销失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 撤销失败：' + (r.error || ''), 6000);
     return;
   }
-  toast('✅ 已生成反向提交');
+  GitPanelUiService.toast('✅ 已生成反向提交');
   await _refreshGitPanel();
 }
 
@@ -921,13 +928,13 @@ async function _doResetMixed(hash, lostCount) {
     danger: lostCount > 0,
   });
   if (!ok) return;
-  toast('⏮ 正在回退…');
+  GitPanelUiService.toast('⏮ 正在回退…');
   const r = await callGit('reset_mixed', { commit: hash, confirm: '我确定' });
   if (!r.ok) {
-    toast('❌ 回退失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 回退失败：' + (r.error || ''), 6000);
     return;
   }
-  toast('✅ 已回退（改动保留在工作区）');
+  GitPanelUiService.toast('✅ 已回退（改动保留在工作区）');
   await _refreshGitPanel();
 }
 
@@ -954,13 +961,13 @@ async function _doResetHard(hash, lostCount) {
     danger: true,
   });
   if (!ok) return;
-  toast('💥 正在强制重置…');
+  GitPanelUiService.toast('💥 正在强制重置…');
   const r = await callGit('reset_hard', { commit: hash, confirm: '我确定' });
   if (!r.ok) {
-    toast('❌ 重置失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 重置失败：' + (r.error || ''), 6000);
     return;
   }
-  toast('✅ 已重置');
+  GitPanelUiService.toast('✅ 已重置');
   await _refreshGitPanel();
 }
 
@@ -972,20 +979,20 @@ async function _undoLastReset() {
     danger: true,
   });
   if (!ok) return;
-  toast('↩ 正在撤回上次重置…');
+  GitPanelUiService.toast('↩ 正在撤回上次重置…');
   const r = await callGit('reset_orig_head', { confirm: '我确定' });
   if (!r.ok) {
-    toast('❌ 撤回失败：' + (r.error || '找不到 ORIG_HEAD'), 7000);
+    GitPanelUiService.toast('❌ 撤回失败：' + (r.error || '找不到 ORIG_HEAD'), 7000);
     return;
   }
-  toast(`✅ 已恢复到 ${((r.target || '').slice(0, 8) || 'ORIG_HEAD')}`);
+  GitPanelUiService.toast(`✅ 已恢复到 ${((r.target || '').slice(0, 8) || 'ORIG_HEAD')}`);
   GIT_STATE.reflogLoaded = false;
   await _refreshGitPanel();
 }
 
 async function _restoreReflogHash(hash) {
   if (!hash || !/^[0-9a-f]{4,40}$/i.test(hash)) {
-    toast('❌ 无效的恢复点');
+    GitPanelUiService.toast('❌ 无效的恢复点');
     return;
   }
   const entry = (GIT_STATE.reflogEntries || []).find(e => e.hash === hash) || {};
@@ -998,13 +1005,13 @@ async function _restoreReflogHash(hash) {
     danger: true,
   });
   if (!ok) return;
-  toast('⏮ 正在恢复恢复点…');
+  GitPanelUiService.toast('⏮ 正在恢复恢复点…');
   const r = await callGit('reset_to_ref', { commit: hash, confirm: '我确定' });
   if (!r.ok) {
-    toast('❌ 恢复失败：' + (r.error || ''), 7000);
+    GitPanelUiService.toast('❌ 恢复失败：' + (r.error || ''), 7000);
     return;
   }
-  toast(`✅ 已恢复到 ${shortHash}`);
+  GitPanelUiService.toast(`✅ 已恢复到 ${shortHash}`);
   GIT_STATE.reflogLoaded = false;
   await _refreshGitPanel();
 }
@@ -1095,13 +1102,13 @@ async function _doBranchSwitch(name) {
     });
     if (!ok) return;
   }
-  toast('🌿 切换分支…');
+  GitPanelUiService.toast('🌿 切换分支…');
   const r = await callGit('branch_switch', { name });
   if (!r.ok) {
-    toast('❌ 切换失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 切换失败：' + (r.error || ''), 6000);
     return;
   }
-  toast(`✅ 已切换到 ${name}`);
+  GitPanelUiService.toast(`✅ 已切换到 ${name}`);
   await _refreshGitPanel();
 }
 
@@ -1110,16 +1117,16 @@ async function _doBranchCreate() {
   const name = (prompt('新分支名（字母数字 _ - . /）：') || '').trim();
   if (!name) return;
   if (!/^[A-Za-z0-9_\-./]+$/.test(name)) {
-    toast('❌ 分支名格式不合法');
+    GitPanelUiService.toast('❌ 分支名格式不合法');
     return;
   }
-  toast('🌱 创建并切换…');
+  GitPanelUiService.toast('🌱 创建并切换…');
   const r = await callGit('branch_create', { name });
   if (!r.ok) {
-    toast('❌ 创建失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 创建失败：' + (r.error || ''), 6000);
     return;
   }
-  toast(`✅ 已切换到新分支 ${name}`);
+  GitPanelUiService.toast(`✅ 已切换到新分支 ${name}`);
   await _refreshGitPanel();
 }
 
@@ -1129,15 +1136,15 @@ async function _doBranchRename() {
   const next = (prompt(`重命名当前分支「${cur}」为：`, cur) || '').trim();
   if (!next || next === cur) return;
   if (!/^[A-Za-z0-9_\-./]+$/.test(next)) {
-    toast('❌ 分支名格式不合法');
+    GitPanelUiService.toast('❌ 分支名格式不合法');
     return;
   }
   const r = await callGit('branch_rename', { new: next });
   if (!r.ok) {
-    toast('❌ 重命名失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 重命名失败：' + (r.error || ''), 6000);
     return;
   }
-  toast(`✅ 已重命名为 ${next}`);
+  GitPanelUiService.toast(`✅ 已重命名为 ${next}`);
   await _refreshGitPanel();
 }
 
@@ -1159,10 +1166,10 @@ async function _doBranchDelete(name, force) {
       }
       return;
     }
-    toast('❌ 删除失败：' + (r.error || ''), 6000);
+    GitPanelUiService.toast('❌ 删除失败：' + (r.error || ''), 6000);
     return;
   }
-  toast(`✅ 分支 ${name} 已删除`);
+  GitPanelUiService.toast(`✅ 分支 ${name} 已删除`);
   // 重新打开菜单显示最新列表
   await _refreshGitPanel();
 }
@@ -1393,44 +1400,44 @@ async function _refreshRemotePanel() {
 async function _savePanelUser() {
   const name = document.getElementById('cfgRpUserName').value.trim();
   const email = document.getElementById('cfgRpUserEmail').value.trim();
-  if (!name || !email) return toast('⚠️ 请填写完整');
+  if (!name || !email) return GitPanelUiService.toast('⚠️ 请填写完整');
   const r1 = await callGit('config_set', { key: 'user.name', value: name });
   const r2 = await callGit('config_set', { key: 'user.email', value: email });
-  if (!r1.ok || !r2.ok) return toast('❌ 保存失败');
-  toast('✅ 已保存');
+  if (!r1.ok || !r2.ok) return GitPanelUiService.toast('❌ 保存失败');
+  GitPanelUiService.toast('✅ 已保存');
   await _refreshRemotePanel();
   await _refreshGitPanel();
 }
 
 async function _saveGitProxyConfig() {
   const cfg = _getGitProxyInput();
-  if (cfg.error) return toast('⚠️ ' + cfg.error, 4000);
+  if (cfg.error) return GitPanelUiService.toast('⚠️ ' + cfg.error, 4000);
   if (!cfg.enabled) {
     await _clearGitProxyConfig();
     return;
   }
   const r1 = await callGit('config_set', { key: 'http.proxy', value: cfg.url });
   const r2 = await callGit('config_set', { key: 'https.proxy', value: cfg.url });
-  if (!r1.ok || !r2.ok) return toast('❌ 保存代理失败', 5000);
-  toast('✅ 已保存 Git 代理');
+  if (!r1.ok || !r2.ok) return GitPanelUiService.toast('❌ 保存代理失败', 5000);
+  GitPanelUiService.toast('✅ 已保存 Git 代理');
   await _refreshRemotePanel();
 }
 
 async function _clearGitProxyConfig() {
   const r1 = await callGit('config_unset', { key: 'http.proxy' });
   const r2 = await callGit('config_unset', { key: 'https.proxy' });
-  if (!r1.ok || !r2.ok) return toast('❌ 清空代理失败', 5000);
-  toast('✅ 已清空 Git 代理');
+  if (!r1.ok || !r2.ok) return GitPanelUiService.toast('❌ 清空代理失败', 5000);
+  GitPanelUiService.toast('✅ 已清空 Git 代理');
   await _refreshRemotePanel();
 }
 
 async function _addRemote() {
   const name = document.getElementById('newRemoteName').value.trim();
   const url = document.getElementById('newRemoteUrl').value.trim();
-  if (!name || !url) return toast('⚠️ 请填写名称和 URL');
+  if (!name || !url) return GitPanelUiService.toast('⚠️ 请填写名称和 URL');
   const r = await callGit('remote_add', { name, url });
-  if (!r.ok) return toast('❌ ' + (r.error || ''), 5000);
-  toast('✅ 已添加');
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''), 5000);
+  GitPanelUiService.toast('✅ 已添加');
   await _refreshRemotePanel();
 }
 
@@ -1438,8 +1445,8 @@ async function _editRemoteUrl(name, oldUrl) {
   const url = (prompt(`修改 ${name} 的 URL：`, oldUrl) || '').trim();
   if (!url || url === oldUrl) return;
   const r = await callGit('remote_set_url', { name, url });
-  if (!r.ok) return toast('❌ ' + (r.error || ''), 5000);
-  toast('✅ 已更新');
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''), 5000);
+  GitPanelUiService.toast('✅ 已更新');
   await _refreshRemotePanel();
 }
 
@@ -1451,8 +1458,8 @@ async function _removeRemote(name) {
   });
   if (!ok) return;
   const r = await callGit('remote_remove', { name });
-  if (!r.ok) return toast('❌ ' + (r.error || ''), 5000);
-  toast('✅ 已删除');
+  if (!r.ok) return GitPanelUiService.toast('❌ ' + (r.error || ''), 5000);
+  GitPanelUiService.toast('✅ 已删除');
   await _refreshRemotePanel();
 }
 
@@ -1480,19 +1487,19 @@ async function _pushCurrentBranch(force, logFn) {
   const currentBranch = branch || await _getCurrentBranch();
   if (!currentBranch) {
     log('❌ 无法确定当前分支', true);
-    toast('❌ 无法确定当前分支');
+    GitPanelUiService.toast('❌ 无法确定当前分支');
     return false;
   }
   const targetBranch = _getRemoteTargetBranch(currentBranch);
   if (!_isValidRemoteBranchName(targetBranch)) {
     log('❌ 远程分支名无效。请只使用字母、数字、点、斜杠、下划线和连字符，且不要以 /、.、- 开头。', true);
-    toast('❌ 远程分支名无效', 4000);
+    GitPanelUiService.toast('❌ 远程分支名无效', 4000);
     return false;
   }
   _setRemoteTargetBranch(targetBranch);
   const targetLabel = _remoteTargetLabel(targetBranch);
   // 🔍 先扫敏感信息
-  toast(`🔍 扫描 ${targetLabel} 的敏感信息…`);
+  GitPanelUiService.toast(`🔍 扫描 ${targetLabel} 的敏感信息…`);
   const scan = await callGit('scan_diff', { remote: 'origin', branch: targetBranch });
   if (scan.ok && scan.findings && scan.findings.length) {
     const ok = await _showSensitiveWarning(scan.findings, force);
@@ -1524,7 +1531,7 @@ async function _pushCurrentBranch(force, logFn) {
     return false;
   }
   log(`✅ 已推送到 ${targetLabel}\n\n` + (r.output || ''), false);
-  toast('✅ 已推送');
+  GitPanelUiService.toast('✅ 已推送');
   return true;
 }
 
@@ -1538,7 +1545,7 @@ async function _doPull() {
   const branch = _getRemoteTargetBranch(localBranch);
   if (!_isValidRemoteBranchName(branch)) {
     _syncLog('❌ 远程分支名无效。请先修正远程分支。', true);
-    toast('❌ 远程分支名无效', 4000);
+    GitPanelUiService.toast('❌ 远程分支名无效', 4000);
     return;
   }
   _setRemoteTargetBranch(branch);
@@ -1549,7 +1556,7 @@ async function _doPull() {
     return;
   }
   _syncLog('✅ 拉取成功\n\n' + (r.output || ''), false);
-  toast('✅ 已拉取');
+  GitPanelUiService.toast('✅ 已拉取');
   await _refreshRemotePanel();
 }
 
@@ -1676,3 +1683,22 @@ window._doPush = _doPush;
 window._doPull = _doPull;
 window._doFetch = _doFetch;
 window._showCredHelp = _showCredHelp;
+
+window.AgentApp.define('gitPanel', {
+  GIT_STATE,
+  openGitPanel,
+  closeGitPanel,
+  _refreshGitPanel,
+  _doInit,
+  _stageOne,
+  _unstageOne,
+  _checkoutOne,
+  _stageAll,
+  _unstageAll,
+  _stageUntracked,
+  _onCommit,
+  _onCommitAndPush,
+  _doPush,
+  _doPull,
+  _doFetch
+});

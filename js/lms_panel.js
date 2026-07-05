@@ -2,6 +2,8 @@
 // 顶部 🎓 学习 按钮 → 打开抽屉面板
 // 4 个标签页：📊 概览 / 📝 待办 / 📚 课程 / 📂 课件
 
+const LmsPanelUiService = window.AgentApp.require('uiService');
+
 const LMS_PANEL_STATE = {
   page: 'home',              // home | lms | scores | schedule | emptyRooms | attendance | judge | trainingPlan
   tab: 'overview',           // overview | todos | courses | materials
@@ -1032,11 +1034,15 @@ function lmsPanelSetAttendancePageSize(value) {
 
 function lmsPanelAttendancePrevPage() {
   LMS_PANEL_STATE.attendancePage = Math.max(1, (Number(LMS_PANEL_STATE.attendancePage) || 1) - 1);
+  const input = document.getElementById('lmsAttendancePage');
+  if (input) input.value = String(LMS_PANEL_STATE.attendancePage);
   lmsPanelFetchAttendance();
 }
 
 function lmsPanelAttendanceNextPage() {
   LMS_PANEL_STATE.attendancePage = (Number(LMS_PANEL_STATE.attendancePage) || 1) + 1;
+  const input = document.getElementById('lmsAttendancePage');
+  if (input) input.value = String(LMS_PANEL_STATE.attendancePage);
   lmsPanelFetchAttendance();
 }
 
@@ -1688,9 +1694,9 @@ async function lmsPanelFetchTodos() {
   const r = await lmsApiGet('/api/todos');
   if (r.ok) {
     LMS_PANEL_STATE.cache.todos = r.data.todo_list || [];
-    toast(`✅ 已加载 ${LMS_PANEL_STATE.cache.todos.length} 项待办`);
+    LmsPanelUiService.toast(`✅ 已加载 ${LMS_PANEL_STATE.cache.todos.length} 项待办`);
   } else {
-    toast('❌ ' + (r.message || r.error));
+    LmsPanelUiService.toast('❌ ' + (r.message || r.error));
     if (r.error === 'COOKIE_EXPIRED') lmsPanelOpenCookieEditor('login');
   }
   lmsPanelRender();
@@ -1702,9 +1708,9 @@ async function lmsPanelFetchCourses() {
   const r = await lmsApiGet('/api/my-courses');
   if (r.ok) {
     LMS_PANEL_STATE.cache.courses = r.data.courses || [];
-    toast(`✅ 已加载 ${LMS_PANEL_STATE.cache.courses.length} 门课程`);
+    LmsPanelUiService.toast(`✅ 已加载 ${LMS_PANEL_STATE.cache.courses.length} 门课程`);
   } else {
-    toast('❌ ' + (r.message || r.error));
+    LmsPanelUiService.toast('❌ ' + (r.message || r.error));
     if (r.error === 'COOKIE_EXPIRED') lmsPanelOpenCookieEditor('login');
   }
   lmsPanelRender();
@@ -1722,9 +1728,9 @@ async function lmsPanelFetchMaterials(cid) {
       activities: ra.data.activities || [],
       modules: (rm.ok && rm.data && rm.data.modules) || [],
     };
-    toast(`✅ 课件加载完成`);
+    LmsPanelUiService.toast(`✅ 课件加载完成`);
   } else {
-    toast('❌ ' + (ra.message || ra.error));
+    LmsPanelUiService.toast('❌ ' + (ra.message || ra.error));
   }
   lmsPanelRender();
 }
@@ -1746,14 +1752,14 @@ async function lmsPanelFetchScores() {
     LMS_PANEL_STATE.cache.scoreSummary = result.summary || {};
     LMS_PANEL_STATE.scoreResolvedAccountType = result.account_type || accountType;
     LMS_PANEL_STATE.scoreSelectedKeys = null;
-    toast(`成绩已加载：${LMS_PANEL_STATE.cache.scores.length} 门课程`);
+    LmsPanelUiService.toast(`成绩已加载：${LMS_PANEL_STATE.cache.scores.length} 门课程`);
   } else {
     LMS_PANEL_STATE.cache.scores = null;
     LMS_PANEL_STATE.cache.scoreSummary = null;
     LMS_PANEL_STATE.scoreResolvedAccountType = '';
     LMS_PANEL_STATE.scoreError = (result && (result.message || result.error)) || '成绩查询失败。';
     LMS_PANEL_STATE.scoreSelectedKeys = null;
-    toast(LMS_PANEL_STATE.scoreError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.scoreError);
   }
   lmsPanelRender();
 }
@@ -1775,14 +1781,14 @@ async function lmsPanelFetchSchedule() {
     LMS_PANEL_STATE.cache.scheduleSummary = result.summary || {};
     LMS_PANEL_STATE.scheduleResolvedAccountType = result.account_type || accountType;
     LMS_PANEL_STATE.scheduleResultTerm = result.term || '';
-    toast(`课表已加载：${LMS_PANEL_STATE.cache.scheduleLessons.length} 条课程安排`);
+    LmsPanelUiService.toast(`课表已加载：${LMS_PANEL_STATE.cache.scheduleLessons.length} 条课程安排`);
   } else {
     LMS_PANEL_STATE.cache.scheduleLessons = null;
     LMS_PANEL_STATE.cache.scheduleSummary = null;
     LMS_PANEL_STATE.scheduleResolvedAccountType = '';
     LMS_PANEL_STATE.scheduleResultTerm = '';
     LMS_PANEL_STATE.scheduleError = (result && (result.message || result.error)) || '课表查询失败。';
-    toast(LMS_PANEL_STATE.scheduleError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.scheduleError);
   }
   lmsPanelRender();
 }
@@ -1812,12 +1818,12 @@ async function lmsPanelFetchEmptyRooms() {
   if (result && result.ok) {
     LMS_PANEL_STATE.cache.emptyRooms = result.rooms || [];
     LMS_PANEL_STATE.cache.emptyRoomSummary = result.summary || {};
-    toast(`空闲教室已加载：${LMS_PANEL_STATE.cache.emptyRooms.length} 间`);
+    LmsPanelUiService.toast(`空闲教室已加载：${LMS_PANEL_STATE.cache.emptyRooms.length} 间`);
   } else {
     LMS_PANEL_STATE.cache.emptyRooms = null;
     LMS_PANEL_STATE.cache.emptyRoomSummary = null;
     LMS_PANEL_STATE.emptyRoomError = (result && (result.message || result.error)) || '空闲教室查询失败。';
-    toast(LMS_PANEL_STATE.emptyRoomError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.emptyRoomError);
   }
   lmsPanelRender();
 }
@@ -1855,7 +1861,7 @@ async function lmsPanelFetchAttendance() {
     LMS_PANEL_STATE.attendanceResolvedAccountType = result.account_type || accountType;
     LMS_PANEL_STATE.attendanceResolvedAccessMode = result.access_mode || accessMode;
     LMS_PANEL_STATE.attendancePage = (result.pagination && result.pagination.page) || page;
-    toast(`考勤已加载：${LMS_PANEL_STATE.cache.attendanceFlows.length} 条流水`);
+    LmsPanelUiService.toast(`考勤已加载：${LMS_PANEL_STATE.cache.attendanceFlows.length} 条流水`);
   } else {
     LMS_PANEL_STATE.cache.attendanceFlows = null;
     LMS_PANEL_STATE.cache.attendanceSubjects = null;
@@ -1864,7 +1870,7 @@ async function lmsPanelFetchAttendance() {
     LMS_PANEL_STATE.attendanceResolvedAccountType = '';
     LMS_PANEL_STATE.attendanceResolvedAccessMode = '';
     LMS_PANEL_STATE.attendanceError = (result && (result.message || result.error)) || '考勤查询失败。';
-    toast(LMS_PANEL_STATE.attendanceError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.attendanceError);
   }
   lmsPanelRender();
 }
@@ -1896,12 +1902,12 @@ async function lmsPanelFetchJudgeStatus() {
   if (result && result.ok) {
     LMS_PANEL_STATE.cache.judgeQuestionnaires = result.questionnaires || [];
     LMS_PANEL_STATE.judgeResolvedAccountType = result.account_type || LMS_PANEL_STATE.judgeAccountType;
-    toast(`待评教问卷：${LMS_PANEL_STATE.cache.judgeQuestionnaires.length} 份`);
+    LmsPanelUiService.toast(`待评教问卷：${LMS_PANEL_STATE.cache.judgeQuestionnaires.length} 份`);
   } else {
     LMS_PANEL_STATE.cache.judgeQuestionnaires = null;
     LMS_PANEL_STATE.judgeResolvedAccountType = '';
     LMS_PANEL_STATE.judgeError = (result && (result.message || result.error)) || '获取待评教问卷失败。';
-    toast(LMS_PANEL_STATE.judgeError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.judgeError);
   }
   lmsPanelRender();
 }
@@ -1924,18 +1930,18 @@ async function lmsPanelSubmitJudgeAll() {
       LMS_PANEL_STATE.cache.judgeResults = null;
       LMS_PANEL_STATE.cache.judgeQuestionnaires = [];
       LMS_PANEL_STATE.judgeResolvedAccountType = result.account_type || LMS_PANEL_STATE.judgeAccountType;
-      toast('暂无待评教问卷');
+      LmsPanelUiService.toast('暂无待评教问卷');
       lmsPanelRender();
       return;
     }
     LMS_PANEL_STATE.cache.judgeResults = results;
     LMS_PANEL_STATE.cache.judgeQuestionnaires = null;
     LMS_PANEL_STATE.judgeResolvedAccountType = result.account_type || LMS_PANEL_STATE.judgeAccountType;
-    toast(`评教完成：成功 ${result.success_count || 0}/${results.length}`);
+    LmsPanelUiService.toast(`评教完成：成功 ${result.success_count || 0}/${results.length}`);
   } else {
     LMS_PANEL_STATE.cache.judgeResults = null;
     LMS_PANEL_STATE.judgeError = (result && (result.message || result.error)) || '一键评教失败。';
-    toast(LMS_PANEL_STATE.judgeError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.judgeError);
   }
   lmsPanelRender();
 }
@@ -1961,7 +1967,7 @@ async function lmsPanelFetchTrainingPlan() {
     LMS_PANEL_STATE.cache.trainingPlanSummary = result.summary || {};
     LMS_PANEL_STATE.trainingPlanSelectedCode = result.selected_plan_code || (result.selected_plan && result.selected_plan.code) || selectedCode;
     LMS_PANEL_STATE.trainingPlanResolvedAccountType = result.account_type || accountType;
-    toast(`培养方案已加载：${LMS_PANEL_STATE.cache.trainingPlanCourses.length} 门课程`);
+    LmsPanelUiService.toast(`培养方案已加载：${LMS_PANEL_STATE.cache.trainingPlanCourses.length} 门课程`);
   } else {
     LMS_PANEL_STATE.cache.trainingPlans = null;
     LMS_PANEL_STATE.cache.trainingPlan = null;
@@ -1971,7 +1977,7 @@ async function lmsPanelFetchTrainingPlan() {
     LMS_PANEL_STATE.cache.trainingPlanSummary = null;
     LMS_PANEL_STATE.trainingPlanResolvedAccountType = '';
     LMS_PANEL_STATE.trainingPlanError = (result && (result.message || result.error)) || '培养方案查询失败。';
-    toast(LMS_PANEL_STATE.trainingPlanError);
+    LmsPanelUiService.toast(LMS_PANEL_STATE.trainingPlanError);
   }
   lmsPanelRender();
 }
@@ -1989,7 +1995,7 @@ async function lmsPanelShowMaterials(cid) {
 async function lmsPanelShowHomework(hwId) {
   const r = await lmsApiGet(`/api/homework-activities/${hwId}`);
   if (!r.ok) {
-    toast('❌ ' + (r.message || r.error));
+    LmsPanelUiService.toast('❌ ' + (r.message || r.error));
     return;
   }
   // 渲染到模态弹窗
@@ -2004,7 +2010,7 @@ function lmsPanelCloseModal() {
 
 async function lmsPanelDownload(uploadId, filename) {
   const msg = await lmsToolDownload(uploadId, filename);
-  toast(msg.startsWith('✅') ? '✅ 下载已开始' : msg);
+  LmsPanelUiService.toast(msg.startsWith('✅') ? '✅ 下载已开始' : msg);
 }
 
 function lmsPanelShowLoading(text) {
@@ -2313,7 +2319,7 @@ function lmsPanelHandleLoginResponse(result) {
     lmsPanelCloseCookieEditor();
     lmsPanelRefreshStatus();
     lmsPanelRender();
-    toast(result.has_session_cookie ? '✅ LMS 登录成功' : '✅ 登录成功，已保存 Cookie');
+    LmsPanelUiService.toast(result.has_session_cookie ? '✅ LMS 登录成功' : '✅ 登录成功，已保存 Cookie');
     if (LMS_PANEL_STATE.page === 'lms' && LMS_PANEL_STATE.tab === 'overview') lmsPanelFetchAll();
     return;
   }
@@ -2370,11 +2376,11 @@ async function lmsPanelSaveCookie() {
   lmsPanelRefreshStatus();
   lmsPanelRender();
   if (sync.error) {
-    toast(`Cookie 已保存，但${sync.error}`, 3000);
+    LmsPanelUiService.toast(`Cookie 已保存，但${sync.error}`, 3000);
   } else if (sync.cleared) {
-    toast('Cookie 已保存，已清除旧保存账号');
+    LmsPanelUiService.toast('Cookie 已保存，已清除旧保存账号');
   } else {
-    toast(val ? '✅ Cookie 已保存' : '🗑 Cookie 已清空');
+    LmsPanelUiService.toast(val ? '✅ Cookie 已保存' : '🗑 Cookie 已清空');
   }
   if (val && LMS_PANEL_STATE.page === 'lms' && LMS_PANEL_STATE.tab === 'overview') {
     lmsPanelFetchAll();
@@ -2388,5 +2394,32 @@ function lmsPanelClearCookie() {
   lmsPanelCloseCookieEditor();
   lmsPanelRefreshStatus();
   lmsPanelRender();
-  toast('🗑 已清空');
+  LmsPanelUiService.toast('🗑 已清空');
 }
+
+window.AgentApp.define('lmsPanel', {
+  LMS_PANEL_STATE,
+  lmsPanelEmptyCache,
+  openLmsPanel,
+  closeLmsPanel,
+  lmsPanelSetPage,
+  lmsPanelSetTab,
+  lmsPanelRender,
+  lmsPanelFetchAll,
+  lmsPanelFetchTodos,
+  lmsPanelFetchCourses,
+  lmsPanelFetchMaterials,
+  lmsPanelFetchScores,
+  lmsPanelFetchSchedule,
+  lmsPanelFetchEmptyRooms,
+  lmsPanelFetchAttendance,
+  lmsPanelFetchJudgeStatus,
+  lmsPanelSubmitJudgeAll,
+  lmsPanelFetchTrainingPlan,
+  lmsPanelDownload,
+  lmsPanelOpenCookieEditor,
+  lmsPanelCloseCookieEditor,
+  lmsPanelLoginWithPassword,
+  lmsPanelSaveCookie,
+  lmsPanelClearCookie
+});

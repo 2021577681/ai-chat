@@ -8,6 +8,23 @@ const dialogManagerCurrentChat = DialogManagerStateModule.currentChat;
 const dialogManagerChatById = DialogManagerStateModule.chatById;
 const dialogManagerIsChatGenerating = DialogManagerStateModule.isChatGenerating;
 const dialogManagerSyncGlobalTaskState = DialogManagerStateModule.syncGlobalTaskState;
+const DialogManagerUiService = window.AgentApp.require('uiService');
+
+function dialogManagerToast(message, ms) {
+  DialogManagerUiService.toast(message, ms);
+}
+
+function dialogManagerRenderChatList() {
+  DialogManagerUiService.renderChatList();
+}
+
+function dialogManagerRenderMessages() {
+  DialogManagerUiService.renderMessages();
+}
+
+function dialogManagerUpdateSendBtn() {
+  DialogManagerUiService.updateSendBtn();
+}
 
 const DIALOG_MANAGER_ROOT_ID = '__root';
 let dialogManagerSelectedChatId = '';
@@ -152,7 +169,7 @@ function saveDialogManagerSettings() {
   if (checkbox) dm.timelineEnabled = !!checkbox.checked;
   dialogManagerPersistSettings();
   if (typeof updateDialogTimeline === 'function') updateDialogTimeline();
-  if (typeof toast === 'function') toast('已保存对话管理设置');
+  dialogManagerToast('已保存对话管理设置');
 }
 
 function dialogManagerUserAnchors(chat) {
@@ -765,7 +782,7 @@ function dialogExplorerDrop(id, type, targetFolderId) {
   if (type === 'chat') {
     const targetId = dialogExplorerResolveFolderTarget(targetFolderId);
     if (targetId === null) {
-      if (typeof toast === 'function') toast('目标文件夹不存在', 2000);
+      dialogManagerToast('目标文件夹不存在', 2000);
       renderDialogManagerFolders();
       return;
     }
@@ -777,7 +794,7 @@ function dialogExplorerDrop(id, type, targetFolderId) {
     touchFolder(oldFolderId);
     touchFolder(targetId);
     dialogManagerSaveData();
-    renderChatList();
+    dialogManagerRenderChatList();
     renderDialogManagerFolders();
   } else if (type === 'folder') {
     const dm = ensureDialogManagerSettings();
@@ -785,7 +802,7 @@ function dialogExplorerDrop(id, type, targetFolderId) {
     if (!folder) return;
     const targetId = dialogExplorerResolveFolderTarget(targetFolderId, dm);
     if (targetId === null) {
-      if (typeof toast === 'function') toast('目标文件夹不存在', 2000);
+      dialogManagerToast('目标文件夹不存在', 2000);
       renderDialogManagerFolders();
       return;
     }
@@ -801,7 +818,7 @@ function dialogExplorerDrop(id, type, targetFolderId) {
     const targetDepth = targetId ? dialogExplorerFolderDepth(targetId) : 0;
     const maxChildDepth = dialogExplorerMaxChildDepth(id);
     if (targetDepth + maxChildDepth + 1 > DIALOG_EXPLORER_MAX_DEPTH) {
-      if (typeof toast === 'function') toast(`移动后将超过 ${DIALOG_EXPLORER_MAX_DEPTH} 层嵌套限制`, 2000);
+      dialogManagerToast(`移动后将超过 ${DIALOG_EXPLORER_MAX_DEPTH} 层嵌套限制`, 2000);
       return;
     }
     const oldParentId = folder.parentId || '';
@@ -963,13 +980,13 @@ function dialogExplorerHandleContextAction(e) {
 
 function dialogExplorerNewFolder() {
   if (dialogManagerCurrentFolderId.startsWith('__group_')) {
-    if (typeof toast === 'function') toast('任务组视图不能新建文件夹', 2000);
+    dialogManagerToast('任务组视图不能新建文件夹', 2000);
     return;
   }
   const dm = ensureDialogManagerSettings();
   const newDepth = (dialogManagerCurrentFolderId ? dialogExplorerFolderDepth(dialogManagerCurrentFolderId) : 0) + 1;
   if (newDepth > DIALOG_EXPLORER_MAX_DEPTH) {
-    if (typeof toast === 'function') toast(`文件夹嵌套最多 ${DIALOG_EXPLORER_MAX_DEPTH} 层`, 2000);
+    dialogManagerToast(`文件夹嵌套最多 ${DIALOG_EXPLORER_MAX_DEPTH} 层`, 2000);
     return;
   }
   const id = 'folder_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
@@ -997,9 +1014,9 @@ function dialogExplorerRenameFolder(folderId) {
   const raw = prompt('重命名文件夹（最多' + DIALOG_EXPLORER_MAX_NAME_LEN + '字）', folder.name);
   if (raw === null) return;
   const name = raw.trim();
-  if (!name) { if (typeof toast === 'function') toast('名称不能为空'); return; }
+  if (!name) { dialogManagerToast('名称不能为空'); return; }
   if (name.length > DIALOG_EXPLORER_MAX_NAME_LEN) {
-    if (typeof toast === 'function') toast(`文件夹名称最多 ${DIALOG_EXPLORER_MAX_NAME_LEN} 个字`, 2000);
+    dialogManagerToast(`文件夹名称最多 ${DIALOG_EXPLORER_MAX_NAME_LEN} 个字`, 2000);
     return;
   }
   folder.name = name;
@@ -1060,9 +1077,9 @@ function dialogExplorerDeleteFolder(folderId) {
   touchFolder(parentId);
   dialogManagerPersistSettings();
   dialogManagerSaveData();
-  renderChatList();
-  if (typeof renderMessages === 'function') renderMessages();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  dialogManagerRenderChatList();
+  dialogManagerRenderMessages();
+  dialogManagerUpdateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   renderDialogManagerFolders();
 }
@@ -1075,13 +1092,13 @@ function dialogExplorerRenameChat(chatId) {
   const raw = prompt('重命名对话', chat.title || '新对话');
   if (raw === null) return;
   const title = raw.trim();
-  if (!title) { if (typeof toast === 'function') toast('名称不能为空'); return; }
+  if (!title) { dialogManagerToast('名称不能为空'); return; }
   chat.title = title.slice(0, 80);
   touchFolder(chat.dialogFolderId || '');
   dialogManagerSaveData();
-  renderChatList();
+  dialogManagerRenderChatList();
   renderDialogManagerFolders();
-  if (typeof toast === 'function') toast('已重命名');
+  dialogManagerToast('已重命名');
 }
 
 function dialogExplorerExportChat(chatId, format) {
@@ -1145,9 +1162,9 @@ function dialogExplorerTargetHidden(type, id) {
 function dialogExplorerRefreshAfterVisibilityChange(folderId) {
   if (folderId) touchFolder(folderId);
   dialogManagerSaveData();
-  renderChatList();
-  if (typeof renderMessages === 'function') renderMessages();
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  dialogManagerRenderChatList();
+  dialogManagerRenderMessages();
+  dialogManagerUpdateSendBtn();
   if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
   dialogManagerSyncGlobalTaskState(dialogManagerState.currentId);
   renderDialogManagerFolders();
@@ -1165,12 +1182,12 @@ function dialogExplorerHideChat(chatId) {
   const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   if (chat._hiddenFromUI) {
-    if (typeof toast === 'function') toast('该对话已隐藏');
+    dialogManagerToast('该对话已隐藏');
     return;
   }
   chat._hiddenFromUI = true;
   dialogExplorerAfterHideChats(new Set([chatId]), chat.dialogFolderId || '');
-  if (typeof toast === 'function') toast('已隐藏对话');
+  dialogManagerToast('已隐藏对话');
 }
 
 function dialogExplorerHideFolderChats(folderId) {
@@ -1180,24 +1197,24 @@ function dialogExplorerHideFolderChats(folderId) {
   const affectedChats = dialogExplorerChatsInFolderTree(folderId);
   const visibleChats = affectedChats.filter(chat => !chat._hiddenFromUI);
   if (!visibleChats.length) {
-    if (typeof toast === 'function') toast('该文件夹中没有可隐藏的对话');
+    dialogManagerToast('该文件夹中没有可隐藏的对话');
     return;
   }
   visibleChats.forEach(chat => { chat._hiddenFromUI = true; });
   dialogExplorerAfterHideChats(new Set(visibleChats.map(chat => chat.id)), folderId);
-  if (typeof toast === 'function') toast(`已隐藏 ${visibleChats.length} 个对话`);
+  dialogManagerToast(`已隐藏 ${visibleChats.length} 个对话`);
 }
 
 function dialogExplorerUnhideChat(chatId) {
   const chat = dialogManagerChatById(chatId);
   if (!chat) return;
   if (!chat._hiddenFromUI) {
-    if (typeof toast === 'function') toast('该对话未隐藏');
+    dialogManagerToast('该对话未隐藏');
     return;
   }
   delete chat._hiddenFromUI;
   dialogExplorerRefreshAfterVisibilityChange(chat.dialogFolderId || '');
-  if (typeof toast === 'function') toast('已取消隐藏对话');
+  dialogManagerToast('已取消隐藏对话');
 }
 
 function dialogExplorerUnhideFolderChats(folderId) {
@@ -1207,12 +1224,12 @@ function dialogExplorerUnhideFolderChats(folderId) {
   const affectedChats = dialogExplorerChatsInFolderTree(folderId);
   const hiddenChats = affectedChats.filter(chat => chat._hiddenFromUI);
   if (!hiddenChats.length) {
-    if (typeof toast === 'function') toast('该文件夹中没有隐藏的对话');
+    dialogManagerToast('该文件夹中没有隐藏的对话');
     return;
   }
   hiddenChats.forEach(chat => { delete chat._hiddenFromUI; });
   dialogExplorerRefreshAfterVisibilityChange(folderId);
-  if (typeof toast === 'function') toast(`已取消隐藏 ${hiddenChats.length} 个对话`);
+  dialogManagerToast(`已取消隐藏 ${hiddenChats.length} 个对话`);
 }
 
 function dialogExplorerDeleteChat(chatId) {
@@ -1226,8 +1243,8 @@ function dialogExplorerDeleteChat(chatId) {
     dialogManagerState.chats = (dialogManagerState.chats || []).filter(c => c.id !== chatId);
     if (dialogManagerState.currentId === chatId) dialogManagerState.currentId = ((dialogManagerState.chats || [])[0] && dialogManagerState.chats[0].id) || '';
     dialogManagerSaveData();
-    renderChatList();
-    if (typeof toast === 'function') toast('已删除');
+    dialogManagerRenderChatList();
+    dialogManagerToast('已删除');
   }
   touchFolder(folderId);
   renderDialogManagerFolders();
@@ -1297,7 +1314,7 @@ function exportDialogManagedChat(format) {
   } else if (format === 'pdf') {
     exportDialogPdf(chat, `${base}.pdf`);
   }
-  if (typeof toast === 'function') toast(`对话 ${format.toUpperCase()} 已导出`);
+  dialogManagerToast(`对话 ${format.toUpperCase()} 已导出`);
 }
 
 function buildDialogMarkdownExport(chat) {
@@ -1353,7 +1370,7 @@ function exportDialogPdf(chat, filename) {
     try {
       frame.contentWindow.focus();
       frame.contentWindow.print();
-      if (typeof toast === 'function') toast(`请选择"另存为 PDF"：${filename}`, 3500);
+      dialogManagerToast(`请选择"另存为 PDF"：${filename}`, 3500);
     } finally {
       setTimeout(() => frame.remove(), 1200);
     }
@@ -1402,7 +1419,7 @@ function savePromptFromUi() {
   const title = (titleInput && titleInput.value.trim()) || '';
   const content = (contentInput && contentInput.value.trim()) || '';
   if (!title || !content) {
-    if (typeof toast === 'function') toast('提示词标题和内容都不能为空');
+    dialogManagerToast('提示词标题和内容都不能为空');
     return;
   }
   const now = Date.now();

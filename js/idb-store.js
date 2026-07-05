@@ -298,13 +298,22 @@
     clearAll() {
       const keys = Array.from(kvCache.keys());
       kvCache.clear();
-      if (_db) {
-        const tx = _db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).clear();
-      }
       try { localStorage.clear(); } catch (e) {}
       dirty.clear();
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      if (_db) {
+        return new Promise((resolve, reject) => {
+          try {
+            const tx = _db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).clear();
+            tx.oncomplete = () => resolve(keys.length);
+            tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error || new Error('clearAll aborted'));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
       return keys.length;
     },
     // 立即落盘（重要操作后可主动调用）

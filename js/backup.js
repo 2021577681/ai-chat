@@ -886,12 +886,12 @@ function applyImport() {
   closeBackup();
 }
 
-function resetAllData() {
+async function resetAllData() {
   if (!confirm('⚠️ 清空所有数据？建议先备份！')) return;
   if (!confirm('再次确认：不可恢复！')) return;
   // ⭐ 一键清空：storage.clearAll() 会把 IndexedDB 和 localStorage 一起清掉
   if (typeof storage !== 'undefined' && storage.clearAll) {
-    storage.clearAll();
+    await Promise.resolve(storage.clearAll());
   } else {
     // 兜底
     localStorage.removeItem(BackupConfigModule.STORE_KEY);

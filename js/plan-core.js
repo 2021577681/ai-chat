@@ -549,7 +549,7 @@ async function regeneratePlan(msgIdx) {
   c.messages = c.messages.slice(0, msgIdx);
   PlanCoreUiService.renderMessages();
   planCoreSaveData();
-  await callAPIWithPlan();
+  await PlanCoreOrchestrationService.callAPIWithPlan();
 }
 
 function editPlanStep(msgIdx, stepIdx) {

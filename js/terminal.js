@@ -10,6 +10,7 @@ const terminalChatTaskById = TerminalStateModule.chatTaskById;
 const terminalIsChatGenerating = TerminalStateModule.isChatGenerating;
 const terminalSyncGlobalTaskState = TerminalStateModule.syncGlobalTaskState;
 const TerminalOrchestrationService = window.AgentApp.require('orchestrationService');
+const TerminalUiService = window.AgentApp.require('uiService');
 
 // ⭐ 操作类别定义（共 9 类需弹窗的操作）
 const PERMISSION_CATEGORIES = {
@@ -344,7 +345,7 @@ function startTermConfirmAutoAllowTimer(context) {
   _termConfirmAutoAllowTimer = setTimeout(() => {
     _termConfirmAutoAllowTimer = null;
     if (!_termConfirmResolve) return;
-    if (typeof toast === 'function') toast('大纲模式权限等待超时，已自动允许本次调用', 3500);
+    TerminalUiService.toast('大纲模式权限等待超时，已自动允许本次调用', 3500);
     termConfirmAccept({ autoAllowed: true });
   }, OUTLINE_PERMISSION_AUTO_ALLOW_MS);
 }
@@ -553,7 +554,7 @@ function termConfirmAccept(options = {}) {
   if (!autoAllowed && cat && (permanentAllowed || document.getElementById('termAllowSession').checked)) {
     setPermanentPermission(cat, true);
     const info = PERMISSION_CATEGORIES[cat];
-    toast(`✓ 已永久允许「${info ? info.label : cat}」（可在 ⋯ 更多 → 权限管理 撤销）`, 3500);
+    TerminalUiService.toast(`✓ 已永久允许「${info ? info.label : cat}」（可在 ⋯ 更多 → 权限管理 撤销）`, 3500);
   }
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
@@ -573,7 +574,7 @@ function termConfirmAcceptAll(options = {}) {
   if (cat) {
     getTaskAllowForChat(_currentConfirmChatId)[cat] = true;
     const info = PERMISSION_CATEGORIES[cat];
-    toast(`⚡ 本任务后续将自动允许「${info ? info.label : cat}」`, 2500);
+    TerminalUiService.toast(`⚡ 本任务后续将自动允许「${info ? info.label : cat}」`, 2500);
   }
   const btn = document.getElementById('termAllowBtn');
   if (btn._timer) clearInterval(btn._timer);
@@ -1650,9 +1651,9 @@ async function attachFileForAI(path, description, context) {
 
   if (context && context.concurrentChatId && context.concurrentAgentId) {
     if (r.is_image) {
-      toast(`✓ 已加载图片 ${r.name}`, 1500);
+      TerminalUiService.toast(`✓ 已加载图片 ${r.name}`, 1500);
     } else {
-      toast(`✓ 已加载文档 ${r.name}（${(r.size / 1024).toFixed(1)} KB）`, 1500);
+      TerminalUiService.toast(`✓ 已加载文档 ${r.name}（${(r.size / 1024).toFixed(1)} KB）`, 1500);
     }
     const agentName = context.concurrentAgentName || '当前 AI';
     return {
@@ -1667,9 +1668,9 @@ async function attachFileForAI(path, description, context) {
   pushPendingAIAttachment(chatId, attachment);
   
   if (r.is_image) {
-    toast(`✓ 已加载图片 ${r.name}`, 1500);
+    TerminalUiService.toast(`✓ 已加载图片 ${r.name}`, 1500);
   } else {
-    toast(`✓ 已加载文档 ${r.name}（${(r.size / 1024).toFixed(1)} KB）`, 1500);
+    TerminalUiService.toast(`✓ 已加载文档 ${r.name}（${(r.size / 1024).toFixed(1)} KB）`, 1500);
   }
   
   if (TERMINAL_CONFIG.autoAnalyzeAfterAttach) {
@@ -1688,7 +1689,7 @@ async function attachFileForAI(path, description, context) {
     attachment._hidden = false;
     if (chatId === terminalState.currentId) {
       terminalState.pendingAttachments.push(attachment);
-      renderPendingAtts();
+      TerminalUiService.renderPendingAttachments();
     }
     return `✅ 已加载 ${r.name}\n请告诉用户："已加载 ${r.name}，请再发一句话我就能看到了。"`;
   }
@@ -1762,12 +1763,12 @@ async function tryAutoResend(chatId) {
   } catch (e) {
     console.error('[auto-resend] failed:', e);
     if (!(e.name === 'QuotaExceededError' || (e.message && e.message.includes('quota')))) {
-      toast('自动重发失败：' + e.message, 3000);
+      TerminalUiService.toast('自动重发失败：' + e.message, 3000);
     }
   } finally {
     delete _autoResendInProgressByChat[chatId];
     terminalSyncGlobalTaskState(chatId);
-    if (typeof updateSendBtn === 'function') updateSendBtn();
+    TerminalUiService.updateSendBtn();
   }
 }
 async function sendHiddenMessage(text, chatId) {
@@ -1782,7 +1783,7 @@ async function sendHiddenMessage(text, chatId) {
   
   if (!terminalState.settings.apiKey) {
     console.error('[隐藏发送] 没有 API Key');
-    toast('请先配置 API Key');
+    TerminalUiService.toast('请先配置 API Key');
     return;
   }
   
@@ -1821,13 +1822,13 @@ async function sendHiddenMessage(text, chatId) {
   } finally {
     terminalState.isGenerating = false;
     terminalState.abortCtrl = null;
-    if (typeof updateSendBtn === 'function') updateSendBtn();
+    TerminalUiService.updateSendBtn();
   }
 }
 
 function toggleAutoAnalyze() {
   TERMINAL_CONFIG.autoAnalyzeAfterAttach = !TERMINAL_CONFIG.autoAnalyzeAfterAttach;
-  toast(TERMINAL_CONFIG.autoAnalyzeAfterAttach 
+  TerminalUiService.toast(TERMINAL_CONFIG.autoAnalyzeAfterAttach
     ? '✓ 自动分析模式已开启' 
     : '✓ 自动分析模式已关闭', 3000);
 }
@@ -1904,10 +1905,10 @@ function forceUnstuck() {
   Object.values(_autoResendTimersByChat).forEach(t => { try { clearTimeout(t); } catch (e) {} });
   _autoResendTimersByChat = {};
   
-  if (typeof updateSendBtn === 'function') updateSendBtn();
-  if (typeof renderPendingAtts === 'function') renderPendingAtts();
+  TerminalUiService.updateSendBtn();
+  TerminalUiService.renderPendingAttachments();
   
-  toast('🔄 已强制恢复对话状态');
+  TerminalUiService.toast('🔄 已强制恢复对话状态');
 }
 
 window.forceUnstuck = forceUnstuck;

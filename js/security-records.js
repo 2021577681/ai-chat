@@ -476,3 +476,19 @@ window.clearSecurityRecords = clearSecurityRecords;
 window.openSecurityRecords = openSecurityRecords;
 window.closeSecurityRecords = closeSecurityRecords;
 window.renderSecurityRecords = renderSecurityRecords;
+
+window.AgentApp.define('securityRecords', {
+  SECURITY_RECORDS_STORAGE_KEY,
+  SECURITY_RECORDS_MAX,
+  SECURITY_RECORDS_FILTERS,
+  loadSecurityRecords,
+  saveSecurityRecords,
+  addSecurityRecord,
+  recordPrivacySecurityEvent,
+  recordShellAuditSecurityEvent,
+  clearSecurityRecords,
+  openSecurityRecords,
+  closeSecurityRecords,
+  refreshSecurityRecordsIfOpen,
+  renderSecurityRecords
+});

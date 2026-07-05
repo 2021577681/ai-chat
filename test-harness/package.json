@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "test:e2e": "node ../tests/e2e/run-e2e.js",
+    "test:e2e:ui": "node ../tests/e2e/run-e2e.js --ui",
+    "test:e2e:headed": "node ../tests/e2e/run-e2e.js --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

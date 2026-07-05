@@ -477,7 +477,9 @@ function _chatDisplayTitle(chat) {
 }
 
 function _chatFirstUserTitle(chat) {
-  const firstUser = chat && Array.isArray(chat.messages) ? chat.messages.find(m => m && m.role === 'user') : null;
+  const firstUser = chat && Array.isArray(chat.messages)
+    ? chat.messages.find(m => m && m.role === 'user' && !m._hiddenFromUI)
+    : null;
   const text = _chatMessagePlainText(firstUser).replace(/\s+/g, ' ').trim();
   if (!text) return '';
   const sentence = text.match(/^(.{1,80}?[。！？!?\.](?:\s|$)|.{1,80})/);
@@ -1223,6 +1225,7 @@ function renderMsg(m, idx) {
         <div class="msg-actions">
           <button class="msg-action" data-action="valueClick" data-handler="copyMsg" data-value="${idx}" data-value-type="number">📋 复制</button>
           ${m.role !== 'tool' ? `<button class="msg-action" data-action="valueClick" data-handler="regenerate" data-value="${idx}" data-value-type="number">🔄 重新生成</button>` : ''}
+          ${m.role !== 'tool' ? `<button class="msg-action danger" data-action="valueClick" data-handler="deleteMessageTurn" data-value="${idx}" data-value-type="number" title="删除这轮问答">🗑 删除</button>` : ''}
         </div>` : ''}
       </div>
       ${isUser ? renderUserMsgActions(idx) : ''}
@@ -1474,7 +1477,7 @@ async function onSend() {
     return;
   }
 
-  const c = chatCurrentChat();
+  let c = chatCurrentChat();
 
   // ⭐ 辩论模式发送按钮处理 —— 必须在空输入检查之前
   //    停止/空闲/错误时点发送 = 恢复辩论，不需要输入内容
@@ -1505,7 +1508,14 @@ async function onSend() {
     return;
   }
   if (typeof ensureCompletionSoundReady === 'function') ensureCompletionSoundReady();
-  if (!chatCurrentChat()) newChat();
+  if (!c) {
+    newChat();
+    c = chatCurrentChat();
+  }
+  if (!c) {
+    toast('创建新对话失败，请刷新页面后重试', 3000);
+    return;
+  }
   
   if (typeof resetTaskPermission === 'function') resetTaskPermission();
   
@@ -1624,6 +1634,92 @@ function copyMsg(idx) {
   navigator.clipboard.writeText(_messageTextForEdit(c.messages[idx])).then(() => toast('✓ 已复制'));
 }
 
+function _findRegenerateCutIndex(messages, replyIdx) {
+  if (!Array.isArray(messages)) return Math.max(0, replyIdx || 0);
+  let cut = Math.max(0, Math.min(Number(replyIdx) || 0, messages.length));
+  while (cut > 0) {
+    const prev = messages[cut - 1];
+    if (prev && prev.role === 'user') break;
+    cut--;
+  }
+  return cut;
+}
+
+function _isVisibleUserTurnBoundary(msg) {
+  return !!(msg && msg.role === 'user' && !msg._hiddenFromUI);
+}
+
+function _isHiddenUserBoundary(msg) {
+  return !!(msg && msg.role === 'user' && msg._hiddenFromUI && msg._isBeacon);
+}
+
+function _findMessageTurnBounds(messages, msgIdx) {
+  if (!Array.isArray(messages)) return null;
+  const idx = Number(msgIdx);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= messages.length) return null;
+  const target = messages[idx];
+  if (!target || target.role === 'user') return null;
+
+  let start = idx;
+  for (let i = idx; i >= 0; i--) {
+    if (_isVisibleUserTurnBoundary(messages[i])) {
+      start = i;
+      break;
+    }
+  }
+
+  let end = idx + 1;
+  for (let i = idx + 1; i < messages.length; i++) {
+    const next = messages[i];
+    if (_isVisibleUserTurnBoundary(next) || _isHiddenUserBoundary(next)) break;
+    end = i + 1;
+  }
+
+  return { start, end, count: Math.max(0, end - start) };
+}
+
+function _looksLikeAutoChatTitle(chat, oldDerivedTitle) {
+  const title = String(chat && chat.title || '').trim();
+  if (!title || title === '新对话') return true;
+  const oldTitle = String(oldDerivedTitle || '').trim();
+  if (!oldTitle) return false;
+  return title === oldTitle || title === oldTitle.slice(0, 30);
+}
+
+function _refreshChatTitleAfterTurnDelete(chat, oldDerivedTitle) {
+  if (!chat || !Array.isArray(chat.messages)) return;
+  const hasVisibleMessages = chat.messages.some(m => m && !m._hiddenFromUI);
+  if (!hasVisibleMessages) {
+    chat.title = '新对话';
+    return;
+  }
+  if (!_looksLikeAutoChatTitle(chat, oldDerivedTitle)) return;
+  const nextTitle = _chatFirstUserTitle(chat);
+  if (nextTitle) chat.title = nextTitle.slice(0, 30);
+}
+
+async function deleteMessageTurn(idx) {
+  const c = chatCurrentChat();
+  if (!c || !Array.isArray(c.messages)) return;
+  let bounds = _findMessageTurnBounds(c.messages, idx);
+  if (!bounds || bounds.count <= 0) return;
+  if (typeof confirm === 'function' && !confirm('删除这轮问答？该用户提问、AI 回答和中间工具结果都会从历史中移除。')) return;
+
+  const oldDerivedTitle = _chatFirstUserTitle(c);
+  await _abortChatForRewrite(c.id);
+  bounds = _findMessageTurnBounds(c.messages, idx);
+  if (!bounds || bounds.count <= 0) return;
+  c.messages.splice(bounds.start, bounds.count);
+  _refreshChatTitleAfterTurnDelete(c, oldDerivedTitle);
+  chatSaveData();
+  renderChatList();
+  renderMessages();
+  if (chatSyncGlobalTaskState) chatSyncGlobalTaskState(c.id);
+  if (typeof updateSendBtn === 'function') updateSendBtn();
+  if (typeof updateTokenDisplay === 'function') updateTokenDisplay();
+  if (typeof toast === 'function') toast('已删除这轮问答', 1800);
+}
+
 async function regenerate(idx) {
   const c = chatCurrentChat();
   if (!c) return;
@@ -1651,8 +1747,7 @@ async function regenerate(idx) {
     if (typeof updateSendBtn === 'function') updateSendBtn();
   }
   
-  c.messages = c.messages.slice(0, idx);
-  while (c.messages.length && c.messages[c.messages.length - 1].role === 'tool') c.messages.pop();
+  c.messages = c.messages.slice(0, _findRegenerateCutIndex(c.messages, idx));
   // ⭐ 重新生成等价于"重新开始一个 AI 回合"，必须清理上次残留状态：
   // 1. 任务级临时授权 + 自动重发定时器（与 newChat/onSend 行为一致）
   // 2. 计划模式 / 大纲的执行中标志（防止旧标志卡住 onSend）
@@ -1820,6 +1915,9 @@ if (typeof window !== 'undefined' && window.AgentApp) {
     onSend,
     copyMsg,
     regenerate,
+    _findRegenerateCutIndex,
+    deleteMessageTurn,
+    _findMessageTurnBounds,
     addAttachment,
     removeAttachment,
     setupDrag,

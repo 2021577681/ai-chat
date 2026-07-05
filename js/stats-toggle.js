@@ -45,3 +45,12 @@ function toggleStatsBar() {
 
 window.initStatsBarToggle = initStatsBarToggle;
 window.toggleStatsBar = toggleStatsBar;
+
+window.AgentApp.define('statsToggle', {
+  STATS_BAR_COLLAPSED_KEY,
+  applyStatsBarCollapsed,
+  loadStatsBarCollapsed,
+  saveStatsBarCollapsed,
+  initStatsBarToggle,
+  toggleStatsBar
+});

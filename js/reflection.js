@@ -6,6 +6,7 @@
 // - 工具历史不进入主对话 c.messages，只存 reflection.turns
 
 const ReflectionStateModule = window.AgentApp.require('state');
+const ReflectionUiService = window.AgentApp.require('uiService');
 const reflectionState = ReflectionStateModule.state;
 const reflectionSaveData = ReflectionStateModule.saveData;
 const reflectionPersistSettings = ReflectionStateModule.persistSettings;
@@ -25,11 +26,11 @@ async function callAPIWithReflection(options = {}) {
   const c = requestedChatId ? reflectionChatById(requestedChatId) : reflectionCurrentChat();
   const s = reflectionState.settings;
   const taskChatId = c && c.id;
-  const renderIfVisible = () => { if (!taskChatId || reflectionIsCurrentChat(taskChatId)) renderMessages(); };
+  const renderIfVisible = () => { if (!taskChatId || reflectionIsCurrentChat(taskChatId)) ReflectionUiService.renderMessages(); };
   const taskUseTools = options.useTools !== undefined ? !!options.useTools : !!s.useTools;
   const suppressCompletionSound = !!options.suppressCompletionSound;
   if (taskChatId && reflectionIsChatGenerating(taskChatId)) {
-    if (typeof toast === 'function' && reflectionIsCurrentChat(taskChatId)) toast('此对话已有任务正在执行，请稍等');
+    if (reflectionIsCurrentChat(taskChatId)) ReflectionUiService.toast('此对话已有任务正在执行，请稍等');
     return;
   }
   // ⭐ 创建 abortCtrl，让用户按"停止"按钮能中断学生答 / 老师评的任意一轮
@@ -45,8 +46,8 @@ async function callAPIWithReflection(options = {}) {
   }
   // ⭐ 清零软停止标志：新任务开始
   reflectionState.stopRequested = false;
-  updateSendBtn();
-  if (typeof renderChatList === 'function') renderChatList();
+  ReflectionUiService.updateSendBtn();
+  ReflectionUiService.renderChatList();
   
   const aiMsg = {
     role: 'assistant',
@@ -207,7 +208,7 @@ async function callAPIWithReflection(options = {}) {
     // ⭐ 完成时做一次完整的局部刷新（重渲染整个消息节点，让最终答案 + 折叠态都生效）
     if (c) {
       const finalIdx = c.messages.indexOf(aiMsg);
-      if (finalIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(finalIdx, c);
+      if (finalIdx >= 0 && ReflectionUiService.has('refreshMsgNode')) ReflectionUiService.refreshMsgNode(finalIdx, c);
       else renderIfVisible();
     }
     reflectionSaveData();
@@ -229,7 +230,7 @@ async function callAPIWithReflection(options = {}) {
     delete aiMsg.reflection.progressText;
     if (c) {
       const errIdx = c.messages.indexOf(aiMsg);
-      if (errIdx >= 0 && typeof refreshMsgNode === 'function') refreshMsgNode(errIdx, c);
+      if (errIdx >= 0 && ReflectionUiService.has('refreshMsgNode')) ReflectionUiService.refreshMsgNode(errIdx, c);
       else renderIfVisible();
     }
     reflectionSaveData();
@@ -241,8 +242,8 @@ async function callAPIWithReflection(options = {}) {
       reflectionState.abortCtrl = null;
       if (reflectionState.activeTaskChatId === taskChatId) reflectionState.activeTaskChatId = null;
     }
-    updateSendBtn();
-    if (typeof renderChatList === 'function') renderChatList();
+    ReflectionUiService.updateSendBtn();
+    ReflectionUiService.renderChatList();
   }
 }
 
@@ -322,7 +323,8 @@ function refreshReflectionLive(aiMsg, immediate, targetChat) {
     const panel = document.querySelector(`.reflection-panel[data-msg-idx="${idx}"]`);
     if (!panel) {
       // 面板还没创建（首次出现）：局部刷新这一条消息
-      if (typeof refreshMsgNode === 'function') refreshMsgNode(idx, c);
+      if (ReflectionUiService.has('refreshMsgNode')) ReflectionUiService.refreshMsgNode(idx, c);
+      else ReflectionUiService.renderMessages();
       return;
     }
     const ref = aiMsg.reflection || {};
@@ -515,7 +517,7 @@ function applyPreset(key) {
   if (!p) return;
   document.getElementById('ref_studentPrompt').value = p.student;
   document.getElementById('ref_teacherPrompt').value = p.teacher;
-  toast('✓ 已应用预设');
+  ReflectionUiService.toast('✓ 已应用预设');
 }
 
 function saveReflectionSettings() {
@@ -558,9 +560,9 @@ function saveReflectionSettings() {
     if (s.useReflection) btn.classList.add('reflect-active');
     else btn.classList.remove('reflect-active');
   }
-  updateSendBtn();
+  ReflectionUiService.updateSendBtn();
   closeReflectionSettings();
-  toast('✓ 已保存');
+  ReflectionUiService.toast('✓ 已保存');
 }
 
 function toggleReflection() {
@@ -586,8 +588,8 @@ function toggleReflection() {
     else btn.classList.remove('reflect-active');
   }
   reflectionPersistSettings();
-  updateSendBtn();
-  toast(s.useReflection ? '✓ 已启用师生' : '✓ 已关闭师生');
+  ReflectionUiService.updateSendBtn();
+  ReflectionUiService.toast(s.useReflection ? '✓ 已启用师生' : '✓ 已关闭师生');
 }
 window.callAPIWithReflection = callAPIWithReflection;
 window.refreshReflectionLive = refreshReflectionLive;

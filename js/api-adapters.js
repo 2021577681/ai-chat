@@ -204,7 +204,56 @@ function buildOpenAIResponsesInput(history, options = {}) {
     }
   }
   
-  return out;
+  return fixOpenAIResponsesInputSequence(out);
+}
+
+function isResponsesConversationBoundary(item) {
+  return !!(item && (item.role || item.type === 'message'));
+}
+
+function makeMissingResponsesToolOutput(callId) {
+  return {
+    type: 'function_call_output',
+    call_id: callId,
+    output: '[system: this tool call was interrupted or its result is unavailable]'
+  };
+}
+
+function flushMissingResponsesToolOutputs(fixed, pendingCalls) {
+  for (const callId of pendingCalls.keys()) {
+    fixed.push(makeMissingResponsesToolOutput(callId));
+  }
+  pendingCalls.clear();
+}
+
+function fixOpenAIResponsesInputSequence(input) {
+  const fixed = [];
+  const pendingCalls = new Map();
+  
+  for (const item of input || []) {
+    if (isResponsesConversationBoundary(item) && pendingCalls.size) {
+      flushMissingResponsesToolOutputs(fixed, pendingCalls);
+    }
+    
+    fixed.push(item);
+    
+    if (item && item.type === 'function_call') {
+      const callId = item.call_id || item.id;
+      if (callId) pendingCalls.set(callId, item);
+      continue;
+    }
+    
+    if (item && item.type === 'function_call_output') {
+      const callId = item.call_id;
+      if (callId) pendingCalls.delete(callId);
+    }
+  }
+  
+  if (pendingCalls.size) {
+    flushMissingResponsesToolOutputs(fixed, pendingCalls);
+  }
+  
+  return fixed;
 }
 
 // ⭐ 关键修复：支持 PDF 和图片
@@ -401,6 +450,7 @@ if (typeof window !== 'undefined' && window.AgentApp) {
     buildOpenAIMessages,
     fixOpenAIMessageSequence,
     buildOpenAIResponsesInput,
+    fixOpenAIResponsesInputSequence,
     buildAnthropicMessages,
     fixAnthropicMessageSequence
   });

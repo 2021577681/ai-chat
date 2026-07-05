@@ -454,3 +454,12 @@ window.dblpSearch = dblpSearch;
 window.openAlexSearch = openAlexSearch;
 window.crossrefSearch = crossrefSearch;
 window.fetchPdfText = fetchPdfText;
+
+window.AgentApp.define('paperTools', {
+  arxivSearch,
+  semanticScholarSearch,
+  dblpSearch,
+  openAlexSearch,
+  crossrefSearch,
+  fetchPdfText
+});

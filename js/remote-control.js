@@ -15,6 +15,15 @@ const remoteControlSyncGlobalTaskState = RemoteControlStateModule.syncGlobalTask
 const remoteControlEnsureChatTasks = RemoteControlStateModule.ensureChatTasks;
 const remoteControlSetChatTaskGuidance = RemoteControlStateModule.setChatTaskGuidance;
 const RemoteControlOrchestrationService = window.AgentApp.require('orchestrationService');
+const RemoteControlUiService = window.AgentApp.require('uiService');
+
+function remoteControlRenderChatList() {
+  RemoteControlUiService.renderChatList();
+}
+
+function remoteControlRenderMessagesIfCurrent(chat) {
+  if (remoteControlIsCurrentChat(chat)) RemoteControlUiService.renderMessages();
+}
 
 const REMOTE_CONTROL_LEGACY_SHORT_REPLY_PROMPT = '你正通过微信文件传输助手被遥控。请只输出最终答案，不展示工具调用过程或大纲过程；回答要简短，适合微信阅读。';
 
@@ -305,7 +314,7 @@ async function remoteControlStartRuntime() {
     await remoteControlSendWechat(remoteControlStartupMarker);
     if (generation !== remoteControlRuntimeGeneration || !remoteControlSettings().enabled) return;
     remoteControlPollOnce();
-    if (generation === remoteControlRuntimeGeneration && remoteControlSettings().enabled && typeof toast === 'function') toast('微信遥控 bridge 已启动');
+    if (generation === remoteControlRuntimeGeneration && remoteControlSettings().enabled) RemoteControlUiService.toast('微信遥控 bridge 已启动');
   } catch (e) {
     if (!remoteControlSettings().enabled) return;
     console.error('[remote-control] bridge start failed:', e);
@@ -314,7 +323,7 @@ async function remoteControlStartRuntime() {
     remoteControlClearTimer();
     remoteControlPersistSettings();
     syncRemoteControlButton();
-    if (typeof toast === 'function') toast('微信遥控 bridge 启动失败：' + (e.message || e), 4000);
+    RemoteControlUiService.toast('微信遥控 bridge 启动失败：' + (e.message || e), 4000);
   }
 }
 
@@ -836,8 +845,8 @@ function remoteControlEnsureTemporaryChat(parsed) {
   remoteControlSyncGlobalTaskState(chat.id);
   if (typeof updateTemporaryChatButton === 'function') updateTemporaryChatButton();
   remoteControlSaveData();
-  renderChatList();
-  if (remoteControlIsCurrentChat(chat)) renderMessages();
+  remoteControlRenderChatList();
+  remoteControlRenderMessagesIfCurrent(chat);
   return chat;
 }
 
@@ -879,8 +888,8 @@ function remoteControlAppendUser(chat, content) {
     try { maybeInsertBeacon(chat); } catch (e) { console.warn('[remote-control] beacon failed:', e); }
   }
   remoteControlSaveData();
-  renderChatList();
-  if (remoteControlIsCurrentChat(chat)) renderMessages();
+  remoteControlRenderChatList();
+  remoteControlRenderMessagesIfCurrent(chat);
 }
 
 function remoteControlStripInternalPromptText(text) {
@@ -1048,7 +1057,7 @@ async function remoteControlRestartFromCommand() {
     remoteControlScheduleNext();
   } catch (e) {
     console.error('[remote-control] restart failed:', e);
-    if (typeof toast === 'function') toast('微信遥控重启失败：' + (e.message || e), 4000);
+    RemoteControlUiService.toast('微信遥控重启失败：' + (e.message || e), 4000);
   }
 }
 
@@ -1321,7 +1330,7 @@ function remoteControlQueueGuidance(chat, parsed) {
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
   if (typeof traceUserMessage === 'function') traceUserMessage(parsed.body || userMsg.content);
   remoteControlSyncGlobalTaskState(chat.id);
-  if (typeof updateSendBtn === 'function') updateSendBtn();
+  RemoteControlUiService.updateSendBtn();
   return true;
 }
 
@@ -1500,7 +1509,7 @@ async function remoteControlRegenerateChat(chat, parsed) {
   chat.messages = chat.messages.slice(0, idx);
   while (chat.messages.length && chat.messages[chat.messages.length - 1].role === 'tool') chat.messages.pop();
   remoteControlSaveData();
-  if (remoteControlIsCurrentChat(chat)) renderMessages();
+  remoteControlRenderMessagesIfCurrent(chat);
   const before = chat.messages.length;
   try {
     const useTools = !!(chat.remoteControl && chat.remoteControl.useToolsDefault);
@@ -1867,7 +1876,7 @@ function remoteControlDispatchParsed(parsed, msg) {
     .then(() => remoteControlHandleParsed(parsed))
     .catch(e => {
       console.error('[remote-control] async command failed:', e);
-      if (typeof toast === 'function') toast('遥控指令执行失败：' + (e.message || e), 3000);
+      RemoteControlUiService.toast('遥控指令执行失败：' + (e.message || e), 3000);
     })
     .finally(() => {
       remoteControlInFlightMessages.delete(messageKey);
@@ -1930,7 +1939,7 @@ async function remoteControlPollOnce() {
     remoteControlDispatchMessages(diff.items, cfg);
   } catch (e) {
     console.error('[remote-control] poll failed:', e);
-    if (typeof toast === 'function') toast('遥控轮询失败：' + (e.message || e), 3000);
+    RemoteControlUiService.toast('遥控轮询失败：' + (e.message || e), 3000);
   } finally {
     remoteControlPolling = false;
     if (remoteControlCanSchedulePoll()) remoteControlScheduleNext();
@@ -1962,11 +1971,11 @@ async function toggleRemoteControl(force) {
   remoteControlPersistSettings();
   syncRemoteControlButton();
   if (cfg.enabled) {
-    if (typeof toast === 'function') toast('✓ 已开启微信遥控');
+    RemoteControlUiService.toast('✓ 已开启微信遥控');
     await remoteControlStartRuntime();
   } else {
     await remoteControlStopRuntime();
-    if (typeof toast === 'function') toast('✓ 已关闭微信遥控');
+    RemoteControlUiService.toast('✓ 已关闭微信遥控');
   }
 }
 
@@ -2048,7 +2057,7 @@ async function saveAndCloseRemoteControlSettings() {
   } else {
     closeRemoteControlSettings();
   }
-  if (typeof toast === 'function') toast('✓ 已保存远程遥控设置');
+  RemoteControlUiService.toast('✓ 已保存远程遥控设置');
   return true;
 }
 
