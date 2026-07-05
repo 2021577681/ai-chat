@@ -360,7 +360,25 @@ quality-check.bat -SkipE2E
 quality-check.bat
 ```
 
-### 4. 启动后端与前端
+### 4. 打包 Release
+
+默认打包会先执行快速质量检查，再生成 release zip 和 SHA256 校验文件：
+
+```bash
+build-release.bat
+```
+
+常用参数：
+
+```bash
+build-release.bat -Version v0.1.0
+build-release.bat -FullE2E
+build-release.bat -Force
+```
+
+发布产物会写入 `release/`，该目录是可再生成的构建产物，已被 `.gitignore` 排除。上传 GitHub Release 后可以删除本地 `release/` 目录。
+
+### 5. 启动后端与前端
 
 #### Windows 推荐方式
 
@@ -386,7 +404,7 @@ AI-Chat-大模型对话助手.html
 http://localhost:8765/
 ```
 
-### 4. 配置模型
+### 6. 配置模型
 
 打开前端后进入设置页，配置：
 
@@ -405,7 +423,7 @@ http://localhost:8765/
 - `Kimi K2`
 - `本地中转服务`
 
-### 5. 配置工作区沙箱
+### 7. 配置工作区沙箱
 
 前端左侧「沙箱目录」卡片可以选择 Agent 能访问的工作目录。文件操作、命令执行、Git 操作都会围绕该目录进行，避免误操作系统其他路径。🔒
 
