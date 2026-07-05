@@ -17,7 +17,72 @@ from urllib.parse import quote_plus, parse_qs, unquote, urlparse
 class WebMixin:
     """Handler mixin：网络搜索 + 网页抓取"""
 
-    # ============ 🌐 网络搜索（多引擎回退） ============
+    # ============ Proxy helpers ============
+    def _proxy_flag_enabled(self, value):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+    def _normalize_local_web_proxy_url(self, raw_url):
+        raw = str(raw_url or '').strip()
+        if not raw:
+            return '', 'proxy_url is empty while proxy is enabled'
+
+        m = re.match(r'^(https?|socks5h?)://(?:127\.0\.0\.1|localhost):(\d{1,5})/?$', raw, flags=re.I)
+        if not m:
+            return '', 'proxy_url must be a local proxy like http://127.0.0.1:7890 or socks5h://127.0.0.1:7890'
+
+        scheme = m.group(1).lower()
+        port = int(m.group(2))
+        if port < 1 or port > 65535:
+            return '', 'proxy port must be between 1 and 65535'
+        if scheme == 'https':
+            scheme = 'http'
+        elif scheme == 'socks5':
+            scheme = 'socks5h'
+        return f'{scheme}://127.0.0.1:{port}', None
+
+    def _web_proxy_config(self, body):
+        body = body or {}
+        enabled_value = body.get('proxy_enabled')
+        if enabled_value is None:
+            enabled_value = body.get('use_proxy')
+        if not self._proxy_flag_enabled(enabled_value):
+            return None, '', None
+
+        proxy_url, error = self._normalize_local_web_proxy_url(body.get('proxy_url') or body.get('proxy'))
+        if error:
+            return None, '', error
+
+        if proxy_url.startswith('socks5h://'):
+            try:
+                import socks  # noqa: F401
+            except ImportError:
+                return None, '', 'SOCKS proxy requires PySocks support. Run: pip install "requests[socks]" and restart the local service.'
+
+        return {'http': proxy_url, 'https': proxy_url}, proxy_url, None
+
+    def _format_web_request_error(self, engine, error, proxy_url=''):
+        message = re.sub(r'\s+', ' ', str(error) or type(error).__name__).strip()
+        if len(message) > 260:
+            message = message[:257] + '...'
+        text = f'{engine}: {type(error).__name__}: {message}'
+        if proxy_url:
+            text += f' (proxy={proxy_url})'
+            lower = message.lower()
+            if 'missing dependencies for socks support' in lower or 'socks' in lower:
+                text += '; install requests[socks] and restart the local service'
+            elif 'connection refused' in lower or 'actively refused' in lower or 'winerror 10061' in lower:
+                text += '; confirm the local proxy is running and the port is correct'
+            elif 'proxy' in lower:
+                text += '; check the local proxy type and port'
+        return text
+
+    # ============ Web search ============
     def handle_web_search(self, body):
         """网页搜索，返回标题 + URL + 摘要列表。不需要任何 API Key。
 
@@ -44,19 +109,12 @@ class WebMixin:
         max_results = min(int(body.get('max_results', 8)), 20)
         region = (body.get('region') or 'cn').lower()
         preferred_engine = (body.get('engine') or body.get('source') or 'auto').strip().lower()
-        proxy_enabled = bool(body.get('proxy_enabled') or body.get('use_proxy'))
-        proxy_url = (body.get('proxy_url') or body.get('proxy') or '').strip()
+        proxies, proxy_url, proxy_error = self._web_proxy_config(body)
 
         if not query:
             return self.response.json(200, {'ok': False, 'error': 'query 不能为空'})
-
-        proxies = None
-        if proxy_enabled:
-            if not proxy_url:
-                return self.response.json(200, {'ok': False, 'error': '已启用搜索代理，但代理地址为空'})
-            if not re.match(r'^(https?|socks4|socks5|socks5h)://', proxy_url, flags=re.I):
-                return self.response.json(200, {'ok': False, 'error': '搜索代理地址必须以 http://、https://、socks5:// 或 socks5h:// 开头'})
-            proxies = {'http': proxy_url, 'https': proxy_url}
+        if proxy_error:
+            return self.response.json(200, {'ok': False, 'error': proxy_error})
 
         proxy_hint = proxy_url if proxies else 'off'
         print(f'🌐 [网络搜索] "{query}" (max={max_results}, region={region}, engine={preferred_engine}, proxy={proxy_hint})')
@@ -389,7 +447,7 @@ class WebMixin:
                     errors.append(f'{name}: 0 条结果')
                     print(f'⚠️ [网络搜索] {name} 无结果')
             except Exception as e:
-                errors.append(f'{name}: {type(e).__name__}')
+                errors.append(self._format_web_request_error(name, e, proxy_url if proxies else ''))
                 print(f'⚠️ [网络搜索] {name} 失败: {e}')
 
         return self.response.json(200, {
@@ -409,7 +467,12 @@ class WebMixin:
         if not (url.startswith('http://') or url.startswith('https://')):
             return self.response.json(200, {'ok': False, 'error': 'URL 必须以 http:// 或 https:// 开头'})
 
-        print(f'🌐 [抓取] {url}  extract={extract_text}')
+        proxies, proxy_url, proxy_error = self._web_proxy_config(body)
+        if proxy_error:
+            return self.response.json(200, {'ok': False, 'error': proxy_error})
+
+        proxy_hint = proxy_url if proxies else 'off'
+        print(f'🌐 [抓取] {url}  extract={extract_text}  proxy={proxy_hint}')
 
         try:
             import requests
@@ -422,7 +485,7 @@ class WebMixin:
                               '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             }
-            resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True, proxies=proxies)
             content_type = resp.headers.get('content-type', '')
             if not resp.encoding or resp.encoding.lower() == 'iso-8859-1':
                 resp.encoding = resp.apparent_encoding or 'utf-8'
@@ -465,4 +528,4 @@ class WebMixin:
                 'truncated': len(text) > max_chars
             })
         except Exception as e:
-            self.response.json(200, {'ok': False, 'error': f'抓取失败：{e}'})
+            self.response.json(200, {'ok': False, 'error': self._format_web_request_error('fetch_url', e, proxy_url if proxies else '')})

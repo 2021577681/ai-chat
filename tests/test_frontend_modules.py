@@ -2374,6 +2374,18 @@ class FrontendModuleTests(unittest.TestCase):
             for direct_usage in direct_typeof_checks:
                 self.assertNotIn(direct_usage, js, f'{path.name} should not probe UI globals directly')
 
+    def test_web_tools_share_proxy_settings(self):
+        config_js = (ROOT / 'js' / 'config.js').read_text(encoding='utf-8')
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+
+        self.assertRegex(config_js, r"name: 'web_search'[\s\S]+proxy_enabled[\s\S]+proxy_url")
+        self.assertRegex(config_js, r"name: 'fetch_url'[\s\S]+proxy_enabled[\s\S]+proxy_url")
+        self.assertIn("code: 'return await webSearch(args.query, args.max_results, args.region, args);'", config_js)
+        self.assertIn("code: 'return await fetchUrl(args.url, args.extract_text, args.max_chars, args);'", config_js)
+
+        self.assertRegex(terminal_js, r"async function webSearch[\s\S]+proxy_enabled: proxyEnabled[\s\S]+proxy_url: proxyUrl")
+        self.assertRegex(terminal_js, r"async function fetchUrl[\s\S]+proxy_enabled: proxyEnabled[\s\S]+proxy_url: proxyUrl")
+
 
 if __name__ == '__main__':
     unittest.main()

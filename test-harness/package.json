@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "install:browser": "playwright install chromium",
     "test:e2e": "node ../tests/e2e/run-e2e.js",
     "test:e2e:ui": "node ../tests/e2e/run-e2e.js --ui",
     "test:e2e:headed": "node ../tests/e2e/run-e2e.js --headed"

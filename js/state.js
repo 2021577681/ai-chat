@@ -127,7 +127,7 @@ let state = {
     // ⭐ 跨域代理：通过本地服务（local_terminal_server.py）转发 LLM 请求
     // 默认开启 —— 大部分用户用本地项目时都会遇到 CORS 问题
     useLocalProxy: true,
-    // 🌐 搜索工具代理：让 web_search 后端请求走本机 HTTP/SOCKS 代理，解决 Google 等搜索源网络问题
+    // 🌐 搜索工具代理：让 web_search / fetch_url 后端请求走本机 HTTP/SOCKS 代理，解决 Google 等网络问题
     searchProxyEnabled: false,
     searchProxyUrl: 'http://127.0.0.1:7890',
     // ⭐ 自动重试：网络抖动 / HTTP 5xx / 429 / 流中途断开时自动重发

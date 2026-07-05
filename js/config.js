@@ -417,7 +417,7 @@ const BUILTIN_TOOLS = [
         region: { type: 'string', description: '地区偏好，可选 cn（国内优先）/ global（海外优先）' },
         engine: { type: 'string', description: '可选搜索源：auto（默认自动回退）/ google / duckduckgo / bing / bing-cn / bing-global / 360 / sogou / baidu' },
         proxy_enabled: { type: 'boolean', description: '可选：是否为本次搜索启用本地代理。不传则使用主设置里的搜索代理开关。' },
-        proxy_url: { type: 'string', description: '可选：本次搜索使用的代理地址，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7890。不传则使用主设置里的搜索代理地址。' }
+        proxy_url: { type: 'string', description: '可选：本次搜索使用的本地代理地址，如 http://127.0.0.1:7890 或 socks5h://127.0.0.1:7890。不传则使用主设置里的搜索代理地址。' }
       },
       required: ['query']
     },
@@ -431,11 +431,13 @@ const BUILTIN_TOOLS = [
       properties: {
         url: { type: 'string', description: '完整链接，必须以 http:// 或 https:// 开头' },
         extract_text: { type: 'boolean', description: '是否提取网页正文（默认 true）。设为 false 返回原始内容（适合 JSON/纯文本）' },
-        max_chars: { type: 'number', description: '最多返回字符数，默认 8000，最大 50000' }
+        max_chars: { type: 'number', description: '最多返回字符数，默认 8000，最大 50000' },
+        proxy_enabled: { type: 'boolean', description: '可选：是否为本次抓取启用本地代理。不传则使用主设置里的搜索代理开关。' },
+        proxy_url: { type: 'string', description: '可选：本次抓取使用的本地代理地址，如 http://127.0.0.1:7890 或 socks5h://127.0.0.1:7890。不传则使用主设置里的搜索代理地址。' }
       },
       required: ['url']
     },
-    code: 'return await fetchUrl(args.url, args.extract_text, args.max_chars);'
+    code: 'return await fetchUrl(args.url, args.extract_text, args.max_chars, args);'
   },
 
   // ============ 📚 论文/学术工具（前端直连 API，无需后端代理） ============

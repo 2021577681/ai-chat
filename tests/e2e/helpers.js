@@ -103,6 +103,147 @@ function makeOpenAiResponse(body, callNumber, replyPrefix) {
   };
 }
 
+function makeOpenAiToolCallResponse(body, callNumber, toolCall) {
+  return {
+    id: `chatcmpl-e2e-tool-${callNumber}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model || 'mock-model',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: toolCall.id,
+              type: 'function',
+              function: {
+                name: toolCall.name,
+                arguments: JSON.stringify(toolCall.arguments || {})
+              }
+            }
+          ]
+        }
+      }
+    ],
+    usage: {
+      prompt_tokens: 14,
+      completion_tokens: 4,
+      total_tokens: 18
+    }
+  };
+}
+
+function makeWebToolsScenarioResponse(body, callNumber) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const toolMessages = messages.filter(msg => msg && msg.role === 'tool');
+  const hasSearchResult = toolMessages.some(msg => msg.name === 'web_search' || msg.tool_call_id === 'call_e2e_web_search');
+  const hasFetchResult = toolMessages.some(msg => msg.name === 'fetch_url' || msg.tool_call_id === 'call_e2e_fetch_url');
+
+  if (!hasSearchResult) {
+    return makeOpenAiToolCallResponse(body, callNumber, {
+      id: 'call_e2e_web_search',
+      name: 'web_search',
+      arguments: {
+        query: 'e2e search proxy verification',
+        max_results: 2,
+        region: 'global'
+      }
+    });
+  }
+
+  if (!hasFetchResult) {
+    return makeOpenAiToolCallResponse(body, callNumber, {
+      id: 'call_e2e_fetch_url',
+      name: 'fetch_url',
+      arguments: {
+        url: 'https://example.test/e2e-search-result',
+        extract_text: true,
+        max_chars: 1200
+      }
+    });
+  }
+
+  return {
+    id: `chatcmpl-e2e-web-tools-final-${callNumber}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model || 'mock-model',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'stop',
+        message: {
+          role: 'assistant',
+          content: 'Tool-assisted final: web_search and fetch_url completed through the mocked local backend.'
+        }
+      }
+    ],
+    usage: {
+      prompt_tokens: 18,
+      completion_tokens: 10,
+      total_tokens: 28
+    }
+  };
+}
+
+function bodyHasTool(body, toolName) {
+  return (Array.isArray(body.tools) ? body.tools : []).some(tool => {
+    if (!tool) return false;
+    if (tool.name === toolName) return true;
+    if (tool.function && tool.function.name === toolName) return true;
+    return false;
+  });
+}
+
+function makeOutlineMaxItemsScenarioResponse(body, callNumber) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const toolMessages = messages.filter(msg => msg && msg.role === 'tool');
+  const hasSavedOutline = toolMessages.some(msg => msg.name === 'save_outline' || msg.tool_call_id === 'call_e2e_save_outline');
+
+  if (!hasSavedOutline) {
+    return makeOpenAiToolCallResponse(body, callNumber, {
+      id: 'call_e2e_save_outline',
+      name: 'save_outline',
+      arguments: {
+        items: [
+          { id: 'a1', title: 'Define acceptance criteria', status: 'pending' },
+          { id: 'a2', title: 'Inspect relevant files', status: 'pending' },
+          { id: 'a3', title: 'Implement focused change', status: 'pending' },
+          { id: 'a4', title: 'Run targeted verification', status: 'pending' },
+          { id: 'a5', title: 'Review edge cases', status: 'pending' },
+          { id: 'a6', title: 'Summarize outcome', status: 'pending' }
+        ]
+      }
+    });
+  }
+
+  return {
+    id: `chatcmpl-e2e-outline-final-${callNumber}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model || 'mock-model',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'stop',
+        message: {
+          role: 'assistant',
+          content: 'Outline final: initial outline was capped by the configured item limit.'
+        }
+      }
+    ],
+    usage: {
+      prompt_tokens: 20,
+      completion_tokens: 8,
+      total_tokens: 28
+    }
+  };
+}
+
 function serializeRequestText(body) {
   const chunks = [];
   const push = value => {
@@ -675,6 +816,16 @@ async function mockLlm(route, options, state) {
     ? options.streamForLlm(body, callNumber)
     : (body.stream !== undefined ? !!body.stream : !!options.stream);
 
+  if (options.outlineMaxItemsScenario && bodyHasTool(body, 'save_outline')) {
+    await fulfillSafely(route, jsonResponse(makeOutlineMaxItemsScenarioResponse(body, callNumber)));
+    return;
+  }
+
+  if (options.webToolsScenario) {
+    await fulfillSafely(route, jsonResponse(makeWebToolsScenarioResponse(body, callNumber)));
+    return;
+  }
+
   if (useStream) {
     await fulfillSafely(route, textResponse(
       makeOpenAiStream(body, callNumber, options.replyPrefix),
@@ -799,6 +950,33 @@ function agentBackendPayload(action, body, state = {}) {
   }
   if (action === 'git') {
     return mockGitPayload(body, state);
+  }
+  if (action === 'web_search') {
+    return {
+      ok: true,
+      query: body.query || 'mock query',
+      engine: body.engine || 'mock-search',
+      count: 1,
+      results: [
+        {
+          title: 'Mock E2E Search Result',
+          url: 'https://example.test/e2e-search-result',
+          snippet: 'Search result returned by the mocked local backend.'
+        }
+      ]
+    };
+  }
+  if (action === 'fetch_url') {
+    const content = 'Fetched page text returned by the mocked local backend for proxy verification.';
+    return {
+      ok: true,
+      url: body.url || 'https://example.test/e2e-search-result',
+      status: 200,
+      title: 'Mock E2E Web Page',
+      length: content.length,
+      content,
+      truncated: false
+    };
   }
   if (action === 'wechat_bridge') {
     return { ok: true, enabled: false, commands: [], message: 'mock remote control idle' };

@@ -123,4 +123,40 @@ test.describe('chat generation without real API keys', () => {
 
     clientErrors.expectNoErrors();
   });
+
+  test('temporary chat can be opened while the original conversation keeps generating', async ({ page }) => {
+    const { clientErrors } = await gotoApp(page, {
+      delayForLlm(body) {
+        const serialized = JSON.stringify(body);
+        if (serialized.includes('slow original before temporary chat')) return 1_200;
+        return 50;
+      }
+    });
+    await configureMockProvider(page);
+
+    await sendMessage(page, 'slow original before temporary chat');
+    await waitForGenerating(page);
+    const originalChatId = await page.evaluate(() => state.currentId);
+
+    await page.locator('#temporaryChatBtn').click();
+    await expect.poll(() => page.evaluate(() => !!(currentChat() && currentChat().temporary))).toBe(true);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop/);
+    await expect(page.locator('#messagesInner')).not.toContainText('slow original before temporary chat');
+
+    await sendMessage(page, 'temporary chat should stay usable');
+    await waitForAssistantReply(page, 'Mock reply #2: temporary chat should stay usable');
+
+    await expect.poll(() => page.evaluate((id) => {
+      const chat = chatById(id);
+      return !!(chat && (chat.messages || []).some(msg => (
+        msg.role === 'assistant'
+        && String(msg.content || '').includes('Mock reply #1: slow original before temporary chat')
+      )));
+    }, originalChatId), { timeout: 10_000 }).toBe(true);
+    await page.evaluate((chatId) => window.AgentApp.require('chat').switchChat(chatId), originalChatId);
+    await waitForAssistantReply(page, 'Mock reply #1: slow original before temporary chat');
+    await expect(page.locator('#messagesInner')).not.toContainText('temporary chat should stay usable');
+
+    clientErrors.expectNoErrors();
+  });
 });

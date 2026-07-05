@@ -521,7 +521,7 @@
       <div>
         <label style="margin:0;">搜索工具使用本地代理</label>
         <div class="form-hint" style="margin-top:2px;">
-          仅影响 <code>web_search</code> 网络搜索请求，可用于 Google / DuckDuckGo 等搜索源。需本机代理软件已启动。
+          影响 <code>web_search</code> 和 <code>fetch_url</code> 网络请求，可用于 Google / DuckDuckGo 等搜索源。需本机代理软件已启动。
         </div>
       </div>
       <label class="switch"><input type="checkbox" id="searchProxyEnabled"><span class="switch-slider"></span></label>
@@ -529,9 +529,9 @@
 
     <div class="form-group">
       <label>搜索代理地址</label>
-      <input type="text" id="searchProxyUrl" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:7890">
+      <input type="text" id="searchProxyUrl" placeholder="http://127.0.0.1:7890 或 socks5h://127.0.0.1:7890">
       <div class="form-hint">
-        支持 HTTP/HTTPS 代理；SOCKS 代理需 Python requests 安装 socks 支持：<code>pip install requests[socks]</code>。
+        仅支持本机代理地址（127.0.0.1 / localhost）；SOCKS 建议使用 <code>socks5h://127.0.0.1:端口</code>，并确保 Python requests 安装 socks 支持：<code>pip install requests[socks]</code>。
       </div>
     </div>
     

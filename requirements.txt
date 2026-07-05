@@ -1,13 +1,16 @@
 # Python 依赖
-# local_terminal_server.py 主体仅用标准库；
-# 但 web_search / fetch_url / LMS 助手依赖 requests
-requests>=2.31.0
+# Node.js / Playwright 依赖不在这里管理，见 test-harness/package.json。
+# local_terminal_server.py 主体大量使用标准库；完整功能需要下面这些包。
+requests[socks]>=2.31.0
 pycryptodome>=3.20.0
+lxml>=4.9.0
 
-# 📊 PPT 生成工具依赖（server/ppt_core.py / server/ppt_image_pipeline.py）
+# PPT 生成工具依赖（server/ppt_core.py / server/ppt_image_pipeline.py）
 python-pptx>=0.6.23
 
-# 📸 截图功能依赖（server/screenshot.py）
+# 截图功能依赖（server/screenshot.py）
 Pillow>=10.0.0
 pywin32>=306; sys_platform == 'win32'
 psutil>=5.9.0
+
+# 可选：微信桥接后端按需安装 wxauto 或 wxauto4，本项目不强制拉入。

@@ -1311,10 +1311,15 @@ async function webSearch(query, maxResults, region, context) {
 
 // ⭐ 抓取网页正文（通过本地后端，自动识别编码 + 去除 HTML）
 async function fetchUrl(url, extractText, maxChars, context) {
+  const s = (typeof terminalState !== 'undefined' && terminalState.settings) ? terminalState.settings : {};
+  const proxyEnabled = context && context.proxy_enabled !== undefined ? !!context.proxy_enabled : !!s.searchProxyEnabled;
+  const proxyUrl = (context && context.proxy_url) || s.searchProxyUrl || '';
   const r = await callAgentBackend('fetch_url', {
     url,
     extract_text: extractText !== false,
-    max_chars: maxChars || 8000
+    max_chars: maxChars || 8000,
+    proxy_enabled: proxyEnabled,
+    proxy_url: proxyUrl
   }, undefined, undefined, context);
   if (typeof r === 'string') return r;
   if (!r.ok) return `❌ 抓取失败：${r.error}`;

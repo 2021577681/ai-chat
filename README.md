@@ -321,20 +321,46 @@ agent/
 ### 1. 环境要求
 
 - Python 3.10+ 推荐
+- Node.js 18+，用于 JavaScript 语法检查和 E2E 测试
+- npm，用于安装 Playwright 测试依赖
 - Windows / Linux / macOS 均可运行基础能力
 - Windows 下截图窗口模式需要 `pywin32`
 - PPT 能力需要 `python-pptx`
 - Web 搜索、LMS 等能力需要 `requests`
+- LMS 评教中的部分页面解析需要 `lxml`
 
 ### 2. 安装依赖
+
+Python 依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-如果只想体验基础聊天 + 本地后端，主体后端大量能力使用 Python 标准库；但建议完整安装依赖以启用搜索、LMS、截图、PPT 等能力。
+E2E 测试依赖：
 
-### 3. 启动后端与前端
+```bash
+cd test-harness
+npm install
+npm run install:browser
+cd ..
+```
+
+如果只想体验基础聊天 + 本地后端，主体后端大量能力使用 Python 标准库；但建议完整安装依赖以启用搜索、LMS、截图、PPT、E2E 测试等能力。
+
+### 3. 质量检查
+
+```bash
+quality-check.bat -SkipE2E
+```
+
+完整检查含 E2E：
+
+```bash
+quality-check.bat
+```
+
+### 4. 启动后端与前端
 
 #### Windows 推荐方式
 
