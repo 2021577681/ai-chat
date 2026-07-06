@@ -117,7 +117,7 @@ function _canGuideCurrentTask(chatId) {
   const task = chatTaskByIdFromState(chatId);
   if (!task || !task.isGenerating) return false;
   if (task.mode === 'ppt' && typeof queuePptMidrunGuidanceFromComposer === 'function') return true;
-  return !task.mode || task.mode === 'chat';
+  return !task.mode || task.mode === 'chat' || task.mode === 'goal';
 }
 
 function queueMidrunGuidance(chat, input, text) {

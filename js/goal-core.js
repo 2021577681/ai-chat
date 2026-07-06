@@ -8,15 +8,20 @@ const goalSaveData = GoalCoreStateModule.saveData;
 const goalPersistSettings = GoalCoreStateModule.persistSettings;
 const goalPersistTools = GoalCoreStateModule.persistTools;
 const goalChatById = GoalCoreStateModule.chatById;
+const goalCurrentChat = GoalCoreStateModule.currentChat;
 const goalBeginChatTask = GoalCoreStateModule.beginChatTask;
 const goalRequestStopChatTask = GoalCoreStateModule.requestStopChatTask;
 const goalClearChatTask = GoalCoreStateModule.clearChatTask;
 const goalSetChatTaskMode = GoalCoreStateModule.setChatTaskMode;
+const goalChatTaskById = GoalCoreStateModule.chatTaskById;
+const goalSetChatTaskGuidance = GoalCoreStateModule.setChatTaskGuidance;
+const goalTakeChatTaskGuidance = GoalCoreStateModule.takeChatTaskGuidance;
 const GOAL_STORAGE_KEY = 'aichat_goals_v1';
 const GOAL_TOOL_NAMES = new Set(['create_goal', 'get_goal', 'update_goal']);
 
 const GOAL_TERMINAL_STATUSES = new Set(['complete', 'blocked', 'cancelled']);
 const GOAL_RUNNERS = new Map();
+let goalElapsedTimer = null;
 
 let goalStore = normalizeGoalStore(null);
 
@@ -90,6 +95,7 @@ function normalizeGoalRecord(goal) {
     lastResult: String(goal.lastResult || ''),
     lastError: String(goal.lastError || ''),
     nextStep: String(goal.nextStep || ''),
+    pendingGuidance: String(goal.pendingGuidance || ''),
     events,
     blockerAudit: normalizeBlockerAudit(goal.blockerAudit),
     createdAt,
@@ -200,8 +206,10 @@ function createGoalRecord(options = {}) {
   const objective = String(options.objective || '').trim();
   if (!objective) throw new Error('目标不能为空');
   const settings = goalSettings();
+  const chat = options.chat || (options.chatId ? goalChatById(options.chatId) : null);
   const goal = normalizeGoalRecord({
     id: makeGoalId(),
+    chatId: chat && chat.id || options.chatId || '',
     objective,
     status: 'active',
     tokenBudget: Math.max(0, Number(options.token_budget || options.tokenBudget || 0) || 0),
@@ -212,11 +220,13 @@ function createGoalRecord(options = {}) {
     updatedAt: nowIso(),
     events: []
   });
+  if (chat) bindGoalToChat(goal, chat);
   pushGoalEvent(goal, 'created', { progress: 'Goal created.' });
   goalStore.goals.unshift(goal);
   goalStore.activeGoalId = goal.id;
   goalStore.selectedGoalId = goal.id;
   saveGoals();
+  if (chat) goalSaveData();
   return goal;
 }
 
@@ -265,6 +275,70 @@ function escapeGoalHtml(value) {
 function clipGoalText(value, max = 180) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+function goalCardTitle(goal, max = 120) {
+  const objective = String((goal && goal.objective) || '');
+  const lines = objective
+    .split(/\r?\n/)
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  let title = lines.find(line => !/^(prompt|system|user|assistant|目标|任务|需求|要求|说明)\s*[:：]?\s*$/i.test(line))
+    || lines[0]
+    || '未命名目标';
+  title = title
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^(目标|任务|需求|要求|说明|prompt|objective)\s*[:：]\s*/i, '')
+    .trim() || title;
+  return clipGoalText(title, max);
+}
+
+function goalEndTime(goal) {
+  if (!goal || !GOAL_TERMINAL_STATUSES.has(goal.status)) return 0;
+  const value = goal.completedAt || goal.blockedAt || goal.cancelledAt || goal.updatedAt;
+  const time = Date.parse(value || '');
+  return Number.isFinite(time) ? time : 0;
+}
+
+function goalElapsedMs(goal, now = Date.now()) {
+  const start = Date.parse((goal && goal.createdAt) || '');
+  if (!Number.isFinite(start)) return 0;
+  const end = goalEndTime(goal) || now;
+  return Math.max(0, end - start);
+}
+
+function formatGoalElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) return `${hours}时${String(minutes).padStart(2, '0')}分`;
+  if (minutes) return `${minutes}分${String(seconds).padStart(2, '0')}秒`;
+  return `${seconds}秒`;
+}
+
+function goalElapsedText(goal, now = Date.now()) {
+  return formatGoalElapsed(goalElapsedMs(goal, now));
+}
+
+function refreshGoalElapsedStat() {
+  const statEl = document.getElementById('goalElapsedStat');
+  if (!statEl) return;
+  const goal = selectedGoal();
+  if (!goal) return;
+  statEl.textContent = goalElapsedText(goal);
+}
+
+function startGoalElapsedTimer() {
+  if (goalElapsedTimer) return;
+  refreshGoalElapsedStat();
+  goalElapsedTimer = setInterval(refreshGoalElapsedStat, 1000);
+}
+
+function stopGoalElapsedTimer() {
+  if (!goalElapsedTimer) return;
+  clearInterval(goalElapsedTimer);
+  goalElapsedTimer = null;
 }
 
 const goalChatNodeUpdateQueue = new Map();
@@ -355,7 +429,8 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
     assistantIdx: -1,
     finalTextCandidate: '',
     finalAssistantIdx: -1,
-    hasToolCalls: false
+    hasToolCalls: false,
+    finalized: false
   };
 
   const appendMessage = (message) => {
@@ -388,7 +463,11 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
 
   const appendFinalAssistant = (text) => {
     const content = String(text || '').trim();
-    if (!content || hasFinalAssistant()) return null;
+    if (!content || recorder.finalized) return null;
+    if (hasFinalAssistant()) {
+      recorder.finalized = true;
+      return null;
+    }
     const now = Date.now();
     const msg = appendMessage({
       role: 'assistant',
@@ -401,6 +480,7 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
     recorder.assistant = msg;
     recorder.assistantIdx = chat.messages.length - 1;
     recorder.finalAssistantIdx = recorder.assistantIdx;
+    recorder.finalized = true;
     return msg;
   };
 
@@ -506,11 +586,13 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
         if (!appendFinalAssistant(event.finalText)) appendGoalTurnFinalAssistant();
       }
     },
-    finish() {
+    finish(options = {}) {
       finishAssistant();
-      appendGoalTurnFinalAssistant();
+      const appended = options.appendFinal === false ? null : appendGoalTurnFinalAssistant();
       goalSaveData();
-      if (recorder.assistantIdx >= 0) scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
+      if (!appended && !recorder.finalized && recorder.assistantIdx >= 0) {
+        scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
+      }
     }
   };
 }
@@ -527,10 +609,11 @@ function renderGoalPanel() {
       listEl.innerHTML = goals.map(goal => {
         const selected = goal.id === goalStore.selectedGoalId;
         const running = isGoalRunning(goal.id);
+        const cardTitle = goalCardTitle(goal);
         return `
           <div class="goal-item ${selected ? 'selected' : ''} ${escapeGoalHtml(goal.status)}" role="button" tabindex="0" data-action="valueClick" data-keydown-action="goalCardSelect" data-handler="selectGoalById" data-value="${escapeGoalHtml(goal.id)}">
             <div class="goal-item-main">
-              <span class="goal-item-title">${escapeGoalHtml(clipGoalText(goal.objective, 76))}</span>
+              <span class="goal-item-title" title="${escapeGoalHtml(cardTitle)}">${escapeGoalHtml(cardTitle)}</span>
               <span class="goal-item-meta">${statusLabel(goal.status)} · ${goal.turnCount}/${goal.maxTurns} 轮${running ? ' · 运行中' : ''}</span>
             </div>
             <div class="goal-item-actions">
@@ -560,7 +643,7 @@ function renderGoalPanel() {
         </div>
         <div class="goal-stat-grid">
           <div><strong>${goal.turnCount}</strong><span>已用轮次</span></div>
-          <div><strong>${goal.maxTurns}</strong><span>轮次上限</span></div>
+          <div><strong id="goalElapsedStat">${escapeGoalHtml(goalElapsedText(goal))}</strong><span>任务耗时</span></div>
           <div><strong>${goalRecordedTokenUsed(goal)}</strong><span>已记 token</span></div>
           <div><strong>${goal.tokenBudget || '不限'}</strong><span>token 预算</span></div>
         </div>
@@ -592,6 +675,7 @@ function renderGoalPanel() {
   if (objectiveInput && current && document.activeElement !== objectiveInput) objectiveInput.value = current.objective || '';
   if (budgetInput && current && document.activeElement !== budgetInput) budgetInput.value = current.tokenBudget || '';
   if (maxTurnsInput && current && document.activeElement !== maxTurnsInput) maxTurnsInput.value = current.maxTurns || goalSettings().goalMaxTurns || 20;
+  refreshGoalElapsedStat();
 }
 
 function updateGoalButton() {
@@ -606,11 +690,13 @@ function openGoalPanel() {
   const modal = document.getElementById('goalModal');
   if (modal) modal.classList.add('show');
   renderGoalPanel();
+  startGoalElapsedTimer();
 }
 
 function closeGoalPanel() {
   const modal = document.getElementById('goalModal');
   if (modal) modal.classList.remove('show');
+  stopGoalElapsedTimer();
 }
 
 function readGoalForm() {
@@ -623,6 +709,7 @@ function readGoalForm() {
 function createGoalFromUi() {
   try {
     const form = readGoalForm();
+    form.chat = goalCurrentChat();
     const goal = createGoalRecord(form);
     goalToast('目标已创建');
     continueGoal(goal.id);
@@ -640,8 +727,11 @@ function saveGoalEditFromUi() {
   goal.tokenBudget = Math.max(0, form.tokenBudget || 0);
   goal.maxTurns = Math.max(1, form.maxTurns || goalSettings().goalMaxTurns || 20);
   pushGoalEvent(goal, 'edited', { progress: 'Goal objective/settings edited.' });
+  const queuedGuidance = isGoalRunning(goal.id)
+    ? queueGoalGuidance(goal, '目标已修改，请按新的目标继续：\n' + goal.objective)
+    : false;
   saveGoals();
-  goalToast('目标已保存');
+  goalToast(queuedGuidance ? '目标已保存，将按新目标继续' : '目标已保存');
 }
 
 function selectGoalById(goalId) {
@@ -688,33 +778,36 @@ function deleteGoalById(goalId) {
   deleteGoal(goalId);
 }
 
-function ensureGoalChat(goal) {
-  let chat = goal.chatId ? goalChatById(goal.chatId) : null;
-  if (chat) {
-    goalState.currentId = chat.id;
-    goalSaveData();
-    GoalCoreUiService.renderChatList();
-    GoalCoreUiService.renderMessages();
-    GoalCoreUiService.updateSendBtn();
-    return chat;
-  }
-  const id = 'goal_' + Date.now();
-  chat = {
+function bindGoalToChat(goal, chat) {
+  if (!goal || !chat) return chat;
+  if (!Array.isArray(chat.messages)) chat.messages = [];
+  if (!Array.isArray(chat.goalIds)) chat.goalIds = [];
+  if (!chat.goalIds.includes(goal.id)) chat.goalIds.push(goal.id);
+  if (!chat.goalId) chat.goalId = goal.id;
+  goal.chatId = chat.id;
+  return chat;
+}
+
+function createFallbackGoalChat(goal) {
+  const id = 'c_' + Date.now();
+  const chat = {
     id,
-    title: '目标：' + clipGoalText(goal.objective, 28),
-    messages: [
-      {
-        role: 'user',
-        content: '目标：' + goal.objective,
-        createdAt: Date.now()
-      }
-    ],
-    createdAt: Date.now(),
-    goalId: goal.id
+    title: '新对话',
+    messages: [],
+    createdAt: Date.now()
   };
   goalState.chats.unshift(chat);
-  goal.chatId = id;
   goalState.currentId = id;
+  return bindGoalToChat(goal, chat);
+}
+
+function ensureGoalChat(goal) {
+  let chat = goal.chatId ? goalChatById(goal.chatId) : null;
+  if (!chat) chat = goalCurrentChat();
+  if (!chat) chat = createFallbackGoalChat(goal);
+  bindGoalToChat(goal, chat);
+  goalState.currentId = chat.id;
+  persistGoals();
   goalSaveData();
   GoalCoreUiService.renderChatList();
   GoalCoreUiService.renderMessages();
@@ -722,7 +815,147 @@ function ensureGoalChat(goal) {
   return chat;
 }
 
-function buildGoalTurnPrompt(goal) {
+function goalToolContextChat(toolContext = {}) {
+  if (toolContext && toolContext.chat) return toolContext.chat;
+  if (toolContext && toolContext.chatId) return goalChatById(toolContext.chatId);
+  return null;
+}
+
+function syncGoalToolContextChat(goal, toolContext = {}) {
+  const chat = goalToolContextChat(toolContext);
+  if (!goal || !chat) return false;
+  const previousGoalChatId = goal.chatId || '';
+  const hadGoalId = Array.isArray(chat.goalIds) && chat.goalIds.includes(goal.id);
+  bindGoalToChat(goal, chat);
+  return goal.chatId !== previousGoalChatId || !hadGoalId;
+}
+
+function goalGuidanceTextFromMessage(message) {
+  if (!message) return '';
+  if (typeof message.content === 'string') return message.content.trim();
+  if (Array.isArray(message.content)) {
+    return message.content
+      .filter(part => part && (part.type === 'text' || part.type === 'input_text'))
+      .map(part => part.text || '')
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+  return '';
+}
+
+function hasPendingGoalGuidance(chatId) {
+  const task = goalChatTaskById(chatId);
+  return !!(task && task.pendingGuidance);
+}
+
+function appendGoalGuidanceMessage(chat, goal, guidance) {
+  if (!chat || !goal || !guidance) return '';
+  const message = {
+    ...guidance,
+    role: guidance.role || 'user',
+    createdAt: guidance.createdAt || Date.now(),
+    goalId: goal.id,
+    _midrunGuidance: true,
+    _goalGuidance: true
+  };
+  const text = goalGuidanceTextFromMessage(message);
+  chat.messages.push(message);
+  const idx = chat.messages.length - 1;
+  goal.pendingGuidance = text;
+  pushGoalEvent(goal, 'guidance', { progress: clipGoalText(text || 'User guidance received.', 500) });
+  goalSaveData();
+  GoalCoreUiService.renderChatList();
+  scheduleGoalChatNodeUpdate(chat, idx, 'append');
+  GoalCoreUiService.updateSendBtn();
+  return text;
+}
+
+function consumePendingGoalGuidance(chat, goal) {
+  if (!chat || !goal) return '';
+  const guidance = goalTakeChatTaskGuidance(chat.id);
+  if (!guidance) return '';
+  const task = goalChatTaskById(chat.id);
+  if (task) {
+    task.stopRequested = false;
+    task.guidanceRequested = false;
+  }
+  goalState.stopRequested = false;
+  return appendGoalGuidanceMessage(chat, goal, guidance);
+}
+
+function takeGoalPendingGuidance(goal) {
+  const text = String((goal && goal.pendingGuidance) || '').trim();
+  if (goal && text) goal.pendingGuidance = '';
+  return text;
+}
+
+function normalizeGoalContextMessage(message) {
+  if (!message || message._hiddenFromUI) return null;
+  const role = message.role;
+  if (!['user', 'assistant', 'tool', 'system'].includes(role)) return null;
+  const out = { role };
+  if (typeof message.content === 'string') out.content = message.content;
+  else if (Array.isArray(message.content)) out.content = message.content.map(part => ({ ...part }));
+  else out.content = '';
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+    out.tool_calls = message.tool_calls.map(tc => JSON.parse(JSON.stringify(tc)));
+  }
+  if (Array.isArray(message.attachments) && message.attachments.length) {
+    out.attachments = message.attachments.map(att => ({ ...att }));
+  }
+  if (message.tool_call_id) out.tool_call_id = message.tool_call_id;
+  if (message.name) out.name = message.name;
+  if (!String(out.content || '').trim() && !out.tool_calls && !out.tool_call_id && !out.attachments) return null;
+  return out;
+}
+
+function buildGoalConversationContext(chat, beforeIdx, limit = 30) {
+  const messages = Array.isArray(chat && chat.messages) ? chat.messages : [];
+  const end = Math.max(0, Math.min(Number(beforeIdx || 0), messages.length));
+  const context = messages
+    .slice(0, end)
+    .map(normalizeGoalContextMessage)
+    .filter(Boolean)
+    .slice(-Math.max(0, Number(limit || 30) || 30));
+  while (context.length && context[0].role === 'tool') context.shift();
+  return context;
+}
+
+function queueGoalGuidance(goal, text) {
+  if (!goal || !goal.chatId || !text) return false;
+  const chat = goalChatById(goal.chatId);
+  if (!chat) return false;
+  const message = {
+    role: 'user',
+    content: String(text || ''),
+    createdAt: Date.now(),
+    goalId: goal.id,
+    _midrunGuidance: true,
+    _goalGuidance: true,
+    _queuedAt: Date.now()
+  };
+  const task = goalChatTaskById(chat.id);
+  if (task && task.pendingGuidance) {
+    task.pendingGuidance.content = [task.pendingGuidance.content || '', message.content || ''].filter(Boolean).join('\n\n');
+    task.pendingGuidance._queuedAt = Date.now();
+    task.guidanceRequested = true;
+  } else if (goalSetChatTaskGuidance) {
+    goalSetChatTaskGuidance(chat.id, message);
+  } else if (task) {
+    task.pendingGuidance = message;
+    task.guidanceRequested = true;
+  }
+  const runner = GOAL_RUNNERS.get(goal.id);
+  if (task) task.stopRequested = true;
+  goalState.stopRequested = true;
+  if (runner && runner.controller) {
+    try { runner.controller.abort(); } catch (e) {}
+  }
+  return true;
+}
+
+function buildGoalTurnPrompt(goal, guidanceText = '') {
   const settings = goalSettings();
   const template = settings.goalTurnPrompt || goalDefaultTurnPrompt();
   const values = {
@@ -737,7 +970,11 @@ function buildGoalTurnPrompt(goal) {
     nextStep: goal.nextStep || '',
     blockerCount: String(goal.blockerAudit && goal.blockerAudit.count || 0)
   };
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] !== undefined ? values[key] : '');
+  const base = template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] !== undefined ? values[key] : '');
+  const guidance = String(guidanceText || '').trim();
+  return guidance
+    ? base + '\n\n用户中途引导：\n' + guidance
+    : base;
 }
 
 function goalUsageNumber(...values) {
@@ -890,6 +1127,7 @@ async function continueGoal(goalId) {
   const chat = ensureGoalChat(goal);
   const controller = new AbortController();
   const runner = { controller, done: false };
+  let restartAfterGuidance = false;
   GOAL_RUNNERS.set(goal.id, runner);
   goalBeginChatTask(chat.id, controller, { resetStop: true });
   goalSetChatTaskMode(chat.id, 'goal', { goalId: goal.id });
@@ -929,14 +1167,18 @@ async function continueGoal(goalId) {
 
       const protocol = { toolCalls: [] };
       const chatRecorder = createGoalChatRecorder(chat, freshGoal.id, turnNo);
+      const turnGuidance = takeGoalPendingGuidance(freshGoal);
+      if (turnGuidance) persistGoals();
+      const contextMessages = buildGoalConversationContext(chat, userMsgIdx);
       const tokenStatsBefore = goalChatRecordedTokenTotal(chat);
       const messageCountBeforeRun = chat.messages.length;
-      const turnPrompt = buildGoalTurnPrompt(freshGoal);
+      const turnPrompt = buildGoalTurnPrompt(freshGoal, turnGuidance);
       const systemPrompt = goalSettings().goalSystemPrompt || goalDefaultSystemPrompt();
       let result;
+      let suppressFinalAssistant = false;
       try {
         result = await GoalCoreOrchestrationService.runAgentLoop({
-          initialMessages: [{ role: 'user', content: turnPrompt }],
+          initialMessages: [...contextMessages, { role: 'user', content: turnPrompt }],
           systemPrompt,
           model: goalSettings().goalModel || goalState.settings.currentModel,
           maxRounds: Math.max(0, Number(goalSettings().goalMaxToolRounds || goalState.settings.maxToolRounds || 15) || 15),
@@ -957,8 +1199,11 @@ async function continueGoal(goalId) {
             chatRecorder.handle(event);
           }
         });
+      } catch (e) {
+        suppressFinalAssistant = !!(e && e.name === 'AbortError' && hasPendingGoalGuidance(chat.id));
+        throw e;
       } finally {
-        chatRecorder.finish();
+        chatRecorder.finish({ appendFinal: !suppressFinalAssistant });
       }
 
       const latestGoal = goalById(goal.id);
@@ -993,13 +1238,21 @@ async function continueGoal(goalId) {
     const latestGoal = goalById(goal.id);
     let stoppedByGoalStatus = false;
     if (latestGoal) {
+      const guidanceAbort = !!(e && e.name === 'AbortError' && hasPendingGoalGuidance(chat.id));
       stoppedByGoalStatus = !!(e && e.name === 'AbortError' && latestGoal.status && latestGoal.status !== 'active');
-      if (controller.signal.aborted && latestGoal.status === 'active') latestGoal.status = 'paused';
-      latestGoal.lastError = e && e.message ? e.message : String(e);
-      if (!stoppedByGoalStatus) pushGoalEvent(latestGoal, controller.signal.aborted ? 'paused' : 'error', { reason: latestGoal.lastError });
+      if (guidanceAbort) {
+        consumePendingGoalGuidance(chat, latestGoal);
+        latestGoal.status = 'active';
+        latestGoal.lastError = '';
+        restartAfterGuidance = true;
+      } else {
+        if (controller.signal.aborted && latestGoal.status === 'active') latestGoal.status = 'paused';
+        latestGoal.lastError = e && e.message ? e.message : String(e);
+        if (!stoppedByGoalStatus) pushGoalEvent(latestGoal, controller.signal.aborted ? 'paused' : 'error', { reason: latestGoal.lastError });
+      }
       saveGoals();
     }
-    if (!controller.signal.aborted && !stoppedByGoalStatus) goalToast('Goal run failed: ' + (e && e.message ? e.message : e), 5000);
+    if (!restartAfterGuidance && !controller.signal.aborted && !stoppedByGoalStatus) goalToast('Goal run failed: ' + (e && e.message ? e.message : e), 5000);
   } finally {
     runner.done = true;
     GOAL_RUNNERS.delete(goal.id);
@@ -1007,6 +1260,10 @@ async function continueGoal(goalId) {
     updateGoalButton();
     renderGoalPanel();
     GoalCoreUiService.updateSendBtn();
+    const latestGoal = goalById(goal.id);
+    if (restartAfterGuidance && latestGoal && latestGoal.status === 'active') {
+      setTimeout(() => continueGoal(latestGoal.id), 0);
+    }
   }
 }
 
@@ -1079,7 +1336,13 @@ function normalizeBlockerReason(reason) {
 }
 
 function createGoal(args = {}, toolContext = {}) {
-  const goal = createGoalRecord(args || {});
+  const chat = goalToolContextChat(toolContext);
+  const goal = createGoalRecord({ ...(args || {}), chat, chatId: chat && chat.id || (toolContext && toolContext.chatId) || '' });
+  if (chat) {
+    bindGoalToChat(goal, chat);
+    saveGoals();
+    goalSaveData();
+  }
   return {
     ok: true,
     goal: summarizeGoalForTool(goal),
@@ -1092,6 +1355,7 @@ function getGoal(args = {}, toolContext = {}) {
   const id = args.goal_id || args.goalId || (toolContext && toolContext.goalId) || goalStore.activeGoalId || goalStore.selectedGoalId;
   const goal = goalById(id);
   if (!goal) return { ok: false, error: 'No active goal.' };
+  if (syncGoalToolContextChat(goal, toolContext)) goalSaveData();
   pushGoalEvent(goal, 'get_goal', { progress: 'Goal context read.' });
   saveGoals();
   return {
@@ -1110,6 +1374,7 @@ function updateGoal(args = {}, toolContext = {}) {
   const id = args.goal_id || args.goalId || (toolContext && toolContext.goalId) || goalStore.activeGoalId || goalStore.selectedGoalId;
   const goal = goalById(id);
   if (!goal) return { ok: false, error: 'No active goal.' };
+  if (syncGoalToolContextChat(goal, toolContext)) goalSaveData();
 
   const status = normalizeGoalStatus(args.status || goal.status);
   const progress = String(args.progress || '').trim();

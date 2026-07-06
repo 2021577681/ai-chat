@@ -244,6 +244,82 @@ function makeOutlineMaxItemsScenarioResponse(body, callNumber) {
   };
 }
 
+function goalScenarioMessages(body) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  let start = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || msg.role !== 'user') continue;
+    const content = typeof msg.content === 'string'
+      ? msg.content
+      : (Array.isArray(msg.content)
+          ? msg.content.map(part => part && part.text || '').join('\n')
+          : '');
+    if (content.includes('Goal objective:') || content.includes('目标：')) {
+      start = i;
+      break;
+    }
+  }
+  return start >= 0 ? messages.slice(start + 1) : messages;
+}
+
+function goalScenarioObjective(body) {
+  const text = serializeRequestText(body);
+  const match = text.match(/(?:Goal objective|目标)\s*[:：]\s*([^\n]+)/);
+  return match ? match[1].trim() : 'E2E goal';
+}
+
+function makeGoalScenarioResponse(body, callNumber) {
+  const turnMessages = goalScenarioMessages(body);
+  const toolMessages = turnMessages.filter(msg => msg && msg.role === 'tool');
+  const hasGetGoal = toolMessages.some(msg => msg.name === 'get_goal' || msg.tool_call_id === 'call_e2e_goal_get');
+  const hasUpdateGoal = toolMessages.some(msg => msg.name === 'update_goal' || msg.tool_call_id === 'call_e2e_goal_update');
+  const objective = goalScenarioObjective(body);
+
+  if (!hasGetGoal) {
+    return makeOpenAiToolCallResponse(body, callNumber, {
+      id: 'call_e2e_goal_get',
+      name: 'get_goal',
+      arguments: {}
+    });
+  }
+
+  if (!hasUpdateGoal) {
+    return makeOpenAiToolCallResponse(body, callNumber, {
+      id: 'call_e2e_goal_update',
+      name: 'update_goal',
+      arguments: {
+        status: 'complete',
+        progress: `E2E completed one verifiable step for ${objective}`,
+        evidence: 'E2E mocked goal evidence',
+        final_summary: `Goal complete: ${objective}`
+      }
+    });
+  }
+
+  return {
+    id: `chatcmpl-e2e-goal-final-${callNumber}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: body.model || 'mock-model',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'stop',
+        message: {
+          role: 'assistant',
+          content: `Goal scenario final: ${objective}`
+        }
+      }
+    ],
+    usage: {
+      prompt_tokens: 16,
+      completion_tokens: 8,
+      total_tokens: 24
+    }
+  };
+}
+
 function serializeRequestText(body) {
   const chunks = [];
   const push = value => {
@@ -823,6 +899,11 @@ async function mockLlm(route, options, state) {
 
   if (options.webToolsScenario) {
     await fulfillSafely(route, jsonResponse(makeWebToolsScenarioResponse(body, callNumber)));
+    return;
+  }
+
+  if (options.goalScenario && bodyHasTool(body, 'get_goal')) {
+    await fulfillSafely(route, jsonResponse(makeGoalScenarioResponse(body, callNumber)));
     return;
   }
 
