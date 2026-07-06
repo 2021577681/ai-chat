@@ -479,7 +479,7 @@ function refreshJsonHistory() {
         : `<span style="color:var(--success);">✅ 成功</span>`;
       return `
         <div class="json-history-item">
-          <div class="json-history-header" data-action="toggleParentCollapsed">
+          <div class="json-history-header" data-action="toggleParentCollapsed" data-toggle-class="expanded">
             <span class="json-history-time">${date}</span>
             <span class="json-history-status">${status}</span>
             <span style="margin-left:auto;font-size:11px;color:var(--text-secondary);">点击展开</span>

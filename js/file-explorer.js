@@ -37,6 +37,8 @@ const FILE_EXPLORER_STATE = {
   contextType: '',
   mediaKind: '',
   contextScope: '',
+  absolutePath: '',
+  workspaceRoot: '',
   inlineFilePath: '',
   inlineFileKind: '',
   inlineFileSide: 'right',
@@ -79,6 +81,82 @@ function parentExplorerPath(path) {
   const parts = p.split('/').filter(Boolean);
   parts.pop();
   return parts.length ? parts.join('/') : '.';
+}
+
+function trimFileExplorerAbsolutePath(path) {
+  const raw = String(path || '').trim();
+  if (!raw) return '';
+  const trimmed = raw.replace(/[\\/]+$/g, '');
+  if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}\\`;
+  if (!trimmed && /^[\\/]+$/.test(raw)) return raw.charAt(0);
+  return trimmed || raw;
+}
+
+function fileExplorerPathSeparator(path) {
+  return String(path || '').includes('\\') ? '\\' : '/';
+}
+
+function joinFileExplorerAbsolutePath(basePath, relativePath) {
+  const base = trimFileExplorerAbsolutePath(basePath);
+  const relative = normalizeExplorerPath(relativePath);
+  if (!base || relative === '.') return base;
+  const sep = fileExplorerPathSeparator(base);
+  const prefix = /[\\/]$/.test(base) ? base : `${base}${sep}`;
+  return prefix + relative.split('/').filter(Boolean).join(sep);
+}
+
+function fileExplorerWorkspaceRoot() {
+  if (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.workspace) {
+    return trimFileExplorerAbsolutePath(TERMINAL_CONFIG.workspace);
+  }
+  if (FILE_EXPLORER_STATE.workspaceRoot) {
+    return trimFileExplorerAbsolutePath(FILE_EXPLORER_STATE.workspaceRoot);
+  }
+  return '';
+}
+
+function noteFileExplorerAbsolutePath(absolutePath, relativePath = FILE_EXPLORER_STATE.path) {
+  const absolute = trimFileExplorerAbsolutePath(absolutePath);
+  if (!absolute) return;
+  FILE_EXPLORER_STATE.absolutePath = absolute;
+  if (normalizeExplorerPath(relativePath) === '.') {
+    FILE_EXPLORER_STATE.workspaceRoot = absolute;
+  }
+}
+
+function fileExplorerPathRelativeToCurrent(path) {
+  const normalizedPath = normalizeExplorerPath(path);
+  const currentPath = normalizeExplorerPath(FILE_EXPLORER_STATE.path);
+  if (normalizedPath === currentPath) return '.';
+  if (currentPath === '.') return normalizedPath;
+  if (normalizedPath.startsWith(`${currentPath}/`)) {
+    return normalizedPath.slice(currentPath.length + 1);
+  }
+  return '';
+}
+
+function fileExplorerAbsolutePathFor(path) {
+  const normalizedPath = normalizeExplorerPath(path);
+  const currentAbsolute = trimFileExplorerAbsolutePath(FILE_EXPLORER_STATE.absolutePath);
+  const currentRelative = fileExplorerPathRelativeToCurrent(normalizedPath);
+  if (currentAbsolute && currentRelative) {
+    return joinFileExplorerAbsolutePath(currentAbsolute, currentRelative);
+  }
+  return joinFileExplorerAbsolutePath(fileExplorerWorkspaceRoot(), normalizedPath);
+}
+
+function isFileExplorerRemoteMode() {
+  return typeof isRemoteAgentActive === 'function' && isRemoteAgentActive();
+}
+
+function requireFileExplorerRemoteAction() {
+  if (isFileExplorerRemoteMode()) return true;
+  fileExplorerToast('远程连接时可用');
+  return false;
+}
+
+function isFileExplorerRemoteOnlyAction(action) {
+  return action === 'download' || action === 'upload-files' || action === 'upload-folder';
 }
 
 function setFileExplorerPathDisplay(path) {
@@ -729,18 +807,20 @@ function ensureFileExplorerContextMenu() {
       <button type="button" data-action="copy-item">复制</button>
       <button type="button" data-action="cut-item">剪切</button>
       <button type="button" data-action="paste" data-paste-only="true" data-dir-only="true" hidden>粘贴到此文件夹</button>
-      <button type="button" data-action="download">下载</button>
+      <button type="button" data-action="download" data-remote-only="true">下载</button>
       <button type="button" data-action="rename">重命名</button>
-      <button type="button" data-action="copy-path">复制路径</button>
+      <button type="button" data-action="copy-path">复制相对路径</button>
+      <button type="button" data-action="copy-absolute-path">复制绝对路径</button>
       <button type="button" data-action="delete">删除</button>
     </div>
     <div data-menu-section="blank">
-      <button type="button" data-action="upload-files">上传文件</button>
-      <button type="button" data-action="upload-folder">上传文件夹</button>
+      <button type="button" data-action="upload-files" data-remote-only="true">上传文件</button>
+      <button type="button" data-action="upload-folder" data-remote-only="true">上传文件夹</button>
       <button type="button" data-action="paste" data-paste-only="true" hidden>粘贴</button>
       <button type="button" data-action="new-file">新建文件</button>
       <button type="button" data-action="new-folder">新建文件夹</button>
-      <button type="button" data-action="copy-path">复制路径</button>
+      <button type="button" data-action="copy-path">复制相对路径</button>
+      <button type="button" data-action="copy-absolute-path">复制绝对路径</button>
       <button type="button" data-action="switch-workspace">切换工作区</button>
     </div>
   `;
@@ -795,6 +875,7 @@ async function loadFileExplorer(path = FILE_EXPLORER_STATE.path, options = {}) {
     const r = await callAgentBackend('list_dir', { path: FILE_EXPLORER_STATE.path });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '读取目录失败');
+    noteFileExplorerAbsolutePath(r.path, FILE_EXPLORER_STATE.path);
     FILE_EXPLORER_STATE.entries = Array.isArray(r.entries) ? r.entries : [];
     FILE_EXPLORER_STATE.autoRefreshSignature = fileExplorerEntriesSignature(FILE_EXPLORER_STATE.entries);
     FILE_EXPLORER_STATE.autoRefreshPath = FILE_EXPLORER_STATE.path;
@@ -831,6 +912,7 @@ async function pollFileExplorerChanges() {
     const r = await callAgentBackend('list_dir', { path });
     if (typeof r === 'string' || !r || !r.ok) return;
     if (path !== normalizeExplorerPath(FILE_EXPLORER_STATE.path) || !FILE_EXPLORER_STATE.visible) return;
+    noteFileExplorerAbsolutePath(r.path, path);
     const entries = Array.isArray(r.entries) ? r.entries : [];
     const signature = fileExplorerEntriesSignature(entries);
     if (FILE_EXPLORER_STATE.autoRefreshPath !== path || FILE_EXPLORER_STATE.autoRefreshSignature !== signature) {
@@ -925,6 +1007,7 @@ function fileExplorerItemsFromFileList(files) {
 }
 
 async function uploadSelectedFilesToExplorer(files, targetPath = FILE_EXPLORER_STATE.path) {
+  if (!requireFileExplorerRemoteAction()) return;
   const items = Array.isArray(files) ? files.filter(item => item && item.file) : fileExplorerItemsFromFileList(files);
   if (!items.length) {
     fileExplorerToast('没有可上传的文件');
@@ -1006,6 +1089,7 @@ function ensureFileExplorerUploadInput(kind) {
 }
 
 function openFileExplorerUploadPicker(kind = 'files', targetPath = FILE_EXPLORER_STATE.path) {
+  if (!requireFileExplorerRemoteAction()) return;
   const normalizedKind = kind === 'folder' ? 'folder' : 'files';
   const input = ensureFileExplorerUploadInput(normalizedKind);
   input.onchange = event => handleFileExplorerUploadInputChange(event, normalizedKind, targetPath);
@@ -1686,6 +1770,10 @@ function copyFileEditorContent() {
 
 async function openFileWithSystemDefault(path) {
   const normalizedPath = normalizeExplorerPath(path);
+  if (isFileExplorerRemoteMode()) {
+    fileExplorerToast(`远程连接时不能用本机默认应用直接打开远程文件：${fileExplorerBasename(normalizedPath)}。请使用预览或下载。`, 5200);
+    return;
+  }
   try {
     if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
     const r = await callAgentBackend('open_file_default', { path: normalizedPath });
@@ -2014,6 +2102,9 @@ function showFileExplorerContextMenu(event, item) {
     const needsDir = btn.dataset.dirOnly === 'true';
     btn.hidden = !FILE_EXPLORER_STATE.clipboard || (needsDir && type !== 'dir');
   });
+  menu.querySelectorAll('[data-remote-only]').forEach(btn => {
+    btn.hidden = !isFileExplorerRemoteMode();
+  });
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
   const padding = 8;
@@ -2100,11 +2191,29 @@ async function switchFileExplorerWorkspace(path = FILE_EXPLORER_STATE.contextPat
   }
 }
 
-async function copyFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
+async function copyFileExplorerRelativePath(path = FILE_EXPLORER_STATE.contextPath) {
   const normalizedPath = normalizeExplorerPath(path);
   try {
     await navigator.clipboard.writeText(normalizedPath);
-    fileExplorerToast('路径已复制');
+    fileExplorerToast('相对路径已复制');
+  } catch (e) {
+    fileExplorerToast('复制失败：' + (e.message || String(e)));
+  }
+}
+
+async function copyFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
+  return copyFileExplorerRelativePath(path);
+}
+
+async function copyFileExplorerAbsolutePath(path = FILE_EXPLORER_STATE.contextPath) {
+  const absolutePath = fileExplorerAbsolutePathFor(path);
+  if (!absolutePath) {
+    fileExplorerToast('无法获取沙箱绝对路径');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(absolutePath);
+    fileExplorerToast('绝对路径已复制');
   } catch (e) {
     fileExplorerToast('复制失败：' + (e.message || String(e)));
   }
@@ -2188,6 +2297,7 @@ async function pasteFileExplorerItem(targetDir = FILE_EXPLORER_STATE.contextPath
 }
 
 function downloadFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath, type = FILE_EXPLORER_STATE.contextType) {
+  if (!requireFileExplorerRemoteAction()) return;
   const normalizedPath = normalizeExplorerPath(path);
   if (!normalizedPath) {
     fileExplorerToast('没有可下载的路径');
@@ -2261,6 +2371,7 @@ function handleFileExplorerContextMenuAction(event) {
   hideFileExplorerContextMenu();
   if (!path) return;
   const action = btn.dataset.action;
+  if (isFileExplorerRemoteOnlyAction(action) && !requireFileExplorerRemoteAction()) return;
   if (action === 'open') openFileExplorerPath(path, type);
   else if (action === 'compile-tex') compileTexFile(path);
   else if (action === 'copy-item') copyFileExplorerItem(path, type);
@@ -2270,7 +2381,8 @@ function handleFileExplorerContextMenuAction(event) {
   else if (action === 'upload-files') openFileExplorerUploadPicker('files', path);
   else if (action === 'upload-folder') openFileExplorerUploadPicker('folder', path);
   else if (action === 'rename') renameFileExplorerPath(path);
-  else if (action === 'copy-path') copyFileExplorerPath(path);
+  else if (action === 'copy-path') copyFileExplorerRelativePath(path);
+  else if (action === 'copy-absolute-path') copyFileExplorerAbsolutePath(path);
   else if (action === 'delete') deleteFileExplorerPath(path);
   else if (action === 'new-file') createFileExplorerFile(path);
   else if (action === 'new-folder') createFileExplorerFolder(path);
@@ -2320,6 +2432,8 @@ window.closeMediaViewer = closeMediaViewer;
 window.reloadMediaViewer = reloadMediaViewer;
 window.openMediaViewerInNewTab = openMediaViewerInNewTab;
 window.copyFileExplorerPath = copyFileExplorerPath;
+window.copyFileExplorerRelativePath = copyFileExplorerRelativePath;
+window.copyFileExplorerAbsolutePath = copyFileExplorerAbsolutePath;
 window.copyFileExplorerItem = copyFileExplorerItem;
 window.cutFileExplorerItem = cutFileExplorerItem;
 window.pasteFileExplorerItem = pasteFileExplorerItem;
@@ -2370,6 +2484,9 @@ window.AgentApp.define('fileExplorer', {
   closeInlineFilePanel,
   createFileExplorerFile,
   createFileExplorerFolder,
+  copyFileExplorerPath,
+  copyFileExplorerRelativePath,
+  copyFileExplorerAbsolutePath,
   copyFileExplorerItem,
   cutFileExplorerItem,
   pasteFileExplorerItem,

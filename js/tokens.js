@@ -226,6 +226,14 @@ function getChatTokenStats(chat) {
   return chat.tokenStats;
 }
 
+function tokenUsageNumber(...values) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 let _tokenFetchTimer = null;
 let _tokenFetchTimersByChat = {};
 let _tokenFetchInflight = false;
@@ -328,24 +336,46 @@ function migrateChatTokenStatsToLedger() {
 function recordUsageFromResponse(chat, usage, meta = {}) {
   if (!chat || !usage) return;
   const stats = getChatTokenStats(chat);
+  const usageSource = usage.usageMetadata || usage.usage || usage;
   
   // 兼容两种格式的字段
   // Anthropic: input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
   // OpenAI:    prompt_tokens, completion_tokens, prompt_tokens_details.cached_tokens
   
-  const inputTokens = usage.input_tokens || usage.prompt_tokens || 0;
-  const outputTokens = usage.output_tokens || usage.completion_tokens || 0;
+  let inputTokens = tokenUsageNumber(
+    usageSource.input_tokens,
+    usageSource.prompt_tokens,
+    usageSource.inputTokens,
+    usageSource.promptTokens,
+    usageSource.promptTokenCount
+  );
+  let outputTokens = tokenUsageNumber(
+    usageSource.output_tokens,
+    usageSource.completion_tokens,
+    usageSource.outputTokens,
+    usageSource.completionTokens,
+    usageSource.candidatesTokenCount
+  );
+  const totalTokens = tokenUsageNumber(usageSource.total_tokens, usageSource.totalTokens, usageSource.totalTokenCount);
+  if (!inputTokens && !outputTokens && totalTokens) inputTokens = totalTokens;
   
   // 缓存（Anthropic 直接给字段；OpenAI 在 prompt_tokens_details.cached_tokens）
-  const cacheRead = usage.cache_read_input_tokens 
-    || usage.prompt_tokens_details?.cached_tokens 
-    || 0;
-  const cacheCreate = usage.cache_creation_input_tokens || 0;
+  const cacheRead = tokenUsageNumber(
+    usageSource.cache_read_input_tokens,
+    usageSource.prompt_tokens_details?.cached_tokens,
+    usageSource.promptTokensDetails?.cachedTokens,
+    usageSource.cachedContentTokenCount
+  );
+  const cacheCreate = tokenUsageNumber(usageSource.cache_creation_input_tokens, usageSource.cacheCreationInputTokens);
   
   // 思考 token（Anthropic extended thinking / OpenAI o1 reasoning）
-  const thinking = usage.output_tokens_details?.thinking_tokens 
-    || usage.completion_tokens_details?.reasoning_tokens 
-    || 0;
+  const thinking = tokenUsageNumber(
+    usageSource.output_tokens_details?.thinking_tokens,
+    usageSource.outputTokensDetails?.thinkingTokens,
+    usageSource.completion_tokens_details?.reasoning_tokens,
+    usageSource.completionTokensDetails?.reasoningTokens,
+    usageSource.thoughtsTokenCount
+  );
   
   const now = Date.now();
   const model = meta.model || tokensState.settings.currentModel || 'unknown';

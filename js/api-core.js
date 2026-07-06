@@ -259,16 +259,72 @@ function extractResponsesToolCalls(output) {
     .filter(tc => tc.id && tc.name);
 }
 
-function normalizeResponsesUsage(usage) {
+function usageNumber(...values) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function normalizeUsageForAccounting(usage) {
   if (!usage) return null;
+  const src = usage.usageMetadata || usage.usage || usage;
+  const inputTokens = usageNumber(
+    src.input_tokens,
+    src.prompt_tokens,
+    src.inputTokens,
+    src.promptTokens,
+    src.promptTokenCount
+  );
+  const outputTokens = usageNumber(
+    src.output_tokens,
+    src.completion_tokens,
+    src.outputTokens,
+    src.completionTokens,
+    src.candidatesTokenCount
+  );
+  const totalTokens = usageNumber(
+    src.total_tokens,
+    src.totalTokens,
+    src.totalTokenCount,
+    inputTokens + outputTokens
+  );
+  if (!inputTokens && !outputTokens && !totalTokens) return null;
   return {
-    prompt_tokens: usage.input_tokens ?? usage.prompt_tokens ?? 0,
-    completion_tokens: usage.output_tokens ?? usage.completion_tokens ?? 0,
-    total_tokens: usage.total_tokens ?? ((usage.input_tokens || 0) + (usage.output_tokens || 0)),
-    input_tokens: usage.input_tokens,
-    output_tokens: usage.output_tokens,
-    input_tokens_details: usage.input_tokens_details,
-    output_tokens_details: usage.output_tokens_details
+    ...usage,
+    prompt_tokens: inputTokens,
+    completion_tokens: outputTokens,
+    total_tokens: totalTokens,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    input_tokens_details: src.input_tokens_details || src.inputTokensDetails || usage.input_tokens_details,
+    output_tokens_details: src.output_tokens_details || src.outputTokensDetails || usage.output_tokens_details,
+    prompt_tokens_details: src.prompt_tokens_details || src.promptTokensDetails || usage.prompt_tokens_details,
+    completion_tokens_details: src.completion_tokens_details || src.completionTokensDetails || usage.completion_tokens_details
+  };
+}
+
+function normalizeResponsesUsage(usage) {
+  return normalizeUsageForAccounting(usage);
+}
+
+function accumulateUsageForAccounting(total, usage) {
+  const current = normalizeUsageForAccounting(usage);
+  if (!current) return total || null;
+  if (!total) return { ...current };
+  const prev = normalizeUsageForAccounting(total) || {};
+  const inputTokens = Number(prev.input_tokens || prev.prompt_tokens || 0) + Number(current.input_tokens || current.prompt_tokens || 0);
+  const outputTokens = Number(prev.output_tokens || prev.completion_tokens || 0) + Number(current.output_tokens || current.completion_tokens || 0);
+  const totalTokens = Number(prev.total_tokens || 0) + Number(current.total_tokens || 0);
+  return {
+    ...total,
+    ...current,
+    prompt_tokens: inputTokens,
+    completion_tokens: outputTokens,
+    total_tokens: totalTokens || inputTokens + outputTokens,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens
   };
 }
 
@@ -1816,13 +1872,16 @@ async function runAgentLoop({
     }
     
     // 把 usage 累计到当前对话（让师生模式的 token 也进总账）
-    if (usage && typeof recordUsageFromResponse === 'function') {
+    const usageForAccounting = normalizeUsageForAccounting(usage);
+    if (usageForAccounting) {
+      totalUsage = accumulateUsageForAccounting(totalUsage, usageForAccounting);
+    }
+    if (usageForAccounting && typeof recordUsageFromResponse === 'function') {
       const _c = chat
         || (chatId ? apiCoreChatById(chatId) : null)
         || apiCoreActiveTaskChat()
         || apiCoreCurrentChat();
-      if (_c) recordUsageFromResponse(_c, usage, { model });
-      totalUsage = totalUsage ? { ...totalUsage, ...usage } : usage;
+      if (_c) recordUsageFromResponse(_c, usageForAccounting, { model });
     }
     
     if (typeof privacyGuardFinalizeText === 'function') {
@@ -2006,7 +2065,9 @@ window.AgentApp.define('apiCore', {
   buildHeaders,
   extractResponsesText,
   extractResponsesToolCalls,
+  normalizeUsageForAccounting,
   normalizeResponsesUsage,
+  accumulateUsageForAccounting,
   responsesEventKey,
   callAPI,
   handleStream,

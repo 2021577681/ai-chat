@@ -9,6 +9,7 @@ from server.exec import (
     _coerce_execute_timeout,
     _git_proxy_bat_lines,
     _normalize_local_git_proxy_url,
+    _remote_terminal_ssh_args,
 )
 from server.handler import Handler
 from server.routes import (
@@ -151,6 +152,14 @@ class ExecGitProxyTests(unittest.TestCase):
         self.assertEqual(300, _coerce_execute_timeout(999, default=60))
         self.assertEqual(120, _coerce_execute_timeout('120', default=60))
         self.assertEqual(60, _coerce_execute_timeout('bad', default=60))
+
+    def test_remote_terminal_builds_ssh_cd_command(self):
+        args = _remote_terminal_ssh_args('ssh -p 2222 user@example.com', '~/project dir')
+
+        self.assertEqual(['ssh', '-p', '2222', '-t', 'user@example.com'], args[:5])
+        self.assertIn('cd "$HOME"/', args[-1])
+        self.assertIn('project dir', args[-1])
+        self.assertIn('exec "${SHELL:-/bin/sh}" -l', args[-1])
 
 
 if __name__ == '__main__':

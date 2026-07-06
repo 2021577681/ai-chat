@@ -10,6 +10,7 @@ const permissionsPersistSettings = PermissionsStateModule.persistSettings;
 
 function openPermissions() {
   document.getElementById('permissionsModal').classList.add('show');
+  renderFullAccessControl();
   renderPermissionsList();
   renderTaskPermissionsList();
 }
@@ -27,9 +28,10 @@ function renderPermissionsList() {
   }
   
   const perms = (TERMINAL_CONFIG && TERMINAL_CONFIG.permanentAllow) || {};
+  const fullAccess = typeof isFullAccessModeEnabled === 'function' && isFullAccessModeEnabled();
   
   container.innerHTML = Object.entries(PERMISSION_CATEGORIES).map(([key, info]) => {
-    const granted = !!perms[key];
+    const granted = fullAccess || !!perms[key];
     return `
       <label class="perm-item">
         <input type="checkbox" ${granted ? 'checked' : ''}
@@ -44,6 +46,29 @@ function renderPermissionsList() {
       </label>
     `;
   }).join('');
+}
+
+function renderFullAccessControl() {
+  const container = document.getElementById('fullAccessPermissionPanel');
+  if (!container) return;
+  const fullAccess = typeof isFullAccessModeEnabled === 'function' && isFullAccessModeEnabled();
+  const total = typeof PERMISSION_CATEGORIES !== 'undefined' ? Object.keys(PERMISSION_CATEGORIES).length : 0;
+  const granted = (TERMINAL_CONFIG && TERMINAL_CONFIG.permanentAllow) ? Object.keys(TERMINAL_CONFIG.permanentAllow).length : 0;
+  container.innerHTML = `
+    <div class="perm-full-access ${fullAccess ? 'enabled' : ''}">
+      <div class="perm-full-access-info">
+        <div class="perm-full-access-title">完全访问</div>
+        <div class="perm-full-access-desc">
+          ${fullAccess
+            ? `已默认允许全部 ${total} 类工具，并允许 AI 对沙箱目录外的路径发起操作。`
+            : `一键允许全部 ${total} 类工具，并允许 AI 对沙箱目录外的路径发起操作。当前已永久允许 ${granted}/${total} 类。`}
+        </div>
+      </div>
+      <button class="btn ${fullAccess ? '' : 'btn-primary'}" data-action="onToggleFullAccess">
+        ${fullAccess ? '关闭完全访问' : '允许完全访问'}
+      </button>
+    </div>
+  `;
 }
 
 function renderTaskPermissionsList() {
@@ -73,6 +98,26 @@ function onTogglePermission(category, checked) {
   PermissionsUiService.toast(checked
     ? `✓ 已永久允许「${name}」`
     : `🗑️ 已撤销「${name}」的永久授权`, 2000);
+  renderFullAccessControl();
+  renderPermissionsList();
+}
+
+function onToggleFullAccess() {
+  const fullAccess = typeof isFullAccessModeEnabled === 'function' && isFullAccessModeEnabled();
+  if (fullAccess) {
+    if (typeof restoreFullAccessPermissions === 'function') restoreFullAccessPermissions();
+    else if (typeof setFullAccessMode === 'function') setFullAccessMode(false);
+    PermissionsUiService.toast('已关闭完全访问；已恢复开启前的单项永久授权。', 2400);
+  } else {
+    const count = typeof PERMISSION_CATEGORIES !== 'undefined' ? Object.keys(PERMISSION_CATEGORIES).length : 0;
+    const ok = confirm(
+      `确认允许完全访问？\n\n这会默认允许全部 ${count} 类工具，并允许 AI 对沙箱目录外的路径发起操作。\n关闭完全访问后会恢复开启前的单项永久授权。\n隐私模式和 Shell 审核仍会继续生效。`
+    );
+    if (!ok) return;
+    if (typeof grantFullAccessPermissions === 'function') grantFullAccessPermissions();
+    PermissionsUiService.toast('已开启完全访问：全部工具默认允许，沙箱外路径操作已放开。', 3000);
+  }
+  renderFullAccessControl();
   renderPermissionsList();
 }
 
@@ -85,6 +130,7 @@ function onClearAllPerms() {
   }
   if (!confirm(`确认撤销全部 ${count} 项永久授权？\n下次调用相应工具会重新弹窗。`)) return;
   clearAllPermanentPermissions();
+  renderFullAccessControl();
   PermissionsUiService.toast(`🗑️ 已清空全部 ${count} 项永久授权`, 2500);
   renderPermissionsList();
 }
@@ -130,8 +176,10 @@ window.AgentApp.define('permissions', {
   openPermissions,
   closePermissions,
   renderPermissionsList,
+  renderFullAccessControl,
   renderTaskPermissionsList,
   onTogglePermission,
+  onToggleFullAccess,
   onClearAllPerms,
   onClearTaskPerms,
   onClearAllSecrets

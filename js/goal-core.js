@@ -267,15 +267,35 @@ function clipGoalText(value, max = 180) {
   return text.length > max ? text.slice(0, max - 1) + '…' : text;
 }
 
-let goalChatRenderScheduled = false;
+const goalChatNodeUpdateQueue = new Map();
+let goalChatNodeUpdateScheduled = false;
 
-function scheduleGoalChatRender(chat) {
+function scheduleGoalChatNodeUpdate(chat, idx, mode = 'refresh') {
   if (!chat || !GoalCoreStateModule.isCurrentChat(chat.id)) return;
-  if (goalChatRenderScheduled) return;
-  goalChatRenderScheduled = true;
+  if (!Number.isInteger(idx) || idx < 0) return;
+  const key = `${chat.id}:${idx}`;
+  const existing = goalChatNodeUpdateQueue.get(key);
+  goalChatNodeUpdateQueue.set(key, {
+    chat,
+    idx,
+    append: mode === 'append' || !!(existing && existing.append)
+  });
+  if (goalChatNodeUpdateScheduled) return;
+  goalChatNodeUpdateScheduled = true;
   const flush = () => {
-    goalChatRenderScheduled = false;
-    GoalCoreUiService.renderMessages();
+    goalChatNodeUpdateScheduled = false;
+    const updates = Array.from(goalChatNodeUpdateQueue.values()).sort((a, b) => a.idx - b.idx);
+    goalChatNodeUpdateQueue.clear();
+    for (const item of updates) {
+      if (!item.chat || !GoalCoreStateModule.isCurrentChat(item.chat.id)) continue;
+      let ok = false;
+      if (item.append && GoalCoreUiService.has('appendMsgNode')) {
+        ok = GoalCoreUiService.appendMsgNode(item.idx, item.chat) !== false;
+      } else if (GoalCoreUiService.has('refreshMsgNode')) {
+        ok = GoalCoreUiService.refreshMsgNode(item.idx, item.chat) !== false;
+      }
+      if (!ok) GoalCoreUiService.renderMessages();
+    }
     GoalCoreUiService.updateSendBtn();
   };
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(flush);
@@ -288,10 +308,53 @@ function normalizeGoalToolArguments(args) {
   catch (e) { return '{}'; }
 }
 
+function goalObjectFromMaybeJson(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function goalFinalTextFromUpdateGoalArgs(args) {
+  const obj = goalObjectFromMaybeJson(args);
+  const finalSummary = String(obj.final_summary || obj.finalSummary || '').trim();
+  const progress = String(obj.progress || '').trim();
+  const evidence = String(obj.evidence || '').trim();
+  const nextStep = String(obj.next_step || obj.nextStep || '').trim();
+  if (normalizeGoalStatus(obj.status) === 'complete') {
+    return finalSummary || evidence || progress;
+  }
+  return [progress, evidence ? '证据：' + evidence : '', nextStep ? '下一步：' + nextStep : '']
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function goalFinalTextFromUpdateGoalResult(content) {
+  const obj = goalObjectFromMaybeJson(content);
+  const goal = obj && obj.goal && typeof obj.goal === 'object' ? obj.goal : null;
+  if (!goal) return '';
+  return goalTerminalFinalText(goal) || String(goal.summary || goal.lastResult || goal.nextStep || '').trim();
+}
+
+function goalTerminalFinalText(goal) {
+  if (!goal) return '';
+  if (goal.status !== 'complete') {
+    return String(goal.summary || goal.lastResult || goal.nextStep || '').trim();
+  }
+  return String(goal.summary || goal.lastResult || '').trim();
+}
+
 function createGoalChatRecorder(chat, goalId, turnNo) {
   const recorder = {
     assistant: null,
     assistantIdx: -1,
+    finalTextCandidate: '',
+    finalAssistantIdx: -1,
     hasToolCalls: false
   };
 
@@ -304,9 +367,52 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
       _goalTurn: turnNo
     };
     chat.messages.push(msg);
+    const idx = chat.messages.length - 1;
     goalSaveData();
-    scheduleGoalChatRender(chat);
+    scheduleGoalChatNodeUpdate(chat, idx, 'append');
     return msg;
+  };
+
+  const rememberFinalText = (text) => {
+    const value = String(text || '').trim();
+    if (value) recorder.finalTextCandidate = value;
+  };
+
+  const hasFinalAssistant = () => {
+    const assistant = recorder.assistant;
+    return !!(assistant
+      && assistant.role === 'assistant'
+      && !(assistant.tool_calls && assistant.tool_calls.length)
+      && String(assistant.content || '').trim());
+  };
+
+  const appendFinalAssistant = (text) => {
+    const content = String(text || '').trim();
+    if (!content || hasFinalAssistant()) return null;
+    const now = Date.now();
+    const msg = appendMessage({
+      role: 'assistant',
+      content,
+      _startTime: now,
+      _firstTokenAt: now,
+      _endTime: now,
+      _goalFinal: true
+    });
+    recorder.assistant = msg;
+    recorder.assistantIdx = chat.messages.length - 1;
+    recorder.finalAssistantIdx = recorder.assistantIdx;
+    return msg;
+  };
+
+  const appendGoalTerminalFinalAssistant = () => {
+    const goal = goalById(goalId);
+    if (!goal || goal.status !== 'complete') return null;
+    return appendFinalAssistant(recorder.finalTextCandidate || goalTerminalFinalText(goal));
+  };
+
+  const appendGoalTurnFinalAssistant = () => {
+    const goal = goalById(goalId);
+    return appendFinalAssistant(recorder.finalTextCandidate || goalTerminalFinalText(goal));
   };
 
   const ensureAssistant = () => {
@@ -324,7 +430,7 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
   const finishAssistant = () => {
     if (!recorder.assistant || recorder.assistant._endTime) return;
     recorder.assistant._endTime = Date.now();
-    scheduleGoalChatRender(chat);
+    scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
   };
 
   const startRound = () => {
@@ -345,11 +451,14 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
         const assistant = ensureAssistant();
         if (!assistant._firstTokenAt) assistant._firstTokenAt = Date.now();
         assistant.content = String(assistant.content || '') + String(event.text || '');
-        scheduleGoalChatRender(chat);
+        scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
         return;
       }
       if (event.type === 'tool_call') {
         const assistant = ensureAssistant();
+        if (event.name === 'update_goal') {
+          rememberFinalText(goalFinalTextFromUpdateGoalArgs(event.args));
+        }
         if (!Array.isArray(assistant.tool_calls)) assistant.tool_calls = [];
         if (!assistant.tool_calls.some(tc => tc && tc.id === event.id)) {
           assistant.tool_calls.push({
@@ -376,24 +485,32 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
           _startTime: now,
           _endTime: now
         });
+        if (event.name === 'update_goal') {
+          rememberFinalText(goalFinalTextFromUpdateGoalResult(event.content));
+          appendGoalTerminalFinalAssistant();
+        }
         return;
       }
       if (event.type === 'round_end') {
         const assistant = recorder.assistant;
         if (assistant && event.text && !String(assistant.content || '').trim()) {
           assistant.content = String(event.text || '');
+          scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
         }
         finishAssistant();
         return;
       }
       if (event.type === 'done') {
+        rememberFinalText(event.finalText);
         finishAssistant();
+        if (!appendFinalAssistant(event.finalText)) appendGoalTurnFinalAssistant();
       }
     },
     finish() {
       finishAssistant();
+      appendGoalTurnFinalAssistant();
       goalSaveData();
-      scheduleGoalChatRender(chat);
+      if (recorder.assistantIdx >= 0) scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
     }
   };
 }
@@ -444,7 +561,7 @@ function renderGoalPanel() {
         <div class="goal-stat-grid">
           <div><strong>${goal.turnCount}</strong><span>已用轮次</span></div>
           <div><strong>${goal.maxTurns}</strong><span>轮次上限</span></div>
-          <div><strong>${goal.tokenUsed || 0}</strong><span>已记 token</span></div>
+          <div><strong>${goalRecordedTokenUsed(goal)}</strong><span>已记 token</span></div>
           <div><strong>${goal.tokenBudget || '不限'}</strong><span>token 预算</span></div>
         </div>
         <div class="goal-detail-block">
@@ -613,7 +730,7 @@ function buildGoalTurnPrompt(goal) {
     status: goal.status,
     turn: String(goal.turnCount + 1),
     maxTurns: String(goal.maxTurns),
-    tokenUsed: String(goal.tokenUsed || 0),
+    tokenUsed: String(goalRecordedTokenUsed(goal)),
     tokenBudget: goal.tokenBudget ? String(goal.tokenBudget) : 'unlimited',
     summary: goal.summary || '',
     lastResult: goal.lastResult || '',
@@ -623,9 +740,86 @@ function buildGoalTurnPrompt(goal) {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] !== undefined ? values[key] : '');
 }
 
+function goalUsageNumber(...values) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 function usageTokenCount(usage) {
   if (!usage || typeof usage !== 'object') return 0;
-  return Number(usage.total_tokens || usage.totalTokens || usage.input_tokens + usage.output_tokens || usage.prompt_tokens + usage.completion_tokens || 0) || 0;
+  const src = usage.usageMetadata || usage.usage || usage;
+  const inputTokens = goalUsageNumber(
+    src.input_tokens,
+    src.prompt_tokens,
+    src.inputTokens,
+    src.promptTokens,
+    src.promptTokenCount
+  );
+  const outputTokens = goalUsageNumber(
+    src.output_tokens,
+    src.completion_tokens,
+    src.outputTokens,
+    src.completionTokens,
+    src.candidatesTokenCount
+  );
+  return goalUsageNumber(
+    src.total_tokens,
+    src.totalTokens,
+    src.totalTokenCount,
+    inputTokens + outputTokens
+  );
+}
+
+function goalChatRecordedTokenTotal(chat) {
+  const stats = chat && chat.tokenStats;
+  if (!stats || typeof stats !== 'object') return 0;
+  return goalUsageNumber(Number(stats.inputTokens || 0) + Number(stats.outputTokens || 0));
+}
+
+function goalRecordedTokenUsed(goal) {
+  if (!goal) return 0;
+  return Math.max(Number(goal.tokenUsed || 0) || 0, goalChatRecordedTokenTotal(goalChatById(goal.chatId)));
+}
+
+function syncGoalTokenUsageFromChat(goal) {
+  if (!goal) return 0;
+  const recorded = goalRecordedTokenUsed(goal);
+  if (recorded > (Number(goal.tokenUsed || 0) || 0)) goal.tokenUsed = recorded;
+  return recorded;
+}
+
+function goalEstimateTextTokens(text) {
+  if (typeof estimateTokens === 'function') return Math.max(0, Number(estimateTokens(text)) || 0);
+  let value = '';
+  if (typeof text === 'string') value = text;
+  else {
+    try { value = JSON.stringify(text || ''); }
+    catch (e) { value = String(text || ''); }
+  }
+  return Math.ceil(value.length / 3);
+}
+
+function goalEstimateMessageTokens(message) {
+  if (typeof estimateMessageTokens === 'function') return Math.max(0, Number(estimateMessageTokens(message)) || 0);
+  if (!message || typeof message !== 'object') return 0;
+  return 4
+    + goalEstimateTextTokens(message.role || '')
+    + goalEstimateTextTokens(message.content || '')
+    + goalEstimateTextTokens(message.name || '')
+    + goalEstimateTextTokens(message.tool_call_id || '')
+    + goalEstimateTextTokens(message.tool_calls || '');
+}
+
+function goalEstimateTurnTokens(systemPrompt, turnPrompt, chat, messageStartIdx) {
+  let total = goalEstimateTextTokens(systemPrompt) + goalEstimateTextTokens(turnPrompt);
+  const messages = Array.isArray(chat && chat.messages) ? chat.messages : [];
+  for (let i = Math.max(0, Number(messageStartIdx || 0)); i < messages.length; i++) {
+    total += goalEstimateMessageTokens(messages[i]);
+  }
+  return Math.max(0, Math.ceil(total));
 }
 
 function goalToolCallName(toolCall) {
@@ -727,18 +921,23 @@ async function continueGoal(goalId) {
         goalId: freshGoal.id,
         _goalTurn: turnNo
       });
+      const userMsgIdx = chat.messages.length - 1;
       goalSaveData();
       GoalCoreUiService.renderChatList();
-      GoalCoreUiService.renderMessages();
+      scheduleGoalChatNodeUpdate(chat, userMsgIdx, 'append');
       GoalCoreUiService.updateSendBtn();
 
       const protocol = { toolCalls: [] };
       const chatRecorder = createGoalChatRecorder(chat, freshGoal.id, turnNo);
+      const tokenStatsBefore = goalChatRecordedTokenTotal(chat);
+      const messageCountBeforeRun = chat.messages.length;
+      const turnPrompt = buildGoalTurnPrompt(freshGoal);
+      const systemPrompt = goalSettings().goalSystemPrompt || goalDefaultSystemPrompt();
       let result;
       try {
         result = await GoalCoreOrchestrationService.runAgentLoop({
-          initialMessages: [{ role: 'user', content: buildGoalTurnPrompt(freshGoal) }],
-          systemPrompt: goalSettings().goalSystemPrompt || goalDefaultSystemPrompt(),
+          initialMessages: [{ role: 'user', content: turnPrompt }],
+          systemPrompt,
           model: goalSettings().goalModel || goalState.settings.currentModel,
           maxRounds: Math.max(0, Number(goalSettings().goalMaxToolRounds || goalState.settings.maxToolRounds || 15) || 15),
           signal: controller.signal,
@@ -765,8 +964,11 @@ async function continueGoal(goalId) {
       const latestGoal = goalById(goal.id);
       if (!latestGoal) break;
       const finalText = String((result && result.finalText) || '').trim();
-      const tokenUsed = usageTokenCount(result && result.usage);
+      const tokenUsed = usageTokenCount(result && result.usage)
+        || Math.max(0, goalChatRecordedTokenTotal(chat) - tokenStatsBefore)
+        || goalEstimateTurnTokens(systemPrompt, turnPrompt, chat, messageCountBeforeRun);
       if (tokenUsed) latestGoal.tokenUsed += tokenUsed;
+      syncGoalTokenUsageFromChat(latestGoal);
       latestGoal.lastResult = finalText || latestGoal.lastResult;
       pushGoalEvent(latestGoal, 'turn_result', { result: clipGoalText(finalText || 'No final text.', 500) });
       const protocolViolation = applyGoalProtocolAudit(latestGoal, inspectGoalProtocol(result && result.messages, protocol), finalText);
@@ -780,7 +982,6 @@ async function continueGoal(goalId) {
       saveGoals();
       goalSaveData();
       GoalCoreUiService.renderChatList();
-      GoalCoreUiService.renderMessages();
       GoalCoreUiService.updateSendBtn();
 
       keepGoing = !!goalSettings().goalAutoContinue
@@ -984,7 +1185,7 @@ function summarizeGoalForTool(goal) {
     turnCount: goal.turnCount,
     maxTurns: goal.maxTurns,
     tokenBudget: goal.tokenBudget,
-    tokenUsed: goal.tokenUsed,
+    tokenUsed: goalRecordedTokenUsed(goal),
     summary: goal.summary,
     lastResult: goal.lastResult,
     nextStep: goal.nextStep,

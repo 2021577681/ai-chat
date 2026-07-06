@@ -64,6 +64,16 @@ def _compact_large_write_payload(action, body):
     return body
 
 
+def _body_flag_enabled(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
               McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin,
@@ -183,6 +193,9 @@ class Handler(BaseHTTPRequestHandler,
         session_id = body.get('session_id') or self.headers.get('X-Session-Id', '')
         session_id = config.normalize_session_id(session_id)
         cwd_token = config.bind_request_cwd(config.get_session_cwd(session_id))
+        full_access_token = config.bind_request_full_access(
+            _body_flag_enabled(body.get('allow_full_access') or body.get('full_access'))
+        )
         self._bind_http_context(session_id)
         self._log_action_request(action, body)
 
@@ -191,4 +204,5 @@ class Handler(BaseHTTPRequestHandler,
         except Exception as e:
             self.response.json(500, {'ok': False, 'error': f'内部错误: {e}'})
         finally:
+            config.reset_request_full_access(full_access_token)
             config.reset_request_cwd(cwd_token)

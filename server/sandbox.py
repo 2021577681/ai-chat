@@ -146,6 +146,8 @@ def command_workspace_violation(cmd: str):
     注意：这是防御层，不是为了证明命令绝对安全。命令里只要出现
     明显外部路径/家目录引用/父目录遍历，就直接拒绝。
     """
+    if config.is_full_access_enabled():
+        return False, ''
     if not cmd:
         return False, ''
 
@@ -188,6 +190,8 @@ def command_workspace_violation(cmd: str):
 # ============ L1：路径校验 ============
 def is_inside_workspace(abs_path):
     """检查 abs_path 是否在沙箱根目录内（含 realpath 解析以防 symlink 越狱）"""
+    if config.is_full_access_enabled():
+        return True
     try:
         real = os.path.realpath(abs_path)
     except Exception:

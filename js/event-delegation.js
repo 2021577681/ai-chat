@@ -177,6 +177,7 @@
     'resetAllData',
     'applyImport',
     'closePermissions',
+    'onToggleFullAccess',
     'onClearAllPerms',
     'onClearAllSecrets',
     'shellAuditConfirmAccept',
@@ -592,7 +593,7 @@
       if (el) el.remove();
     },
     toggleParentCollapsed(event, target) {
-      if (target.parentElement) target.parentElement.classList.toggle('collapsed');
+      if (target.parentElement) target.parentElement.classList.toggle(target.dataset.toggleClass || 'collapsed');
     },
     switchJsonTab(event, target) {
       return callGlobal('switchJsonTab', [target.dataset.jsontab || dataValue(target, 'preview'), target]);

@@ -1,5 +1,7 @@
 ﻿// ============ 本地 Agent 工具集 ============
 const TERMINAL_PERMS_KEY = 'aichat_terminal_perms_v1';
+const TERMINAL_FULL_ACCESS_KEY = 'aichat_terminal_full_access_v1';
+const TERMINAL_FULL_ACCESS_PERMS_BACKUP_KEY = 'aichat_terminal_full_access_perms_backup_v1';
 const TerminalStateModule = window.AgentApp.require('state');
 const terminalState = TerminalStateModule.state;
 const terminalSaveData = TerminalStateModule.saveData;
@@ -60,6 +62,62 @@ function savePermanentPerms(p) {
   catch (e) { console.warn('[perm] 保存失败:', e); }
 }
 
+function clonePermanentPerms(perms) {
+  const out = {};
+  Object.keys(perms || {}).forEach(category => {
+    if (perms[category] && PERMISSION_CATEGORIES[category]) out[category] = true;
+  });
+  return out;
+}
+
+function loadFullAccessMode() {
+  try {
+    const raw = storage.get(TERMINAL_FULL_ACCESS_KEY);
+    if (raw === true || raw === 'true' || raw === '1') return true;
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return parsed === true || !!(parsed && parsed.enabled);
+  } catch (e) {
+    return false;
+  }
+}
+
+function saveFullAccessMode(enabled) {
+  try { storage.set(TERMINAL_FULL_ACCESS_KEY, JSON.stringify({ enabled: !!enabled, updatedAt: Date.now() })); }
+  catch (e) { console.warn('[perm] 保存完全访问状态失败:', e); }
+}
+
+function saveFullAccessPermissionSnapshot(perms) {
+  try {
+    storage.set(TERMINAL_FULL_ACCESS_PERMS_BACKUP_KEY, JSON.stringify({
+      permanentAllow: clonePermanentPerms(perms),
+      updatedAt: Date.now()
+    }));
+  } catch (e) {
+    console.warn('[perm] 保存完全访问权限快照失败:', e);
+  }
+}
+
+function loadFullAccessPermissionSnapshot() {
+  try {
+    const raw = storage.get(TERMINAL_FULL_ACCESS_PERMS_BACKUP_KEY);
+    if (!raw) return null;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const perms = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed.permanentAllow || parsed)
+      : {};
+    return clonePermanentPerms(perms);
+  } catch (e) {
+    console.warn('[perm] 加载完全访问权限快照失败:', e);
+    return null;
+  }
+}
+
+function clearFullAccessPermissionSnapshot() {
+  try { storage.remove(TERMINAL_FULL_ACCESS_PERMS_BACKUP_KEY); }
+  catch (e) { console.warn('[perm] 清理完全访问权限快照失败:', e); }
+}
+
 const TERMINAL_CONFIG = {
   serverUrl: 'http://localhost:8765',
   sessionId: 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
@@ -68,6 +126,7 @@ const TERMINAL_CONFIG = {
   taskAllowByChat: {},
   // ⭐ 永久允许（按类别），存 localStorage，可在 UI 撤销
   permanentAllow: loadPermanentPerms(),
+  fullAccess: loadFullAccessMode(),
   autoAnalyzeAfterAttach: true
 };
 
@@ -184,13 +243,42 @@ function setPermanentPermission(category, allow) {
   if (allow) {
     TERMINAL_CONFIG.permanentAllow[category] = true;
   } else {
+    if (TERMINAL_CONFIG.fullAccess) restoreFullAccessPermissions();
     delete TERMINAL_CONFIG.permanentAllow[category];
   }
   savePermanentPerms(TERMINAL_CONFIG.permanentAllow);
 }
 function clearAllPermanentPermissions() {
+  clearFullAccessPermissionSnapshot();
   TERMINAL_CONFIG.permanentAllow = {};
   savePermanentPerms({});
+  setFullAccessMode(false);
+}
+function setFullAccessMode(enabled) {
+  TERMINAL_CONFIG.fullAccess = !!enabled;
+  saveFullAccessMode(TERMINAL_CONFIG.fullAccess);
+  return TERMINAL_CONFIG.fullAccess;
+}
+function isFullAccessModeEnabled() {
+  return !!(TERMINAL_CONFIG && TERMINAL_CONFIG.fullAccess);
+}
+function grantFullAccessPermissions() {
+  if (!TERMINAL_CONFIG.fullAccess) saveFullAccessPermissionSnapshot(TERMINAL_CONFIG.permanentAllow);
+  Object.keys(PERMISSION_CATEGORIES || {}).forEach(category => {
+    TERMINAL_CONFIG.permanentAllow[category] = true;
+  });
+  savePermanentPerms(TERMINAL_CONFIG.permanentAllow);
+  setFullAccessMode(true);
+}
+function restoreFullAccessPermissions() {
+  const snapshot = loadFullAccessPermissionSnapshot();
+  if (snapshot) {
+    TERMINAL_CONFIG.permanentAllow = snapshot;
+    savePermanentPerms(TERMINAL_CONFIG.permanentAllow);
+  }
+  clearFullAccessPermissionSnapshot();
+  setFullAccessMode(false);
+  return TERMINAL_CONFIG.permanentAllow;
 }
 function clearTaskPermissions(chatId) {
   const id = chatId || (typeof terminalState !== 'undefined' ? terminalState.currentId : '');
@@ -200,6 +288,10 @@ function clearTaskPermissions(chatId) {
 }
 window.setPermanentPermission = setPermanentPermission;
 window.clearAllPermanentPermissions = clearAllPermanentPermissions;
+window.setFullAccessMode = setFullAccessMode;
+window.isFullAccessModeEnabled = isFullAccessModeEnabled;
+window.grantFullAccessPermissions = grantFullAccessPermissions;
+window.restoreFullAccessPermissions = restoreFullAccessPermissions;
 window.PERMISSION_CATEGORIES = PERMISSION_CATEGORIES;
 
 function resolveToolChatId(context) {
@@ -628,6 +720,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   const forceConfirm = !!(context && typeof context === 'object' && context.forceConfirm);
   const skipConfirm = !!(context && typeof context === 'object' && context.skipConfirm);
   const category = ACTION_TO_CATEGORY[action] || '';
+  const fullAccessAllowed = isFullAccessModeEnabled();
   const requestParams = withCheckpointParam(params, context);
   if (typeof guardConcurrentFileOwnership === 'function') {
     const conflict = guardConcurrentFileOwnership(action, requestParams, context);
@@ -639,12 +732,12 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     const taskAllow = getTaskAllowForChat(chatId);
     const taskAllowed = !!taskAllow[category];
     const permanentlyAllowed = !!TERMINAL_CONFIG.permanentAllow[category];
-    const alreadyAllowed = permanentlyAllowed || taskAllowed;
+    const alreadyAllowed = fullAccessAllowed || permanentlyAllowed || taskAllowed;
     
     // forceConfirm 用于 Git 命令在快照工具未启用时绕过“永久允许执行命令”，
     // 避免旧的永久 execute 权限静默放行 Git 写入/恢复类命令。
     // 但用户点击“本任务后续允许执行命令”后，应在当前任务内继续生效。
-    if ((forceConfirm && !taskAllowed) || !alreadyAllowed) {
+    if ((forceConfirm && !taskAllowed && !fullAccessAllowed) || !alreadyAllowed) {
       const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, {
         ...(context && typeof context === 'object' ? context : {}),
         chatId
@@ -687,7 +780,8 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     const auditContext = {
       ...(context && typeof context === 'object' ? context : {}),
       chatId,
-      workspace: TERMINAL_CONFIG.workspace || ''
+      workspace: TERMINAL_CONFIG.workspace || '',
+      fullAccess: fullAccessAllowed
     };
     const audit = await reviewShellCommandWithAI({
       command: auditCommand,
@@ -764,7 +858,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     return await fetchAgentBackendWithTimeout(TERMINAL_CONFIG.serverUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...backendParams, session_id: getAgentSessionId({ chatId }) })
+      body: JSON.stringify({ action, ...backendParams, session_id: getAgentSessionId({ chatId }), allow_full_access: fullAccessAllowed })
     }, context && context.signal ? context.signal : undefined, requestTimeoutMs);
   };
   
@@ -2133,8 +2227,14 @@ window.AgentApp.define('terminal', {
   ACTION_TO_CATEGORY,
   loadPermanentPerms,
   savePermanentPerms,
+  loadFullAccessMode,
+  saveFullAccessMode,
   setPermanentPermission,
   clearAllPermanentPermissions,
+  setFullAccessMode,
+  isFullAccessModeEnabled,
+  grantFullAccessPermissions,
+  restoreFullAccessPermissions,
   clearTaskPermissions,
   resolveToolChatId,
   getTaskAllowForChat,

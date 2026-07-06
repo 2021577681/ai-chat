@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import locale
+import shlex
 import subprocess
 import tempfile
 
@@ -82,6 +83,34 @@ def _coerce_execute_timeout(value, default=30, maximum=300):
     except (TypeError, ValueError):
         timeout = default
     return max(1, min(timeout, maximum))
+
+
+def _split_ssh_command(command):
+    command = (command or '').strip()
+    if not command:
+        raise ValueError('SSH 命令不能为空')
+    parts = shlex.split(command, posix=(os.name != 'nt'))
+    if not parts or os.path.basename(parts[0]).lower() not in ('ssh', 'ssh.exe'):
+        raise ValueError('SSH 命令必须以 ssh 开头')
+    if len(parts) < 2:
+        raise ValueError('SSH 命令缺少远程主机')
+    return parts
+
+
+def _quote_remote_cd_path(path):
+    raw = str(path or '~').strip() or '~'
+    if raw == '~':
+        return '$HOME'
+    if raw.startswith('~/'):
+        rest = raw[2:].strip('/')
+        return '"$HOME"' + (('/' + shlex.quote(rest)) if rest else '')
+    return shlex.quote(raw)
+
+
+def _remote_terminal_ssh_args(ssh_command, remote_workspace):
+    parts = _split_ssh_command(ssh_command)
+    remote_cmd = f'cd {_quote_remote_cd_path(remote_workspace)} && exec "${{SHELL:-/bin/sh}}" -l'
+    return list(parts[:-1]) + ['-t', parts[-1], remote_cmd]
 
 
 def _unique_encodings(names):
@@ -287,6 +316,71 @@ class ExecMixin:
             })
         except Exception as e:
             return self.response.json(200, {'ok': False, 'error': f'无法打开终端: {e}'})
+
+    def handle_open_remote_terminal(self, body):
+        """Open a local terminal window and connect it to the remote workspace."""
+        try:
+            ssh_command = (body.get('ssh_command') or '').strip()
+            remote_workspace = (body.get('remote_workspace') or '~').strip() or '~'
+            ssh_args = _remote_terminal_ssh_args(ssh_command, remote_workspace)
+            system = platform.system().lower()
+            proc = None
+            terminal_title = 'AI Remote Terminal'
+
+            if system == 'windows':
+                commands = [
+                    ['wt.exe', 'new-tab', '--title', terminal_title] + ssh_args,
+                    ['wt.exe'] + ssh_args,
+                    ['cmd.exe', '/k', f'title {terminal_title} & {subprocess.list2cmdline(ssh_args)}'],
+                ]
+                last_error = None
+                for cmd in commands:
+                    try:
+                        proc = subprocess.Popen(
+                            cmd,
+                            cwd=os.path.realpath(config.WORKSPACE_ROOT),
+                            creationflags=subprocess.CREATE_NEW_CONSOLE,
+                        )
+                        break
+                    except Exception as e:
+                        last_error = e
+                if proc is None:
+                    raise last_error or RuntimeError('无法启动 Windows 终端')
+                focus_window_soon(
+                    pid=getattr(proc, 'pid', None),
+                    title_keywords=[terminal_title, 'Windows Terminal'],
+                    timeout=3.0,
+                )
+            elif system == 'darwin':
+                command = shlex.join(ssh_args)
+                escaped = command.replace('\\', '\\\\').replace('"', '\\"')
+                script = f'tell application "Terminal" to do script "{escaped}"'
+                proc = subprocess.Popen(['osascript', '-e', script], cwd=os.path.realpath(config.WORKSPACE_ROOT))
+            else:
+                commands = [
+                    ['x-terminal-emulator', '-e'] + ssh_args,
+                    ['gnome-terminal', '--'] + ssh_args,
+                    ['konsole', '-e'] + ssh_args,
+                    ['xfce4-terminal', '-e', shlex.join(ssh_args)],
+                    ['xterm', '-e'] + ssh_args,
+                ]
+                last_error = None
+                for cmd in commands:
+                    try:
+                        proc = subprocess.Popen(cmd, cwd=os.path.realpath(config.WORKSPACE_ROOT))
+                        break
+                    except Exception as e:
+                        last_error = e
+                if proc is None:
+                    raise last_error or RuntimeError('无法启动系统终端')
+
+            return self.response.json(200, {
+                'ok': True,
+                'pid': getattr(proc, 'pid', None),
+                'remote_workspace': remote_workspace,
+            })
+        except Exception as e:
+            return self.response.json(200, {'ok': False, 'error': f'无法打开远程终端: {e}'})
 
     def handle_execute(self, body):
         command = body.get('command', '').strip()

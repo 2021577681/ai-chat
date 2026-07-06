@@ -42,6 +42,7 @@ ACTION_ROUTES = (
     ActionRoute('remote_execute', 'handle_remote_execute'),
     ActionRoute('workspace_info', 'handle_workspace_info', pass_body=False),
     ActionRoute('open_terminal', 'handle_open_terminal'),
+    ActionRoute('open_remote_terminal', 'handle_open_remote_terminal'),
     ActionRoute('read_file', 'handle_read_file'),
     ActionRoute('read_file_binary', 'handle_read_file_binary'),
     ActionRoute('write_file', 'handle_write_file'),

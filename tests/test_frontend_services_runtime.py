@@ -77,6 +77,9 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
             sandbox.refreshMsgNode = (idx, chat) => {
               sandbox.refreshArgs = [idx, chat.id];
             };
+            sandbox.appendMsgNode = (idx, chat) => {
+              sandbox.appendArgs = [idx, chat.id];
+            };
             sandbox.updateSendBtn = () => {
               sandbox.sendBtnUpdated = true;
             };
@@ -89,6 +92,8 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
             assert.strictEqual(sandbox.rendered, true);
             ui.refreshMsgNode(2, { id: 'chat-1' });
             assert.deepStrictEqual(sandbox.refreshArgs, [2, 'chat-1']);
+            ui.appendMsgNode(3, { id: 'chat-2' });
+            assert.deepStrictEqual(sandbox.appendArgs, [3, 'chat-2']);
             ui.updateSendBtn();
             assert.strictEqual(sandbox.sendBtnUpdated, true);
 
@@ -1253,6 +1258,25 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
               preventDefault() {}
             });
             assert.deepStrictEqual(collapsedParent.toggled, ['collapsed']);
+
+            const expandedParent = {
+              toggled: [],
+              classList: {
+                toggle(name) {
+                  expandedParent.toggled.push(name);
+                }
+              }
+            };
+            const expandTarget = eventTarget({
+              action: 'toggleParentCollapsed',
+              toggleClass: 'expanded'
+            }, 'data-action');
+            expandTarget.parentElement = expandedParent;
+            listeners.click({
+              target: expandTarget,
+              preventDefault() {}
+            });
+            assert.deepStrictEqual(expandedParent.toggled, ['expanded']);
 
             const changeEvent = {
               target: eventTarget({ changeAction: 'saveSettings' }, 'data-change-action')

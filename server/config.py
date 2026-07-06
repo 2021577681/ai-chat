@@ -54,6 +54,7 @@ REMOTE_HEARTBEAT_LAST = time.time()
 # 真正的工具请求通过 session_id 绑定到 SESSION_CWDS，避免多标签/多任务互相串目录。
 current_cwd = os.getcwd()
 _request_cwd = contextvars.ContextVar('request_cwd', default=None)
+_request_full_access = contextvars.ContextVar('request_full_access', default=False)
 SESSION_CWDS = {}
 SESSION_LOCK = threading.Lock()
 DEFAULT_SESSION_ID = 'default'
@@ -160,6 +161,22 @@ def reset_request_cwd(token) -> None:
         _request_cwd.reset(token)
     except Exception:
         pass
+
+
+def bind_request_full_access(enabled: bool = False):
+    """Bind whether the current request may operate outside WORKSPACE_ROOT."""
+    return _request_full_access.set(bool(enabled))
+
+
+def reset_request_full_access(token) -> None:
+    try:
+        _request_full_access.reset(token)
+    except Exception:
+        pass
+
+
+def is_full_access_enabled() -> bool:
+    return bool(_request_full_access.get())
 
 
 def get_current_cwd() -> str:

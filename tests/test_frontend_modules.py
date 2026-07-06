@@ -197,6 +197,10 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn("window.AgentApp.define('securityRecords'", security_records_js)
         self.assertIn("window.AgentApp.define('rateLimiter'", rate_limiter_js)
         self.assertIn("window.AgentApp.define('tokens'", tokens_js)
+        self.assertIn('function tokenUsageNumber', tokens_js)
+        self.assertIn('usage.usageMetadata || usage.usage || usage', tokens_js)
+        self.assertIn('usageSource.promptTokenCount', tokens_js)
+        self.assertIn('usageSource.totalTokenCount', tokens_js)
         self.assertIn("window.AgentApp.define('tokenUsage'", token_usage_js)
         self.assertIn("window.AgentApp.define('projectInstructions'", project_instructions_js)
         self.assertIn("window.AgentApp.define('projectMemory'", project_memory_js)
@@ -285,6 +289,29 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn("remoteInit.catch(e => console.warn('[remote] init failed:', e));", main_js)
         self.assertIn('noteRemoteWorkspaceChanged(r.workspace || r.cwd);', utils_js)
         self.assertIn('noteRemoteWorkspaceChanged(r.workspace || r.cwd || normalizedPath);', file_explorer_js)
+
+    def test_remote_terminal_uses_local_controller_and_default_open_warns(self):
+        terminal_launcher_js = (ROOT / 'js' / 'terminal-launcher.js').read_text(encoding='utf-8')
+        file_explorer_js = (ROOT / 'js' / 'file-explorer.js').read_text(encoding='utf-8')
+        routes_py = (ROOT / 'server' / 'routes.py').read_text(encoding='utf-8')
+
+        for snippet in (
+            'async function openRemoteWorkspaceTerminal()',
+            "typeof isRemoteAgentActive !== 'function' || !isRemoteAgentActive()",
+            'REMOTE_CONTROLLER.serverUrl',
+            "action: 'open_remote_terminal'",
+            'ssh_command: sshCommand',
+            'remote_workspace: remoteWorkspace',
+            '已打开本机终端并连接到远程目录',
+            'window.openRemoteWorkspaceTerminal = openRemoteWorkspaceTerminal',
+            'openRemoteWorkspaceTerminal,',
+        ):
+            self.assertIn(snippet, terminal_launcher_js)
+
+        self.assertIn("ActionRoute('open_remote_terminal', 'handle_open_remote_terminal')", routes_py)
+        self.assertIn('if (isFileExplorerRemoteMode()) {', file_explorer_js)
+        self.assertIn('远程连接时不能用本机默认应用直接打开远程文件', file_explorer_js)
+        self.assertIn('请使用预览或下载', file_explorer_js)
 
     def test_state_consumes_config_module_for_storage_keys(self):
         state_js = (ROOT / 'js' / 'state.js').read_text(encoding='utf-8')
@@ -445,6 +472,11 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn('apiCoreChatById(', api_core_js)
         self.assertIn('ApiCoreUiService.toast', api_core_js)
         self.assertIn('ApiCoreOrchestrationService.executeTool', api_core_js)
+        self.assertIn('function normalizeUsageForAccounting', api_core_js)
+        self.assertIn('function accumulateUsageForAccounting', api_core_js)
+        self.assertIn('src.totalTokenCount', api_core_js)
+        self.assertIn('totalUsage = accumulateUsageForAccounting(totalUsage, usageForAccounting)', api_core_js)
+        self.assertIn('recordUsageFromResponse(_c, usageForAccounting, { model })', api_core_js)
         for direct_usage in (
             'state.',
             'saveData()',
@@ -516,9 +548,65 @@ class FrontendModuleTests(unittest.TestCase):
             'data-change-action="valueChange"',
             'data-handler="onTogglePermission"',
             'data-checked-arg="true"',
+            'data-action="onToggleFullAccess"',
             'data-action="onClearTaskPerms"',
         ):
             self.assertIn(delegated_attr, permissions_js)
+
+    def test_full_access_permission_mode_keeps_shell_audit_and_marks_backend_requests(self):
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+        permissions_js = (ROOT / 'js' / 'permissions.js').read_text(encoding='utf-8')
+        shell_audit_js = (ROOT / 'js' / 'shell-audit.js').read_text(encoding='utf-8')
+        event_delegation_js = (ROOT / 'js' / 'event-delegation.js').read_text(encoding='utf-8')
+        html = (ROOT / 'AI-Chat-大模型对话助手.html').read_text(encoding='utf-8')
+        config_py = (ROOT / 'server' / 'config.py').read_text(encoding='utf-8')
+        handler_py = (ROOT / 'server' / 'handler.py').read_text(encoding='utf-8')
+        sandbox_py = (ROOT / 'server' / 'sandbox.py').read_text(encoding='utf-8')
+
+        for snippet in (
+            "const TERMINAL_FULL_ACCESS_KEY = 'aichat_terminal_full_access_v1'",
+            "const TERMINAL_FULL_ACCESS_PERMS_BACKUP_KEY = 'aichat_terminal_full_access_perms_backup_v1'",
+            'fullAccess: loadFullAccessMode()',
+            'function clonePermanentPerms(perms)',
+            'function saveFullAccessPermissionSnapshot(perms)',
+            'function loadFullAccessPermissionSnapshot()',
+            'function restoreFullAccessPermissions()',
+            'function setFullAccessMode(enabled)',
+            'function isFullAccessModeEnabled()',
+            'function grantFullAccessPermissions()',
+            'saveFullAccessPermissionSnapshot(TERMINAL_CONFIG.permanentAllow)',
+            'TERMINAL_CONFIG.permanentAllow = snapshot',
+            'const fullAccessAllowed = isFullAccessModeEnabled();',
+            'const alreadyAllowed = fullAccessAllowed || permanentlyAllowed || taskAllowed;',
+            'allow_full_access: fullAccessAllowed',
+        ):
+            self.assertIn(snippet, terminal_js)
+        self.assertIn("action === 'execute' && !skipShellAudit && typeof reviewShellCommandWithAI === 'function'", terminal_js)
+
+        for snippet in (
+            'function renderFullAccessControl()',
+            'id="fullAccessPermissionPanel"',
+            'data-action="onToggleFullAccess"',
+            'function onToggleFullAccess()',
+            'grantFullAccessPermissions()',
+            'restoreFullAccessPermissions()',
+            'const granted = fullAccess || !!perms[key];',
+            '关闭完全访问后会恢复开启前的单项永久授权',
+            '隐私模式和 Shell 审核仍会继续生效',
+            '已恢复开启前的单项永久授权',
+        ):
+            self.assertIn(snippet, permissions_js if snippet != 'id="fullAccessPermissionPanel"' else html)
+
+        self.assertIn("'onToggleFullAccess'", event_delegation_js)
+        self.assertIn('function shellAuditFullAccessEnabled(context)', shell_audit_js)
+        self.assertIn('shellAuditFullAccessEnabled(context)', shell_audit_js)
+        self.assertIn('callShellAuditModel({', shell_audit_js)
+        self.assertIn("_request_full_access = contextvars.ContextVar('request_full_access', default=False)", config_py)
+        self.assertIn('def bind_request_full_access(enabled: bool = False):', config_py)
+        self.assertIn("body.get('allow_full_access') or body.get('full_access')", handler_py)
+        self.assertIn('config.reset_request_full_access(full_access_token)', handler_py)
+        self.assertIn("if config.is_full_access_enabled():\n        return False, ''", sandbox_py)
+        self.assertIn('if config.is_full_access_enabled():\n        return True', sandbox_py)
 
     def test_theme_consumes_state_module(self):
         theme_js = (ROOT / 'js' / 'theme.js').read_text(encoding='utf-8')
@@ -653,6 +741,7 @@ class FrontendModuleTests(unittest.TestCase):
         for delegated_attr in (
             'data-handler="selectJsonResponse"',
             'data-action="toggleParentCollapsed"',
+            'data-toggle-class="expanded"',
             'data-handler="copyHistoryRequest"',
             'data-value-type="number"',
         ):
@@ -1393,9 +1482,40 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn("event.type === 'tool_result'", goal_core_js)
         self.assertIn("role: 'tool'", goal_core_js)
         self.assertIn('assistant.tool_calls.push', goal_core_js)
+        self.assertIn('function goalFinalTextFromUpdateGoalArgs', goal_core_js)
+        self.assertIn('function goalFinalTextFromUpdateGoalResult', goal_core_js)
+        self.assertIn('function goalTerminalFinalText', goal_core_js)
+        self.assertIn('rememberFinalText(goalFinalTextFromUpdateGoalArgs(event.args))', goal_core_js)
+        self.assertIn('rememberFinalText(goalFinalTextFromUpdateGoalResult(event.content))', goal_core_js)
+        self.assertIn('appendGoalTerminalFinalAssistant()', goal_core_js)
+        self.assertIn('appendGoalTurnFinalAssistant()', goal_core_js)
+        self.assertIn("nextStep ? '下一步：' + nextStep : ''", goal_core_js)
+        self.assertIn('_goalFinal: true', goal_core_js)
+        self.assertIn('rememberFinalText(event.finalText)', goal_core_js)
+        self.assertIn('function goalChatRecordedTokenTotal', goal_core_js)
+        self.assertIn('function goalRecordedTokenUsed', goal_core_js)
+        self.assertIn('function syncGoalTokenUsageFromChat', goal_core_js)
+        self.assertIn('function goalEstimateTurnTokens', goal_core_js)
+        self.assertIn('const messageCountBeforeRun = chat.messages.length', goal_core_js)
+        self.assertIn('const turnPrompt = buildGoalTurnPrompt(freshGoal)', goal_core_js)
+        self.assertIn('const tokenStatsBefore = goalChatRecordedTokenTotal(chat)', goal_core_js)
+        self.assertIn('Math.max(0, goalChatRecordedTokenTotal(chat) - tokenStatsBefore)', goal_core_js)
+        self.assertIn('goalEstimateTurnTokens(systemPrompt, turnPrompt, chat, messageCountBeforeRun)', goal_core_js)
+        self.assertIn('syncGoalTokenUsageFromChat(latestGoal)', goal_core_js)
+        self.assertIn('function scheduleGoalChatNodeUpdate', goal_core_js)
+        self.assertIn("GoalCoreUiService.has('appendMsgNode')", goal_core_js)
+        self.assertIn('GoalCoreUiService.appendMsgNode(item.idx, item.chat)', goal_core_js)
+        self.assertIn('GoalCoreUiService.refreshMsgNode(item.idx, item.chat)', goal_core_js)
+        self.assertIn("scheduleGoalChatNodeUpdate(chat, userMsgIdx, 'append')", goal_core_js)
+        self.assertNotIn('scheduleGoalChatRender', goal_core_js)
+        self.assertNotIn('goalChatRenderScheduled', goal_core_js)
         turn_message_idx = goal_core_js.index("content: '目标第 ' + turnNo + ' 轮：继续推进")
         turn_message_block = goal_core_js[turn_message_idx:goal_core_js.index('_goalTurn: turnNo', turn_message_idx)]
         self.assertNotIn('_hiddenFromUI: true', turn_message_block)
+        turn_ui_block = goal_core_js[goal_core_js.index('const userMsgIdx = chat.messages.length - 1'):goal_core_js.index('const protocol = { toolCalls: [] };')]
+        self.assertNotIn('GoalCoreUiService.renderMessages()', turn_ui_block)
+        result_ui_block = goal_core_js[goal_core_js.index('const protocolViolation = applyGoalProtocolAudit'):goal_core_js.index('keepGoing = !!goalSettings().goalAutoContinue')]
+        self.assertNotIn('GoalCoreUiService.renderMessages()', result_ui_block)
         self.assertNotIn("content: '目标第 ' + turnNo + ' 轮：\\n\\n' + finalText", goal_core_js)
         self.assertIn('data-action="deleteActiveGoal"', html)
         self.assertIn('data-handler="deleteGoalById"', goal_core_js)
@@ -1483,7 +1603,7 @@ class FrontendModuleTests(unittest.TestCase):
         contracts = {
             'ui-service.js': (
                 'uiService',
-                ['has', 'toast', 'renderMessages', 'refreshMsgNode', 'renderChatList', 'updateSendBtn', 'scrollToBottom']
+                ['has', 'toast', 'renderMessages', 'refreshMsgNode', 'appendMsgNode', 'renderChatList', 'updateSendBtn', 'scrollToBottom']
             ),
             'orchestration-service.js': (
                 'orchestrationService',
@@ -1519,7 +1639,7 @@ class FrontendModuleTests(unittest.TestCase):
             ),
             'file-explorer.js': (
                 'fileExplorer',
-                ['renderFileExplorer', 'loadFileExplorer', 'openFileEditor', 'openPdfViewer', 'openCurrentFileInMainPanel', 'uploadSelectedFilesToExplorer', 'openFileExplorerUploadPicker', 'copyFileExplorerItem', 'cutFileExplorerItem', 'pasteFileExplorerItem', 'downloadFileExplorerPath']
+                ['renderFileExplorer', 'loadFileExplorer', 'openFileEditor', 'openPdfViewer', 'openCurrentFileInMainPanel', 'uploadSelectedFilesToExplorer', 'openFileExplorerUploadPicker', 'copyFileExplorerPath', 'copyFileExplorerRelativePath', 'copyFileExplorerAbsolutePath', 'copyFileExplorerItem', 'cutFileExplorerItem', 'pasteFileExplorerItem', 'downloadFileExplorerPath']
             ),
             'git-panel.js': (
                 'gitPanel',
@@ -1580,10 +1700,16 @@ class FrontendModuleTests(unittest.TestCase):
         handler_py = (ROOT / 'server' / 'handler.py').read_text(encoding='utf-8')
 
         for snippet in (
-            'data-action="upload-files"',
-            'data-action="upload-folder"',
+            'data-action="upload-files" data-remote-only="true"',
+            'data-action="upload-folder" data-remote-only="true"',
+            'data-remote-only="true"',
+            'function isFileExplorerRemoteMode()',
+            'function requireFileExplorerRemoteAction()',
+            'function isFileExplorerRemoteOnlyAction(action)',
+            'btn.hidden = !isFileExplorerRemoteMode()',
             "action === 'upload-files'",
             "action === 'upload-folder'",
+            "isFileExplorerRemoteOnlyAction(action) && !requireFileExplorerRemoteAction()",
             "openFileExplorerUploadPicker('files', path)",
             "openFileExplorerUploadPicker('folder', path)",
             'function ensureFileExplorerUploadInput(kind)',
@@ -1644,11 +1770,21 @@ class FrontendModuleTests(unittest.TestCase):
             'data-action="cut-item"',
             'data-action="paste"',
             'data-paste-only="true"',
-            'data-action="download"',
+            'data-action="download" data-remote-only="true"',
+            'data-action="copy-path"',
+            'data-action="copy-absolute-path"',
+            "action === 'download' || action === 'upload-files' || action === 'upload-folder'",
+            '复制相对路径',
+            '复制绝对路径',
+            'function copyFileExplorerRelativePath',
+            'function copyFileExplorerAbsolutePath',
+            'function joinFileExplorerAbsolutePath',
             'function copyFileExplorerItem',
             'function cutFileExplorerItem',
             'function pasteFileExplorerItem',
             'function downloadFileExplorerPath',
+            "action === 'copy-absolute-path'",
+            'FILE_EXPLORER_STATE.workspaceRoot',
             "'copy_file'",
             "'move_file'",
             "clip.mode === 'cut'",

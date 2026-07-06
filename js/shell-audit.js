@@ -451,6 +451,12 @@ function detectShellAuditWorkspaceBoundaryViolation(command, workspaceRoot) {
   return { violation: false, reason: '' };
 }
 
+function shellAuditFullAccessEnabled(context) {
+  if (context && context.fullAccess === true) return true;
+  if (typeof isFullAccessModeEnabled === 'function') return isFullAccessModeEnabled();
+  return !!(typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.fullAccess);
+}
+
 function trimShellAuditPathToken(value) {
   return String(value || '')
     .trim()
@@ -567,7 +573,9 @@ async function reviewShellCommandWithAI({ command, cwd, context } = {}) {
     return { ok: true, allow: true, necessary: true, risk: 'low', reason: 'Shell 审核未启用。', concerns: [], autoAllow: true, skipped: true };
   }
   const workspaceRoot = getShellAuditWorkspaceRoot(context);
-  const boundary = detectShellAuditWorkspaceBoundaryViolation(String(command || ''), workspaceRoot);
+  const boundary = shellAuditFullAccessEnabled(context)
+    ? { violation: false, reason: '' }
+    : detectShellAuditWorkspaceBoundaryViolation(String(command || ''), workspaceRoot);
   if (boundary.violation) {
     return {
       ok: true,
@@ -773,6 +781,7 @@ function resetShellAuditPrompt() {
 
 window.ensureShellAuditSettings = ensureShellAuditSettings;
 window.getShellAuditSettings = getShellAuditSettings;
+window.shellAuditFullAccessEnabled = shellAuditFullAccessEnabled;
 window.reviewShellCommandWithAI = reviewShellCommandWithAI;
 window.shellAuditConfirmRisk = shellAuditConfirmRisk;
 window.shellAuditConfirmAccept = shellAuditConfirmAccept;
@@ -785,6 +794,7 @@ window.resetShellAuditPrompt = resetShellAuditPrompt;
 window.AgentApp.define('shellAudit', {
   ensureShellAuditSettings,
   getShellAuditSettings,
+  shellAuditFullAccessEnabled,
   reviewShellCommandWithAI,
   shellAuditConfirmRisk,
   shellAuditConfirmAccept,
