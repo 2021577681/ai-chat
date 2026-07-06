@@ -53,6 +53,9 @@ async function init() {
   if (typeof loadTaskQueue === 'function') {
     loadTaskQueue();
   }
+  if (typeof loadGoals === 'function') {
+    loadGoals();
+  }
   
   // 2. 搴旂敤涓婚
   applyTheme();
@@ -92,6 +95,16 @@ async function init() {
   if (typeof initScheduledSend === 'function') initScheduledSend();
   if (typeof initRemoteControl === 'function') {
     try { initRemoteControl(); } catch (e) { console.warn('[remote-control] init failed:', e); }
+  }
+  if (typeof initRemoteConnection === 'function') {
+    try {
+      const remoteInit = initRemoteConnection();
+      if (remoteInit && typeof remoteInit.catch === 'function') {
+        remoteInit.catch(e => console.warn('[remote] init failed:', e));
+      }
+    } catch (e) {
+      console.warn('[remote] init failed:', e);
+    }
   }
   
   // 6. 鏇存柊搴曢儴鐘舵€佷俊鎭?
@@ -195,6 +208,7 @@ async function init() {
       // 猸?椤哄簭锛氬厛鍏虫渶涓婂眰锛堝浘鐗囬瑙堛€佺粓绔‘璁わ級鈫?鏅€氭ā鎬?鈫?LMS 鎶藉眽
       const modals = [
         'imgPreview', 'termConfirmMask',
+        'goalModal', 'goalSettingsModal',
         'toolEditModal', 'dialogManagerModal', 'backupModal', 'projectInstructionsModal', 'projectMemoryModal', 'mcpSkillModal', 'toolsModal', 'reflectionModal',
         'planModal', 'outlineModal', 'privacyModal', 'taskQueueModal', 'concurrentRequestsModal', 'settingsModal', 'jsonEditorModal',
         'rateSettingsModal', 'tokenDetailModal', 'permissionsModal',

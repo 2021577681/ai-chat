@@ -53,6 +53,17 @@ def _redact_log_secrets(value):
     return value
 
 
+def _compact_large_write_payload(action, body):
+    if action != 'write_file' or not isinstance(body, dict):
+        return body
+    encoding = str(body.get('encoding') or body.get('content_encoding') or '').lower()
+    if encoding != 'base64' or not isinstance(body.get('content'), str):
+        return body
+    body = dict(body)
+    body['content'] = f'<base64 {len(body["content"])} chars>'
+    return body
+
+
 class Handler(BaseHTTPRequestHandler,
               ExecMixin, FilesMixin, WebMixin, GitMixin, ProxyMixin, ScreenshotMixin,
               McpSkillsMixin, MusicMixin, PreviewMixin, RemoteMixin, WorkspaceMixin,
@@ -124,7 +135,7 @@ class Handler(BaseHTTPRequestHandler,
         print(f'\n{"=" * 60}')
         print(f'收到请求: action="{action}", session="{self.request_context.session_id}"')
         if action != 'read_file_binary':
-            log_body = _redact_log_secrets(copy.deepcopy(body))
+            log_body = _compact_large_write_payload(action, _redact_log_secrets(copy.deepcopy(body)))
             if action in ('mcp_list_tools', 'mcp_call_tool'):
                 if isinstance(log_body.get('server'), dict) and log_body['server'].get('env'):
                     log_body['server']['env'] = '***'

@@ -205,6 +205,7 @@ async function selectWorkspaceFromUi() {
     }
     if (!r.ok) throw new Error(r.error || '切换沙箱目录失败');
     updateWorkspaceDisplay(r);
+    if (typeof noteRemoteWorkspaceChanged === 'function') noteRemoteWorkspaceChanged(r.workspace || r.cwd);
     refreshWorkspaceDependentContext();
     if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
     toast('✓ 沙箱目录已切换');

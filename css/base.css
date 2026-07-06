@@ -66,7 +66,7 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .file-explorer-item.is-dir .file-explorer-name{font-weight:600}
 .file-explorer-empty{margin:8px 2px;padding:10px;border:1px dashed var(--border);border-radius:8px;color:var(--text-secondary);font-size:12px;line-height:1.45}
 .file-explorer-empty.error{color:var(--danger);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}
-.file-explorer-context-menu{position:fixed;z-index:4200;width:104px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;display:flex;flex-direction:column;gap:2px}
+.file-explorer-context-menu{position:fixed;z-index:4200;width:132px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;display:flex;flex-direction:column;gap:2px}
 .file-explorer-context-menu[hidden]{display:none}
 .file-explorer-context-menu button{width:100%;border:0;border-radius:6px;background:transparent;color:var(--text);cursor:pointer;text-align:left;padding:7px 10px;font-family:inherit;font-size:12.5px;line-height:1.2}
 .file-explorer-context-menu button:hover,.file-explorer-context-menu button:focus-visible{background:var(--bg-hover);color:var(--primary);outline:none}
@@ -753,6 +753,59 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .task-queue-tree-edges{position:absolute;left:0;top:0;z-index:1;pointer-events:none;overflow:visible}
 .task-queue-tree-edges path{fill:none;stroke:rgba(148,163,184,.58);stroke-width:1.6}
 .task-queue-tree-edges path.dependency{stroke:var(--primary);stroke-width:2}
+
+.modal.goal-modal{width:min(1100px,96vw)}
+.goal-layout{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:14px;align-items:start}
+.goal-compose,.goal-detail{border:1px solid var(--border);border-radius:10px;background:var(--bg);padding:12px}
+.goal-compose textarea{width:100%;resize:vertical;min-height:96px}
+.goal-form-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.goal-settings-modal .goal-form-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+.goal-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 12px}
+.goal-actions .btn,.goal-item-actions .btn{padding:6px 9px;font-size:12px;white-space:nowrap}
+.goal-danger-btn{color:var(--danger);border-color:rgba(239,68,68,.45)}
+.goal-danger-btn:hover{color:var(--danger);border-color:rgba(239,68,68,.65);background:rgba(239,68,68,.08)}
+.goal-list{display:flex;flex-direction:column;gap:8px;max-height:38vh;overflow:auto;padding-right:2px}
+.goal-empty{padding:18px;border:1px dashed var(--border);border-radius:9px;color:var(--text-secondary);text-align:center;background:var(--bg-input);font-size:13px}
+.goal-empty.compact{padding:10px;text-align:left}
+.goal-item{border:1px solid var(--border);border-radius:9px;background:var(--bg-sidebar);padding:8px;display:flex;gap:8px;align-items:flex-start;cursor:pointer;transition:background .15s ease,border-color .15s ease}
+.goal-item:hover{background:var(--bg-hover);border-color:rgba(79,70,229,.28)}
+.goal-item:focus-visible{outline:2px solid rgba(79,70,229,.35);outline-offset:2px}
+.goal-item.selected{border-color:var(--primary);background:rgba(79,70,229,.06)}
+.goal-item.complete{border-color:rgba(34,197,94,.42)}
+.goal-item.blocked{border-color:rgba(239,68,68,.42)}
+.goal-item.paused{border-color:rgba(245,158,11,.42)}
+.goal-item-main{appearance:none;border:0;background:transparent;color:inherit;text-align:left;padding:0;display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;cursor:pointer}
+.goal-item-title{font-size:13px;font-weight:650;color:var(--text);line-height:1.35;word-break:break-word}
+.goal-item-meta{font-size:12px;color:var(--text-secondary)}
+.goal-item-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.goal-detail{min-height:420px}
+.goal-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.goal-detail-title{font-size:15px;font-weight:700;color:var(--text);line-height:1.4;word-break:break-word}
+.goal-detail-meta{margin-top:3px;font-size:12px;color:var(--text-secondary)}
+.goal-status-pill{font-size:12px;border-radius:999px;padding:3px 9px;background:var(--bg-hover);color:var(--text-secondary);white-space:nowrap}
+.goal-status-pill.active{background:rgba(59,130,246,.12);color:var(--primary)}
+.goal-status-pill.paused{background:rgba(245,158,11,.14);color:var(--warning)}
+.goal-status-pill.complete{background:rgba(34,197,94,.12);color:var(--success)}
+.goal-status-pill.blocked,.goal-status-pill.cancelled{background:rgba(239,68,68,.12);color:var(--danger)}
+.goal-stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}
+.goal-stat-grid>div{border:1px solid var(--border);border-radius:8px;background:var(--bg-sidebar);padding:9px;display:flex;flex-direction:column;gap:3px}
+.goal-stat-grid strong{font-size:16px;color:var(--text);font-variant-numeric:tabular-nums}
+.goal-stat-grid span{font-size:11.5px;color:var(--text-secondary)}
+.goal-detail-block{border-top:1px solid var(--border);padding-top:10px;margin-top:10px}
+.goal-detail-block label{display:block;margin-bottom:5px;font-size:12px;font-weight:700;color:var(--text-secondary)}
+.goal-detail-block p{margin:0;color:var(--text);font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.goal-events{display:flex;flex-direction:column;gap:7px}
+.goal-event{border:1px solid var(--border);border-radius:8px;background:var(--bg-sidebar);padding:8px}
+.goal-event span{font-size:11px;color:var(--text-secondary);margin-right:6px}
+.goal-event b{font-size:12px;color:var(--text)}
+.goal-event p{margin:4px 0 0;font-size:12.5px;color:var(--text-secondary);line-height:1.45}
+@media (max-width:820px){
+  .goal-layout{grid-template-columns:1fr}
+  .goal-form-row,.goal-settings-modal .goal-form-row{grid-template-columns:1fr}
+  .goal-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .goal-item{flex-direction:column}
+  .goal-item-actions{justify-content:flex-start}
+}
 
 /* 并发请求 */
 .concurrent-requests-modal .modal{width:min(1040px,95vw)}

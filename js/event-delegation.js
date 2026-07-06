@@ -35,6 +35,18 @@
     'toggleStatsBar',
     'startTemporaryChat',
     'togglePlan',
+    'openGoalPanel',
+    'closeGoalPanel',
+    'createGoalFromUi',
+    'continueActiveGoal',
+    'pauseActiveGoal',
+    'cancelActiveGoal',
+    'deleteActiveGoal',
+    'saveGoalEditFromUi',
+    'openGoalSettings',
+    'closeGoalSettings',
+    'saveGoalSettings',
+    'resetGoalPrompts',
     'toggleOutline',
     'toggleTools',
     'openLmsPanel',
@@ -301,6 +313,11 @@
     'refreshMusicLibrary',
     'musicPlayIndex',
     'applyRatePreset',
+    'selectGoalById',
+    'continueGoalById',
+    'pauseGoalById',
+    'cancelGoalById',
+    'deleteGoalById',
     'editPlanStep',
     'retryPlanStep',
     'skipPlanStep',
@@ -777,6 +794,11 @@
       const handler = target.dataset.handler || '';
       if (!enterKeyActions.has(handler)) return undefined;
       return callGlobal(handler, [event]);
+    },
+    goalCardSelect(event, target) {
+      if (event.key !== 'Enter' && event.key !== ' ') return undefined;
+      event.preventDefault();
+      return callGlobal('selectGoalById', [dataValue(target)]);
     }
   };
 

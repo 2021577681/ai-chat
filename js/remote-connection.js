@@ -8,6 +8,7 @@ const REMOTE_DIR_PICKER = {
   currentPath: '~',
   parentPath: '~'
 };
+let remoteAutoReconnectAttempted = false;
 
 function remoteDefaultConfig() {
   return {
@@ -17,7 +18,10 @@ function remoteDefaultConfig() {
     localPort: 18765,
     heartbeatTimeout: 75,
     installDeps: true,
-    encryptedPassword: ''
+    encryptedPassword: '',
+    autoReconnect: false,
+    lastConnectedAt: 0,
+    lastServerUrl: ''
   };
 }
 
@@ -69,6 +73,52 @@ function saveRemoteConnectionConfig(cfg) {
   storage.set(REMOTE_CONNECTION_KEY, JSON.stringify({ ...remoteDefaultConfig(), ...(cfg || {}) }));
 }
 
+function updateRemoteConnectionConfig(patch = {}) {
+  const cfg = loadRemoteConnectionConfig();
+  const next = { ...cfg, ...(patch || {}) };
+  saveRemoteConnectionConfig(next);
+  return next;
+}
+
+function isRemoteAgentActive() {
+  return !!(
+    typeof TERMINAL_CONFIG !== 'undefined' &&
+    TERMINAL_CONFIG.serverUrl &&
+    REMOTE_CONTROLLER.serverUrl &&
+    TERMINAL_CONFIG.serverUrl !== REMOTE_CONTROLLER.serverUrl
+  );
+}
+
+function persistActiveRemoteConnection(info = {}) {
+  const workspace = (info && (info.workspace || info.cwd || info.remoteWorkspace)) || '';
+  const patch = {
+    autoReconnect: true,
+    lastConnectedAt: Date.now(),
+    lastServerUrl: (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.serverUrl) || ''
+  };
+  if (workspace) patch.remoteWorkspace = workspace;
+  return updateRemoteConnectionConfig(patch);
+}
+
+function clearRemoteAutoReconnectFlag() {
+  return updateRemoteConnectionConfig({
+    autoReconnect: false,
+    lastServerUrl: '',
+    lastConnectedAt: 0
+  });
+}
+
+function noteRemoteWorkspaceChanged(path) {
+  const workspace = String(path || '').trim();
+  if (!workspace || !isRemoteAgentActive()) return;
+  updateRemoteConnectionConfig({
+    remoteWorkspace: workspace,
+    autoReconnect: true,
+    lastConnectedAt: Date.now(),
+    lastServerUrl: TERMINAL_CONFIG.serverUrl || ''
+  });
+}
+
 function setRemoteStatus(message, kind = '') {
   const el = document.getElementById('remoteConnectionStatus');
   if (!el) return;
@@ -80,18 +130,23 @@ function remoteEscapeHtml(s) {
   return String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 }
 
+function applyRemoteConfigToForm(cfg, password = '') {
+  const config = { ...remoteDefaultConfig(), ...(cfg || {}) };
+  document.getElementById('remoteSshCommand').value = config.sshCommand || '';
+  document.getElementById('remotePassword').value = password || '';
+  document.getElementById('remoteWorkspace').value = config.remoteWorkspace || '';
+  document.getElementById('remoteAgentPort').value = config.remoteAgentPort || 8765;
+  document.getElementById('remoteLocalPort').value = config.localPort || 18765;
+  document.getElementById('remoteHeartbeatTimeout').value = config.heartbeatTimeout || 75;
+  document.getElementById('remoteInstallDeps').checked = config.installDeps !== false;
+}
+
 async function openRemoteConnection() {
   const modal = document.getElementById('remoteConnectionModal');
   if (!modal) return;
   const cfg = loadRemoteConnectionConfig();
   const password = await remoteDecryptPassword(cfg.encryptedPassword || '');
-  document.getElementById('remoteSshCommand').value = cfg.sshCommand || '';
-  document.getElementById('remotePassword').value = password || '';
-  document.getElementById('remoteWorkspace').value = cfg.remoteWorkspace || '';
-  document.getElementById('remoteAgentPort').value = cfg.remoteAgentPort || 8765;
-  document.getElementById('remoteLocalPort').value = cfg.localPort || 18765;
-  document.getElementById('remoteHeartbeatTimeout').value = cfg.heartbeatTimeout || 75;
-  document.getElementById('remoteInstallDeps').checked = cfg.installDeps !== false;
+  applyRemoteConfigToForm(cfg, password);
   setRemoteStatus('填写 SSH 命令后点击连接；远程工作区留空时默认使用远程用户主目录 ~。');
   modal.classList.add('show');
 }
@@ -113,10 +168,12 @@ function remoteFormValues() {
   };
 }
 
-async function saveRemoteConnectionFromUi() {
+async function saveRemoteConnectionFromUi(options = {}) {
   const v = remoteFormValues();
   const encryptedPassword = await remoteEncryptPassword(v.password || '');
+  const existing = loadRemoteConnectionConfig();
   saveRemoteConnectionConfig({
+    ...existing,
     sshCommand: v.sshCommand,
     remoteWorkspace: v.remoteWorkspace,
     remoteAgentPort: v.remoteAgentPort,
@@ -125,10 +182,11 @@ async function saveRemoteConnectionFromUi() {
     installDeps: v.installDeps,
     encryptedPassword
   });
-  setRemoteStatus('配置已加密保存到本地。', 'ok');
-  RemoteConnectionUiService.toast('远程连接配置已保存');
+  if (!options.silent) {
+    setRemoteStatus('Remote connection config saved locally.', 'ok');
+    RemoteConnectionUiService.toast('Remote connection config saved');
+  }
 }
-
 async function remoteBackend(action, params = {}) {
   const requestTimeoutMs = Math.max(1000, parseInt(params.requestTimeoutMs, 10) || 75000);
   const payload = { ...params };
@@ -261,6 +319,7 @@ async function selectRemoteDirCurrent() {
     if (!r.ok) throw new Error(r.error || '切换远程沙箱目录失败');
     updateWorkspaceDisplay(r);
     refreshWorkspaceDependentContext();
+    noteRemoteWorkspaceChanged(r.workspace || r.cwd || selected);
     if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
     setRemoteStatus('远程沙箱目录已切换：' + (r.workspace || selected), 'ok');
     RemoteConnectionUiService.toast('✓ 远程沙箱目录已切换');
@@ -269,18 +328,23 @@ async function selectRemoteDirCurrent() {
   }
 }
 
-async function connectRemoteAgent() {
+async function connectRemoteAgent(options = {}) {
+  const opts = (options && typeof options === 'object' && !('target' in options)) ? options : {};
+  const autoReconnect = !!opts.autoReconnect;
+  const skipConfirm = !!opts.skipConfirm || autoReconnect;
   const btn = document.getElementById('remoteConnectBtn');
   const oldServerUrl = TERMINAL_CONFIG.serverUrl;
   let remoteStarted = false;
   const v = remoteFormValues();
   if (!v.sshCommand) return setRemoteStatus('请填写 SSH 命令，例如 ssh user@example.com', 'error');
-  if (!confirm('将通过 SSH 上传并在远程服务器启动 Agent 后端，继续？')) return;
+  if (!skipConfirm && !confirm('将通过 SSH 上传并在远程服务器启动 Agent 后端，继续？')) return;
   if (btn) btn.disabled = true;
-  setRemoteStatus('正在保存配置...', 'loading');
-  await saveRemoteConnectionFromUi();
+  setRemoteStatus(autoReconnect ? '正在恢复上次远程连接...' : '正在保存配置...', 'loading');
+  if (!autoReconnect) {
+    await saveRemoteConnectionFromUi({ silent: !!opts.silentSave });
+  }
   try {
-    setRemoteStatus('正在打包、上传、启动远程 Agent 并建立隧道，可能需要几十秒...', 'loading');
+    setRemoteStatus(autoReconnect ? '正在自动连接上次远程工作区，可能需要几十秒...' : '正在打包、上传、启动远程 Agent 并建立隧道，可能需要几十秒...', 'loading');
     const r = await remoteBackend('remote_connect', {
       ssh_command: v.sshCommand,
       password: v.password,
@@ -310,6 +374,11 @@ async function connectRemoteAgent() {
     if (typeof updateWorkspaceDisplay === 'function') {
       updateWorkspaceDisplay(workspaceInfo);
     }
+    persistActiveRemoteConnection({
+      workspace: workspaceInfo.workspace || workspaceInfo.cwd || v.remoteWorkspace,
+      cwd: workspaceInfo.cwd,
+      remoteWorkspace: v.remoteWorkspace
+    });
     if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
     setRemoteStatus(`已连接：${r.server_url} → ${workspaceInfo.workspace || v.remoteWorkspace}`, 'ok');
     RemoteConnectionUiService.toast('远程 Agent 已连接');
@@ -338,9 +407,23 @@ async function disconnectRemoteAgent() {
   } catch (e) {
     console.warn('[remote] disconnect failed:', e);
   }
+  clearRemoteAutoReconnectFlag();
   TERMINAL_CONFIG.serverUrl = REMOTE_CONTROLLER.serverUrl || 'http://localhost:8765';
   await refreshWorkspaceInfo();
   setRemoteStatus(`已切回控制端 ${TERMINAL_CONFIG.serverUrl}`, 'ok');
+}
+
+async function initRemoteConnection() {
+  if (remoteAutoReconnectAttempted) return;
+  remoteAutoReconnectAttempted = true;
+  const cfg = loadRemoteConnectionConfig();
+  if (!cfg.autoReconnect || !cfg.sshCommand || !cfg.remoteWorkspace) return;
+  if (isRemoteAgentActive()) return;
+
+  const password = await remoteDecryptPassword(cfg.encryptedPassword || '');
+  applyRemoteConfigToForm(cfg, password);
+  setRemoteStatus('正在恢复上次远程连接：' + cfg.remoteWorkspace, 'loading');
+  await connectRemoteAgent({ autoReconnect: true, skipConfirm: true, silentSave: true });
 }
 
 async function checkRemoteStatus() {
@@ -359,6 +442,8 @@ window.closeRemoteConnection = closeRemoteConnection;
 window.saveRemoteConnectionFromUi = saveRemoteConnectionFromUi;
 window.connectRemoteAgent = connectRemoteAgent;
 window.disconnectRemoteAgent = disconnectRemoteAgent;
+window.initRemoteConnection = initRemoteConnection;
+window.noteRemoteWorkspaceChanged = noteRemoteWorkspaceChanged;
 window.checkRemoteStatus = checkRemoteStatus;
 window.openRemoteDirPicker = openRemoteDirPicker;
 window.refreshRemoteDirPicker = refreshRemoteDirPicker;
@@ -372,6 +457,8 @@ window.AgentApp.define('remoteConnection', {
   saveRemoteConnectionFromUi,
   connectRemoteAgent,
   disconnectRemoteAgent,
+  initRemoteConnection,
+  noteRemoteWorkspaceChanged,
   checkRemoteStatus,
   openRemoteDirPicker,
   refreshRemoteDirPicker,

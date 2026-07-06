@@ -115,6 +115,33 @@ const PLAN_REVIEWER_PROMPT = '你是计划评审专家。审视执行计划是�
 
 const PLAN_RESULT_VERIFIER_PROMPT = '你是计划模式的最终结果验证老师。你只能看到原始任务、执行方案和最终执行结果，看不到执行者的工具调用过程或中间推理。请基于这些材料自主判断任务是否完成；如需要核验事实、文件、命令或环境状态，可以调用可用工具进行验证。\n\n最后必须严格输出 JSON（不要代码块，不要额外文字）：{"passed":true/false,"score":0-10,"reason":"通过或不通过的核心理由","issues":["未完成或不可靠之处"],"suggestions":["怎么改进"],"improvement":{"title":"改进阶段标题","description":"如果未通过，给执行者的具体改进任务；如果通过可为空","successCriteria":["改进完成标准"]}}\n\n评分标准：8 分及以上通常表示可以通过。若验证不通过，请给出具体、不重复原步骤的改进建议，便于用户决定是否追加一个改进阶段继续执行。';
 
+const DEFAULT_GOAL_SYSTEM_PROMPT = [
+  '你正在执行一个可恢复的长期目标。',
+  '每一轮必须先调用 get_goal 读取当前目标状态。',
+  '每一轮只推进一个最小、可验证的步骤；需要时使用工具真实推进或验证。',
+  '每轮结束前必须调用 update_goal 记录 progress、evidence 和 next_step。',
+  '只有当整个目标确实完成，并且有证据或最终总结时，才能用 update_goal 标记 complete。',
+  '遇到阻塞时，用 update_goal(status="blocked") 记录具体 blocker_reason；只有同一阻塞重复达到阈值后才会真正变为 blocked。',
+  '不要因为 token 预算、轮次预算、时间不足或想收尾而标记 complete。'
+].join('\n');
+
+const DEFAULT_GOAL_TURN_PROMPT = [
+  '目标：{{objective}}',
+  '当前状态：{{status}}',
+  '轮次：{{turn}} / {{maxTurns}}',
+  'Token 预算：{{tokenUsed}} / {{tokenBudget}}',
+  '最近总结：{{summary}}',
+  '最近结果：{{lastResult}}',
+  '下一步提示：{{nextStep}}',
+  '',
+  '执行协议：',
+  '1. 第一件事调用 get_goal。',
+  '2. 选择一个最小可验证步骤执行。',
+  '3. 必要时调用文件、终端、搜索等工具，避免空转。',
+  '4. 结束前调用 update_goal 写入 progress、evidence、next_step；只有目标完整达成才标记 complete。',
+  '5. 最终回复只简要说明本轮做了什么和下一步。'
+].join('\n');
+
 const PRESET_TOOLS = {
   time:    { name: 'get_current_time', description: '获取当前时间', parameters: { type: 'object', properties: { timezone: { type: 'string' } }, required: [] }, code: "const tz=args.timezone||undefined;const opts={dateStyle:'full',timeStyle:'long'};if(tz)opts.timeZone=tz;return new Date().toLocaleString('zh-CN',opts);" },
   calc:    { name: 'calculator', description: '数学计算', parameters: { type: 'object', properties: { expression: { type: 'string' } }, required: ['expression'] }, code: "try{return '结果：'+Function('\"use strict\"; return ('+args.expression+')')();}catch(e){return '错误：'+e.message;}" },
@@ -126,6 +153,50 @@ const PRESET_TOOLS = {
 
 // ⭐ 内置工具定义（基础笔记/文件夹操作 + 可选工具组）
 const BUILTIN_TOOLS = [
+  {
+    name: 'create_goal',
+    description: '创建一个可恢复的长期目标。通常由目标面板创建；仅当用户明确要求新建长期目标或当前没有目标时调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        objective: { type: 'string', description: '目标的完整描述' },
+        token_budget: { type: 'number', description: '可选 token 预算。达到后只会暂停，不能作为完成依据。' },
+        max_turns: { type: 'number', description: '可选最大执行轮次' }
+      },
+      required: ['objective']
+    },
+    code: 'return await createGoal(args, toolContext);'
+  },
+  {
+    name: 'get_goal',
+    description: '读取当前长期目标状态。目标模式每轮必须先调用本工具，再决定这轮的最小可验证步骤。',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal_id: { type: 'string', description: '可选目标 ID。留空时读取当前活动目标。' }
+      },
+      required: []
+    },
+    code: 'return await getGoal(args, toolContext);'
+  },
+  {
+    name: 'update_goal',
+    description: '记录长期目标进展、证据、下一步或状态。complete 必须有证据或最终总结；blocked 只有同一 blocker 重复达到阈值后才会真正阻塞；不能因预算耗尽而 complete。',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal_id: { type: 'string', description: '可选目标 ID。留空时更新当前活动目标。' },
+        status: { type: 'string', enum: ['active', 'paused', 'complete', 'blocked', 'cancelled'], description: '目标状态。仅目标真实完成时使用 complete。' },
+        progress: { type: 'string', description: '本轮完成的具体进展' },
+        evidence: { type: 'string', description: '可核验的证据，例如文件路径、命令结果摘要、测试结果或最终产物说明' },
+        next_step: { type: 'string', description: '下一轮建议推进的最小步骤' },
+        blocker_reason: { type: 'string', description: '阻塞原因。标记 blocked 时必须尽量具体且稳定。' },
+        final_summary: { type: 'string', description: '目标完成时的最终总结' }
+      },
+      required: []
+    },
+    code: 'return await updateGoal(args, toolContext);'
+  },
   {
     name: 'read_skill',
     description: '读取一个已扫描到的本地 Skill 的完整 SKILL.md 内容。仅当系统提示中的 skill-ref 摘要与当前任务相关时调用，参数 path 必须来自 skill-ref 的 path。',
@@ -749,6 +820,8 @@ if (typeof window !== 'undefined' && window.AgentApp) {
     PLAN_PRESETS,
     PLAN_REVIEWER_PROMPT,
     PLAN_RESULT_VERIFIER_PROMPT,
+    DEFAULT_GOAL_SYSTEM_PROMPT,
+    DEFAULT_GOAL_TURN_PROMPT,
     PRESET_TOOLS,
     BUILTIN_TOOLS,
     clearAllSecrets

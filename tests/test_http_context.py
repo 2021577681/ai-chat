@@ -1,9 +1,15 @@
 import io
 import json
+import os
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from unittest import mock
 
+from server import config
 from server.http_context import RequestContext, ResponseWriter
+from server.preview import PreviewMixin
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +31,10 @@ class FakeHandler:
 
     def end_headers(self):
         self.ended = True
+
+
+class PreviewDownloadHandler(PreviewMixin):
+    pass
 
 
 class HttpContextTests(unittest.TestCase):
@@ -83,6 +93,69 @@ class HttpContextTests(unittest.TestCase):
         )
 
         self.assertEqual({'ok': True}, context.read_json())
+
+    def test_preview_file_download_uses_attachment_disposition(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.multiple(
+            config,
+            WORKSPACE_ROOT=os.path.realpath(root),
+            current_cwd=os.path.realpath(root),
+        ), mock.patch('builtins.print'):
+            with open(os.path.join(root, 'note.txt'), 'w', encoding='utf-8') as f:
+                f.write('hello')
+
+            fake = FakeHandler()
+            context = RequestContext(
+                method='GET',
+                path='/preview-file?path=note.txt&download=1',
+                headers=fake.headers,
+                cwd=os.path.realpath(root),
+                workspace=os.path.realpath(root),
+            )
+            handler = PreviewDownloadHandler()
+            handler.request_context = context
+            handler.response = ResponseWriter(fake, context)
+
+            handler.handle_preview_file_get()
+
+            headers = dict(fake.sent_headers)
+            self.assertEqual(200, fake.status)
+            self.assertEqual(b'hello', fake.wfile.getvalue())
+            self.assertIn("attachment; filename*=UTF-8''note.txt", headers.get('Content-Disposition', ''))
+            self.assertIn('Content-Disposition', headers.get('Access-Control-Expose-Headers', ''))
+
+    def test_preview_directory_download_returns_zip_archive(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.multiple(
+            config,
+            WORKSPACE_ROOT=os.path.realpath(root),
+            current_cwd=os.path.realpath(root),
+        ), mock.patch('builtins.print'):
+            os.makedirs(os.path.join(root, 'docs', 'nested'))
+            with open(os.path.join(root, 'docs', 'readme.txt'), 'w', encoding='utf-8') as f:
+                f.write('hello')
+            with open(os.path.join(root, 'docs', 'nested', 'note.txt'), 'w', encoding='utf-8') as f:
+                f.write('nested')
+
+            fake = FakeHandler()
+            context = RequestContext(
+                method='GET',
+                path='/preview-file?path=docs&download=1&archive=zip',
+                headers=fake.headers,
+                cwd=os.path.realpath(root),
+                workspace=os.path.realpath(root),
+            )
+            handler = PreviewDownloadHandler()
+            handler.request_context = context
+            handler.response = ResponseWriter(fake, context)
+
+            handler.handle_preview_file_get()
+
+            headers = dict(fake.sent_headers)
+            self.assertEqual(200, fake.status)
+            self.assertEqual('application/zip', headers.get('Content-Type'))
+            self.assertIn("attachment; filename*=UTF-8''docs.zip", headers.get('Content-Disposition', ''))
+            with zipfile.ZipFile(io.BytesIO(fake.wfile.getvalue())) as zf:
+                self.assertEqual('hello', zf.read('readme.txt').decode('utf-8'))
+                self.assertEqual('nested', zf.read('nested/note.txt').decode('utf-8'))
 
     def test_migrated_mixins_do_not_use_private_json_sender(self):
         for relative_path in (

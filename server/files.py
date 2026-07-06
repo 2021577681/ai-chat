@@ -59,6 +59,26 @@ def _is_workspace_root_path(path):
         return False
 
 
+def _copy_candidate_path(path, source_is_dir):
+    parent, name = os.path.split(path)
+    if source_is_dir:
+        stem, ext = name, ''
+    else:
+        stem, ext = os.path.splitext(name)
+    for idx in range(1, 1000):
+        suffix = ' - 副本' if idx == 1 else f' - 副本 {idx}'
+        candidate = os.path.join(parent, f'{stem}{suffix}{ext}')
+        if not os.path.exists(candidate):
+            return candidate
+    raise RuntimeError('无法生成不冲突的复制目标名称')
+
+
+def _dedupe_copy_target(path, source_is_dir):
+    if not os.path.exists(path):
+        return path
+    return _copy_candidate_path(path, source_is_dir)
+
+
 def _parse_hunk_header(line):
     m = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', line)
     if not m:
@@ -726,7 +746,10 @@ class FilesMixin:
         path, err = check_path_or_error(body.get('path', ''))
         if err: return self.response.json(200, {'ok': False, 'error': err})
         content = body.get('content', '')
-        print(f'✍️  [写文件] {path} ({len(content)} 字符)')
+        encoding = str(body.get('encoding') or body.get('content_encoding') or '').strip().lower()
+        is_base64 = encoding == 'base64'
+        unit = 'base64 字符' if is_base64 else '字符'
+        print(f'✍️  [写文件] {path} ({len(content)} {unit})')
         try:
             checkpoint = self._checkpoint_before_mutation([path], body, 'write_file')
             parent = os.path.dirname(path)
@@ -742,13 +765,24 @@ class FilesMixin:
                         old_lines = len(old_text.splitlines())
                 except Exception:
                     old_lines = 0
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            if is_base64:
+                payload = str(content or '')
+                if payload.startswith('data:') and ',' in payload:
+                    payload = payload.split(',', 1)[1]
+                binary = base64.b64decode(payload, validate=True)
+                with open(path, 'wb') as f:
+                    f.write(binary)
+                bytes_written = len(binary)
+            else:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                bytes_written = len(content.encode('utf-8'))
             print(f'   ✅ 成功！')
             self.response.json(200, {
                 'ok': True, 'path': path,
                 'action': '覆盖' if existed else '创建',
-                'bytes_written': len(content.encode('utf-8')),
+                'bytes_written': bytes_written,
+                'encoding': 'base64' if is_base64 else 'utf-8',
                 'old_lines': old_lines,
                 'checkpoint_id': checkpoint['id'] if checkpoint else None,
                 'checkpoint': checkpoint
@@ -977,6 +1011,135 @@ class FilesMixin:
                 'path': path,
                 'new_path': new_path,
                 'type': 'dir' if os.path.isdir(new_path) else 'file',
+                'checkpoint_id': checkpoint['id'] if checkpoint else None,
+                'checkpoint': checkpoint
+            })
+        except Exception as e:
+            self.response.json(200, {'ok': False, 'error': str(e)})
+
+    def handle_copy_file(self, body):
+        path, err = check_path_or_error(
+            body.get('path') or body.get('source_path') or body.get('sourcePath') or ''
+        )
+        if err: return self.response.json(200, {'ok': False, 'error': err})
+        print(f'📋 [复制] {path}')
+        if not os.path.exists(path):
+            return self.response.json(200, {'ok': False, 'error': '源路径不存在'})
+
+        source_is_dir = os.path.isdir(path)
+        raw_target_path = body.get('new_path') or body.get('newPath') or body.get('target_path') or body.get('targetPath')
+        if raw_target_path:
+            new_path, err = check_path_or_error(raw_target_path)
+            if err: return self.response.json(200, {'ok': False, 'error': err})
+        else:
+            target_dir, err = check_path_or_error(
+                body.get('target_dir') or body.get('targetDir') or body.get('dest_dir') or body.get('destDir') or '.'
+            )
+            if err: return self.response.json(200, {'ok': False, 'error': err})
+            if not os.path.isdir(target_dir):
+                return self.response.json(200, {'ok': False, 'error': '粘贴目标不是目录'})
+            new_path = os.path.join(target_dir, os.path.basename(path))
+
+        try:
+            parent = os.path.dirname(new_path)
+            if parent and not os.path.isdir(parent):
+                return self.response.json(200, {'ok': False, 'error': '目标父目录不存在'})
+
+            if _body_flag_enabled(body.get('dedupe')):
+                new_path = _dedupe_copy_target(new_path, source_is_dir)
+            elif os.path.exists(new_path):
+                return self.response.json(200, {'ok': False, 'error': '目标路径已存在'})
+
+            if source_is_dir:
+                src_real = os.path.realpath(path)
+                dst_real = os.path.realpath(new_path)
+                try:
+                    if os.path.commonpath([src_real, dst_real]) == src_real:
+                        return self.response.json(200, {'ok': False, 'error': '不能把目录复制到自身内部'})
+                except ValueError:
+                    return self.response.json(200, {'ok': False, 'error': '源路径和目标路径不在同一文件系统'})
+
+            checkpoint = self._checkpoint_before_mutation([new_path], body, 'copy_file')
+            if source_is_dir:
+                shutil.copytree(path, new_path, symlinks=True)
+                copied_type = 'dir'
+            else:
+                shutil.copy2(path, new_path)
+                copied_type = 'file'
+
+            self.response.json(200, {
+                'ok': True,
+                'path': path,
+                'new_path': new_path,
+                'type': copied_type,
+                'bytes_written': 0 if copied_type == 'dir' else os.path.getsize(new_path),
+                'checkpoint_id': checkpoint['id'] if checkpoint else None,
+                'checkpoint': checkpoint
+            })
+        except Exception as e:
+            self.response.json(200, {'ok': False, 'error': str(e)})
+
+    def handle_move_file(self, body):
+        path, err = check_path_or_error(
+            body.get('path') or body.get('source_path') or body.get('sourcePath') or ''
+        )
+        if err: return self.response.json(200, {'ok': False, 'error': err})
+        print(f'✂️  [移动] {path}')
+        if not os.path.exists(path):
+            return self.response.json(200, {'ok': False, 'error': '源路径不存在'})
+
+        source_is_dir = os.path.isdir(path)
+        raw_target_path = body.get('new_path') or body.get('newPath') or body.get('target_path') or body.get('targetPath')
+        if raw_target_path:
+            new_path, err = check_path_or_error(raw_target_path)
+            if err: return self.response.json(200, {'ok': False, 'error': err})
+        else:
+            target_dir, err = check_path_or_error(
+                body.get('target_dir') or body.get('targetDir') or body.get('dest_dir') or body.get('destDir') or '.'
+            )
+            if err: return self.response.json(200, {'ok': False, 'error': err})
+            if not os.path.isdir(target_dir):
+                return self.response.json(200, {'ok': False, 'error': '粘贴目标不是目录'})
+            new_path = os.path.join(target_dir, os.path.basename(path))
+
+        try:
+            src_real = os.path.realpath(path)
+            dst_real = os.path.realpath(new_path)
+            if src_real == dst_real:
+                return self.response.json(200, {
+                    'ok': True,
+                    'path': path,
+                    'new_path': new_path,
+                    'type': 'dir' if source_is_dir else 'file',
+                    'unchanged': True
+                })
+
+            parent = os.path.dirname(new_path)
+            if parent and not os.path.isdir(parent):
+                return self.response.json(200, {'ok': False, 'error': '目标父目录不存在'})
+
+            if _body_flag_enabled(body.get('dedupe')):
+                new_path = _dedupe_copy_target(new_path, source_is_dir)
+                dst_real = os.path.realpath(new_path)
+            elif os.path.exists(new_path):
+                return self.response.json(200, {'ok': False, 'error': '目标路径已存在'})
+
+            if source_is_dir:
+                try:
+                    if os.path.commonpath([src_real, dst_real]) == src_real:
+                        return self.response.json(200, {'ok': False, 'error': '不能把目录移动到自身内部'})
+                except ValueError:
+                    return self.response.json(200, {'ok': False, 'error': '源路径和目标路径不在同一文件系统'})
+
+            checkpoint = self._checkpoint_before_mutation([path, new_path], body, 'move_file')
+            shutil.move(path, new_path)
+            moved_type = 'dir' if os.path.isdir(new_path) else 'file'
+            self.response.json(200, {
+                'ok': True,
+                'path': path,
+                'new_path': new_path,
+                'type': moved_type,
+                'bytes_written': 0 if moved_type == 'dir' else os.path.getsize(new_path),
                 'checkpoint_id': checkpoint['id'] if checkpoint else None,
                 'checkpoint': checkpoint
             })

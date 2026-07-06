@@ -228,6 +228,7 @@
       <button class="topbar-btn" id="temporaryChatBtn" data-action="startTemporaryChat" title="临时会话：刷新保留，切换或新建对话后删除"><img class="topbar-btn-icon" src="icon/时间_time.png" alt=""><span>临时</span></button>
       <button class="topbar-btn" id="scheduleBtn" data-action="toggleScheduledSend" title="定时发送：到点后才让 AI 响应"><img class="topbar-btn-icon" src="icon/闹钟_alarm-clock.png" alt=""><span>定时</span></button>
       <button class="topbar-btn" id="planBtn" data-action="togglePlan" title="计划模式"><img class="topbar-btn-icon" src="icon/计划_plan.png" alt=""><span>计划</span></button>
+      <button class="topbar-btn" id="goalBtn" data-action="openGoalPanel" title="目标管理"><img class="topbar-btn-icon" src="icon/追踪_trace.png" alt=""><span>目标</span></button>
       <button class="topbar-btn" id="outlineBtn" data-action="toggleOutline" title="大纲模式（动态规划）"><img class="topbar-btn-icon" src="icon/大纲视图_mindmap-list.png" alt=""><span>大纲</span></button>
       <button class="topbar-btn" id="toolsBtn" data-action="toggleTools" title="工具调用"><img class="topbar-btn-icon" src="icon/工具_tool.png" alt=""><span>工具</span></button>
       <button class="topbar-btn" data-action="openLmsPanel" title="西安交大 LMS 学习助手"><img class="topbar-btn-icon" src="icon/学位帽_degree-hat.png" alt=""><span>学习</span></button>
@@ -863,6 +864,102 @@
     <div class="modal-footer">
       <button class="btn" data-action="closeFetchModelsModal">取消</button>
       <button class="btn btn-primary" data-action="confirmAddFetchedModels">✅ 添加选中</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 目标模式 ============ -->
+<div class="modal-mask" id="goalModal">
+  <div class="modal wide goal-modal">
+    <h2>目标 <button class="modal-close" data-action="closeGoalPanel">×</button></h2>
+
+    <div class="goal-layout">
+      <section class="goal-compose">
+        <div class="form-group">
+          <label>目标</label>
+          <textarea id="goalObjectiveInput" rows="4" placeholder="写下要持续推进的目标，例如：修复某个测试失败并提交可验证结果"></textarea>
+        </div>
+        <div class="goal-form-row">
+          <div class="form-group">
+            <label>Token 预算</label>
+            <input type="number" id="goalBudgetInput" min="0" step="1" placeholder="0 表示不限">
+          </div>
+          <div class="form-group">
+            <label>最大轮次</label>
+            <input type="number" id="goalMaxTurnsInput" min="1" step="1" placeholder="20">
+          </div>
+        </div>
+        <div class="goal-actions">
+          <button class="btn btn-primary" type="button" data-action="createGoalFromUi">创建并继续</button>
+          <button class="btn" type="button" data-action="saveGoalEditFromUi">保存修改</button>
+          <button class="btn" type="button" data-action="continueActiveGoal">继续</button>
+          <button class="btn" type="button" data-action="pauseActiveGoal">暂停</button>
+          <button class="btn btn-warning" type="button" data-action="cancelActiveGoal">取消</button>
+          <button class="btn goal-danger-btn" type="button" data-action="deleteActiveGoal">删除目标</button>
+          <button class="btn" type="button" data-action="openGoalSettings">设置</button>
+        </div>
+        <div class="json-help">
+          目标模式会让 AI 每轮先读取目标状态，只推进一个可验证步骤，并用工具记录进展。预算耗尽只会暂停，不会被当作完成。
+        </div>
+        <div id="goalList" class="goal-list"></div>
+      </section>
+
+      <section id="goalDetail" class="goal-detail">
+        <div class="goal-empty">选择或创建目标后查看进度。</div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="goalSettingsModal">
+  <div class="modal wide goal-settings-modal">
+    <h2>目标模式设置 <button class="modal-close" data-action="closeGoalSettings">×</button></h2>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">自动继续</label><div class="form-hint" style="margin-top:2px;">开启后一次点击会连续跑多轮，直到完成、暂停、阻塞、取消或达到轮次上限。</div></div>
+      <label class="switch"><input type="checkbox" id="goalSettingAutoContinue"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><label style="margin:0;">完成时要求证据</label><div class="form-hint" style="margin-top:2px;">开启后，update_goal complete 必须带 evidence 或 final_summary。</div></div>
+      <label class="switch"><input type="checkbox" id="goalSettingRequireVerification"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="goal-form-row">
+      <div class="form-group">
+        <label>默认最大轮次</label>
+        <input type="number" id="goalSettingMaxTurns" min="1" step="1" placeholder="20">
+      </div>
+      <div class="form-group">
+        <label>每轮最大工具循环</label>
+        <input type="number" id="goalSettingMaxToolRounds" min="0" step="1" placeholder="15">
+      </div>
+      <div class="form-group">
+        <label>阻塞重复阈值</label>
+        <input type="number" id="goalSettingBlockedThreshold" min="1" step="1" placeholder="3">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>目标模式模型</label>
+      <input type="text" id="goalSettingModel" placeholder="留空使用主模型">
+    </div>
+
+    <div class="form-group">
+      <label>System Prompt</label>
+      <textarea id="goalSettingSystemPrompt" rows="8"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label>每轮 User Prompt 模板</label>
+      <textarea id="goalSettingTurnPrompt" rows="10"></textarea>
+      <div class="form-hint">可用变量：{{objective}}、{{status}}、{{turn}}、{{maxTurns}}、{{tokenUsed}}、{{tokenBudget}}、{{summary}}、{{lastResult}}、{{nextStep}}</div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn" data-action="resetGoalPrompts">恢复默认提示词</button>
+      <button class="btn" data-action="closeGoalSettings">取消</button>
+      <button class="btn btn-primary" data-action="saveGoalSettings">保存</button>
     </div>
   </div>
 </div>
@@ -1758,6 +1855,7 @@
     </div>
     <button class="settings-nav-item active" data-action="openSettingsSection" data-settings-section="main" data-desc="管理 API、模型、代理和本地授权。"><span><img class="settings-nav-icon" src="icon/设置_setting-one.png" alt=""></span><span>主设置</span></button>
     <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="remoteControl" data-desc="配置微信文件传输助手轮询、指令格式和回复模板。"><span><img class="settings-nav-icon" src="icon/遥控器_remote-control.png" alt=""></span><span>远程遥控</span></button>
+    <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="goal" data-desc="配置目标模式的长期任务循环、预算、阻塞判定和提示词。"><span><img class="settings-nav-icon" src="icon/追踪_trace.png" alt=""></span><span>目标模式</span></button>
     <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="plan" data-desc="配置先规划、评审、执行和验证的多阶段工作流。"><span><img class="settings-nav-icon" src="icon/计划_plan.png" alt=""></span><span>计划模式</span></button>
     <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="outline" data-desc="配置动态大纲和自主探索式任务执行。"><span><img class="settings-nav-icon" src="icon/大纲视图_mindmap-list.png" alt=""></span><span>大纲模式</span></button>
     <button class="settings-nav-item" data-action="openSettingsSection" data-settings-section="ppt" data-desc="配置图片页 PPT 生成流程、目标页数、视觉偏好和各阶段 Prompt。"><span><img class="settings-nav-icon" src="icon/pdf文件_file-pdf-one.png" alt=""></span><span>PPT 模式</span></button>
@@ -2042,6 +2140,7 @@
 <script src="js/api-core.js"></script>
 <script src="js/api-stream.js"></script>
 <script src="js/tools.js"></script>
+<script src="js/goal-core.js"></script>
 <script src="js/shell-audit.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/stats-toggle.js"></script>

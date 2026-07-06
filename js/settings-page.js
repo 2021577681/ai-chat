@@ -7,6 +7,7 @@ const settingsPagePersistSettings = SettingsPageStateModule.persistSettings;
 const SETTINGS_PAGE_SECTIONS = {
   main: { open: 'openSettings', close: 'closeSettings', modalId: 'settingsModal' },
   remoteControl: { open: 'openRemoteControlSettings', close: 'closeRemoteControlSettings', modalId: 'remoteControlSettingsModal' },
+  goal: { open: 'openGoalSettings', close: 'closeGoalSettings', modalId: 'goalSettingsModal' },
   plan: { open: 'openPlanSettings', close: 'closePlanSettings', modalId: 'planModal' },
   outline: { open: 'openOutlineSettings', close: 'closeOutlineSettings', modalId: 'outlineModal' },
   ppt: { open: 'openPptSettings', close: 'closePptSettings', modalId: 'pptSettingsModal' },
@@ -53,6 +54,7 @@ function initSettingsPage() {
   [
     'openSettings',
     'openRemoteControlSettings',
+    'openGoalSettings',
     'openPlanSettings',
     'openOutlineSettings',
     'openPptSettings',
@@ -77,6 +79,7 @@ function initSettingsPage() {
     'openGitPanel',
     'closeSettings',
     'closeRemoteControlSettings',
+    'closeGoalSettings',
     'closePlanSettings',
     'closeOutlineSettings',
     'closePptSettings',
@@ -105,6 +108,10 @@ function initSettingsPage() {
 
   window.openSettings = function() { openSettingsPage('main'); };
   window.openRemoteControlSettings = function() { openSettingsPage('remoteControl'); };
+  window.openGoalSettings = function() {
+    if (typeof window.closeGoalPanel === 'function') window.closeGoalPanel();
+    openSettingsPage('goal');
+  };
   window.openPlanSettings = function() { openSettingsPage('plan'); };
   window.openOutlineSettings = function() { openSettingsPage('outline'); };
   window.openPptSettings = function() { openSettingsPage('ppt'); };
@@ -130,6 +137,7 @@ function initSettingsPage() {
 
   window.closeSettings = function() { closeSettingsProxy('main'); };
   window.closeRemoteControlSettings = function() { closeSettingsProxy('remoteControl'); };
+  window.closeGoalSettings = function() { closeSettingsProxy('goal'); };
   window.closePlanSettings = function() { closeSettingsProxy('plan'); };
   window.closeOutlineSettings = function() { closeSettingsProxy('outline'); };
   window.closePptSettings = function() { closeSettingsProxy('ppt'); };

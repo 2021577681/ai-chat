@@ -1088,6 +1088,11 @@ function _concurrentContext(context) {
 function _concurrentMutationPaths(action, params, context) {
   const p = params || {};
   if (['write_file', 'append_file', 'edit_file', 'delete_file'].includes(action)) return [p.path].filter(Boolean);
+  if (action === 'copy_file') return [p.new_path || p.newPath || p.target_path || p.targetPath || p.target_dir || p.targetDir || p.dest_dir || p.destDir].filter(Boolean);
+  if (action === 'move_file') return [
+    p.path,
+    p.new_path || p.newPath || p.target_path || p.targetPath || p.target_dir || p.targetDir || p.dest_dir || p.destDir
+  ].filter(Boolean);
   if (action === 'apply_patch') return p.dry_run ? [] : _concurrentPatchPaths(p.patch);
   if (action === 'restore_checkpoint') {
     const ctx = _concurrentContext(context);
@@ -1100,7 +1105,7 @@ function _concurrentMutationPaths(action, params, context) {
 }
 
 function _concurrentIsMutationAction(action, params) {
-  return ['write_file', 'append_file', 'edit_file', 'delete_file', 'apply_patch', 'restore_checkpoint', 'git_restore'].includes(action)
+  return ['write_file', 'copy_file', 'move_file', 'append_file', 'edit_file', 'delete_file', 'apply_patch', 'restore_checkpoint', 'git_restore'].includes(action)
     && !(action === 'apply_patch' && params && params.dry_run);
 }
 
@@ -1173,6 +1178,8 @@ function _concurrentResultPaths(action, params, result, context) {
     ].filter(Boolean);
   }
   if (['write_file', 'append_file', 'edit_file', 'delete_file', 'git_restore'].includes(action) && r.path) return [r.path];
+  if (action === 'copy_file' && (r.new_path || r.path)) return [r.new_path || r.path];
+  if (action === 'move_file') return [r.path, r.new_path].filter(Boolean);
   return _concurrentMutationPaths(action, params, context);
 }
 

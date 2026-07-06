@@ -7,6 +7,8 @@ const StateUiService = (typeof window !== 'undefined' && window.AgentApp)
 const STATE_REFLECTION_PRESETS = StateConfig ? StateConfig.REFLECTION_PRESETS : REFLECTION_PRESETS;
 const STATE_PLAN_PRESETS = StateConfig ? StateConfig.PLAN_PRESETS : PLAN_PRESETS;
 const STATE_BUILTIN_TOOLS = StateConfig ? StateConfig.BUILTIN_TOOLS : BUILTIN_TOOLS;
+const STATE_DEFAULT_GOAL_SYSTEM_PROMPT = StateConfig ? StateConfig.DEFAULT_GOAL_SYSTEM_PROMPT : '';
+const STATE_DEFAULT_GOAL_TURN_PROMPT = StateConfig ? StateConfig.DEFAULT_GOAL_TURN_PROMPT : '';
 const STORAGE_KEYS = StateConfig
   ? {
       store: StateConfig.STORE_KEY,
@@ -77,6 +79,14 @@ let state = {
     planVerifierModel: '',
     planPlannerPrompt: STATE_PLAN_PRESETS.general.planner,
     planExecutorPrompt: STATE_PLAN_PRESETS.general.executor,
+    goalMaxTurns: 20,
+    goalMaxToolRounds: 15,
+    goalAutoContinue: true,
+    goalRequireVerification: true,
+    goalBlockedRepeatThreshold: 3,
+    goalModel: '',
+    goalSystemPrompt: STATE_DEFAULT_GOAL_SYSTEM_PROMPT,
+    goalTurnPrompt: STATE_DEFAULT_GOAL_TURN_PROMPT,
     // 📑 大纲模式（动态规划）
     useOutline: false,
     outlineMaxRounds: 30,

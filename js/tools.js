@@ -826,7 +826,8 @@ async function executeTool(name, args, context = {}) {
       'readToolArtifact',
       'listCheckpoints', 'restoreCheckpoint',
       'listDir', 'searchInFiles', 'webSearch', 'fetchUrl', 'aiScreenshot', 'attachFileForAI',
-      'callGit', 'aiGitStatus', 'aiGitHistory', 'aiGitDiff', 'aiGitSnapshot', 'aiGitRestore'
+      'callGit', 'aiGitStatus', 'aiGitHistory', 'aiGitDiff', 'aiGitSnapshot', 'aiGitRestore',
+      'createGoal', 'getGoal', 'updateGoal'
     ];
     const scopedFns = scopedNames.map(n => _ctxToolFn(n, toolContext));
     const fn = new Function('args', 'toolContext', ...scopedNames, `return (async () => { ${tool.code} })();`);

@@ -74,6 +74,13 @@
     ], [history, model, rolePrompt, options || {}], 'callOnceWithRole');
   }
 
+  function runAgentLoop(options = {}) {
+    return invoke([
+      { module: 'apiCore', method: 'runAgentLoop' },
+      { global: 'runAgentLoop' }
+    ], [options || {}], 'runAgentLoop');
+  }
+
   function callByMode(mode, options = {}) {
     const selected = mode || 'normal';
     if (selected === 'outline') return callAPIWithOutline(options);
@@ -93,6 +100,7 @@
     callAPIWithReflection,
     executeTool,
     callOnceWithRole,
+    runAgentLoop,
     callByMode
   });
 })(window);

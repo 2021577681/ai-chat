@@ -33,6 +33,8 @@ const PERMISSION_CATEGORIES = {
 const ACTION_TO_CATEGORY = {
   execute: 'execute',
   write_file: 'write',
+  copy_file: 'write',
+  move_file: 'edit',
   append_file: 'append',
   edit_file: 'edit',
   apply_patch: 'edit',
@@ -894,12 +896,190 @@ function tokenizeShellLikeCommand(command) {
 }
 
 function commandHasShellOperators(command) {
-  return /(?:&&|\|\||[|;<>`])/.test(String(command || ''));
+  return /(?:&&|\|\||\$\(|[|;<>`])/.test(String(command || ''));
 }
 
 function splitGitPathspec(tokens) {
   const idx = tokens.indexOf('--');
   return idx >= 0 ? tokens.slice(idx + 1).filter(Boolean) : [];
+}
+
+function parseGitExecuteTokens(tokens) {
+  let i = 1;
+  let passthroughOnly = false;
+  while (i < tokens.length) {
+    const token = String(tokens[i] || '');
+    const lower = token.toLowerCase();
+    if (lower === '--no-pager' || lower === '--no-optional-locks') {
+      i += 1;
+      continue;
+    }
+    if (token === '-C') {
+      if (!tokens[i + 1]) return { invalid: true, sub: '', rest: [], passthroughOnly: true };
+      passthroughOnly = true;
+      i += 2;
+      continue;
+    }
+    if (token.startsWith('-C') && token.length > 2) {
+      passthroughOnly = true;
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return {
+    invalid: false,
+    sub: String(tokens[i] || '').toLowerCase(),
+    rest: tokens.slice(i + 1),
+    passthroughOnly
+  };
+}
+
+function gitTokensBeforePathspec(tokens) {
+  const idx = tokens.indexOf('--');
+  return idx >= 0 ? tokens.slice(0, idx) : tokens;
+}
+
+function gitOptionMatches(token, option) {
+  return token === option || token.startsWith(option + '=');
+}
+
+function gitHasOption(tokens, options) {
+  const args = gitTokensBeforePathspec(tokens);
+  return args.some(token => options.some(option => gitOptionMatches(String(token || ''), option)));
+}
+
+function gitHasExactOption(tokens, options) {
+  const args = gitTokensBeforePathspec(tokens);
+  return args.some(token => options.includes(String(token || '')));
+}
+
+function gitNonOptionArgs(tokens) {
+  return gitTokensBeforePathspec(tokens).filter(token => {
+    const value = String(token || '');
+    return value && !value.startsWith('-');
+  });
+}
+
+const GIT_READ_ONLY_UNSAFE_OPTIONS = [
+  '--output',
+  '--ext-diff',
+  '--textconv',
+  '--filters',
+  '--open-files-in-pager',
+  '--exec-path',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--upload-pack',
+  '--receive-pack',
+  '--help'
+];
+
+function gitReadOnlyArgsLookSafe(tokens) {
+  const args = gitTokensBeforePathspec(tokens);
+  return !args.some(token => {
+    const value = String(token || '');
+    if (value === '-O' || value.startsWith('-O')) return true;
+    return GIT_READ_ONLY_UNSAFE_OPTIONS.some(option => gitOptionMatches(value, option));
+  });
+}
+
+function gitBranchReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest)) return false;
+  const mutating = [
+    '-d', '-D', '-m', '-M', '-c', '-C', '-u',
+    '--delete', '--move', '--copy', '--set-upstream-to', '--unset-upstream',
+    '--track', '--no-track', '--create-reflog', '--no-create-reflog',
+    '--edit-description'
+  ];
+  if (gitHasOption(rest, mutating)) return false;
+  if (!rest.length) return true;
+  if (gitHasExactOption(rest, ['--show-current'])) return gitNonOptionArgs(rest).length === 0;
+  const allowsPatternsOrCommits = gitHasOption(rest, [
+    '--list', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at'
+  ]);
+  return gitNonOptionArgs(rest).length === 0 || allowsPatternsOrCommits;
+}
+
+function gitRemoteReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest)) return false;
+  if (!rest.length) return true;
+  if (rest.every(token => ['-v', '--verbose'].includes(String(token || '')))) return true;
+  const action = String(rest[0] || '').toLowerCase();
+  if (action !== 'get-url') return false;
+  const args = rest.slice(1);
+  const names = args.filter(token => {
+    const value = String(token || '');
+    return value && !value.startsWith('-');
+  });
+  return names.length <= 1 && args.every(token => {
+    const value = String(token || '');
+    return !value.startsWith('-') || ['--push', '--all'].includes(value);
+  });
+}
+
+function gitTagReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest)) return false;
+  const mutating = [
+    '-a', '-s', '-u', '-f', '-d',
+    '--annotate', '--sign', '--local-user', '--force', '--delete', '--edit'
+  ];
+  if (gitHasOption(rest, mutating)) return false;
+  if (!rest.length) return true;
+  const allowsPatternsOrCommits = gitHasOption(rest, [
+    '-l', '--list', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at'
+  ]);
+  return gitNonOptionArgs(rest).length === 0 || allowsPatternsOrCommits;
+}
+
+function gitReflogReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest)) return false;
+  if (!rest.length) return true;
+  const first = String(rest[0] || '').toLowerCase();
+  if (['expire', 'delete', 'drop'].includes(first)) return false;
+  return first === 'show' || first.startsWith('-');
+}
+
+function gitCatFileReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest) || !rest.length) return false;
+  const mode = String(rest[0] || '');
+  return ['-p', '-t', '-s', '-e'].includes(mode) ||
+    ['blob', 'tree', 'commit', 'tag'].includes(mode.toLowerCase());
+}
+
+function gitSubmoduleReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest)) return false;
+  return !rest.length || String(rest[0] || '').toLowerCase() === 'status';
+}
+
+function gitWorktreeReadOnlyArgs(rest) {
+  if (!gitReadOnlyArgsLookSafe(rest)) return false;
+  return String(rest[0] || '').toLowerCase() === 'list';
+}
+
+function gitReadOnlyPassthroughDecision(sub, rest) {
+  const normalized = String(sub || '').toLowerCase();
+  if (!normalized) return null;
+  if (!gitReadOnlyArgsLookSafe(rest)) return { blocked: true };
+
+  const simpleReadOnly = new Set([
+    '--version', 'version',
+    'status', 'st', 'log', 'diff', 'show',
+    'rev-parse', 'ls-files', 'show-ref', 'for-each-ref',
+    'describe', 'merge-base', 'blame', 'grep', 'ls-tree',
+    'shortlog', 'name-rev', 'cherry'
+  ]);
+  if (simpleReadOnly.has(normalized)) return { passthrough: true };
+  if (normalized === 'ls-remote') return { passthrough: true, forceConfirm: true };
+  if (normalized === 'branch') return gitBranchReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  if (normalized === 'remote') return gitRemoteReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  if (normalized === 'tag') return gitTagReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  if (normalized === 'reflog') return gitReflogReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  if (normalized === 'cat-file') return gitCatFileReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  if (normalized === 'submodule') return gitSubmoduleReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  if (normalized === 'worktree') return gitWorktreeReadOnlyArgs(rest) ? { passthrough: true } : { blocked: true };
+  return null;
 }
 
 function gitCommitFromTokens(tokens) {
@@ -925,12 +1105,29 @@ function aiGitToolsAvailable() {
 async function routeGitExecuteCommand(command, context) {
   const tokens = tokenizeShellLikeCommand(command);
   if (!tokens.length || String(tokens[0]).toLowerCase() !== 'git') return null;
-  if (!aiGitToolsAvailable()) return { passthrough: true, forceConfirm: true };
   if (commandHasShellOperators(command)) {
     return '❌ 检测到包含 shell 控制符的 git 命令。为避免绕过 Git/回滚权限，请改用 note_status、note_history、note_diff、note_snapshot、note_restore 或 restore_checkpoint。';
   }
-  const sub = String(tokens[1] || '').toLowerCase();
-  const rest = tokens.slice(2);
+  if (!aiGitToolsAvailable()) return { passthrough: true, forceConfirm: true };
+  const parsed = parseGitExecuteTokens(tokens);
+  if (parsed.invalid) return '❌ git -C 缺少目标目录。';
+  const sub = parsed.sub;
+  const rest = parsed.rest;
+
+  if (sub === 'clone') {
+    return { passthrough: true, forceConfirm: true };
+  }
+
+  const readOnlyDecision = gitReadOnlyPassthroughDecision(sub, rest);
+  if (readOnlyDecision && readOnlyDecision.blocked) {
+    return '❌ 这个 Git 命令不在只读白名单内，或包含可能写文件/启动外部程序的选项。请改用专用 Git 工具，或去掉危险选项后重试。';
+  }
+  if (readOnlyDecision && readOnlyDecision.passthrough) {
+    return { passthrough: true, forceConfirm: !!readOnlyDecision.forceConfirm };
+  }
+  if (parsed.passthroughOnly) {
+    return '❌ git -C 只允许用于只读 Git 命令透传。写入、恢复或未识别命令请在目标目录中执行，或改用专用 Git 工具。';
+  }
   
   if (!sub || ['status', 'st'].includes(sub)) {
     return await aiGitStatus(context);
@@ -986,7 +1183,7 @@ async function executeTerminalCommand(command, cwd, newWindow, timeout, context)
   if (gitRouted && typeof gitRouted === 'object' && gitRouted.passthrough) gitRouted = null;
   if (gitRouted !== null) return gitRouted;
   const r = await callAgentBackend('execute', { command, cwd, timeout: timeoutSec, new_window: !!newWindow },
-    forceConfirm ? 'AI 想执行 Git 命令（快照工具未启用）' : 'AI 想执行任务指令',
+    forceConfirm ? 'AI 想执行 Git 命令' : 'AI 想执行任务指令',
     command,
     { ...(context && typeof context === 'object' ? context : {}), forceConfirm });
   if (typeof r === 'string') return r;

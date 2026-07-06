@@ -1340,6 +1340,41 @@ function onPickFiles(e) {
   e.target.value = '';
 }
 
+function chatArrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer || 0);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function chatReadFileAsArrayBuffer(file) {
+  if (file && typeof file.arrayBuffer === 'function') return file.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e && e.target ? e.target.result : new ArrayBuffer(0));
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function chatReadFileAsDataUrl(file) {
+  const mime = file.type || 'application/octet-stream';
+  const base64 = chatArrayBufferToBase64(await chatReadFileAsArrayBuffer(file));
+  return `data:${mime};base64,${base64}`;
+}
+
+function chatDropContainsDirectory(dataTransfer) {
+  const items = Array.from((dataTransfer && dataTransfer.items) || []);
+  return items.some(item => {
+    if (!item || typeof item.webkitGetAsEntry !== 'function') return false;
+    const entry = item.webkitGetAsEntry();
+    return !!(entry && entry.isDirectory);
+  });
+}
+
 function addAttachment(file, type) {
   if (file.size > 20 * 1024 * 1024) {
     alert(`文件 ${file.name} 超过 20MB`);
@@ -1353,14 +1388,14 @@ function addAttachment(file, type) {
     type: type
   };
   if (type === 'image') {
-    const r = new FileReader();
-    r.onload = e => {
-      att.data = e.target.result;
+    chatReadFileAsDataUrl(file).then(dataUrl => {
+      att.data = dataUrl;
       chatState.pendingAttachments.push(att);
       renderPendingAtts();
       if (typeof updateSendBtn === 'function') updateSendBtn();
-    };
-    r.readAsDataURL(file);
+    }).catch(e => {
+      if (typeof toast === 'function') toast(`读取文件失败：${e.message || e}`, 3000);
+    });
   } else if (isTextLike(file)) {
     const r = new FileReader();
     r.onload = e => {
@@ -1371,14 +1406,14 @@ function addAttachment(file, type) {
     };
     r.readAsText(file);
   } else {
-    const r = new FileReader();
-    r.onload = e => {
-      att.data = e.target.result;
+    chatReadFileAsDataUrl(file).then(dataUrl => {
+      att.data = dataUrl;
       chatState.pendingAttachments.push(att);
       renderPendingAtts();
       if (typeof updateSendBtn === 'function') updateSendBtn();
-    };
-    r.readAsDataURL(file);
+    }).catch(e => {
+      if (typeof toast === 'function') toast(`读取文件失败：${e.message || e}`, 3000);
+    });
   }
 }
 
@@ -1436,6 +1471,10 @@ function setupDrag() {
   }));
   wrap.addEventListener('drop', e => {
     e.preventDefault();
+    if (chatDropContainsDirectory(e.dataTransfer)) {
+      if (typeof toast === 'function') toast('文件夹请拖到资源管理器上传', 3000);
+      return;
+    }
     for (const f of e.dataTransfer.files) addAttachment(f, f.type.startsWith('image/') ? 'image' : 'file');
   });
 }

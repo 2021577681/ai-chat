@@ -14,6 +14,8 @@ const FILE_EXPLORER_STATE = {
   autoRefreshInFlight: false,
   autoRefreshSignature: '',
   autoRefreshPath: '.',
+  uploading: false,
+  clipboard: null,
   entries: [],
   editorPath: '',
   editorOriginal: '',
@@ -45,6 +47,7 @@ const INLINE_FILE_MIN_WINDOW_WIDTH = 1100;
 const INLINE_FILE_MIN_MAIN_WIDTH = 920;
 const INLINE_FILE_MIN_CHAT_WIDTH = 460;
 const INLINE_FILE_MIN_FILE_WIDTH = 360;
+const FILE_EXPLORER_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 
 const FILE_EXPLORER_TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
@@ -723,11 +726,18 @@ function ensureFileExplorerContextMenu() {
     <div data-menu-section="item">
       <button type="button" data-action="open">打开</button>
       <button type="button" data-action="compile-tex" data-tex-only="true" hidden>编译</button>
+      <button type="button" data-action="copy-item">复制</button>
+      <button type="button" data-action="cut-item">剪切</button>
+      <button type="button" data-action="paste" data-paste-only="true" data-dir-only="true" hidden>粘贴到此文件夹</button>
+      <button type="button" data-action="download">下载</button>
       <button type="button" data-action="rename">重命名</button>
       <button type="button" data-action="copy-path">复制路径</button>
       <button type="button" data-action="delete">删除</button>
     </div>
     <div data-menu-section="blank">
+      <button type="button" data-action="upload-files">上传文件</button>
+      <button type="button" data-action="upload-folder">上传文件夹</button>
+      <button type="button" data-action="paste" data-paste-only="true" hidden>粘贴</button>
       <button type="button" data-action="new-file">新建文件</button>
       <button type="button" data-action="new-folder">新建文件夹</button>
       <button type="button" data-action="copy-path">复制路径</button>
@@ -870,6 +880,148 @@ function resetFileExplorerToRoot() {
   FILE_EXPLORER_STATE.entries = [];
   if (FILE_EXPLORER_STATE.visible) loadFileExplorer('.');
   else renderFileExplorer();
+}
+
+function sanitizeUploadRelativePath(path, fallbackName = 'upload.bin') {
+  const source = String(path || fallbackName || 'upload.bin').replace(/\\/g, '/');
+  const parts = source
+    .split('/')
+    .map(part => part.replace(/[\u0000-\u001f\u007f]/g, '').trim())
+    .filter(part => part && part !== '.' && part !== '..');
+  if (parts.length) return parts.join('/');
+  const fallback = String(fallbackName || 'upload.bin').replace(/[\\/]+/g, '').trim();
+  return fallback || 'upload.bin';
+}
+
+function fileExplorerArrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer || 0);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function fileExplorerReadFileAsArrayBuffer(file) {
+  if (file && typeof file.arrayBuffer === 'function') return file.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => resolve(event && event.target ? event.target.result : new ArrayBuffer(0));
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function readUploadFileAsBase64(file) {
+  return fileExplorerArrayBufferToBase64(await fileExplorerReadFileAsArrayBuffer(file));
+}
+
+function fileExplorerItemsFromFileList(files) {
+  return Array.from(files || []).filter(Boolean).map(file => ({
+    file,
+    relativePath: file.webkitRelativePath || file.name
+  }));
+}
+
+async function uploadSelectedFilesToExplorer(files, targetPath = FILE_EXPLORER_STATE.path) {
+  const items = Array.isArray(files) ? files.filter(item => item && item.file) : fileExplorerItemsFromFileList(files);
+  if (!items.length) {
+    fileExplorerToast('没有可上传的文件');
+    return;
+  }
+  if (FILE_EXPLORER_STATE.uploading) {
+    fileExplorerToast('已有文件正在上传');
+    return;
+  }
+  const oversized = items.filter(item => Number(item.file.size || 0) > FILE_EXPLORER_UPLOAD_MAX_BYTES);
+  if (oversized.length) {
+    const names = oversized.slice(0, 3).map(item => item.file.name || '未命名').join('、');
+    fileExplorerToast(`${names}${oversized.length > 3 ? ' 等文件' : ''} 超过 20MB，未上传`);
+    return;
+  }
+
+  FILE_EXPLORER_STATE.uploading = true;
+  const normalizedTarget = normalizeExplorerPath(targetPath || FILE_EXPLORER_STATE.path);
+  let uploaded = 0;
+  const failed = [];
+  try {
+    if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
+    fileExplorerToast(`正在上传 ${items.length} 个文件到 ${normalizedTarget}`);
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      const file = item.file;
+      const relativePath = sanitizeUploadRelativePath(item.relativePath, file.name);
+      const targetFilePath = joinExplorerPath(normalizedTarget, relativePath);
+      try {
+        const content = await readUploadFileAsBase64(file);
+        const r = await callAgentBackend(
+          'write_file',
+          {
+            path: targetFilePath,
+            content,
+            encoding: 'base64',
+            mime: file.type || 'application/octet-stream'
+          },
+          undefined,
+          undefined,
+          { skipConfirm: true }
+        );
+        if (typeof r === 'string') throw new Error(r);
+        if (!r || !r.ok) throw new Error((r && r.error) || '上传失败');
+        uploaded += 1;
+      } catch (e) {
+        failed.push({ path: targetFilePath, error: e.message || String(e) });
+      }
+    }
+    if (failed.length) {
+      console.warn('[file-explorer] upload failed:', failed);
+      fileExplorerToast(`已上传 ${uploaded} 个，失败 ${failed.length} 个`);
+    } else {
+      fileExplorerToast(`已上传 ${uploaded} 个文件`);
+    }
+    if (FILE_EXPLORER_STATE.visible) await loadFileExplorer(FILE_EXPLORER_STATE.path, { silent: true });
+  } catch (e) {
+    fileExplorerToast(e.message || String(e));
+  } finally {
+    FILE_EXPLORER_STATE.uploading = false;
+  }
+}
+
+function ensureFileExplorerUploadInput(kind) {
+  const id = kind === 'folder' ? 'fileExplorerFolderUploadInput' : 'fileExplorerFileUploadInput';
+  let input = document.getElementById(id);
+  if (input) return input;
+  input = document.createElement('input');
+  input.id = id;
+  input.type = 'file';
+  input.hidden = true;
+  input.multiple = true;
+  if (kind === 'folder') {
+    input.setAttribute('webkitdirectory', '');
+    input.setAttribute('directory', '');
+  }
+  document.body.appendChild(input);
+  return input;
+}
+
+function openFileExplorerUploadPicker(kind = 'files', targetPath = FILE_EXPLORER_STATE.path) {
+  const normalizedKind = kind === 'folder' ? 'folder' : 'files';
+  const input = ensureFileExplorerUploadInput(normalizedKind);
+  input.onchange = event => handleFileExplorerUploadInputChange(event, normalizedKind, targetPath);
+  input.value = '';
+  input.click();
+}
+
+async function handleFileExplorerUploadInputChange(event, kind, targetPath) {
+  const input = event && event.target;
+  const files = input && input.files ? input.files : [];
+  try {
+    const items = fileExplorerItemsFromFileList(files);
+    await uploadSelectedFilesToExplorer(items, targetPath);
+  } finally {
+    if (input) input.value = '';
+  }
 }
 
 function setInlineFileStatus(message, kind = '') {
@@ -1858,6 +2010,10 @@ function showFileExplorerContextMenu(event, item) {
   menu.querySelectorAll('[data-tex-only]').forEach(btn => {
     btn.hidden = !(isItem && type !== 'dir' && isFileExplorerTexFile(path));
   });
+  menu.querySelectorAll('[data-paste-only]').forEach(btn => {
+    const needsDir = btn.dataset.dirOnly === 'true';
+    btn.hidden = !FILE_EXPLORER_STATE.clipboard || (needsDir && type !== 'dir');
+  });
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
   const padding = 8;
@@ -1934,6 +2090,7 @@ async function switchFileExplorerWorkspace(path = FILE_EXPLORER_STATE.contextPat
     const r = await callAgentBackend('set_workspace', { path: normalizedPath }, { skipConfirm: true });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '切换工作区失败');
+    if (typeof noteRemoteWorkspaceChanged === 'function') noteRemoteWorkspaceChanged(r.workspace || r.cwd || normalizedPath);
     FILE_EXPLORER_STATE.path = '.';
     FILE_EXPLORER_STATE.entries = [];
     fileExplorerToast('已切换工作区');
@@ -1951,6 +2108,106 @@ async function copyFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
   } catch (e) {
     fileExplorerToast('复制失败：' + (e.message || String(e)));
   }
+}
+
+function setFileExplorerClipboard(path, type, mode = 'copy') {
+  const normalizedPath = normalizeExplorerPath(path);
+  if (!normalizedPath) return false;
+  FILE_EXPLORER_STATE.clipboard = {
+    path: normalizedPath,
+    type: type === 'dir' ? 'dir' : 'file',
+    mode: mode === 'cut' ? 'cut' : 'copy',
+    name: fileExplorerBasename(normalizedPath),
+    copiedAt: Date.now()
+  };
+  return true;
+}
+
+function copyFileExplorerItem(path = FILE_EXPLORER_STATE.contextPath, type = FILE_EXPLORER_STATE.contextType) {
+  if (!setFileExplorerClipboard(path, type, 'copy')) return;
+  fileExplorerToast(`已复制 ${FILE_EXPLORER_STATE.clipboard.name || FILE_EXPLORER_STATE.clipboard.path}`);
+}
+
+function cutFileExplorerItem(path = FILE_EXPLORER_STATE.contextPath, type = FILE_EXPLORER_STATE.contextType) {
+  if (!setFileExplorerClipboard(path, type, 'cut')) return;
+  fileExplorerToast(`已剪切 ${FILE_EXPLORER_STATE.clipboard.name || FILE_EXPLORER_STATE.clipboard.path}`);
+}
+
+function rebaseMovedExplorerPath(current, sourcePath, targetPath) {
+  const currentPath = normalizeExplorerPath(current);
+  const source = normalizeExplorerPath(sourcePath);
+  const target = normalizeExplorerPath(targetPath);
+  if (currentPath === source) return target;
+  if (currentPath.startsWith(source + '/')) return target + currentPath.slice(source.length);
+  return current;
+}
+
+function updateMovedExplorerReferences(sourcePath, targetPath) {
+  FILE_EXPLORER_STATE.editorPath = rebaseMovedExplorerPath(FILE_EXPLORER_STATE.editorPath, sourcePath, targetPath);
+  FILE_EXPLORER_STATE.pdfPath = rebaseMovedExplorerPath(FILE_EXPLORER_STATE.pdfPath, sourcePath, targetPath);
+  FILE_EXPLORER_STATE.imagePath = rebaseMovedExplorerPath(FILE_EXPLORER_STATE.imagePath, sourcePath, targetPath);
+  FILE_EXPLORER_STATE.mediaPath = rebaseMovedExplorerPath(FILE_EXPLORER_STATE.mediaPath, sourcePath, targetPath);
+  FILE_EXPLORER_STATE.inlineFilePath = rebaseMovedExplorerPath(FILE_EXPLORER_STATE.inlineFilePath, sourcePath, targetPath);
+}
+
+async function pasteFileExplorerItem(targetDir = FILE_EXPLORER_STATE.contextPath) {
+  const clip = FILE_EXPLORER_STATE.clipboard;
+  if (!clip || !clip.path) {
+    fileExplorerToast('没有可粘贴的文件');
+    return;
+  }
+  const normalizedTargetDir = normalizeExplorerPath(targetDir || FILE_EXPLORER_STATE.path);
+  const isCut = clip.mode === 'cut';
+  if (isCut && normalizeExplorerPath(parentExplorerPath(clip.path)) === normalizedTargetDir) {
+    FILE_EXPLORER_STATE.clipboard = null;
+    fileExplorerToast('文件已在当前目录');
+    return;
+  }
+  try {
+    if (typeof callAgentBackend !== 'function') throw new Error('本地工具接口未加载');
+    const action = isCut ? 'move_file' : 'copy_file';
+    const r = await callAgentBackend(
+      action,
+      { path: clip.path, target_dir: normalizedTargetDir, dedupe: true },
+      undefined,
+      undefined,
+      { skipConfirm: true }
+    );
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '粘贴失败');
+    const pastedName = fileExplorerBasename(r.new_path || r.path || clip.name);
+    if (isCut) {
+      updateMovedExplorerReferences(clip.path, r.new_path || clip.path);
+      FILE_EXPLORER_STATE.clipboard = null;
+    }
+    fileExplorerToast(isCut ? `已移动 ${pastedName || clip.name}` : `已粘贴 ${pastedName || clip.name}`);
+    await loadFileExplorer(FILE_EXPLORER_STATE.path, { silent: true });
+  } catch (e) {
+    fileExplorerToast(e.message || String(e));
+  }
+}
+
+function downloadFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath, type = FILE_EXPLORER_STATE.contextType) {
+  const normalizedPath = normalizeExplorerPath(path);
+  if (!normalizedPath) {
+    fileExplorerToast('没有可下载的路径');
+    return;
+  }
+  if (typeof TERMINAL_CONFIG === 'undefined') {
+    fileExplorerToast('本地工具接口未加载');
+    return;
+  }
+  const base = (TERMINAL_CONFIG.serverUrl || 'http://localhost:8765').replace(/\/+$/, '');
+  const archive = type === 'dir' ? '&archive=zip' : '';
+  const url = `${base}/preview-file?path=${encodeURIComponent(normalizedPath)}&download=1${archive}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = type === 'dir' ? `${fileExplorerBasename(normalizedPath) || 'folder'}.zip` : fileExplorerBasename(normalizedPath);
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  fileExplorerToast(type === 'dir' ? '已开始打包下载文件夹' : '已开始下载');
 }
 
 async function renameFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
@@ -2006,6 +2263,12 @@ function handleFileExplorerContextMenuAction(event) {
   const action = btn.dataset.action;
   if (action === 'open') openFileExplorerPath(path, type);
   else if (action === 'compile-tex') compileTexFile(path);
+  else if (action === 'copy-item') copyFileExplorerItem(path, type);
+  else if (action === 'cut-item') cutFileExplorerItem(path, type);
+  else if (action === 'paste') pasteFileExplorerItem(path);
+  else if (action === 'download') downloadFileExplorerPath(path, type);
+  else if (action === 'upload-files') openFileExplorerUploadPicker('files', path);
+  else if (action === 'upload-folder') openFileExplorerUploadPicker('folder', path);
   else if (action === 'rename') renameFileExplorerPath(path);
   else if (action === 'copy-path') copyFileExplorerPath(path);
   else if (action === 'delete') deleteFileExplorerPath(path);
@@ -2057,12 +2320,18 @@ window.closeMediaViewer = closeMediaViewer;
 window.reloadMediaViewer = reloadMediaViewer;
 window.openMediaViewerInNewTab = openMediaViewerInNewTab;
 window.copyFileExplorerPath = copyFileExplorerPath;
+window.copyFileExplorerItem = copyFileExplorerItem;
+window.cutFileExplorerItem = cutFileExplorerItem;
+window.pasteFileExplorerItem = pasteFileExplorerItem;
+window.downloadFileExplorerPath = downloadFileExplorerPath;
 window.renameFileExplorerPath = renameFileExplorerPath;
 window.deleteFileExplorerPath = deleteFileExplorerPath;
 window.openFileExplorerPath = openFileExplorerPath;
 window.createFileExplorerFile = createFileExplorerFile;
 window.createFileExplorerFolder = createFileExplorerFolder;
 window.switchFileExplorerWorkspace = switchFileExplorerWorkspace;
+window.uploadSelectedFilesToExplorer = uploadSelectedFilesToExplorer;
+window.openFileExplorerUploadPicker = openFileExplorerUploadPicker;
 window.openCurrentFileInMainPanel = openCurrentFileInMainPanel;
 window.openTextInMainPanel = openTextInMainPanel;
 window.openPdfInMainPanel = openPdfInMainPanel;
@@ -2101,7 +2370,13 @@ window.AgentApp.define('fileExplorer', {
   closeInlineFilePanel,
   createFileExplorerFile,
   createFileExplorerFolder,
+  copyFileExplorerItem,
+  cutFileExplorerItem,
+  pasteFileExplorerItem,
+  downloadFileExplorerPath,
   renameFileExplorerPath,
   deleteFileExplorerPath,
-  switchFileExplorerWorkspace
+  switchFileExplorerWorkspace,
+  uploadSelectedFilesToExplorer,
+  openFileExplorerUploadPicker
 });

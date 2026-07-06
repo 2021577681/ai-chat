@@ -252,6 +252,40 @@ class FrontendModuleTests(unittest.TestCase):
             js = (ROOT / 'js' / script).read_text(encoding='utf-8')
             self.assertIn('AgentApp.define(', js, f'{script} should register a module API')
 
+    def test_remote_connection_auto_reconnect_persists_last_workspace(self):
+        remote_connection_js = (ROOT / 'js' / 'remote-connection.js').read_text(encoding='utf-8')
+        main_js = (ROOT / 'js' / 'main.js').read_text(encoding='utf-8')
+        utils_js = (ROOT / 'js' / 'utils.js').read_text(encoding='utf-8')
+        file_explorer_js = (ROOT / 'js' / 'file-explorer.js').read_text(encoding='utf-8')
+
+        for snippet in (
+            'autoReconnect: false',
+            'lastConnectedAt: 0',
+            "lastServerUrl: ''",
+            'let remoteAutoReconnectAttempted = false;',
+            'function persistActiveRemoteConnection(info = {})',
+            'function clearRemoteAutoReconnectFlag()',
+            'function noteRemoteWorkspaceChanged(path)',
+            'async function initRemoteConnection()',
+            'async function connectRemoteAgent(options = {})',
+            'const skipConfirm = !!opts.skipConfirm || autoReconnect;',
+            "if (!skipConfirm && !confirm('",
+            'if (!autoReconnect) {',
+            'saveRemoteConnectionFromUi({ silent: !!opts.silentSave });',
+            'persistActiveRemoteConnection({',
+            'clearRemoteAutoReconnectFlag();',
+            'window.initRemoteConnection = initRemoteConnection;',
+            'window.noteRemoteWorkspaceChanged = noteRemoteWorkspaceChanged;',
+            'initRemoteConnection,',
+            'noteRemoteWorkspaceChanged,',
+        ):
+            self.assertIn(snippet, remote_connection_js)
+
+        self.assertIn('const remoteInit = initRemoteConnection();', main_js)
+        self.assertIn("remoteInit.catch(e => console.warn('[remote] init failed:', e));", main_js)
+        self.assertIn('noteRemoteWorkspaceChanged(r.workspace || r.cwd);', utils_js)
+        self.assertIn('noteRemoteWorkspaceChanged(r.workspace || r.cwd || normalizedPath);', file_explorer_js)
+
     def test_state_consumes_config_module_for_storage_keys(self):
         state_js = (ROOT / 'js' / 'state.js').read_text(encoding='utf-8')
 
@@ -1313,6 +1347,96 @@ class FrontendModuleTests(unittest.TestCase):
         ):
             self.assertNotIn(direct_usage, terminal_code)
 
+    def test_terminal_allows_git_clone_passthrough(self):
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+        route_idx = terminal_js.index('async function routeGitExecuteCommand')
+        control_guard_idx = terminal_js.index('commandHasShellOperators(command)', route_idx)
+        tools_available_idx = terminal_js.index('if (!aiGitToolsAvailable())', route_idx)
+        clone_idx = terminal_js.index("if (sub === 'clone')")
+
+        self.assertLess(control_guard_idx, tools_available_idx)
+        self.assertGreater(clone_idx, control_guard_idx)
+        self.assertRegex(
+            terminal_js,
+            r"if \(sub === 'clone'\) \{\s*return \{ passthrough: true, forceConfirm: true \};\s*\}",
+        )
+
+    def test_terminal_allows_read_only_git_passthrough(self):
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+
+        self.assertIn('function gitReadOnlyPassthroughDecision', terminal_js)
+        for command in (
+            'rev-parse', 'ls-files', 'show-ref', 'for-each-ref',
+            'describe', 'merge-base', 'blame', 'grep', 'ls-tree',
+            'branch', 'remote', 'tag', 'reflog', 'cat-file',
+            'submodule', 'worktree', 'ls-remote'
+        ):
+            self.assertIn(f"'{command}'", terminal_js)
+
+        self.assertIn("'--output'", terminal_js)
+        self.assertIn("'--ext-diff'", terminal_js)
+        self.assertIn("'--open-files-in-pager'", terminal_js)
+        self.assertIn("'--upload-pack'", terminal_js)
+        self.assertIn("'--help'", terminal_js)
+        self.assertIn('if (parsed.passthroughOnly)', terminal_js)
+        self.assertRegex(
+            terminal_js,
+            r"if \(readOnlyDecision && readOnlyDecision\.passthrough\) \{\s*return \{ passthrough: true, forceConfirm: !!readOnlyDecision\.forceConfirm \};\s*\}",
+        )
+
+    def test_goal_mode_surfaces_tool_calls_in_main_chat(self):
+        goal_core_js = (ROOT / 'js' / 'goal-core.js').read_text(encoding='utf-8')
+        html = next(ROOT.glob('AI-Chat-*.html')).read_text(encoding='utf-8')
+
+        self.assertIn('function createGoalChatRecorder', goal_core_js)
+        self.assertIn("event.type === 'tool_call'", goal_core_js)
+        self.assertIn("event.type === 'tool_result'", goal_core_js)
+        self.assertIn("role: 'tool'", goal_core_js)
+        self.assertIn('assistant.tool_calls.push', goal_core_js)
+        turn_message_idx = goal_core_js.index("content: '目标第 ' + turnNo + ' 轮：继续推进")
+        turn_message_block = goal_core_js[turn_message_idx:goal_core_js.index('_goalTurn: turnNo', turn_message_idx)]
+        self.assertNotIn('_hiddenFromUI: true', turn_message_block)
+        self.assertNotIn("content: '目标第 ' + turnNo + ' 轮：\\n\\n' + finalText", goal_core_js)
+        self.assertIn('data-action="deleteActiveGoal"', html)
+        self.assertIn('data-handler="deleteGoalById"', goal_core_js)
+
+    def test_goal_settings_jump_closes_goal_panel(self):
+        settings_page_js = (ROOT / 'js' / 'settings-page.js').read_text(encoding='utf-8')
+        event_delegation_js = (ROOT / 'js' / 'event-delegation.js').read_text(encoding='utf-8')
+
+        open_goal_idx = settings_page_js.index('window.openGoalSettings = function()')
+        close_panel_idx = settings_page_js.index('window.closeGoalPanel', open_goal_idx)
+        open_page_idx = settings_page_js.index("openSettingsPage('goal')", open_goal_idx)
+
+        self.assertLess(close_panel_idx, open_page_idx)
+        self.assertIn("'deleteActiveGoal'", event_delegation_js)
+        self.assertIn("'deleteGoalById'", event_delegation_js)
+
+    def test_goal_topbar_button_is_management_entry_only(self):
+        html = next(ROOT.glob('AI-Chat-*.html')).read_text(encoding='utf-8')
+        goal_core_js = (ROOT / 'js' / 'goal-core.js').read_text(encoding='utf-8')
+        base_css = (ROOT / 'css' / 'base.css').read_text(encoding='utf-8')
+
+        self.assertIn('id="goalBtn" data-action="openGoalPanel" title="目标管理"', html)
+        self.assertIn("btn.classList.remove('goal-active')", goal_core_js)
+        self.assertNotIn("classList.toggle('goal-active'", goal_core_js)
+        self.assertNotIn('.topbar-btn.goal-active', base_css)
+
+    def test_goal_cards_drive_detail_selection(self):
+        goal_core_js = (ROOT / 'js' / 'goal-core.js').read_text(encoding='utf-8')
+        event_delegation_js = (ROOT / 'js' / 'event-delegation.js').read_text(encoding='utf-8')
+        base_css = (ROOT / 'css' / 'base.css').read_text(encoding='utf-8')
+
+        self.assertIn('role="button" tabindex="0" data-action="valueClick"', goal_core_js)
+        self.assertIn('data-keydown-action="goalCardSelect"', goal_core_js)
+        self.assertIn("const selected = goal.id === goalStore.selectedGoalId", goal_core_js)
+        self.assertIn('return goalById(goalStore.selectedGoalId) || goalStore.goals[0] || null;', goal_core_js)
+        self.assertNotIn('goalStore.selectedGoalId = goal.id;\n  pushGoalEvent(goal, \'continued\'', goal_core_js)
+        self.assertNotIn('selectGoalById(goalId);\n  return continueGoal(goalId);', goal_core_js)
+        self.assertIn('goalCardSelect(event, target)', event_delegation_js)
+        self.assertIn('.goal-item:hover', base_css)
+        self.assertIn('.goal-item:focus-visible', base_css)
+
     def test_service_modules_load_in_dependency_order(self):
         html = (ROOT / 'AI-Chat-大模型对话助手.html').read_text(encoding='utf-8')
 
@@ -1395,7 +1519,7 @@ class FrontendModuleTests(unittest.TestCase):
             ),
             'file-explorer.js': (
                 'fileExplorer',
-                ['renderFileExplorer', 'loadFileExplorer', 'openFileEditor', 'openPdfViewer', 'openCurrentFileInMainPanel']
+                ['renderFileExplorer', 'loadFileExplorer', 'openFileEditor', 'openPdfViewer', 'openCurrentFileInMainPanel', 'uploadSelectedFilesToExplorer', 'openFileExplorerUploadPicker', 'copyFileExplorerItem', 'cutFileExplorerItem', 'pasteFileExplorerItem', 'downloadFileExplorerPath']
             ),
             'git-panel.js': (
                 'gitPanel',
@@ -1449,6 +1573,100 @@ class FrontendModuleTests(unittest.TestCase):
             'data-action="openInlineFileInNewTab"',
         ):
             self.assertIn(delegated_attr, file_explorer_js)
+
+    def test_file_explorer_supports_context_menu_upload(self):
+        file_explorer_js = (ROOT / 'js' / 'file-explorer.js').read_text(encoding='utf-8')
+        base_css = (ROOT / 'css' / 'base.css').read_text(encoding='utf-8')
+        handler_py = (ROOT / 'server' / 'handler.py').read_text(encoding='utf-8')
+
+        for snippet in (
+            'data-action="upload-files"',
+            'data-action="upload-folder"',
+            "action === 'upload-files'",
+            "action === 'upload-folder'",
+            "openFileExplorerUploadPicker('files', path)",
+            "openFileExplorerUploadPicker('folder', path)",
+            'function ensureFileExplorerUploadInput(kind)',
+            "input.type = 'file'",
+            'input.multiple = true',
+            "input.setAttribute('webkitdirectory', '')",
+            'function handleFileExplorerUploadInputChange(event, kind, targetPath)',
+            'function uploadSelectedFilesToExplorer',
+            'function fileExplorerItemsFromFileList(files)',
+        ):
+            self.assertIn(snippet, file_explorer_js)
+
+        for removed in (
+            'handleFileExplorerCapturedDragEnter',
+            'handleFileExplorerCapturedDragOver',
+            'handleFileExplorerCapturedDragLeave',
+            'handleFileExplorerCapturedDrop',
+            'handleFileExplorerDragEnter',
+            'handleFileExplorerDragOver',
+            'handleFileExplorerDragLeave',
+            'handleFileExplorerDrop',
+            'consumeFileExplorerDragEvent',
+            'preventBrowserFileDropNavigation',
+            'uploadDroppedFilesToExplorer',
+            'collectDroppedFiles',
+            'webkitGetAsEntry',
+        ):
+            self.assertNotIn(removed, file_explorer_js)
+
+        self.assertIn('function fileExplorerReadFileAsArrayBuffer', file_explorer_js)
+        self.assertIn('reader.readAsArrayBuffer(file)', file_explorer_js)
+        self.assertNotIn('reader.readAsDataURL(file)', file_explorer_js)
+        self.assertIn("callAgentBackend(\n          'write_file'", file_explorer_js)
+        self.assertIn("encoding: 'base64'", file_explorer_js)
+        self.assertIn('{ skipConfirm: true }', file_explorer_js)
+        self.assertNotIn('.file-explorer-list.is-drag-over', base_css)
+        self.assertIn('def _compact_large_write_payload', handler_py)
+        self.assertIn("action != 'write_file'", handler_py)
+
+    def test_chat_attachment_reading_avoids_browser_data_url_limit(self):
+        chat_js = (ROOT / 'js' / 'chat.js').read_text(encoding='utf-8')
+
+        self.assertIn('function chatReadFileAsDataUrl', chat_js)
+        self.assertIn('function chatDropContainsDirectory', chat_js)
+        self.assertIn('reader.readAsArrayBuffer(file)', chat_js)
+        self.assertIn('文件夹请拖到资源管理器上传', chat_js)
+        self.assertNotIn('readAsDataURL(file)', chat_js)
+
+    def test_file_explorer_context_menu_supports_copy_cut_paste_and_download(self):
+        file_explorer_js = (ROOT / 'js' / 'file-explorer.js').read_text(encoding='utf-8')
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+        concurrent_js = (ROOT / 'js' / 'concurrent-requests.js').read_text(encoding='utf-8')
+        routes_py = (ROOT / 'server' / 'routes.py').read_text(encoding='utf-8')
+        preview_py = (ROOT / 'server' / 'preview.py').read_text(encoding='utf-8')
+
+        for snippet in (
+            'data-action="copy-item"',
+            'data-action="cut-item"',
+            'data-action="paste"',
+            'data-paste-only="true"',
+            'data-action="download"',
+            'function copyFileExplorerItem',
+            'function cutFileExplorerItem',
+            'function pasteFileExplorerItem',
+            'function downloadFileExplorerPath',
+            "'copy_file'",
+            "'move_file'",
+            "clip.mode === 'cut'",
+            'target_dir: normalizedTargetDir',
+            '&download=1',
+            "&archive=zip",
+            "type === 'dir'",
+        ):
+            self.assertIn(snippet, file_explorer_js)
+        self.assertNotIn('data-file-only="true"', file_explorer_js)
+
+        self.assertIn("copy_file: 'write'", terminal_js)
+        self.assertIn("move_file: 'edit'", terminal_js)
+        self.assertIn("ActionRoute('copy_file', 'handle_copy_file')", routes_py)
+        self.assertIn("ActionRoute('move_file', 'handle_move_file')", routes_py)
+        self.assertIn("action === 'copy_file'", concurrent_js)
+        self.assertIn("action === 'move_file'", concurrent_js)
+        self.assertIn("'attachment' if download_mode else 'inline'", preview_py)
 
     def test_static_shell_controls_use_event_delegation(self):
         html = (ROOT / 'AI-Chat-大模型对话助手.html').read_text(encoding='utf-8')
