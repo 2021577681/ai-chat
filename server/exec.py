@@ -107,9 +107,17 @@ def _quote_remote_cd_path(path):
     return shlex.quote(raw)
 
 
-def _remote_terminal_ssh_args(ssh_command, remote_workspace):
+def _remote_terminal_ssh_args(ssh_command, remote_workspace, proxy_url=''):
     parts = _split_ssh_command(ssh_command)
-    remote_cmd = f'cd {_quote_remote_cd_path(remote_workspace)} && exec "${{SHELL:-/bin/sh}}" -l'
+    proxy_url = str(proxy_url or '').strip()
+    proxy_exports = ''
+    if proxy_url:
+        q_proxy = shlex.quote(proxy_url)
+        proxy_exports = (
+            f'export HTTP_PROXY={q_proxy} HTTPS_PROXY={q_proxy} ALL_PROXY={q_proxy} '
+            f'http_proxy={q_proxy} https_proxy={q_proxy} all_proxy={q_proxy}; '
+        )
+    remote_cmd = f'cd {_quote_remote_cd_path(remote_workspace)} && {proxy_exports}exec "${{SHELL:-/bin/sh}}" -l'
     return list(parts[:-1]) + ['-t', parts[-1], remote_cmd]
 
 
@@ -183,9 +191,29 @@ def _decode_process_output(raw):
 class ExecMixin:
     """Handler mixin：handle_execute"""
 
-    def _git_proxy_url_for_execute(self, command, cwd):
+    def _runtime_git_proxy_url_from_body(self, body):
+        cfg = body.get('git_proxy') if isinstance(body, dict) else None
+        if not isinstance(cfg, dict) or not cfg.get('enabled'):
+            return '', ''
+        remote_mode = bool(cfg.get('remote'))
+        if remote_mode:
+            proxy_url = _normalize_local_git_proxy_url(cfg.get('remote_url'))
+            if not proxy_url:
+                return '', 'Remote Git proxy tunnel is unavailable. Reconnect the remote Agent after enabling Git command proxy.'
+            return proxy_url, ''
+        proxy_url = _normalize_local_git_proxy_url(cfg.get('url'))
+        if not proxy_url:
+            return '', 'Git 代理地址无效，只支持本机 http / socks5h 代理，例如 http://127.0.0.1:7890'
+        return proxy_url, ''
+
+    def _git_proxy_url_for_execute(self, command, cwd, body=None):
         if not _command_invokes_git(command):
-            return ''
+            return '', ''
+        proxy_url, proxy_error = self._runtime_git_proxy_url_from_body(body or {})
+        if proxy_error:
+            return '', proxy_error
+        if proxy_url:
+            return proxy_url, ''
         for key in ('https.proxy', 'http.proxy'):
             try:
                 proc = subprocess.run(
@@ -203,15 +231,17 @@ class ExecMixin:
                 continue
             proxy_url = _normalize_local_git_proxy_url(_decode_process_output(proc.stdout).strip())
             if proxy_url:
-                return proxy_url
-        return ''
+                return proxy_url, ''
+        return '', ''
 
-    def _execute_env_for_command(self, command, cwd):
+    def _execute_env_for_command(self, command, cwd, body=None):
         env = os.environ.copy()
-        proxy_url = self._git_proxy_url_for_execute(command, cwd)
+        proxy_url, proxy_error = self._git_proxy_url_for_execute(command, cwd, body)
+        if proxy_error:
+            return env, '', proxy_error
         if proxy_url:
             _apply_git_proxy_env(env, proxy_url)
-        return env, proxy_url
+        return env, proxy_url, ''
 
     def handle_remote_execute(self, body):
         """微信遥控 /终端 专用执行入口。
@@ -322,7 +352,10 @@ class ExecMixin:
         try:
             ssh_command = (body.get('ssh_command') or '').strip()
             remote_workspace = (body.get('remote_workspace') or '~').strip() or '~'
-            ssh_args = _remote_terminal_ssh_args(ssh_command, remote_workspace)
+            proxy_url, proxy_error = self._runtime_git_proxy_url_from_body(body)
+            if proxy_error:
+                return self.response.json(200, {'ok': False, 'error': proxy_error})
+            ssh_args = _remote_terminal_ssh_args(ssh_command, remote_workspace, proxy_url=proxy_url)
             system = platform.system().lower()
             proc = None
             terminal_title = 'AI Remote Terminal'
@@ -421,7 +454,9 @@ class ExecMixin:
         if body.get('new_window'):
             print(f'🪟 [新窗口] cwd={cwd_abs}\n   $ {command}')
             try:
-                proxy_url = self._git_proxy_url_for_execute(command, cwd_abs)
+                proxy_url, proxy_error = self._git_proxy_url_for_execute(command, cwd_abs, body)
+                if proxy_error:
+                    return self.response.json(200, {'ok': False, 'error': proxy_error})
                 # 构建 bat 文件：
                 #   - chcp 65001 解决中文乱码
                 #   - @echo off 隐藏辅助步骤，@echo on 开启命令回显
@@ -523,7 +558,9 @@ class ExecMixin:
             })
 
         try:
-            env, proxy_url = self._execute_env_for_command(command, cwd_abs)
+            env, proxy_url, proxy_error = self._execute_env_for_command(command, cwd_abs, body)
+            if proxy_error:
+                return self.response.json(200, {'ok': False, 'error': proxy_error})
             if proxy_url:
                 print(f'🌐 [Git proxy] execute git command with proxy={proxy_url}')
             proc = subprocess.run(

@@ -127,12 +127,23 @@ const TERMINAL_CONFIG = {
   // ⭐ 永久允许（按类别），存 localStorage，可在 UI 撤销
   permanentAllow: loadPermanentPerms(),
   fullAccess: loadFullAccessMode(),
+  remoteGitProxyUrl: '',
   autoAnalyzeAfterAttach: true
 };
 
 const AGENT_BACKEND_DEFAULT_TIMEOUT_MS = 75 * 1000;
 const AGENT_BACKEND_TOKEN_TIMEOUT_MS = 15 * 1000;
 const AGENT_BACKEND_EXECUTE_GRACE_MS = 15 * 1000;
+const LOCAL_ONLY_BACKEND_ACTIONS = new Set(['web_search', 'fetch_url']);
+
+function resolveAgentBackendServerUrl(action) {
+  const defaultUrl = TERMINAL_CONFIG.serverUrl || 'http://localhost:8765';
+  if (!LOCAL_ONLY_BACKEND_ACTIONS.has(action)) return defaultUrl;
+  if (typeof REMOTE_CONTROLLER !== 'undefined' && REMOTE_CONTROLLER.serverUrl) {
+    return REMOTE_CONTROLLER.serverUrl;
+  }
+  return defaultUrl;
+}
 
 function agentBackendRequestTimeoutMs(action, params) {
   const explicit = params && Number(params.requestTimeoutMs || params._requestTimeoutMs);
@@ -851,14 +862,22 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   
   // ⭐ 实际请求，封装为函数以便 403 后自动重试一次
   const requestTimeoutMs = agentBackendRequestTimeoutMs(action, requestParams);
+  const backendServerUrl = resolveAgentBackendServerUrl(action);
+  const usesAlternateBackend = backendServerUrl !== (TERMINAL_CONFIG.serverUrl || 'http://localhost:8765');
   const doFetch = async () => {
     const backendParams = { ...requestParams };
     delete backendParams.requestTimeoutMs;
     delete backendParams._requestTimeoutMs;
-    return await fetchAgentBackendWithTimeout(TERMINAL_CONFIG.serverUrl, {
+    return await fetchAgentBackendWithTimeout(backendServerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...backendParams, session_id: getAgentSessionId({ chatId }), allow_full_access: fullAccessAllowed })
+      body: JSON.stringify({
+        action,
+        ...backendParams,
+        session_id: getAgentSessionId({ chatId }),
+        allow_full_access: fullAccessAllowed,
+        git_proxy: gitProxyConfigForBackend()
+      })
     }, context && context.signal ? context.signal : undefined, requestTimeoutMs);
   };
   
@@ -878,7 +897,7 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
       claimConcurrentFileOwnership(action, requestParams, r, context);
     }
     // ⭐ 如果响应里带了 workspace/cwd，顺手刷新顶部沙箱栏显示
-    if (r && (r.workspace || r.cwd)) {
+    if (!usesAlternateBackend && r && (r.workspace || r.cwd)) {
       if (r.workspace) TERMINAL_CONFIG.workspace = r.workspace;
       if (r.cwd) TERMINAL_CONFIG.cwd = r.cwd;
       const pathEl = document.getElementById('workspacePath');
@@ -1693,11 +1712,40 @@ function formatFileSize(b) {
 // 与 callAgentBackend 不同：
 //   - 不弹"工具权限确认"（用户主动点 UI 触发，自己就是权限）
 //   - 直接返回后端 JSON（不做字符串包装）
+function isRemoteAgentBackendActive() {
+  return !!(
+    typeof REMOTE_CONTROLLER !== 'undefined' &&
+    REMOTE_CONTROLLER.serverUrl &&
+    TERMINAL_CONFIG.serverUrl &&
+    TERMINAL_CONFIG.serverUrl !== REMOTE_CONTROLLER.serverUrl
+  );
+}
+
+function gitProxyConfigForBackend() {
+  const s = (terminalState && terminalState.settings) || {};
+  const url = String(s.gitProxyUrl || '').trim();
+  const cfg = {
+    enabled: !!s.gitProxyEnabled,
+    url: url || 'http://127.0.0.1:7890'
+  };
+  if (isRemoteAgentBackendActive()) {
+    cfg.remote = true;
+    cfg.remote_url = String(TERMINAL_CONFIG.remoteGitProxyUrl || '').trim();
+  }
+  return cfg;
+}
+window.gitProxyConfigForBackend = gitProxyConfigForBackend;
+
 async function callGit(subcommand, params) {
   const doFetch = async () => fetch(TERMINAL_CONFIG.serverUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'git', subcommand, ...(params || {}) })
+    body: JSON.stringify({
+      action: 'git',
+      subcommand,
+      ...(params || {}),
+      git_proxy: gitProxyConfigForBackend()
+    })
   });
   try {
     let resp = await doFetch();

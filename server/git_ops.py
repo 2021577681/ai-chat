@@ -19,6 +19,7 @@
 import os
 import re
 import subprocess
+from urllib.parse import urlparse
 
 from . import config
 from .sandbox import is_inside_workspace, resolve_path
@@ -70,6 +71,14 @@ class GitMixin:
             return self.response.json(200, {'ok': False, 'error': f'🚫 cwd 越界：{cwd_abs}\n沙箱根: {config.WORKSPACE_ROOT}'})
         if not os.path.isdir(cwd_abs):
             return self.response.json(200, {'ok': False, 'error': f'目录不存在: {cwd_abs}'})
+
+        runtime_proxy_subcommands = {'fetch', 'pull', 'push', 'scan_diff'}
+        git_proxy_url = ''
+        if sub in runtime_proxy_subcommands:
+            git_proxy_url, git_proxy_error = self._normalize_runtime_git_proxy(body.get('git_proxy'))
+            if git_proxy_error:
+                return self.response.json(200, {'ok': False, 'error': git_proxy_error})
+        self._runtime_git_proxy_url = git_proxy_url
 
         try:
             # ===== check =====
@@ -424,6 +433,8 @@ class GitMixin:
 
         except Exception as e:
             return self.response.json(200, {'ok': False, 'error': f'git 内部错误: {e}'})
+        finally:
+            self._runtime_git_proxy_url = ''
 
     # ============ 子命令拆出来的辅助 ============
     def _git_check(self, cwd_abs):
@@ -651,16 +662,75 @@ class GitMixin:
         return self.response.json(200, {'ok': True, 'findings': findings})
 
     # ============ 通用工具 ============
+    def _normalize_runtime_git_proxy(self, raw):
+        """Validate per-request Git proxy settings from the browser."""
+        if not isinstance(raw, dict) or not raw.get('enabled'):
+            return '', ''
+        remote_mode = bool(raw.get('remote'))
+        value = str((raw.get('remote_url') if remote_mode else raw.get('url')) or '').strip()
+        if not value:
+            if remote_mode:
+                return '', 'Remote Git proxy tunnel is unavailable. Reconnect the remote Agent after enabling Git command proxy.'
+            return '', 'Git 代理已启用，但代理地址为空'
+
+        parsed = urlparse(value)
+        scheme = (parsed.scheme or '').lower()
+        host = (parsed.hostname or '').lower()
+        try:
+            port = parsed.port
+        except ValueError:
+            return '', 'Git 代理端口必须是 1-65535 的整数'
+        allowed_hosts = {'127.0.0.1', 'localhost', '::1'}
+        allowed_schemes = {'http', 'https', 'socks5', 'socks5h'}
+        if scheme not in allowed_schemes:
+            return '', 'Git 代理地址只支持 http / https / socks5 / socks5h'
+        if host not in allowed_hosts:
+            return '', 'Git 代理地址只允许本机地址（127.0.0.1 / localhost）'
+        if not isinstance(port, int) or port < 1 or port > 65535:
+            return '', 'Git 代理端口必须是 1-65535 的整数'
+        if parsed.username or parsed.password:
+            return '', 'Git 代理地址不允许包含账号或密码'
+        if parsed.path not in ('', '/'):
+            return '', 'Git 代理地址不应包含路径'
+        if scheme == 'https':
+            scheme = 'http'
+        elif scheme == 'socks5':
+            scheme = 'socks5h'
+        return f'{scheme}://{host}:{port}', ''
+
+    def _get_runtime_git_proxy_url(self):
+        return str(getattr(self, '_runtime_git_proxy_url', '') or '').strip()
+
     def _git_display_cmd(self, cmd):
-        """Force git to emit UTF-8 paths instead of C-quoted octal escapes."""
+        """Force git to emit UTF-8 paths and apply per-request runtime config."""
         if not isinstance(cmd, (list, tuple)) or not cmd:
             return cmd
         cmd = list(cmd)
         if cmd[0] != 'git':
             return cmd
-        if len(cmd) >= 3 and cmd[1] == '-c' and cmd[2].startswith('core.quotepath='):
-            return cmd
-        return ['git', '-c', 'core.quotepath=false'] + cmd[1:]
+        configs = []
+        rest = []
+        i = 1
+        while i < len(cmd):
+            if cmd[i] == '-c' and i + 1 < len(cmd):
+                configs.append(cmd[i + 1])
+                i += 2
+                continue
+            rest = cmd[i:]
+            break
+        if not any(str(item).startswith('core.quotepath=') for item in configs):
+            configs.append('core.quotepath=false')
+
+        proxy_url = self._get_runtime_git_proxy_url()
+        if proxy_url:
+            configs = [item for item in configs if not str(item).startswith(('http.proxy=', 'https.proxy='))]
+            configs.extend([f'http.proxy={proxy_url}', f'https.proxy={proxy_url}'])
+
+        out = ['git']
+        for item in configs:
+            out.extend(['-c', item])
+        out.extend(rest)
+        return out
 
     def _decode_git_path(self, path):
         """Decode git's quoted path format, e.g. "\\344\\270\\255.txt"."""
@@ -717,6 +787,14 @@ class GitMixin:
         env['GIT_TERMINAL_PROMPT'] = '0'
         env['LC_ALL'] = 'C.UTF-8'
         env['LANG'] = 'C.UTF-8'
+        proxy_url = self._get_runtime_git_proxy_url()
+        if proxy_url:
+            env['HTTP_PROXY'] = proxy_url
+            env['HTTPS_PROXY'] = proxy_url
+            env['ALL_PROXY'] = proxy_url
+            env['http_proxy'] = proxy_url
+            env['https_proxy'] = proxy_url
+            env['all_proxy'] = proxy_url
         try:
             run_cmd = self._git_display_cmd(cmd)
             proc = subprocess.run(

@@ -8,6 +8,7 @@ const REMOTE_DIR_PICKER = {
   currentPath: '~',
   parentPath: '~'
 };
+const REMOTE_HEARTBEAT_DEFAULT_SECONDS = 300;
 let remoteAutoReconnectAttempted = false;
 
 function remoteDefaultConfig() {
@@ -16,7 +17,7 @@ function remoteDefaultConfig() {
     remoteWorkspace: '~/',
     remoteAgentPort: 8765,
     localPort: 18765,
-    heartbeatTimeout: 75,
+    heartbeatTimeout: REMOTE_HEARTBEAT_DEFAULT_SECONDS,
     installDeps: true,
     encryptedPassword: '',
     autoReconnect: false,
@@ -137,7 +138,7 @@ function applyRemoteConfigToForm(cfg, password = '') {
   document.getElementById('remoteWorkspace').value = config.remoteWorkspace || '';
   document.getElementById('remoteAgentPort').value = config.remoteAgentPort || 8765;
   document.getElementById('remoteLocalPort').value = config.localPort || 18765;
-  document.getElementById('remoteHeartbeatTimeout').value = config.heartbeatTimeout || 75;
+  document.getElementById('remoteHeartbeatTimeout').value = Math.max(120, parseInt(config.heartbeatTimeout, 10) || REMOTE_HEARTBEAT_DEFAULT_SECONDS);
   document.getElementById('remoteInstallDeps').checked = config.installDeps !== false;
 }
 
@@ -163,7 +164,7 @@ function remoteFormValues() {
     remoteWorkspace: document.getElementById('remoteWorkspace').value.trim() || '~/',
     remoteAgentPort: parseInt(document.getElementById('remoteAgentPort').value, 10) || 8765,
     localPort: parseInt(document.getElementById('remoteLocalPort').value, 10) || 18765,
-    heartbeatTimeout: parseInt(document.getElementById('remoteHeartbeatTimeout').value, 10) || 75,
+    heartbeatTimeout: Math.max(120, parseInt(document.getElementById('remoteHeartbeatTimeout').value, 10) || REMOTE_HEARTBEAT_DEFAULT_SECONDS),
     installDeps: !!document.getElementById('remoteInstallDeps').checked
   };
 }
@@ -334,6 +335,7 @@ async function connectRemoteAgent(options = {}) {
   const skipConfirm = !!opts.skipConfirm || autoReconnect;
   const btn = document.getElementById('remoteConnectBtn');
   const oldServerUrl = TERMINAL_CONFIG.serverUrl;
+  const oldRemoteGitProxyUrl = TERMINAL_CONFIG.remoteGitProxyUrl || '';
   let remoteStarted = false;
   const v = remoteFormValues();
   if (!v.sshCommand) return setRemoteStatus('请填写 SSH 命令，例如 ssh user@example.com', 'error');
@@ -353,10 +355,12 @@ async function connectRemoteAgent(options = {}) {
       local_port: v.localPort,
       heartbeat_timeout: v.heartbeatTimeout,
       install_deps: v.installDeps,
+      git_proxy: (typeof gitProxyConfigForBackend === 'function') ? gitProxyConfigForBackend() : undefined,
       requestTimeoutMs: 240000
     });
     if (!r.ok) throw new Error(r.error || '远程连接失败');
     remoteStarted = true;
+    TERMINAL_CONFIG.remoteGitProxyUrl = r.reverse_git_proxy_url || '';
     TERMINAL_CONFIG.serverUrl = r.server_url;
 
     let workspaceInfo = r.workspace_info;
@@ -384,6 +388,7 @@ async function connectRemoteAgent(options = {}) {
     RemoteConnectionUiService.toast('远程 Agent 已连接');
   } catch (e) {
     TERMINAL_CONFIG.serverUrl = oldServerUrl;
+    TERMINAL_CONFIG.remoteGitProxyUrl = oldRemoteGitProxyUrl;
     if (remoteStarted) {
       try {
         await remoteBackend('remote_disconnect', { requestTimeoutMs: 60000 });
@@ -409,6 +414,7 @@ async function disconnectRemoteAgent() {
   }
   clearRemoteAutoReconnectFlag();
   TERMINAL_CONFIG.serverUrl = REMOTE_CONTROLLER.serverUrl || 'http://localhost:8765';
+  TERMINAL_CONFIG.remoteGitProxyUrl = '';
   await refreshWorkspaceInfo();
   setRemoteStatus(`已切回控制端 ${TERMINAL_CONFIG.serverUrl}`, 'ok');
 }
@@ -429,8 +435,13 @@ async function initRemoteConnection() {
 async function checkRemoteStatus() {
   try {
     const r = await remoteBackend('remote_status', { requestTimeoutMs: 30000 });
+    if (r.connected && r.reverse_git_proxy_url) {
+      TERMINAL_CONFIG.remoteGitProxyUrl = r.reverse_git_proxy_url;
+    } else if (!r.connected) {
+      TERMINAL_CONFIG.remoteGitProxyUrl = '';
+    }
     setRemoteStatus(
-      r.connected ? `隧道在线：${r.server_url}，PID ${r.tunnel_pid}，心跳超时 ${r.heartbeat_timeout || 75}s` : '当前没有活动远程隧道。', r.connected ? 'ok' : ''
+      r.connected ? `隧道在线：${r.server_url}，PID ${r.tunnel_pid}，心跳超时 ${r.heartbeat_timeout || REMOTE_HEARTBEAT_DEFAULT_SECONDS}s` : '当前没有活动远程隧道。', r.connected ? 'ok' : ''
     );
   } catch (e) {
     setRemoteStatus('状态检查失败：' + e.message, 'error');

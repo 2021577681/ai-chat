@@ -19,6 +19,7 @@ import textwrap
 import threading
 import time
 import json
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -37,7 +38,11 @@ _REMOTE_STATE = {
     'tunnel_process': None,
     'heartbeat_thread': None,
     'heartbeat_stop': None,
-    'heartbeat_timeout': 75,
+    'heartbeat_timeout': 300,
+    'reverse_git_proxy_enabled': False,
+    'reverse_git_proxy_url': '',
+    'reverse_git_proxy_port': 0,
+    'local_git_proxy_url': '',
 }
 
 
@@ -98,6 +103,44 @@ def _pick_local_port(preferred=18765):
         if _local_port_free(port):
             return port
     raise RuntimeError('没有可用的本地隧道端口')
+
+
+def _normalize_reverse_git_proxy(raw):
+    cfg = raw if isinstance(raw, dict) else None
+    if not cfg or not cfg.get('enabled'):
+        return None, ''
+    raw_url = str(cfg.get('url') or '').strip()
+    if not raw_url:
+        return None, 'Git proxy is enabled, but proxy URL is empty'
+
+    parsed = urllib.parse.urlparse(raw_url)
+    scheme = (parsed.scheme or '').lower()
+    host = (parsed.hostname or '').lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return None, 'Git proxy port must be an integer from 1 to 65535'
+
+    if scheme not in {'http', 'https', 'socks5', 'socks5h'}:
+        return None, 'Git proxy only supports http / https / socks5 / socks5h'
+    if host not in {'127.0.0.1', 'localhost'}:
+        return None, 'Git proxy must be a local address: 127.0.0.1 or localhost'
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        return None, 'Git proxy port must be an integer from 1 to 65535'
+    if parsed.username or parsed.password:
+        return None, 'Git proxy URL must not include username or password'
+    if parsed.path not in ('', '/'):
+        return None, 'Git proxy URL must not include a path'
+
+    if scheme == 'https':
+        scheme = 'http'
+    elif scheme == 'socks5':
+        scheme = 'socks5h'
+    return {
+        'scheme': scheme,
+        'local_port': port,
+        'local_url': f'{scheme}://127.0.0.1:{port}',
+    }, ''
 
 
 def _make_bundle():
@@ -175,7 +218,7 @@ def _run(cmd, password='', timeout=120, input_text=None):
                 pass
 
 
-def _start_tunnel(ssh_parts, local_port, remote_port, password=''):
+def _start_tunnel(ssh_parts, local_port, remote_port, password='', reverse_forwards=None):
     old = _REMOTE_STATE.get('tunnel_process')
     if old and old.poll() is None:
         try:
@@ -184,9 +227,14 @@ def _start_tunnel(ssh_parts, local_port, remote_port, password=''):
             pass
     cmd = list(ssh_parts[:-1]) + [
         '-N',
+        '-o', 'ExitOnForwardFailure=yes',
         '-L', f'127.0.0.1:{int(local_port)}:127.0.0.1:{int(remote_port)}',
-        ssh_parts[-1]
     ]
+    for item in reverse_forwards or []:
+        remote_bind_port = int(item['remote_port'])
+        local_target_port = int(item['local_port'])
+        cmd.extend(['-R', f'127.0.0.1:{remote_bind_port}:127.0.0.1:{local_target_port}'])
+    cmd.append(ssh_parts[-1])
     env = os.environ.copy()
     askpass = _write_askpass(password)
     if askpass:
@@ -436,7 +484,16 @@ class RemoteMixin:
                 _run(parts + [cmd], password=password, timeout=20)
             except Exception as e:
                 _REMOTE_STATE['last_error'] = str(e)
-        _REMOTE_STATE.update({'connected': False, 'server_url': '', 'tunnel_pid': None, 'tunnel_process': None})
+        _REMOTE_STATE.update({
+            'connected': False,
+            'server_url': '',
+            'tunnel_pid': None,
+            'tunnel_process': None,
+            'reverse_git_proxy_enabled': False,
+            'reverse_git_proxy_url': '',
+            'reverse_git_proxy_port': 0,
+            'local_git_proxy_url': '',
+        })
         self.response.json(200, {'ok': True, 'message': '已断开远程隧道'})
 
     def handle_remote_connect(self, body):
@@ -445,13 +502,16 @@ class RemoteMixin:
         remote_workspace = (body.get('remote_workspace') or '~/').strip()
         remote_port = int(body.get('remote_agent_port') or 8765)
         local_port = _pick_local_port(int(body.get('local_port') or 18765))
-        heartbeat_timeout = int(body.get('heartbeat_timeout') or 75)
+        heartbeat_timeout = max(120, int(body.get('heartbeat_timeout') or 300))
         install_deps = body.get('install_deps', True) is not False
         logs = []
         bundle = tmp_dir = ''
         try:
             ssh_parts = _split_cmd(ssh_command)
             scp_base, target = _scp_parts_from_ssh(ssh_parts)
+            git_proxy_cfg, git_proxy_error = _normalize_reverse_git_proxy(body.get('git_proxy'))
+            if git_proxy_error:
+                raise RuntimeError(git_proxy_error)
 
             logs.append('1/5 打包最小后端...')
             bundle, tmp_dir = _make_bundle()
@@ -520,8 +580,35 @@ class RemoteMixin:
             remote_out = _run(ssh_parts + [start_cmd], password=password, timeout=180)
             logs.append(remote_out.strip()[-1000:])
 
+            reverse_forwards = []
+            reverse_git_proxy_url = ''
+            reverse_git_proxy_port = 0
+            local_git_proxy_url = ''
+            if git_proxy_cfg:
+                local_git_proxy_url = git_proxy_cfg['local_url']
+                reverse_git_proxy_port = _pick_remote_port(
+                    ssh_parts,
+                    git_proxy_cfg['local_port'],
+                    password=password,
+                    span=100,
+                )
+                reverse_git_proxy_url = f"{git_proxy_cfg['scheme']}://127.0.0.1:{reverse_git_proxy_port}"
+                reverse_forwards.append({
+                    'remote_port': reverse_git_proxy_port,
+                    'local_port': git_proxy_cfg['local_port'],
+                })
+                logs.append(
+                    f'Git proxy reverse tunnel: remote {reverse_git_proxy_url} -> local {local_git_proxy_url}'
+                )
+
             logs.append('5/5 建立本地 SSH 隧道...')
-            tunnel = _start_tunnel(ssh_parts, local_port, remote_port, password=password)
+            tunnel = _start_tunnel(
+                ssh_parts,
+                local_port,
+                remote_port,
+                password=password,
+                reverse_forwards=reverse_forwards,
+            )
             server_url = f'http://127.0.0.1:{local_port}'
             try:
                 _wait_for_remote_agent(server_url, timeout=30)
@@ -559,6 +646,10 @@ class RemoteMixin:
                 'heartbeat_timeout': heartbeat_timeout,
                 'tunnel_pid': tunnel.pid,
                 'tunnel_process': tunnel,
+                'reverse_git_proxy_enabled': bool(reverse_git_proxy_url),
+                'reverse_git_proxy_url': reverse_git_proxy_url,
+                'reverse_git_proxy_port': reverse_git_proxy_port,
+                'local_git_proxy_url': local_git_proxy_url,
                 'started_at': _now_stamp(),
                 'last_error': '',
             })
@@ -570,6 +661,10 @@ class RemoteMixin:
                 'remote_workspace': remote_workspace,
                 'tunnel_pid': tunnel.pid,
                 'heartbeat_timeout': heartbeat_timeout,
+                'reverse_git_proxy_enabled': bool(reverse_git_proxy_url),
+                'reverse_git_proxy_url': reverse_git_proxy_url,
+                'reverse_git_proxy_port': reverse_git_proxy_port,
+                'local_git_proxy_url': local_git_proxy_url,
                 'workspace_info': workspace_info,
                 'logs': logs,
             })

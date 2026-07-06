@@ -538,6 +538,24 @@
         仅支持本机代理地址（127.0.0.1 / localhost）；SOCKS 建议使用 <code>socks5h://127.0.0.1:端口</code>，并确保 Python requests 安装 socks 支持：<code>pip install requests[socks]</code>。
       </div>
     </div>
+
+    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <div>
+        <label style="margin:0;">Git 命令使用本地代理</label>
+        <div class="form-hint" style="margin-top:2px;">
+          影响应用内 Git 命令的 <code>fetch</code> / <code>pull</code> / <code>push</code> 等网络访问；不写入当前仓库配置。
+        </div>
+      </div>
+      <label class="switch"><input type="checkbox" id="gitCommandProxyEnabled"><span class="switch-slider"></span></label>
+    </div>
+
+    <div class="form-group">
+      <label>Git 命令代理地址</label>
+      <input type="text" id="gitCommandProxyUrl" placeholder="http://127.0.0.1:7890 或 socks5h://127.0.0.1:7890">
+      <div class="form-hint">
+        仅作为运行 Git 命令时的临时代理环境使用；远程仓库面板里的仓库级 <code>http.proxy</code> / <code>https.proxy</code> 设置保持原样。
+      </div>
+    </div>
     
     <div class="form-group">
       <label>失败自动重试次数</label>
@@ -817,7 +835,7 @@
         </label>
         <label>
           <span>心跳超时自动关闭（秒）</span>
-          <input id="remoteHeartbeatTimeout" type="number" min="20" max="3600" value="75">
+          <input id="remoteHeartbeatTimeout" type="number" min="120" max="3600" value="300">
         </label>
       </div>
       <label class="remote-connection-check">
@@ -828,7 +846,7 @@
         <input id="remoteStopRemote" type="checkbox">
         <span>断开时同时停止远程 Agent 进程</span>
       </label>
-      <div class="remote-connection-hint">流程：打包最小后端 → scp 上传到 ~/.snake-agent/current → 远程 nohup 启动 127.0.0.1 → 本地 ssh -N -L 建立隧道 → 自动切换前端后端地址。远程 Agent 会依赖本地心跳，关闭本地后端/隧道后会在超时后自动退出。</div>
+      <div class="remote-connection-hint">流程：打包最小后端 → scp 上传到 ~/.snake-agent/current → 远程 nohup 启动 127.0.0.1 → 本地 ssh -N -L 建立隧道 → 自动切换前端后端地址。远程 Agent 会依赖本地心跳；任意远程请求也会刷新心跳，关闭本地后端/隧道后会在超时后自动退出。</div>
       <div id="remoteConnectionStatus" class="remote-connection-status">未连接</div>
     </div>
     <div class="modal-footer file-editor-footer">

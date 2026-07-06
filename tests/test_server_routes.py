@@ -132,18 +132,20 @@ class ExecGitProxyTests(unittest.TestCase):
         completed = mock.Mock(returncode=0, stdout=b'socks5://localhost:7890\n')
 
         with mock.patch('server.exec.subprocess.run', return_value=completed) as run:
-            proxy_url = mixin._git_proxy_url_for_execute('git fetch origin', str(ROOT))
+            proxy_url, proxy_error = mixin._git_proxy_url_for_execute('git fetch origin', str(ROOT))
 
         self.assertEqual('socks5h://127.0.0.1:7890', proxy_url)
+        self.assertEqual('', proxy_error)
         run.assert_called_once()
 
     def test_execute_does_not_read_git_config_for_non_git_command(self):
         mixin = ExecMixin()
 
         with mock.patch('server.exec.subprocess.run') as run:
-            proxy_url = mixin._git_proxy_url_for_execute('python script.py', str(ROOT))
+            proxy_url, proxy_error = mixin._git_proxy_url_for_execute('python script.py', str(ROOT))
 
         self.assertEqual('', proxy_url)
+        self.assertEqual('', proxy_error)
         run.assert_not_called()
 
     def test_execute_timeout_is_clamped(self):
@@ -159,6 +161,17 @@ class ExecGitProxyTests(unittest.TestCase):
         self.assertEqual(['ssh', '-p', '2222', '-t', 'user@example.com'], args[:5])
         self.assertIn('cd "$HOME"/', args[-1])
         self.assertIn('project dir', args[-1])
+        self.assertIn('exec "${SHELL:-/bin/sh}" -l', args[-1])
+
+    def test_remote_terminal_exports_git_proxy(self):
+        args = _remote_terminal_ssh_args(
+            'ssh user@example.com',
+            '~/project',
+            proxy_url='http://127.0.0.1:7890',
+        )
+
+        self.assertIn('export HTTP_PROXY=http://127.0.0.1:7890', args[-1])
+        self.assertIn('https_proxy=http://127.0.0.1:7890', args[-1])
         self.assertIn('exec "${SHELL:-/bin/sh}" -l', args[-1])
 
 

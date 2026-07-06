@@ -89,6 +89,7 @@ class Handler(BaseHTTPRequestHandler,
         print(f'[{self.log_date_time_string()}] {format % args}')
 
     def _bind_http_context(self, session_id=''):
+        self._mark_remote_activity()
         self.request_context = RequestContext(
             method=getattr(self, 'command', ''),
             path=self.path,
@@ -100,6 +101,10 @@ class Handler(BaseHTTPRequestHandler,
         )
         self.response = ResponseWriter(self, self.request_context)
         return self.request_context
+
+    def _mark_remote_activity(self):
+        if config.REMOTE_HEARTBEAT_TIMEOUT > 0:
+            config.REMOTE_HEARTBEAT_LAST = time.time()
 
     def do_OPTIONS(self):
         self._bind_http_context()

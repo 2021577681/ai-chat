@@ -47,6 +47,13 @@ function openSettings() {
   if (searchProxyUrlEl) {
     searchProxyUrlEl.value = s.searchProxyUrl || 'http://127.0.0.1:7890';
   }
+  // 🌿 Git 命令本地代理
+  const gitProxyEnabledEl = document.getElementById('gitCommandProxyEnabled');
+  if (gitProxyEnabledEl) gitProxyEnabledEl.checked = !!s.gitProxyEnabled;
+  const gitProxyUrlEl = document.getElementById('gitCommandProxyUrl');
+  if (gitProxyUrlEl) {
+    gitProxyUrlEl.value = s.gitProxyUrl || 'http://127.0.0.1:7890';
+  }
   // ⭐ 自动重试次数
   const retryEl = document.getElementById('retryMaxAttempts');
   const retryValEl = document.getElementById('retryMaxAttemptsVal');
@@ -365,6 +372,14 @@ function saveAndClose() {
   if (searchProxyUrlEl) {
     const v = (searchProxyUrlEl.value || '').trim();
     s.searchProxyUrl = v || 'http://127.0.0.1:7890';
+  }
+  // 🌿 Git 命令本地代理
+  const gitProxyEnabledEl = document.getElementById('gitCommandProxyEnabled');
+  if (gitProxyEnabledEl) s.gitProxyEnabled = gitProxyEnabledEl.checked;
+  const gitProxyUrlEl = document.getElementById('gitCommandProxyUrl');
+  if (gitProxyUrlEl) {
+    const v = (gitProxyUrlEl.value || '').trim();
+    s.gitProxyUrl = v || 'http://127.0.0.1:7890';
   }
   // ⭐ 自动重试次数
   const retryEl = document.getElementById('retryMaxAttempts');

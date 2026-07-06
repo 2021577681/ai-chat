@@ -140,6 +140,9 @@ let state = {
     // 🌐 搜索工具代理：让 web_search / fetch_url 后端请求走本机 HTTP/SOCKS 代理，解决 Google 等网络问题
     searchProxyEnabled: false,
     searchProxyUrl: 'http://127.0.0.1:7890',
+    // 🌿 Git 命令代理：应用级临时代理，不写入仓库 git config
+    gitProxyEnabled: false,
+    gitProxyUrl: 'http://127.0.0.1:7890',
     // ⭐ 自动重试：网络抖动 / HTTP 5xx / 429 / 流中途断开时自动重发
     retryMaxAttempts: -1,       // 最多重试次数；-1 表示无限重试
     retryPolicyVersion: 2,      // v2 默认使用无限重试 + 5 次后固定 2s

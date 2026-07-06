@@ -19,6 +19,7 @@ async function openRemoteWorkspaceTerminal() {
       action: 'open_remote_terminal',
       ssh_command: sshCommand,
       remote_workspace: remoteWorkspace,
+      git_proxy: (typeof gitProxyConfigForBackend === 'function') ? gitProxyConfigForBackend() : undefined,
       session_id: (typeof TERMINAL_CONFIG !== 'undefined' && TERMINAL_CONFIG.sessionId) || 'remote-terminal-ui'
     })
   });
