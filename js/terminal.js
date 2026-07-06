@@ -969,12 +969,23 @@ async function routeGitExecuteCommand(command, context) {
   return '❌ git 命令不允许通过 execute_action 执行。请改用专用 Git 工具：note_status、note_history、note_diff、note_snapshot、note_restore。';
 }
 
-async function executeTerminalCommand(command, cwd, newWindow, context) {
+function normalizeExecuteTimeoutSec(timeout) {
+  const n = parseInt(timeout, 10);
+  if (!Number.isFinite(n)) return 60;
+  return Math.max(1, Math.min(300, n));
+}
+
+async function executeTerminalCommand(command, cwd, newWindow, timeout, context) {
+  if (timeout && typeof timeout === 'object' && context === undefined) {
+    context = timeout;
+    timeout = undefined;
+  }
+  const timeoutSec = normalizeExecuteTimeoutSec(timeout);
   let gitRouted = await routeGitExecuteCommand(command, context);
   const forceConfirm = gitRouted && typeof gitRouted === 'object' && gitRouted.forceConfirm;
   if (gitRouted && typeof gitRouted === 'object' && gitRouted.passthrough) gitRouted = null;
   if (gitRouted !== null) return gitRouted;
-  const r = await callAgentBackend('execute', { command, cwd, timeout: 60, new_window: !!newWindow },
+  const r = await callAgentBackend('execute', { command, cwd, timeout: timeoutSec, new_window: !!newWindow },
     forceConfirm ? 'AI 想执行 Git 命令（快照工具未启用）' : 'AI 想执行任务指令',
     command,
     { ...(context && typeof context === 'object' ? context : {}), forceConfirm });
@@ -992,6 +1003,7 @@ async function executeTerminalCommand(command, cwd, newWindow, context) {
     returncode: r.returncode,
     stdout: r.stdout || '',
     stderr: r.stderr || '',
+    timeout: timeoutSec,
     new_window: !!r.new_window,
     text: output
   };

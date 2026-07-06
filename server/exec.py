@@ -17,6 +17,73 @@ from .sandbox import command_workspace_violation, is_dangerous_command, is_insid
 from .window_focus import focus_window_soon
 
 
+_LOCAL_GIT_PROXY_RE = re.compile(
+    r'^(https?|socks5h?)://(?:127\.0\.0\.1|localhost):(\d{1,5})/?$',
+    flags=re.I,
+)
+
+
+def _normalize_local_git_proxy_url(raw_url):
+    raw = str(raw_url or '').strip()
+    if not raw:
+        return ''
+    match = _LOCAL_GIT_PROXY_RE.match(raw)
+    if not match:
+        return ''
+    scheme = match.group(1).lower()
+    port = int(match.group(2))
+    if port < 1 or port > 65535:
+        return ''
+    if scheme == 'https':
+        scheme = 'http'
+    elif scheme == 'socks5':
+        scheme = 'socks5h'
+    return f'{scheme}://127.0.0.1:{port}'
+
+
+def _command_invokes_git(command):
+    for segment in re.split(r'&&|\|\||[;&|]', str(command or '')):
+        part = segment.strip()
+        if not part:
+            continue
+        if re.match(r'(?i)^"?git(?:\.exe)?"?(?=\s|$)', part):
+            return True
+        if re.match(r'(?i)^cmd(?:\.exe)?\s+/[cs]\s+["\']?git(?:\.exe)?["\']?(?=\s|$)', part):
+            return True
+        if re.match(r'(?i)^(?:powershell|pwsh)(?:\.exe)?\b.*?\s-command\s+["\']?git(?:\.exe)?["\']?(?=\s|$)', part):
+            return True
+    return False
+
+
+def _apply_git_proxy_env(env, proxy_url):
+    if not proxy_url:
+        return env
+    for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+        env[key] = proxy_url
+    return env
+
+
+def _git_proxy_bat_lines(proxy_url):
+    if not proxy_url:
+        return []
+    return [
+        f'set "HTTP_PROXY={proxy_url}"',
+        f'set "HTTPS_PROXY={proxy_url}"',
+        f'set "ALL_PROXY={proxy_url}"',
+        f'set "http_proxy={proxy_url}"',
+        f'set "https_proxy={proxy_url}"',
+        f'set "all_proxy={proxy_url}"',
+    ]
+
+
+def _coerce_execute_timeout(value, default=30, maximum=300):
+    try:
+        timeout = int(value)
+    except (TypeError, ValueError):
+        timeout = default
+    return max(1, min(timeout, maximum))
+
+
 def _unique_encodings(names):
     seen = set()
     out = []
@@ -87,6 +154,36 @@ def _decode_process_output(raw):
 class ExecMixin:
     """Handler mixin：handle_execute"""
 
+    def _git_proxy_url_for_execute(self, command, cwd):
+        if not _command_invokes_git(command):
+            return ''
+        for key in ('https.proxy', 'http.proxy'):
+            try:
+                proc = subprocess.run(
+                    ['git', 'config', '--get', key],
+                    cwd=cwd,
+                    timeout=5,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    shell=False,
+                )
+            except Exception:
+                continue
+            if proc.returncode != 0:
+                continue
+            proxy_url = _normalize_local_git_proxy_url(_decode_process_output(proc.stdout).strip())
+            if proxy_url:
+                return proxy_url
+        return ''
+
+    def _execute_env_for_command(self, command, cwd):
+        env = os.environ.copy()
+        proxy_url = self._git_proxy_url_for_execute(command, cwd)
+        if proxy_url:
+            _apply_git_proxy_env(env, proxy_url)
+        return env, proxy_url
+
     def handle_remote_execute(self, body):
         """微信遥控 /终端 专用执行入口。
 
@@ -95,7 +192,7 @@ class ExecMixin:
         可以访问沙箱外路径。
         """
         command = body.get('command', '').strip()
-        timeout = min(int(body.get('timeout', 60)), 300)
+        timeout = _coerce_execute_timeout(body.get('timeout'), default=60)
         cwd = body.get('cwd') or config.WORKSPACE_ROOT
         cwd_abs = os.path.realpath(os.path.expanduser(str(cwd)))
         if not command:
@@ -194,7 +291,7 @@ class ExecMixin:
     def handle_execute(self, body):
         command = body.get('command', '').strip()
         cwd = body.get('cwd') or config.get_current_cwd()
-        timeout = min(int(body.get('timeout', 30)), 300)
+        timeout = _coerce_execute_timeout(body.get('timeout'), default=30)
         if not command:
             return self.response.json(400, {'ok': False, 'error': '命令为空'})
         print(f'💻 [执行] cwd={cwd}\n   $ {command}')
@@ -230,6 +327,7 @@ class ExecMixin:
         if body.get('new_window'):
             print(f'🪟 [新窗口] cwd={cwd_abs}\n   $ {command}')
             try:
+                proxy_url = self._git_proxy_url_for_execute(command, cwd_abs)
                 # 构建 bat 文件：
                 #   - chcp 65001 解决中文乱码
                 #   - @echo off 隐藏辅助步骤，@echo on 开启命令回显
@@ -241,6 +339,7 @@ class ExecMixin:
                     f'cd /d "{cwd_abs}"',
                     'timeout /t 1 /nobreak >nul',
                 ]
+                bat_lines.extend(_git_proxy_bat_lines(proxy_url))
                 for part in re.split(r'&&', command):
                     part = part.strip()
                     if not part:
@@ -330,9 +429,12 @@ class ExecMixin:
             })
 
         try:
+            env, proxy_url = self._execute_env_for_command(command, cwd_abs)
+            if proxy_url:
+                print(f'🌐 [Git proxy] execute git command with proxy={proxy_url}')
             proc = subprocess.run(
                 command, shell=True, capture_output=True,
-                timeout=timeout, cwd=cwd_abs
+                timeout=timeout, cwd=cwd_abs, env=env
             )
             stdout = _decode_process_output(proc.stdout)
             stderr = _decode_process_output(proc.stderr)

@@ -2386,6 +2386,25 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertRegex(terminal_js, r"async function webSearch[\s\S]+proxy_enabled: proxyEnabled[\s\S]+proxy_url: proxyUrl")
         self.assertRegex(terminal_js, r"async function fetchUrl[\s\S]+proxy_enabled: proxyEnabled[\s\S]+proxy_url: proxyUrl")
 
+    def test_execute_action_exposes_timeout_parameter(self):
+        config_js = (ROOT / 'js' / 'config.js').read_text(encoding='utf-8')
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+        state_js = (ROOT / 'js' / 'state.js').read_text(encoding='utf-8')
+
+        self.assertRegex(config_js, r"name: 'execute_action'[\s\S]+timeout: \{ type: 'number'")
+        self.assertIn("code: 'return await executeTerminalCommand(args.command, args.cwd, args.new_window, args.timeout);'", config_js)
+        self.assertIn('function normalizeExecuteTimeoutSec(timeout)', terminal_js)
+        self.assertIn("timeout: timeoutSec", terminal_js)
+        self.assertIn("const BUILTIN_TOOL_REFRESH_NAMES = new Set(['execute_action']);", state_js)
+
+    def test_file_explorer_delete_uses_recursive_directory_delete(self):
+        file_explorer_js = (ROOT / 'js' / 'file-explorer.js').read_text(encoding='utf-8')
+
+        self.assertIn(
+            "callAgentBackend('delete_file', { path: normalizedPath, recursive: true }, { skipConfirm: true })",
+            file_explorer_js
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

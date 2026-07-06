@@ -500,6 +500,7 @@ function injectBuiltinTools() {
   const existingNames = new Set(state.tools.map(t => t.name));
   const currentSignatures = STATE_BUILTIN_TOOLS.map(t => t.name);
   const builtinByName = new Map(STATE_BUILTIN_TOOLS.map(t => [t.name, t]));
+  const BUILTIN_TOOL_REFRESH_NAMES = new Set(['execute_action']);
   
   // ⭐ 可选工具组：首次安装默认不注入（用户在工具面板手动一键启用）
   // 既减少给模型的工具数量，也降低对外暴露的工具特征
@@ -521,6 +522,13 @@ function injectBuiltinTools() {
   let refreshed = 0;
 
   state.tools = state.tools.map(tool => {
+    if (tool && BUILTIN_TOOL_REFRESH_NAMES.has(tool.name)) {
+      const builtin = builtinByName.get(tool.name);
+      if (!builtin) return tool;
+      const next = JSON.parse(JSON.stringify(builtin));
+      if (JSON.stringify(tool) !== JSON.stringify(next)) refreshed++;
+      return next;
+    }
     if (!tool || (
       !OPTIONAL_TOOL_PREFIXES.some(p => String(tool.name || '').startsWith(p))
     )) return tool;

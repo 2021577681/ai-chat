@@ -275,6 +275,14 @@ function jumpToDialogMessage(idx) {
   }), 60);
 }
 
+function scrollDialogToBottom() {
+  hideDialogTimelineTip();
+  const scroller = document.getElementById('messages');
+  if (!scroller) return;
+  scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+  setTimeout(updateDialogTimeline, 180);
+}
+
 function closeDialogManagerSurface() {
   const page = document.getElementById('settingsPage');
   if (page && page.classList.contains('show') && typeof closeSettingsPage === 'function') {
@@ -519,11 +527,13 @@ function dialogExplorerBreadcrumbDragOver(e) {
   e.preventDefault();
   e.stopPropagation();
   e.dataTransfer.dropEffect = 'move';
-  e.currentTarget.classList.add('breadcrumb-drag-over');
+  const target = dialogExplorerActionTarget(e, 'data-dragover-action');
+  if (target && target.classList) target.classList.add('breadcrumb-drag-over');
 }
 
 function dialogExplorerBreadcrumbDragLeave(e) {
-  e.currentTarget.classList.remove('breadcrumb-drag-over');
+  const target = dialogExplorerActionTarget(e, 'data-dragleave-action');
+  if (target && target.classList) target.classList.remove('breadcrumb-drag-over');
 }
 
 function renderDialogExplorerItems(dm) {
@@ -715,6 +725,11 @@ function renderDialogExplorerItems(dm) {
     }
   };
   area.ondragover = function(e) {
+    const itemDropTarget = dialogExplorerActionTarget(e, 'data-drop-action');
+    if (itemDropTarget && area.contains(itemDropTarget)) {
+      area.classList.remove('drag-over');
+      return;
+    }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     area.classList.add('drag-over');
@@ -723,6 +738,11 @@ function renderDialogExplorerItems(dm) {
     if (!area.contains(e.relatedTarget)) area.classList.remove('drag-over');
   };
   area.ondrop = function(e) {
+    const itemDropTarget = dialogExplorerActionTarget(e, 'data-drop-action');
+    if (itemDropTarget && area.contains(itemDropTarget)) {
+      area.classList.remove('drag-over');
+      return;
+    }
     e.preventDefault();
     area.classList.remove('drag-over');
     const type = e.dataTransfer.getData('text/type');
@@ -747,32 +767,51 @@ function dialogExplorerToggleSort(mode) {
 
 // --- Drag & Drop ---
 
+function dialogExplorerIsElementLike(node) {
+  return !!(node && (node.nodeType === 1 || node.classList || typeof node.matches === 'function'));
+}
+
+function dialogExplorerActionTarget(e, attr) {
+  const selector = '[' + attr + ']';
+  const delegated = e && e.delegateTarget;
+  if (dialogExplorerIsElementLike(delegated) && (!delegated.matches || delegated.matches(selector))) return delegated;
+  const current = e && e.currentTarget;
+  if (dialogExplorerIsElementLike(current) && (!current.matches || current.matches(selector))) return current;
+  const target = e && e.target;
+  return target && typeof target.closest === 'function' ? target.closest(selector) : null;
+}
+
 function dialogExplorerDragStart(e, type, id) {
   e.dataTransfer.setData('text/type', type);
   e.dataTransfer.setData('text/id', id);
   e.dataTransfer.effectAllowed = 'move';
-  e.target.classList.add('dragging');
+  const target = dialogExplorerActionTarget(e, 'data-dragstart-action') || e.target;
+  if (target && target.classList) target.classList.add('dragging');
 }
 
 function dialogExplorerDragEnd(e) {
-  e.target.classList.remove('dragging');
+  const target = dialogExplorerActionTarget(e, 'data-dragend-action') || e.target;
+  if (target && target.classList) target.classList.remove('dragging');
 }
 
 function dialogExplorerItemDragOver(e) {
   e.preventDefault();
   e.stopPropagation();
   e.dataTransfer.dropEffect = 'move';
-  e.currentTarget.classList.add('drag-over');
+  const target = dialogExplorerActionTarget(e, 'data-dragover-action');
+  if (target && target.classList) target.classList.add('drag-over');
 }
 
 function dialogExplorerItemDragLeave(e) {
-  e.currentTarget.classList.remove('drag-over');
+  const target = dialogExplorerActionTarget(e, 'data-dragleave-action');
+  if (target && target.classList) target.classList.remove('drag-over');
 }
 
 function dialogExplorerItemDrop(e, targetFolderId) {
   e.preventDefault();
   e.stopPropagation();
-  e.currentTarget.classList.remove('drag-over');
+  const target = dialogExplorerActionTarget(e, 'data-drop-action');
+  if (target && target.classList) target.classList.remove('drag-over');
   const type = e.dataTransfer.getData('text/type');
   const id = e.dataTransfer.getData('text/id');
   if (type && id) dialogExplorerDrop(id, type, targetFolderId);
@@ -1504,16 +1543,16 @@ function initDialogManager() {
 }
 
 function bindDialogTimelineHover() {
-  const list = document.getElementById('dialogTimelineList');
-  if (!list || list._dialogTimelineHoverBound) return;
-  list._dialogTimelineHoverBound = true;
-  list.addEventListener('mouseover', event => {
-    const point = event.target.closest('.dialog-timeline-point');
-    if (!point || !list.contains(point)) return;
+  const timeline = document.getElementById('dialogTimeline');
+  if (!timeline || timeline._dialogTimelineHoverBound) return;
+  timeline._dialogTimelineHoverBound = true;
+  timeline.addEventListener('mouseover', event => {
+    const point = event.target.closest('.dialog-timeline-point,.dialog-timeline-bottom');
+    if (!point || !timeline.contains(point)) return;
     showDialogTimelineTip(point);
   });
-  list.addEventListener('mouseout', event => {
-    const point = event.target.closest('.dialog-timeline-point');
+  timeline.addEventListener('mouseout', event => {
+    const point = event.target.closest('.dialog-timeline-point,.dialog-timeline-bottom');
     if (!point || (event.relatedTarget && point.contains(event.relatedTarget))) return;
     hideDialogTimelineTip();
   });
@@ -1535,6 +1574,7 @@ function showDialogTimelineTip(point) {
   const tip = ensureDialogTimelineTip();
   const rect = point.getBoundingClientRect();
   tip.textContent = text;
+  tip.classList.toggle('tip-bottom', point.classList.contains('dialog-timeline-bottom'));
   tip.style.left = `${Math.max(8, rect.left - 10)}px`;
   tip.style.top = `${Math.min(window.innerHeight - 20, Math.max(20, rect.top + rect.height / 2))}px`;
   tip.classList.add('show');
@@ -1551,6 +1591,7 @@ window.renderDialogManager = renderDialogManager;
 window.saveDialogManagerSettings = saveDialogManagerSettings;
 window.updateDialogTimeline = updateDialogTimeline;
 window.jumpToDialogMessage = jumpToDialogMessage;
+window.scrollDialogToBottom = scrollDialogToBottom;
 window.renameTimelineNode = renameTimelineNode;
 window.switchDialogManagerChat = switchDialogManagerChat;
 window.setDialogExportChat = setDialogExportChat;

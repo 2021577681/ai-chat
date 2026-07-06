@@ -1982,7 +1982,7 @@ async function renameFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
 async function deleteFileExplorerPath(path = FILE_EXPLORER_STATE.contextPath) {
   const normalizedPath = normalizeExplorerPath(path);
   try {
-    const r = await callAgentBackend('delete_file', { path: normalizedPath }, { skipConfirm: true });
+    const r = await callAgentBackend('delete_file', { path: normalizedPath, recursive: true }, { skipConfirm: true });
     if (typeof r === 'string') throw new Error(r);
     if (!r || !r.ok) throw new Error((r && r.error) || '删除失败');
     if (FILE_EXPLORER_STATE.editorPath === normalizedPath) closeFileEditor(true);

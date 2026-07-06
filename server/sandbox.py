@@ -134,6 +134,12 @@ def _masked_urls(cmd: str) -> str:
     return re.sub(r'https?://\S+', ' ', cmd, flags=re.IGNORECASE)
 
 
+def _is_allowed_shell_device_path(path: str) -> bool:
+    """Allow harmless shell pseudo-files that do not expose real filesystem data."""
+    normalized = (path or '').replace('\\', '/').rstrip('/')
+    return normalized == '/dev/null'
+
+
 def command_workspace_violation(cmd: str):
     """返回 (是否越界, 原因)。用于 shell 命令执行前的保守拦截。
 
@@ -171,6 +177,8 @@ def command_workspace_violation(cmd: str):
         unix_abs_re = re.compile(r'(?<![:\w.-])(/[^\s"\'<>|&]+)')
         for m in unix_abs_re.finditer(masked):
             p = _trim_shell_path(m.group(1))
+            if _is_allowed_shell_device_path(p):
+                continue
             if p and not is_inside_workspace(p):
                 return True, f'命令引用了沙箱外绝对路径：{p}'
 

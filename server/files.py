@@ -42,6 +42,23 @@ def _strip_patch_path(path):
     return path
 
 
+def _body_flag_enabled(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+
+def _is_workspace_root_path(path):
+    try:
+        return os.path.realpath(path) == os.path.realpath(config.WORKSPACE_ROOT)
+    except Exception:
+        return False
+
+
 def _parse_hunk_header(line):
     m = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', line)
     if not m:
@@ -973,16 +990,20 @@ class FilesMixin:
         if not os.path.exists(path):
             return self.response.json(200, {'ok': False, 'error': '路径不存在'})
         try:
+            recursive = _body_flag_enabled((body or {}).get('recursive'))
+            if recursive and _is_workspace_root_path(path):
+                return self.response.json(200, {'ok': False, 'error': '不能递归删除工作区根目录'})
             checkpoint = self._checkpoint_before_mutation([path], body, 'delete_file')
-            if os.path.isfile(path):
+            if os.path.isfile(path) or os.path.islink(path):
                 removed_lines = 0
-                try:
-                    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                        text = f.read()
-                    if text:
-                        removed_lines = len(text.splitlines())
-                except Exception:
-                    removed_lines = 0
+                if os.path.isfile(path):
+                    try:
+                        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                            text = f.read()
+                        if text:
+                            removed_lines = len(text.splitlines())
+                    except Exception:
+                        removed_lines = 0
                 os.remove(path)
                 self.response.json(200, {
                     'ok': True,
@@ -993,13 +1014,17 @@ class FilesMixin:
                     'checkpoint': checkpoint
                 })
             elif os.path.isdir(path):
-                if os.listdir(path):
+                if os.listdir(path) and not recursive:
                     return self.response.json(200, {'ok': False, 'error': '目录非空'})
-                os.rmdir(path)
+                if recursive:
+                    shutil.rmtree(path)
+                else:
+                    os.rmdir(path)
                 self.response.json(200, {
                     'ok': True,
                     'path': path,
                     'type': 'dir',
+                    'recursive': recursive,
                     'checkpoint_id': checkpoint['id'] if checkpoint else None,
                     'checkpoint': checkpoint
                 })

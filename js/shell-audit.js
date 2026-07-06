@@ -401,6 +401,10 @@ function shellAuditIsPathInsideWorkspace(path, workspaceRoot) {
   return target === root || target.startsWith(root + '/');
 }
 
+function shellAuditIsAllowedDevicePath(path) {
+  return normalizeShellAuditPath(path) === '/dev/null';
+}
+
 function maskShellAuditUrls(command) {
   return String(command || '').replace(/https?:\/\/\S+/gi, ' ');
 }
@@ -434,9 +438,10 @@ function detectShellAuditWorkspaceBoundaryViolation(command, workspaceRoot) {
   }
 
   if (!/^[A-Za-z]:[\\\/]/.test(String(workspaceRoot || ''))) {
-    const unixAbs = /(^|[\s"'`])((?:\/(?![\/-])[^ \t\r\n"'`<>|&]+))/g;
+    const unixAbs = /(^|[^\w:.-])((?:\/(?![\/-])[^ \t\r\n"'`<>|&]+))/g;
     while ((m = unixAbs.exec(cmd))) {
       const path = trimShellAuditPathToken(m[2]);
+      if (shellAuditIsAllowedDevicePath(path)) continue;
       if (path && !shellAuditIsPathInsideWorkspace(path, workspaceRoot)) {
         return { violation: true, reason: `命令引用了工作区外绝对路径：${path}` };
       }

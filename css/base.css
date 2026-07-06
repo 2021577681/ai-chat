@@ -972,15 +972,22 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .prompt-card-actions{display:flex;gap:7px;flex-wrap:wrap}
 .dialog-empty{padding:18px 10px;text-align:center;color:var(--text-secondary);font-size:12.5px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-input)}
 .dialog-empty.small{padding:10px;margin-top:8px}
-.dialog-timeline{position:absolute;right:18px;top:50%;transform:translateY(-50%);z-index:20;width:34px;max-height:min(68vh,560px);padding:10px 0;display:flex;justify-content:center;pointer-events:none}
+.dialog-timeline{position:absolute;right:18px;top:50%;transform:translateY(-50%);z-index:20;width:34px;max-height:min(68vh,560px);padding:10px 0 34px;display:flex;justify-content:center;pointer-events:none}
 .dialog-timeline[hidden]{display:none}
-.dialog-timeline-line{position:absolute;top:14px;bottom:14px;left:50%;width:1px;background:var(--border);transform:translateX(-50%)}
-.dialog-timeline-points{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:8px;max-height:calc(min(68vh,560px) - 20px);overflow-x:hidden;overflow-y:auto;pointer-events:auto}
+.dialog-timeline-line{position:absolute;top:14px;bottom:18px;left:50%;width:1px;background:var(--border);transform:translateX(-50%)}
+.dialog-timeline-points{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:8px;max-height:calc(min(68vh,560px) - 54px);overflow-x:hidden;overflow-y:auto;pointer-events:auto}
 .dialog-timeline-point{width:20px;height:20px;border:0;background:transparent;display:flex;align-items:center;justify-content:center;border-radius:50%;cursor:pointer;padding:0}
 .dialog-timeline-point-dot{width:8px;height:8px;border-radius:50%;background:var(--bg-sidebar);border:2px solid var(--primary);box-shadow:0 0 0 2px var(--bg-chat);transition:transform .15s,background .15s,border-color .15s}
 .dialog-timeline-point:hover .dialog-timeline-point-dot,.dialog-timeline-point.active .dialog-timeline-point-dot{background:var(--primary);transform:scale(1.25)}
+.dialog-timeline-bottom{position:absolute;left:50%;bottom:2px;z-index:2;width:24px;height:24px;border:0;border-radius:50%;background:transparent;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;pointer-events:auto;transform:translateX(-50%);outline:none}
+.dialog-timeline-bottom-dot{width:10px;height:10px;border-radius:50%;background:#f97316;border:2px solid #ffedd5;box-shadow:0 0 0 2px var(--bg-chat),0 0 0 5px rgba(249,115,22,.16);transition:transform .15s,background .15s,box-shadow .15s}
+.dialog-timeline-bottom:hover .dialog-timeline-bottom-dot,.dialog-timeline-bottom:focus-visible .dialog-timeline-bottom-dot{background:#ea580c;transform:scale(1.28);box-shadow:0 0 0 2px var(--bg-chat),0 0 0 6px rgba(249,115,22,.22)}
 .dialog-timeline-tip{position:fixed;z-index:3000;width:180px;max-width:min(360px,calc(100vw - 80px));max-height:100px;overflow:hidden;padding:6px 10px 6px 12px;border:none;border-left:3px solid var(--primary);border-radius:0;background:transparent;color:var(--text);box-shadow:none;font-size:12.5px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;pointer-events:none;opacity:0;visibility:hidden;transform:translate(-100%,-50%) translateX(-6px);transition:opacity .12s,visibility .12s,transform .12s}
+.dialog-timeline-tip.tip-bottom{border-left-color:#f97316}
 .dialog-timeline-tip.show{opacity:1;visibility:visible;transform:translate(-100%,-50%)}
+[data-theme="dark"] .dialog-timeline-bottom-dot{background:#fb923c;border-color:#7c2d12;box-shadow:0 0 0 2px var(--bg-chat),0 0 0 5px rgba(251,146,60,.18)}
+[data-theme="dark"] .dialog-timeline-bottom:hover .dialog-timeline-bottom-dot,[data-theme="dark"] .dialog-timeline-bottom:focus-visible .dialog-timeline-bottom-dot{background:#fdba74;box-shadow:0 0 0 2px var(--bg-chat),0 0 0 6px rgba(251,146,60,.24)}
+[data-theme="dark"] .dialog-timeline-tip.tip-bottom{border-left-color:#fb923c}
 .dialog-jump-highlight{animation:dialogJumpPulse 1.6s ease}
 @keyframes dialogJumpPulse{0%{background:rgba(79,70,229,.16);box-shadow:0 0 0 0 rgba(79,70,229,.24)}100%{background:transparent;box-shadow:0 0 0 12px rgba(79,70,229,0)}}
 @media (max-width:1000px){.dialog-manager-grid{grid-template-columns:1fr}.dialog-timeline{display:none!important}.main.dialog-timeline-visible .messages{padding-right:20px}}

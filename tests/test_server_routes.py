@@ -1,5 +1,15 @@
 import unittest
+from pathlib import Path
+from unittest import mock
 
+from server.exec import (
+    ExecMixin,
+    _apply_git_proxy_env,
+    _command_invokes_git,
+    _coerce_execute_timeout,
+    _git_proxy_bat_lines,
+    _normalize_local_git_proxy_url,
+)
 from server.handler import Handler
 from server.routes import (
     ACTION_ROUTE_BY_NAME,
@@ -9,6 +19,9 @@ from server.routes import (
     POST_PREFIX_ROUTES,
 )
 from server.web import WebMixin
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ServerRouteTests(unittest.TestCase):
@@ -77,6 +90,67 @@ class WebProxyTests(unittest.TestCase):
         self.assertIn('google: ConnectionError', message)
         self.assertIn('proxy=http://127.0.0.1:7890', message)
         self.assertIn('local proxy is running', message)
+
+
+class ExecGitProxyTests(unittest.TestCase):
+    def test_local_git_proxy_urls_are_normalized(self):
+        cases = {
+            'http://localhost:7890': 'http://127.0.0.1:7890',
+            'https://127.0.0.1:7890': 'http://127.0.0.1:7890',
+            'socks5://localhost:7890': 'socks5h://127.0.0.1:7890',
+            'socks5h://127.0.0.1:7890': 'socks5h://127.0.0.1:7890',
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(expected, _normalize_local_git_proxy_url(raw))
+
+    def test_non_local_git_proxy_urls_are_not_exported(self):
+        self.assertEqual('', _normalize_local_git_proxy_url('http://proxy.example.com:7890'))
+        self.assertEqual('', _normalize_local_git_proxy_url('http://127.0.0.1:70000'))
+
+    def test_execute_proxy_env_only_targets_git_commands(self):
+        self.assertTrue(_command_invokes_git('git fetch origin'))
+        self.assertTrue(_command_invokes_git('npm test && git pull'))
+        self.assertTrue(_command_invokes_git('cmd /c git fetch'))
+        self.assertTrue(_command_invokes_git('powershell -Command "git fetch"'))
+        self.assertFalse(_command_invokes_git('echo git'))
+        self.assertFalse(_command_invokes_git('python script.py'))
+
+        env = _apply_git_proxy_env({}, 'http://127.0.0.1:7890')
+        for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+            self.assertEqual('http://127.0.0.1:7890', env[key])
+
+    def test_new_window_bat_exports_git_proxy(self):
+        lines = _git_proxy_bat_lines('socks5h://127.0.0.1:7890')
+
+        self.assertIn('set "HTTP_PROXY=socks5h://127.0.0.1:7890"', lines)
+        self.assertIn('set "all_proxy=socks5h://127.0.0.1:7890"', lines)
+
+    def test_execute_reads_git_proxy_from_config(self):
+        mixin = ExecMixin()
+        completed = mock.Mock(returncode=0, stdout=b'socks5://localhost:7890\n')
+
+        with mock.patch('server.exec.subprocess.run', return_value=completed) as run:
+            proxy_url = mixin._git_proxy_url_for_execute('git fetch origin', str(ROOT))
+
+        self.assertEqual('socks5h://127.0.0.1:7890', proxy_url)
+        run.assert_called_once()
+
+    def test_execute_does_not_read_git_config_for_non_git_command(self):
+        mixin = ExecMixin()
+
+        with mock.patch('server.exec.subprocess.run') as run:
+            proxy_url = mixin._git_proxy_url_for_execute('python script.py', str(ROOT))
+
+        self.assertEqual('', proxy_url)
+        run.assert_not_called()
+
+    def test_execute_timeout_is_clamped(self):
+        self.assertEqual(60, _coerce_execute_timeout(None, default=60))
+        self.assertEqual(1, _coerce_execute_timeout(-5, default=60))
+        self.assertEqual(300, _coerce_execute_timeout(999, default=60))
+        self.assertEqual(120, _coerce_execute_timeout('120', default=60))
+        self.assertEqual(60, _coerce_execute_timeout('bad', default=60))
 
 
 if __name__ == '__main__':

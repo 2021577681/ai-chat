@@ -1587,6 +1587,163 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
         )
 
     @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
+    def test_dialog_explorer_delegated_drag_drop_uses_card_target(self):
+        script = textwrap.dedent(
+            r"""
+            const assert = require('assert');
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const root = process.cwd();
+            const sandbox = { console };
+            sandbox.window = sandbox;
+            sandbox.globalThis = sandbox;
+            sandbox.escapeHtml = value => String(value ?? '');
+            vm.createContext(sandbox);
+
+            function run(file) {
+              const code = fs.readFileSync(path.join(root, file), 'utf8');
+              vm.runInContext(code, sandbox, { filename: file });
+            }
+
+            function makeClassList() {
+              const classes = new Set();
+              return {
+                add(name) { classes.add(name); },
+                remove(name) { classes.delete(name); },
+                contains(name) { return classes.has(name); }
+              };
+            }
+
+            function makeActionElement(actionAttr) {
+              const classList = makeClassList();
+              return {
+                nodeType: 1,
+                classList,
+                matches(selector) {
+                  return selector === '[' + actionAttr + ']';
+                }
+              };
+            }
+
+            const nav = { innerHTML: '' };
+            const area = {
+              innerHTML: '',
+              classList: makeClassList(),
+              contains(node) { return node === folderCard || node === childTarget; }
+            };
+            sandbox.document = {
+              documentElement: { contains() { return true; } },
+              getElementById(id) {
+                if (id === 'dialogExplorerNav') return nav;
+                if (id === 'dialogExplorerArea') return area;
+                return null;
+              }
+            };
+
+            run('js/app-context.js');
+            const state = {
+              currentId: 'chat-1',
+              settings: {
+                dialogManager: {
+                  explorerViewMode: 'icons',
+                  explorerSortMode: 'created',
+                  folders: [{ id: 'folder-2', name: 'Target', parentId: '', createdAt: 1 }]
+                }
+              },
+              chats: [{ id: 'chat-1', title: 'Chat', messages: [], createdAt: 2 }]
+            };
+            let saved = 0;
+            let renderedChatList = 0;
+            let persisted = 0;
+            sandbox.AgentApp.define('state', {
+              state,
+              saveData() { saved += 1; },
+              persistSettings() { persisted += 1; },
+              currentChat() { return state.chats[0]; },
+              chatById(id) { return state.chats.find(chat => chat.id === id) || null; },
+              isChatGenerating() { return false; },
+              syncGlobalTaskState() {}
+            });
+            sandbox.AgentApp.define('uiService', {
+              toast() {},
+              renderChatList() { renderedChatList += 1; },
+              renderMessages() {},
+              updateSendBtn() {}
+            });
+
+            run('js/dialog-manager.js');
+
+            const folderCard = makeActionElement('data-drop-action');
+            const childTarget = {
+              closest(selector) {
+                if (selector === '[data-dragover-action]' || selector === '[data-drop-action]') return folderCard;
+                return null;
+              }
+            };
+
+            const dragOverEvent = {
+              target: childTarget,
+              currentTarget: sandbox.document,
+              dataTransfer: {},
+              preventDefault() { this.defaultPrevented = true; },
+              stopPropagation() { this.stopped = true; }
+            };
+            sandbox.dialogExplorerItemDragOver(dragOverEvent);
+            assert.strictEqual(dragOverEvent.defaultPrevented, true);
+            assert.strictEqual(dragOverEvent.stopped, true);
+            assert.strictEqual(dragOverEvent.dataTransfer.dropEffect, 'move');
+            assert.strictEqual(folderCard.classList.contains('drag-over'), true);
+
+            const dropEvent = {
+              target: childTarget,
+              currentTarget: sandbox.document,
+              dataTransfer: {
+                getData(key) {
+                  return key === 'text/type' ? 'chat' : (key === 'text/id' ? 'chat-1' : '');
+                }
+              },
+              preventDefault() { this.defaultPrevented = true; },
+              stopPropagation() { this.stopped = true; }
+            };
+            sandbox.dialogExplorerItemDrop(dropEvent, 'folder-2');
+            assert.strictEqual(dropEvent.defaultPrevented, true);
+            assert.strictEqual(dropEvent.stopped, true);
+            assert.strictEqual(folderCard.classList.contains('drag-over'), false);
+            assert.strictEqual(state.chats[0].dialogFolderId, 'folder-2');
+            assert.strictEqual(saved, 1);
+            assert.strictEqual(renderedChatList, 1);
+
+            sandbox.dialogExplorerToggleSort('created');
+            const savedAfterRender = saved;
+            assert.strictEqual(typeof area.ondrop, 'function');
+            area.classList.add('drag-over');
+            area.ondrop(dropEvent);
+            assert.strictEqual(area.classList.contains('drag-over'), false);
+            assert.strictEqual(saved, savedAfterRender);
+            assert.strictEqual(state.chats[0].dialogFolderId, 'folder-2');
+            assert.strictEqual(persisted, 1);
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / 'dialog_explorer_drag_drop_test.js'
+            script_path.write_text(script, encoding='utf-8')
+            completed = subprocess.run(
+                ['node', str(script_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f'dialog explorer drag/drop runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
+        )
+
+    @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
     def test_regenerate_truncates_entire_tool_turn(self):
         script = textwrap.dedent(
             r"""

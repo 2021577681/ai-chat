@@ -174,6 +174,7 @@
     'termConfirmAcceptAll',
     'closeDialogManager',
     'saveDialogManagerSettings',
+    'scrollDialogToBottom',
     'savePromptFromUi',
     'clearPromptEditor',
     'closeLmsPanel',
