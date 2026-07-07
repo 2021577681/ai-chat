@@ -1349,9 +1349,13 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
   // ⭐ 自动重试：把"发请求 + 读响应 + 解析"整体包成可重试单元
   // 复用主对话的 _isRetryableError / _retryDelay / _sleepAbortable
   // 配置项也用同一套 retryMaxAttempts / retryBaseDelayMs
-  const maxAttempts = retryMaxAttemptsToTotalAttempts(s.retryMaxAttempts);
+  const helperRetryMaxAttempts = Object.prototype.hasOwnProperty.call(options || {}, 'retryMaxAttempts')
+    ? options.retryMaxAttempts
+    : s.retryMaxAttempts;
+  const maxAttempts = retryMaxAttemptsToTotalAttempts(helperRetryMaxAttempts);
   const maxAttemptsLabel = retryTotalAttemptsLabel(maxAttempts);
   const baseDelay = Math.max(100, parseInt(s.retryBaseDelayMs) || 1000);
+  const helperTimeoutMs = Math.max(1000, parseInt(options && options.timeoutMs, 10) || API_FETCH_TIMEOUT_MS);
   const url = buildFullUrl(s.baseUrl, s.apiPath);
   const reqHeaders = buildHeaders();
   let lastErr = null;
@@ -1374,7 +1378,7 @@ async function callOnceWithRole(history, model, rolePrompt, options = {}) {
           method: 'POST',
           headers: reqHeaders,
           body: JSON.stringify(body)
-        }, signal, API_FETCH_TIMEOUT_MS);
+        }, signal, helperTimeoutMs);
         
         if (typeof recordRequest === 'function') {
           recordRequest();

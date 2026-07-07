@@ -757,6 +757,8 @@ function resetTokenStats() {
 
 const COMPRESSION_UNDO_TTL_MS = 30 * 60 * 1000;
 const _compressionUndoSnapshots = {};
+const COMPRESSION_HELPER_TIMEOUT_MS = 90 * 1000;
+const COMPRESSION_HELPER_RETRY_MAX_ATTEMPTS = 0;
 
 function compressionJsonClone(value) {
   try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
@@ -1039,6 +1041,8 @@ async function compressTransientMessagesForAgent(messages, options = {}) {
     chatId: options.chatId || (options.chat && options.chat.id) || '',
     signal: options.signal,
     isStopped: options.isStopped,
+    timeoutMs: options.timeoutMs || COMPRESSION_HELPER_TIMEOUT_MS,
+    retryMaxAttempts: Object.prototype.hasOwnProperty.call(options, 'retryMaxAttempts') ? options.retryMaxAttempts : COMPRESSION_HELPER_RETRY_MAX_ATTEMPTS,
     sourceLabel: `${label} · 内部压缩`
   };
   const conversationText = middleTrimText(
@@ -1312,6 +1316,8 @@ async function compressChat(chat, options = {}) {
     chatId: taskChatId,
     signal: options.signal || (foregroundAbortCtrl ? foregroundAbortCtrl.signal : undefined),
     isStopped: options.isStopped || (shouldTouchGlobalGenerating ? () => !!tokensState.stopRequested : undefined),
+    timeoutMs: options.timeoutMs || COMPRESSION_HELPER_TIMEOUT_MS,
+    retryMaxAttempts: Object.prototype.hasOwnProperty.call(options, 'retryMaxAttempts') ? options.retryMaxAttempts : COMPRESSION_HELPER_RETRY_MAX_ATTEMPTS,
     sourceLabel: `上下文压缩 · ${options.reason || 'manual'}`
   };
   
@@ -1404,7 +1410,11 @@ ${conversationText}
     reason: options.reason || 'manual',
     estimatedBefore
   });
-  chat.messages.push({ role: 'assistant', content: '🗜️ 正在压缩对话历史...', _isCompressing: true });
+  chat.messages.push({
+    role: 'assistant',
+    content: `🗜️ 正在压缩对话历史...（最长等待 ${Math.round(helperOptions.timeoutMs / 1000)} 秒，可点停止中断）`,
+    _isCompressing: true
+  });
   renderCompressionView();
   
   // ⭐ 用闭包函数代替 pop()，避免误删用户消息

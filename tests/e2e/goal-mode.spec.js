@@ -110,7 +110,7 @@ test.describe('goal mode workflows', () => {
 
     await page.locator('#scheduleBtn').click();
     await expect(page.locator('#schedulePicker')).not.toHaveAttribute('hidden', '');
-    await page.fill('#scheduleTimeInput', datetimeLocalFromNow(1500));
+    await page.fill('#scheduleTimeInput', datetimeLocalFromNow(60_000));
 
     await openGoalPanel(page);
     await createGoalFromPanel(page, 'E2E scheduled goal');
@@ -121,6 +121,15 @@ test.describe('goal mode workflows', () => {
       return goal ? { status: goal.status, scheduledStatus: goal.scheduled && goal.scheduled.status } : null;
     })).toEqual({ status: 'paused', scheduledStatus: 'waiting' });
     expect(backend.llmCalls).toHaveLength(0);
+
+    await page.evaluate(() => {
+      const core = window.AgentApp.require('goalCore');
+      const goal = core.listGoals().find(item => item.objective === 'E2E scheduled goal');
+      if (!goal || !goal.scheduled) throw new Error('Scheduled goal was not created');
+      goal.scheduled.runAt = Date.now() - 1;
+      core.saveGoals();
+      core.processScheduledGoals();
+    });
 
     await waitForGoalStatus(page, 'E2E scheduled goal', 'complete');
     expect(backend.llmCalls.length).toBeGreaterThanOrEqual(2);

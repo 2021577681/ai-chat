@@ -189,4 +189,38 @@ test.describe('extra settings prompts and safety controls without real services'
     await waitForAssistantReply(page, 'Mock reply');
     clientErrors.expectNoErrors();
   });
+
+  test('context compression times out and restores composer state when helper request hangs', async ({ page }) => {
+    const { clientErrors } = await gotoApp(page, {
+      delayForLlm(body) {
+        return JSON.stringify(body).includes('上下文压缩') ? 1500 : 0;
+      }
+    });
+    await configureMockProvider(page);
+
+    for (const text of ['timeout seed one', 'timeout seed two', 'timeout seed three']) {
+      await sendMessage(page, text);
+      await waitForAssistantReply(page, 'Mock reply');
+    }
+
+    const result = await page.evaluate(async () => {
+      const chat = currentChat();
+      return await window.compressChat(chat, {
+        reason: 'manual',
+        touchGlobalGenerating: true,
+        timeoutMs: 1000,
+        retryMaxAttempts: 0
+      });
+    });
+    expect(result).toBe(false);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop/);
+    await expect.poll(() => page.evaluate(() =>
+      currentChat().messages.some(m => m && m._isCompressing)
+    )).toBe(false);
+    await expect.poll(() => page.evaluate(() =>
+      window.AgentApp.require('state').state.isGenerating
+    )).toBe(false);
+
+    clientErrors.expectNoErrors();
+  });
 });

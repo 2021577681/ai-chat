@@ -78,6 +78,24 @@ async function clickContextMenuAction(page, action) {
   await page.locator(`#fileExplorerContextMenu [data-action="${action}"]:visible`).click();
 }
 
+async function expectElementCanScroll(locator) {
+  await expect(locator).toBeVisible();
+  const metrics = await locator.evaluate(el => {
+    el.scrollTop = 0;
+    el.scrollTop = el.scrollHeight;
+    const style = getComputedStyle(el);
+    return {
+      clientHeight: el.clientHeight,
+      scrollHeight: el.scrollHeight,
+      scrollTop: el.scrollTop,
+      overflowY: style.overflowY
+    };
+  });
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight + 1);
+  expect(metrics.scrollTop).toBeGreaterThan(0);
+  expect(['auto', 'scroll']).toContain(metrics.overflowY);
+}
+
 async function installBrowserStubs(page) {
   await page.addInitScript(() => {
     window.__e2eClipboard = '';
@@ -274,6 +292,36 @@ test.describe('extra Git, LMS, and file explorer E2E coverage without real servi
     const listCallsBeforeRefresh = backend.backendCalls.filter(call => call.action === 'list_dir').length;
     await page.locator('[data-action="refreshFileExplorer"]').click();
     await expect.poll(() => backend.backendCalls.filter(call => call.action === 'list_dir').length).toBeGreaterThan(listCallsBeforeRefresh);
+
+    clientErrors.expectNoErrors();
+  });
+
+  test('inline markdown and Python preview panes scroll in the main panel', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 760 });
+    const { clientErrors } = await gotoApp(page);
+    await page.waitForFunction(() => typeof window.openTextInMainPanel === 'function');
+
+    const markdown = Array.from({ length: 120 }, (_, i) =>
+      `## Section ${i + 1}\n\nParagraph ${i + 1} from the inline markdown scroll regression fixture.`
+    ).join('\n\n');
+    await page.evaluate(async content => {
+      await window.openTextInMainPanel('sample.md', content, content.length);
+    }, markdown);
+    await expect(page.locator('#inlineFilePanel')).not.toHaveAttribute('hidden', '');
+    await page.locator('#inlineMarkdownToggle').click();
+    await expectElementCanScroll(page.locator('#inlineFileBody .inline-markdown-preview'));
+    await page.locator('[data-action="closeInlineFilePanel"]').click();
+
+    const python = Array.from({ length: 140 }, (_, i) =>
+      `def function_${i + 1}():\n    value = ${i + 1}\n    return "line " + str(value)`
+    ).join('\n\n');
+    await page.evaluate(async content => {
+      await window.openTextInMainPanel('sample.py', content, content.length);
+    }, python);
+    await expect(page.locator('#inlineFilePanel')).not.toHaveAttribute('hidden', '');
+    await page.locator('#inlinePythonToggle').click();
+    await expectElementCanScroll(page.locator('#inlineFileBody .inline-code-preview'));
+    await page.locator('[data-action="closeInlineFilePanel"]').click();
 
     clientErrors.expectNoErrors();
   });
