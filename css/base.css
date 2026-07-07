@@ -287,8 +287,9 @@ body{font-family:var(--font-ui);font-size:14px;letter-spacing:.01em;-webkit-font
 .workspace-status.online{color:var(--success)}
 .workspace-status.offline{color:var(--danger)}
 .workspace-status.checking{color:var(--warning);animation:pulseDanger 1s infinite}
-.workspace-refresh,.workspace-select{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);border-radius:6px;padding:0;font-size:14px;line-height:1;cursor:pointer;color:var(--text-secondary);transition:all .15s;flex-shrink:0}
+.workspace-refresh,.workspace-home,.workspace-select{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);border-radius:6px;padding:0;font-size:14px;line-height:1;cursor:pointer;color:var(--text-secondary);transition:all .15s;flex-shrink:0}
 .workspace-refresh:hover{background:var(--primary);color:#fff;border-color:var(--primary);transform:rotate(90deg)}
+.workspace-home:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
 .workspace-select:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
 
 /* Token 统计栏 */

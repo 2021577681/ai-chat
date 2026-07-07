@@ -10,8 +10,8 @@ const toolsPersistTools = ToolsStateModule ? ToolsStateModule.persistTools : per
 const toolsPersistSettings = ToolsStateModule ? ToolsStateModule.persistSettings : persistSettings;
 const builtinToolDefs = ToolsConfig ? ToolsConfig.BUILTIN_TOOLS : (typeof BUILTIN_TOOLS !== 'undefined' ? BUILTIN_TOOLS : []);
 const presetToolDefs = ToolsConfig ? ToolsConfig.PRESET_TOOLS : (typeof PRESET_TOOLS !== 'undefined' ? PRESET_TOOLS : {});
-const GOAL_TOOL_NAMES = new Set(['create_goal', 'get_goal', 'update_goal']);
-const GOAL_RUNTIME_TOOL_NAMES = new Set(['get_goal', 'update_goal']);
+const TOOLS_GOAL_TOOL_NAMES = new Set(['create_goal', 'get_goal', 'update_goal']);
+const TOOLS_GOAL_RUNTIME_TOOL_NAMES = new Set(['get_goal', 'update_goal']);
 
 // ============ 工具管理 ============
 
@@ -433,7 +433,7 @@ function buildToolsArray(options = {}) {
 
 // ============ 工具结果 Artifact（长输出归档）============
 function isGoalToolName(name) {
-  return GOAL_TOOL_NAMES.has(String(name || ''));
+  return TOOLS_GOAL_TOOL_NAMES.has(String(name || ''));
 }
 
 function isGoalToolContext(context = {}) {
@@ -445,7 +445,7 @@ function toolVisibleForContext(tool, options = {}) {
   if (isPptTool(tool.name) && !(toolsState.settings && toolsState.settings.usePpt)) return false;
   if (!isGoalToolName(tool.name)) return true;
   const toolContext = options.toolContext || options.context || {};
-  return isGoalToolContext(toolContext) && GOAL_RUNTIME_TOOL_NAMES.has(tool.name);
+  return isGoalToolContext(toolContext) && TOOLS_GOAL_RUNTIME_TOOL_NAMES.has(tool.name);
 }
 
 const TOOL_ARTIFACT_INDEX_KEY = 'aichat_tool_artifacts_index_v1';
@@ -839,7 +839,7 @@ async function executeTool(name, args, context = {}) {
     if (!isGoalToolContext(toolContext)) {
       return { ok: false, value: '目标工具只能在目标模式运行上下文中使用。' };
     }
-    if (!GOAL_RUNTIME_TOOL_NAMES.has(name)) {
+    if (!TOOLS_GOAL_RUNTIME_TOOL_NAMES.has(name)) {
       return { ok: false, value: 'create_goal 不允许由 AI 工具调用创建；请使用目标面板创建目标。' };
     }
   }

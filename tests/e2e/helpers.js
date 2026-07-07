@@ -1004,8 +1004,10 @@ function agentBackendPayload(action, body, state = {}) {
       data: Buffer.from('Sample binary content').toString('base64')
     };
   }
-  if (action === 'workspace_info' || action === 'set_workspace') {
-    return { ok: true, workspace: body.path || MOCK_WORKSPACE, cwd: body.path || MOCK_WORKSPACE };
+  if (action === 'workspace_info' || action === 'set_workspace' || action === 'reset_workspace_to_agent_home') {
+    const workspace = action === 'reset_workspace_to_agent_home' ? MOCK_WORKSPACE : (body.path || MOCK_WORKSPACE);
+    if (action === 'reset_workspace_to_agent_home') state.remoteWorkspace = '';
+    return { ok: true, workspace, cwd: workspace, agent_home: MOCK_WORKSPACE };
   }
   if (action === 'skill_list') {
     return { ok: true, skills: [{ name: 'mock-skill', path: 'skill/mock-skill', summary: 'E2E mock skill' }] };
@@ -1134,7 +1136,7 @@ async function installMockBackend(page, options = {}) {
     const isLocalBackend = ['localhost', '127.0.0.1'].includes(url.hostname) && ['8765', '18765'].includes(url.port);
     if (isLocalBackend && url.pathname === '/workspace' && request.method() === 'GET') {
       const workspace = state.remoteWorkspace || MOCK_WORKSPACE;
-      await fulfillSafely(route, jsonResponse({ ok: true, workspace, cwd: workspace }));
+      await fulfillSafely(route, jsonResponse({ ok: true, workspace, cwd: workspace, agent_home: MOCK_WORKSPACE }));
       return;
     }
     if (isLocalBackend && url.pathname === '/lms-proxy') {

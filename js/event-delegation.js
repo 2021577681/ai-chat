@@ -8,7 +8,17 @@
 
   function globalFn(name) {
     const fn = global[name];
-    return typeof fn === 'function' ? fn : null;
+    if (typeof fn === 'function') return fn;
+    const fallbackModules = {
+      openGoalPanel: 'goalCore',
+      closeGoalPanel: 'goalCore',
+      openGoalSettings: 'goalCore',
+      closeGoalSettings: 'goalCore'
+    };
+    const moduleName = fallbackModules[name];
+    const moduleApi = moduleName && AgentApp.optional(moduleName);
+    const moduleFn = moduleApi && moduleApi[name];
+    return typeof moduleFn === 'function' ? moduleFn : null;
   }
 
   function callGlobal(name, args = []) {
@@ -25,6 +35,7 @@
     'collapseSidebar',
     'refreshWorkspaceInfo',
     'selectWorkspaceFromUi',
+    'returnToAgentWorkspace',
     'newChat',
     'fileExplorerGoUp',
     'refreshFileExplorer',

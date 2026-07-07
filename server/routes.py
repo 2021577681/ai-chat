@@ -77,6 +77,7 @@ ACTION_ROUTES = (
     ActionRoute('music', 'handle_music_action'),
     ActionRoute('select_workspace', 'handle_select_workspace'),
     ActionRoute('set_workspace', 'handle_set_workspace'),
+    ActionRoute('reset_workspace_to_agent_home', 'handle_reset_workspace_to_agent_home'),
     ActionRoute('remote_connect', 'handle_remote_connect'),
     ActionRoute('remote_status', 'handle_remote_status'),
     ActionRoute('remote_list_dirs', 'handle_remote_list_dirs'),

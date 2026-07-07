@@ -403,20 +403,25 @@ async function connectRemoteAgent(options = {}) {
   }
 }
 
-async function disconnectRemoteAgent() {
-  if (!confirm('断开本地 SSH 隧道？如勾选停止远程 Agent，会尝试 kill 远程进程。')) return;
+async function disconnectRemoteAgent(options = {}) {
+  const opts = (options && typeof options === 'object' && !('target' in options)) ? options : {};
+  if (!opts.skipConfirm && !confirm('断开本地 SSH 隧道？如勾选停止远程 Agent，会尝试 kill 远程进程。')) return;
   const v = remoteFormValues();
+  const stopRemoteEl = document.getElementById('remoteStopRemote');
+  const stopRemote = Object.prototype.hasOwnProperty.call(opts, 'stopRemote')
+    ? !!opts.stopRemote
+    : !!(stopRemoteEl && stopRemoteEl.checked);
   try {
-    setRemoteStatus('正在断开...', 'loading');
-    await remoteBackend('remote_disconnect', { password: v.password, stop_remote: !!document.getElementById('remoteStopRemote').checked, requestTimeoutMs: 60000 });
+    if (!opts.silent) setRemoteStatus('正在断开...', 'loading');
+    await remoteBackend('remote_disconnect', { password: v.password, stop_remote: stopRemote, requestTimeoutMs: 60000 });
   } catch (e) {
     console.warn('[remote] disconnect failed:', e);
   }
   clearRemoteAutoReconnectFlag();
   TERMINAL_CONFIG.serverUrl = REMOTE_CONTROLLER.serverUrl || 'http://localhost:8765';
   TERMINAL_CONFIG.remoteGitProxyUrl = '';
-  await refreshWorkspaceInfo();
-  setRemoteStatus(`已切回控制端 ${TERMINAL_CONFIG.serverUrl}`, 'ok');
+  if (opts.refreshWorkspace !== false) await refreshWorkspaceInfo();
+  if (!opts.silent) setRemoteStatus(`已切回控制端 ${TERMINAL_CONFIG.serverUrl}`, 'ok');
 }
 
 async function initRemoteConnection() {

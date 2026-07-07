@@ -470,6 +470,7 @@ body{
 }
 
 .sidebar-workspace .workspace-refresh,
+.sidebar-workspace .workspace-home,
 .sidebar-workspace .workspace-select{
   width:20px;
   height:20px;
@@ -533,6 +534,7 @@ body{
 
 .workspace-path:hover,
 .workspace-refresh:hover,
+.workspace-home:hover,
 .workspace-select:hover,
 .token-compress-btn:hover{
   background:var(--bg-hover);

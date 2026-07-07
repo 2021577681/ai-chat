@@ -122,6 +122,7 @@ function updateTopUrlPreview() {
 // ⭐ 刷新顶部沙箱信息栏（从本地服务读取 workspace）
 let _wsRefreshTimer = null;
 let _workspaceSelectInFlight = false;
+let _workspaceHomeInFlight = false;
 
 function updateWorkspaceDisplay(info) {
   const pathEl = document.getElementById('workspacePath');
@@ -132,6 +133,7 @@ function updateWorkspaceDisplay(info) {
   if (typeof TERMINAL_CONFIG !== 'undefined') {
     TERMINAL_CONFIG.workspace = ws;
     TERMINAL_CONFIG.cwd = cwd;
+    if (info && info.agent_home) TERMINAL_CONFIG.agentHome = info.agent_home;
   }
   pathEl.textContent = ws;
   pathEl.title = `点击复制\n沙箱根：${ws}\n当前 cwd：${cwd}`;
@@ -218,6 +220,51 @@ async function selectWorkspaceFromUi() {
   }
 }
 
+async function returnToAgentWorkspace() {
+  if (_workspaceHomeInFlight) return;
+  _workspaceHomeInFlight = true;
+  const pathEl = document.getElementById('workspacePath');
+  const statusEl = document.getElementById('workspaceStatus');
+  const homeBtn = document.querySelector('[data-action="returnToAgentWorkspace"]');
+  const previousText = pathEl ? pathEl.textContent : '';
+  const wasRemote = typeof isRemoteAgentActive === 'function' && isRemoteAgentActive();
+  try {
+    if (homeBtn) homeBtn.disabled = true;
+    if (statusEl) {
+      statusEl.className = 'workspace-status checking';
+      statusEl.title = wasRemote ? '正在断开远程连接并返回 Agent 目录...' : '正在返回 Agent 目录...';
+    }
+    if (pathEl) {
+      pathEl.textContent = wasRemote ? '正在断开远程连接...' : '正在返回 Agent 目录...';
+      pathEl.title = '正在切换沙箱目录';
+    }
+
+    if (wasRemote) {
+      if (typeof disconnectRemoteAgent !== 'function') throw new Error('远程连接模块未加载');
+      await disconnectRemoteAgent({
+        skipConfirm: true,
+        stopRemote: false,
+        silent: true,
+        refreshWorkspace: false
+      });
+    }
+
+    const r = await workspaceBackendAction('reset_workspace_to_agent_home');
+    if (!r.ok) throw new Error(r.error || '返回 Agent 目录失败');
+    updateWorkspaceDisplay(r);
+    refreshWorkspaceDependentContext();
+    if (typeof resetFileExplorerToRoot === 'function') resetFileExplorerToRoot();
+    toast(wasRemote ? '✓ 已断开远程连接并返回 Agent 目录' : '✓ 已返回 Agent 目录');
+  } catch (e) {
+    if (pathEl && previousText) pathEl.textContent = previousText;
+    toast('返回 Agent 目录失败：' + e.message, 4500);
+    await refreshWorkspaceInfo();
+  } finally {
+    if (homeBtn) homeBtn.disabled = false;
+    _workspaceHomeInFlight = false;
+  }
+}
+
 async function refreshWorkspaceInfo() {
   const pathEl = document.getElementById('workspacePath');
   const statusEl = document.getElementById('workspaceStatus');
@@ -250,6 +297,7 @@ async function refreshWorkspaceInfo() {
 }
 window.refreshWorkspaceInfo = refreshWorkspaceInfo;
 window.selectWorkspaceFromUi = selectWorkspaceFromUi;
+window.returnToAgentWorkspace = returnToAgentWorkspace;
 
 function updateUrlPreview() {
   const baseUrl = document.getElementById('baseUrl').value.trim();
@@ -337,6 +385,7 @@ window.AgentApp.define('utils', {
   workspaceBackendAction,
   refreshWorkspaceDependentContext,
   selectWorkspaceFromUi,
+  returnToAgentWorkspace,
   refreshWorkspaceInfo,
   updateUrlPreview,
   extractUserQuestion,

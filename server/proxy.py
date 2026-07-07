@@ -42,7 +42,8 @@ class ProxyMixin:
         self.response.json(200, {
             'ok': True,
             'workspace': config.WORKSPACE_ROOT,
-            'cwd': config.get_current_cwd()
+            'cwd': config.get_current_cwd(),
+            'agent_home': config.AGENT_HOME
         })
 
     # ============ POST /lms-login ============

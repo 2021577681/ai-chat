@@ -7,7 +7,7 @@ const settingsPagePersistSettings = SettingsPageStateModule.persistSettings;
 const SETTINGS_PAGE_SECTIONS = {
   main: { open: 'openSettings', close: 'closeSettings', modalId: 'settingsModal' },
   remoteControl: { open: 'openRemoteControlSettings', close: 'closeRemoteControlSettings', modalId: 'remoteControlSettingsModal' },
-  goal: { open: 'openGoalSettings', close: 'closeGoalSettings', modalId: 'goalSettingsModal' },
+  goal: { open: 'openGoalSettings', close: 'closeGoalSettings', modalId: 'goalSettingsModal', module: 'goalCore' },
   plan: { open: 'openPlanSettings', close: 'closePlanSettings', modalId: 'planModal' },
   outline: { open: 'openOutlineSettings', close: 'closeOutlineSettings', modalId: 'outlineModal' },
   ppt: { open: 'openPptSettings', close: 'closePptSettings', modalId: 'pptSettingsModal' },
@@ -221,6 +221,23 @@ function sortSettingsNav() {
   items.forEach(item => nav.appendChild(item));
 }
 
+function getSettingsOriginalFunction(section, name) {
+  const fn = SETTINGS_PAGE_STATE.originals[name];
+  if (typeof fn === 'function') return fn;
+
+  const config = SETTINGS_PAGE_SECTIONS[section];
+  const moduleName = config && config.module;
+  const moduleApi = moduleName && window.AgentApp && typeof window.AgentApp.optional === 'function'
+    ? window.AgentApp.optional(moduleName)
+    : null;
+  const moduleFn = moduleApi && moduleApi[name];
+  if (typeof moduleFn === 'function') {
+    SETTINGS_PAGE_STATE.originals[name] = moduleFn;
+    return moduleFn;
+  }
+  return null;
+}
+
 async function openSettingsPage(section = 'main') {
   initSettingsPage();
   const page = document.getElementById('settingsPage');
@@ -261,7 +278,7 @@ async function openSettingsSection(section = 'main') {
   content.innerHTML = '<div class="settings-page-loading">Loading...</div>';
   pruneBrokenSettingsModal(config.modalId);
 
-  const openFn = SETTINGS_PAGE_STATE.originals[config.open];
+  const openFn = getSettingsOriginalFunction(section, config.open);
   if (typeof openFn !== 'function') {
     content.innerHTML = '<div class="settings-page-empty">This settings section is unavailable.</div>';
     return;
@@ -422,7 +439,7 @@ function undockSettingsPanel() {
 function closeDockedSection() {
   const active = SETTINGS_PAGE_STATE.activeSection;
   const config = SETTINGS_PAGE_SECTIONS[active];
-  const closeFn = config ? SETTINGS_PAGE_STATE.originals[config.close] : null;
+  const closeFn = config ? getSettingsOriginalFunction(active, config.close) : null;
   undockSettingsPanel();
   if (typeof closeFn === 'function') {
     try { closeFn(); } catch (error) { console.warn('[settings-page] close failed', error); }
@@ -438,7 +455,7 @@ function closeSettingsProxy(section) {
     return;
   }
   const config = SETTINGS_PAGE_SECTIONS[section];
-  const closeFn = config ? SETTINGS_PAGE_STATE.originals[config.close] : null;
+  const closeFn = config ? getSettingsOriginalFunction(section, config.close) : null;
   if (typeof closeFn === 'function') closeFn();
 }
 

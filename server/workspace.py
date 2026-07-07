@@ -100,11 +100,15 @@ class WorkspaceMixin:
         return self.response.json(200, {
             'ok': True,
             'workspace': workspace,
-            'cwd': workspace
+            'cwd': workspace,
+            'agent_home': config.AGENT_HOME
         })
 
     def handle_set_workspace(self, body):
         return self._apply_workspace(body.get('path') or body.get('workspace') or '')
+
+    def handle_reset_workspace_to_agent_home(self, body):
+        return self._apply_workspace(config.AGENT_HOME)
 
     def handle_select_workspace(self, body):
         initial = body.get('initial_dir') or config.WORKSPACE_ROOT
