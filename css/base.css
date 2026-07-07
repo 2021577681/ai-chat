@@ -1417,7 +1417,7 @@ textarea{width:100%;border:none;background:transparent;resize:none;outline:none;
 .img-preview-mask img{max-width:92vw;max-height:92vh;border-radius:8px}
 
 /* Toast */
-.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 20px;border-radius:8px;font-size:13px;opacity:0;transition:all .3s;z-index:3000;pointer-events:none}
+.toast{position:fixed;bottom:30px;left:50%;max-width:min(720px,calc(100vw - 32px));max-height:min(40vh,320px);overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.45;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 20px;border-radius:8px;font-size:13px;opacity:0;transition:all .3s;z-index:3000;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
 /* 终端确认弹窗 */

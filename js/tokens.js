@@ -886,16 +886,69 @@ function compressionExtractCheckpointIds(text) {
   return out;
 }
 
+const COMPRESSION_FILE_EXT_PATTERN = String.raw`(?:js|ts|jsx|tsx|py|java|c|cpp|h|hpp|cs|go|rs|rb|php|html|css|scss|json(?:\.gz)?|md|yml|yaml|toml|ini|sql|sh|bat|ps1|txt|csv|xml|vue|svelte|gz)`;
+const COMPRESSION_FILE_EXT_RE = new RegExp(String.raw`\.${COMPRESSION_FILE_EXT_PATTERN}$`, 'i');
+const COMPRESSION_PATH_COMPONENT = String.raw`[\w\u4e00-\u9fa5.@()+-](?:[\w\u4e00-\u9fa5 .@()+-]*[\w\u4e00-\u9fa5.@()+-])?`;
+const COMPRESSION_PATH_RE = new RegExp(String.raw`(?:^|[\s"'([{])((?:[A-Za-z]:[\\/]|[\\/]|\.{1,2}[\\/])?(?:${COMPRESSION_PATH_COMPONENT}[\\/])+${COMPRESSION_PATH_COMPONENT}\.${COMPRESSION_FILE_EXT_PATTERN})`, 'g');
+const COMPRESSION_FILENAME_COMPONENT = String.raw`[\w\u4e00-\u9fa5.@()+-]+`;
+const COMPRESSION_FILENAME_RE = new RegExp(String.raw`(?:^|[\s"'([{,;:：|])(${COMPRESSION_FILENAME_COMPONENT}\.${COMPRESSION_FILE_EXT_PATTERN})(?=$|[\s"')\]},;:：。；!?|]|[\\/])`, 'g');
+const COMPRESSION_TOKEN_PATH_RE = new RegExp(String.raw`(?:^|[\s"'([{,;:：|])([^\s"'(){}\[\],;:：，。；!?|]+[\\/][^\s"'(){}\[\],;:：，。；!?|]*\.${COMPRESSION_FILE_EXT_PATTERN})(?=$|[\s"'(){}\[\],;:：，。；!?|])`, 'g');
+const COMPRESSION_ROOTED_PATH_RE = /^(?:[A-Za-z]:[\\/]|[\\/]|\.{1,2}[\\/])/;
+const COMPRESSION_GIT_DIFF_PREFIX_RE = /^[ab][\\/](.+)$/;
+const COMPRESSION_COMMON_ABS_ROOT_RE = /^(?:media|home|mnt|tmp|var|opt|usr|Users|root)\//i;
+
+function trimCompressionPathPrefix(p) {
+  let out = p;
+  if (/\s/.test(out) && !COMPRESSION_ROOTED_PATH_RE.test(out)) {
+    const parts = out.split(/\s+/).filter(Boolean);
+    out = parts[parts.length - 1] || out;
+  }
+  const gitPrefix = out.match(COMPRESSION_GIT_DIFF_PREFIX_RE);
+  if (gitPrefix) {
+    out = COMPRESSION_COMMON_ABS_ROOT_RE.test(gitPrefix[1])
+      ? '/' + gitPrefix[1]
+      : gitPrefix[1];
+  }
+  const duplicateRoot = out.slice(1).search(/\/(?:media|home|mnt|tmp|var|opt|usr|Users|root)\//i);
+  if (out.startsWith('/') && duplicateRoot >= 0) {
+    out = out.slice(duplicateRoot + 1);
+  }
+  return out;
+}
+
+function normalizeCompressionFilePathCandidate(value) {
+  let p = compressionString(value)
+    .trim()
+    .replace(/^[`"'([{<]+/, '')
+    .replace(/[`"')\]}>]+$/, '')
+    .replace(/[),.;:，。；]+$/, '')
+    .trim();
+  p = trimCompressionPathPrefix(p);
+  if (!p) return '';
+  if (p.length < 4 || p.length > 240) return '';
+  if (/[\r\n]/.test(p)) return '';
+  if (/\\[rnt]/i.test(p) && !/^[A-Za-z]:[\\/]/.test(p)) return '';
+  if (/\s[\\/]\s/.test(p)) return '';
+  if (/[\\/]/.test(p) && /\b(?:true|false|none|null|undefined)\b/i.test(p)) return '';
+  if (/[\\/]/.test(p) && /\b(?:python(?:3(?:\.\d+)?)?|node|npm|pnpm|yarn|java|gcc|g\+\+|clang|bash|sh|cmd|powershell|pwsh)\s+\S+[\\/]/i.test(p)) return '';
+  if (!COMPRESSION_FILE_EXT_RE.test(p)) return '';
+  return p;
+}
+
+function addCompressionFilePathCandidate(out, value) {
+  for (const part of compressionString(value).split('|')) {
+    const p = normalizeCompressionFilePathCandidate(part);
+    if (p) out.add(p);
+  }
+}
+
 function compressionExtractFilePaths(text) {
   const out = new Set();
   const s = compressionString(text);
-  const pathRe = /(?:^|[\s"'([{])((?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])?(?:[\w\u4e00-\u9fa5 .@()+-]+[\\/])+[\w\u4e00-\u9fa5 .@()+-]+\.(?:js|ts|jsx|tsx|py|java|c|cpp|h|hpp|cs|go|rs|rb|php|html|css|scss|json|md|yml|yaml|toml|ini|sql|sh|bat|ps1|txt|csv|xml|vue|svelte|tsx?))/g;
-  for (const m of s.matchAll(pathRe)) {
-    const p = m[1].replace(/[),.;:，。；]+$/, '');
-    if (p.length >= 4 && p.length <= 240) out.add(p);
-  }
-  const backtickRe = /`([^`\n]+\.(?:js|ts|jsx|tsx|py|java|c|cpp|h|hpp|cs|go|rs|rb|php|html|css|scss|json|md|yml|yaml|toml|ini|sql|sh|bat|ps1|txt|csv|xml|vue|svelte))`/g;
-  for (const m of s.matchAll(backtickRe)) out.add(m[1]);
+  for (const m of s.matchAll(COMPRESSION_PATH_RE)) addCompressionFilePathCandidate(out, m[1]);
+  const plainText = s.replace(/\\[rnt]/g, '\n');
+  for (const m of plainText.matchAll(COMPRESSION_TOKEN_PATH_RE)) addCompressionFilePathCandidate(out, m[1]);
+  for (const m of plainText.matchAll(COMPRESSION_FILENAME_RE)) addCompressionFilePathCandidate(out, m[1]);
   return out;
 }
 
@@ -973,6 +1026,77 @@ function compressionValidationFeedback(validation) {
     lines.push(`必须保留文件路径：${validation.missingRefs.filePaths.slice(0, 80).join(', ')}`);
   }
   return lines.join('\n');
+}
+
+function compressionCanAutoPatchMissingFilePaths(validation) {
+  if (!validation || validation.ok) return false;
+  if (validation.missingHeadings && validation.missingHeadings.length) return false;
+  const refs = validation.missingRefs || {};
+  if (refs.artifactIds && refs.artifactIds.length) return false;
+  if (refs.checkpointIds && refs.checkpointIds.length) return false;
+  return !!(refs.filePaths && refs.filePaths.length);
+}
+
+function compressionAppendMissingFilePaths(summary, filePaths) {
+  const missing = Array.from(new Set(filePaths || []))
+    .map(normalizeCompressionFilePathCandidate)
+    .filter(Boolean)
+    .filter(p => !compressionString(summary).includes(p));
+  if (!missing.length) return summary;
+
+  const lines = compressionString(summary).trimEnd().split(/\r?\n/);
+  const headingRe = /^\s*#{1,4}\s+已查看或修改的文件\s*[：:]?\s*$/;
+  const anyHeadingRe = /^\s*#{1,4}\s+/;
+  const sectionLines = [
+    '',
+    '【自动补全的关键文件路径】',
+    ...missing.map(p => `- ${p}`),
+    ''
+  ];
+  const headingIdx = lines.findIndex(line => headingRe.test(line));
+  if (headingIdx < 0) {
+    return `${lines.join('\n')}\n\n## 已查看或修改的文件\n${sectionLines.slice(1).join('\n')}`;
+  }
+
+  let insertAt = lines.length;
+  for (let i = headingIdx + 1; i < lines.length; i++) {
+    if (anyHeadingRe.test(lines[i])) {
+      insertAt = i;
+      break;
+    }
+  }
+  lines.splice(insertAt, 0, ...sectionLines);
+  return lines.join('\n');
+}
+
+function compressionAutoPatchSummary(summary, validation, requiredRefs) {
+  if (!compressionCanAutoPatchMissingFilePaths(validation)) {
+    return { summary, validation, patched: false };
+  }
+  const patchedSummary = compressionAppendMissingFilePaths(summary, validation.missingRefs.filePaths);
+  const patchedValidation = compressionValidateSummary(patchedSummary, requiredRefs);
+  return {
+    summary: patchedSummary,
+    validation: patchedValidation,
+    patched: patchedSummary !== summary
+  };
+}
+
+function compressionShortErrorMessage(error) {
+  const raw = String((error && error.message) || error || '未知错误').trim();
+  if (!raw) return '未知错误';
+  const firstLine = raw.split(/\r?\n/).map(s => s.trim()).find(Boolean) || raw;
+  if (error && error.name === 'AbortError') return '已停止压缩';
+  if (/请求超时|timeout|timed out/i.test(raw)) {
+    const timeoutMatch = raw.match(/(\d+)\s*s|(\d+)\s*秒/);
+    const duration = timeoutMatch ? (timeoutMatch[1] || timeoutMatch[2]) : '';
+    return duration ? `压缩请求超时（${duration} 秒无响应）` : '压缩请求超时';
+  }
+  if (/^HTTP\s+\d+/i.test(firstLine)) return firstLine.slice(0, 180);
+  if (/^API\s*错误/i.test(firstLine)) return firstLine.slice(0, 180);
+  if (/JSON\s*解析失败|非 JSON 响应/i.test(firstLine)) return firstLine.slice(0, 180);
+  if (/Failed to fetch|NetworkError|网络请求失败/i.test(raw)) return '压缩请求网络失败，请检查 API 地址、代理或网络连接';
+  return firstLine.length > 180 ? firstLine.slice(0, 177) + '...' : firstLine;
 }
 
 function compressionBudgetInfo(chat, extraMessages = [], options = {}) {
@@ -1085,6 +1209,9 @@ ${conversationText}
   if (!summary || !String(summary).trim()) throw new Error(`${label} 内部压缩返回空摘要`);
   let finalSummary = String(summary).trim();
   let validation = compressionValidateSummary(finalSummary, requiredRefs);
+  let patchedSummary = compressionAutoPatchSummary(finalSummary, validation, requiredRefs);
+  finalSummary = patchedSummary.summary;
+  validation = patchedSummary.validation;
   if (!validation.ok) {
     const feedback = compressionValidationFeedback(validation);
     const retryPrompt = `${compressPrompt}
@@ -1108,6 +1235,9 @@ ${feedback}
     if (!summary || !String(summary).trim()) throw new Error(`${label} 内部压缩重写返回空摘要`);
     finalSummary = String(summary).trim();
     validation = compressionValidateSummary(finalSummary, requiredRefs);
+    patchedSummary = compressionAutoPatchSummary(finalSummary, validation, requiredRefs);
+    finalSummary = patchedSummary.summary;
+    validation = patchedSummary.validation;
   }
   if (!validation.ok) {
     throw new Error(`${label} 内部摘要校验失败：${compressionValidationFeedback(validation)}`);
@@ -1446,6 +1576,9 @@ ${conversationText}
     }
     let finalSummary = String(summary).trim();
     let validation = compressionValidateSummary(finalSummary, requiredRefs);
+    let patchedSummary = compressionAutoPatchSummary(finalSummary, validation, requiredRefs);
+    finalSummary = patchedSummary.summary;
+    validation = patchedSummary.validation;
     if (!validation.ok) {
       const feedback = compressionValidationFeedback(validation);
       const retryPrompt = `${compressPrompt}
@@ -1474,6 +1607,9 @@ ${feedback}
       }
       finalSummary = String(retrySummary).trim();
       validation = compressionValidateSummary(finalSummary, requiredRefs);
+      patchedSummary = compressionAutoPatchSummary(finalSummary, validation, requiredRefs);
+      finalSummary = patchedSummary.summary;
+      validation = patchedSummary.validation;
     }
     if (!validation.ok) {
       throw new Error(`摘要校验失败：${compressionValidationFeedback(validation)}`);
@@ -1513,7 +1649,8 @@ ${feedback}
     if (e && e.name === 'AbortError') {
       TokensUiService.toast('已停止压缩', 2000);
     } else {
-      TokensUiService.toast(`❌ 压缩失败：${e.message}`, 3000);
+      console.warn('[compression] 压缩失败:', e);
+      TokensUiService.toast(`❌ 压缩失败：${compressionShortErrorMessage(e)}`, 4000);
     }
     return false;
   } finally {

@@ -1859,7 +1859,7 @@ input::placeholder{
 .toast{
   background:#202124;
   color:#fff;
-  border-radius:999px;
+  border-radius:14px;
   box-shadow:var(--gemini-shadow-lg);
 }
 

@@ -190,6 +190,121 @@ test.describe('extra settings prompts and safety controls without real services'
     clientErrors.expectNoErrors();
   });
 
+  test('context compression auto-patches missing file paths and ignores escaped log fragments', async ({ page }) => {
+    const { clientErrors } = await gotoApp(page);
+    await page.evaluate(() => {
+      const apiCore = window.AgentApp.require('apiCore');
+      window.__e2eOriginalCompressionCallOnce = apiCore.callOnceWithRole;
+      apiCore.callOnceWithRole = async () => [
+        '## 当前任务',
+        '压缩一个包含文件引用和日志输出的对话。',
+        '',
+        '## 用户目标和约束',
+        '保留后续任务需要的关键信息。',
+        '',
+        '## 已完成事项',
+        '已读取并整理早期上下文。',
+        '',
+        '## 关键决策和事实',
+        '需要继续当前任务。',
+        '',
+        '## 已查看或修改的文件',
+        '无',
+        '',
+        '## 工具/命令结果',
+        '日志中包含数据集处理输出。',
+        '',
+        '## 计划/大纲状态',
+        '无',
+        '',
+        '## 测试和验证状态',
+        '无',
+        '',
+        '## 未完成事项',
+        '继续处理最新请求。',
+        '',
+        '## 风险/阻塞',
+        '无',
+        '',
+        '## 下一步建议',
+        '按最新用户问题继续。',
+        '',
+        '## 可丢弃上下文',
+        '旧对话原文可丢弃。'
+      ].join('\n');
+
+      window.AgentApp.require('chat').newChat();
+      const chat = currentChat();
+      state.settings.compressKeepLast = 4;
+      chat.messages = [
+        {
+          role: 'user',
+          content: [
+            '压缩时必须保留 student.txt / course.txt / sc.txt。',
+            '日志：reviews_Beauty_5.json.gz False None\\nmeta_Beauty.js, False None\\n/media/inspur/disk1/zhzhang/conda_envs/llm4rec/bin/python data/process_beauty.py',
+            '命令：chmod +x scripts/run_beauty_graph_random_811_gpu3.sh；bash -n scripts/run_beauty_graph_random_811_gpu3.sh；+x scripts/run_beauty_graph_random_811_gpu3.sh',
+            '新增脚本 scripts/run_beauty_graph_random_811_gpu3.sh，正在运行 model/main.py',
+            'model/main.py|resume_beauty_tiger|run_beauty_paper|generate_code|rqvae/main.py',
+            'diff --git a/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py b/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py',
+            '/media/inspur/disk1/zhzhang/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py'
+          ].join('\n')
+        },
+        { role: 'assistant', content: '已记录这些文件和日志。' },
+        { role: 'user', content: '补充上下文一。' },
+        { role: 'assistant', content: '补充回答一。' },
+        { role: 'user', content: '这是压缩后应该保留的最新请求。' },
+        { role: 'assistant', content: '这是最新回答。' },
+        { role: 'user', content: '继续。' }
+      ];
+      renderMessages();
+    });
+
+    const result = await page.evaluate(async () => {
+      return await window.compressChat(currentChat(), {
+        reason: 'manual',
+        retryMaxAttempts: 0
+      });
+    });
+    expect(result).toBe(true);
+
+    const summary = await page.evaluate(() => {
+      const msg = currentChat().messages.find(m => m && m._isSummary);
+      return msg ? msg.content : '';
+    });
+    expect(summary).toContain('student.txt');
+    expect(summary).toContain('course.txt');
+    expect(summary).toContain('sc.txt');
+    expect(summary).toContain('reviews_Beauty_5.json.gz');
+    expect(summary).toContain('meta_Beauty.js');
+    expect(summary).toContain('data/process_beauty.py');
+    expect(summary).toContain('scripts/run_beauty_graph_random_811_gpu3.sh');
+    expect(summary).toContain('model/main.py');
+    expect(summary).toContain('rqvae/main.py');
+    expect(summary).toContain('/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py');
+    expect(summary).not.toContain('student.txt / course.txt / sc.txt');
+    expect(summary).not.toContain('False None\\nmeta_Beauty.js');
+    expect(summary).not.toContain('reviews_Beauty_5.json.gz False None');
+    expect(summary).not.toContain('python data/process_beauty.py');
+    expect(summary).not.toContain('chmod +x scripts/run_beauty_graph_random_811_gpu3.sh');
+    expect(summary).not.toContain('bash -n scripts/run_beauty_graph_random_811_gpu3.sh');
+    expect(summary).not.toContain('+x scripts/run_beauty_graph_random_811_gpu3.sh');
+    expect(summary).not.toContain('新增脚本 scripts/run_beauty_graph_random_811_gpu3.sh');
+    expect(summary).not.toContain('正在运行 model/main.py');
+    expect(summary).not.toContain('model/main.py|resume_beauty_tiger');
+    expect(summary).not.toContain('a/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py');
+    expect(summary).not.toContain('b/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py');
+    expect(summary).not.toContain('/media/inspur/disk1/zhzhang/media/inspur/disk1/zhzhang/TIGER-XiaoLongtaoo/data/process_beauty.py');
+
+    await page.evaluate(() => {
+      const apiCore = window.AgentApp.require('apiCore');
+      if (window.__e2eOriginalCompressionCallOnce) {
+        apiCore.callOnceWithRole = window.__e2eOriginalCompressionCallOnce;
+        delete window.__e2eOriginalCompressionCallOnce;
+      }
+    });
+    clientErrors.expectNoErrors();
+  });
+
   test('context compression times out and restores composer state when helper request hangs', async ({ page }) => {
     const { clientErrors } = await gotoApp(page, {
       delayForLlm(body) {
@@ -213,6 +328,14 @@ test.describe('extra settings prompts and safety controls without real services'
       });
     });
     expect(result).toBe(false);
+    await expect(page.locator('#toast')).toContainText('压缩请求超时');
+    const toastText = await page.locator('#toast').textContent();
+    expect((toastText || '').length).toBeLessThanOrEqual(220);
+    const toastBox = await page.locator('#toast').boundingBox();
+    expect(toastBox.width).toBeLessThanOrEqual(720);
+    expect(toastBox.height).toBeLessThanOrEqual(320);
+    const toastRadius = await page.locator('#toast').evaluate(el => parseFloat(getComputedStyle(el).borderTopLeftRadius));
+    expect(toastRadius).toBeLessThanOrEqual(20);
     await expect(page.locator('#sendBtn')).not.toHaveClass(/stop/);
     await expect.poll(() => page.evaluate(() =>
       currentChat().messages.some(m => m && m._isCompressing)
