@@ -80,6 +80,9 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
             sandbox.appendMsgNode = (idx, chat) => {
               sandbox.appendArgs = [idx, chat.id];
             };
+            sandbox.updateMsgContentNode = (idx, chat, options) => {
+              sandbox.contentUpdateArgs = [idx, chat.id, options.streaming];
+            };
             sandbox.updateSendBtn = () => {
               sandbox.sendBtnUpdated = true;
             };
@@ -94,6 +97,8 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
             assert.deepStrictEqual(sandbox.refreshArgs, [2, 'chat-1']);
             ui.appendMsgNode(3, { id: 'chat-2' });
             assert.deepStrictEqual(sandbox.appendArgs, [3, 'chat-2']);
+            ui.updateMsgContentNode(4, { id: 'chat-3' }, { streaming: true });
+            assert.deepStrictEqual(sandbox.contentUpdateArgs, [4, 'chat-3', true]);
             ui.updateSendBtn();
             assert.strictEqual(sandbox.sendBtnUpdated, true);
 

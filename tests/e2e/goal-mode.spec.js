@@ -16,6 +16,12 @@ async function createGoalFromPanel(page, objective) {
   await page.locator('[data-action="createGoalFromUi"]').click();
 }
 
+function datetimeLocalFromNow(ms) {
+  const d = new Date(Date.now() + ms);
+  const pad = value => String(value).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 async function waitForGoalStatus(page, objective, status) {
   await expect.poll(() => page.evaluate(({ objective, status }) => {
     const goals = window.AgentApp.require('goalCore').listGoals();
@@ -93,6 +99,32 @@ test.describe('goal mode workflows', () => {
     expect(afterSecond.messages.filter(msg => msg.goalFinal)).toHaveLength(2);
     expect(JSON.stringify(afterSecond)).not.toContain('"goal_"');
     expect(backend.llmCalls.length).toBeGreaterThanOrEqual(4);
+
+    clientErrors.expectNoErrors();
+  });
+
+  test('creates a scheduled goal and only runs it after the selected time arrives', async ({ page }) => {
+    const { backend, clientErrors } = await gotoApp(page, { goalScenario: true });
+    await configureMockProvider(page);
+    await ensureCurrentChat(page);
+
+    await page.locator('#scheduleBtn').click();
+    await expect(page.locator('#schedulePicker')).not.toHaveAttribute('hidden', '');
+    await page.fill('#scheduleTimeInput', datetimeLocalFromNow(1500));
+
+    await openGoalPanel(page);
+    await createGoalFromPanel(page, 'E2E scheduled goal');
+    await expect(page.locator('#schedulePicker')).toHaveAttribute('hidden', '');
+
+    await expect.poll(() => page.evaluate(() => {
+      const goal = window.AgentApp.require('goalCore').listGoals().find(item => item.objective === 'E2E scheduled goal');
+      return goal ? { status: goal.status, scheduledStatus: goal.scheduled && goal.scheduled.status } : null;
+    })).toEqual({ status: 'paused', scheduledStatus: 'waiting' });
+    expect(backend.llmCalls).toHaveLength(0);
+
+    await waitForGoalStatus(page, 'E2E scheduled goal', 'complete');
+    expect(backend.llmCalls.length).toBeGreaterThanOrEqual(2);
+    await expect(page.locator('#messagesInner')).toContainText('Goal complete: E2E scheduled goal');
 
     clientErrors.expectNoErrors();
   });

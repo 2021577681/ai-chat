@@ -122,7 +122,8 @@ const DEFAULT_GOAL_SYSTEM_PROMPT = [
   '每轮结束前必须调用 update_goal 记录 progress、evidence 和 next_step。',
   '只有当整个目标确实完成，并且有证据或最终总结时，才能用 update_goal 标记 complete。',
   '遇到阻塞时，用 update_goal(status="blocked") 记录具体 blocker_reason；只有同一阻塞重复达到阈值后才会真正变为 blocked。',
-  '不要因为 token 预算、轮次预算、时间不足或想收尾而标记 complete。'
+  '不要因为 token 预算、轮次预算、时间不足或想收尾而标记 complete。',
+  '不要用 update_goal 暂停或取消目标；暂停和取消只能由用户或系统保护逻辑触发。'
 ].join('\n');
 
 const DEFAULT_GOAL_TURN_PROMPT = [
@@ -181,12 +182,12 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'update_goal',
-    description: '记录长期目标进展、证据、下一步或状态。complete 必须有证据或最终总结；blocked 只有同一 blocker 重复达到阈值后才会真正阻塞；不能因预算耗尽而 complete。',
+    description: '记录长期目标进展、证据、下一步或状态。AI 只能设置 active、complete 或 blocked；paused/cancelled 只能由用户或系统保护逻辑触发。complete 必须有证据或最终总结；blocked 只有同一 blocker 重复达到阈值后才会真正阻塞；不能因预算耗尽而 complete。',
     parameters: {
       type: 'object',
       properties: {
         goal_id: { type: 'string', description: '可选目标 ID。留空时更新当前活动目标。' },
-        status: { type: 'string', enum: ['active', 'paused', 'complete', 'blocked', 'cancelled'], description: '目标状态。仅目标真实完成时使用 complete。' },
+        status: { type: 'string', enum: ['active', 'complete', 'blocked'], description: '目标状态。AI 不允许暂停或取消目标；需要用户介入时使用 blocked 并写明 blocker_reason。仅目标真实完成时使用 complete。' },
         progress: { type: 'string', description: '本轮完成的具体进展' },
         evidence: { type: 'string', description: '可核验的证据，例如文件路径、命令结果摘要、测试结果或最终产物说明' },
         next_step: { type: 'string', description: '下一轮建议推进的最小步骤' },

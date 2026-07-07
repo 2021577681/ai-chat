@@ -1526,6 +1526,9 @@ class FrontendModuleTests(unittest.TestCase):
 
     def test_goal_mode_surfaces_tool_calls_in_main_chat(self):
         goal_core_js = (ROOT / 'js' / 'goal-core.js').read_text(encoding='utf-8')
+        config_js = (ROOT / 'js' / 'config.js').read_text(encoding='utf-8')
+        tools_js = (ROOT / 'js' / 'tools.js').read_text(encoding='utf-8')
+        api_core_js = (ROOT / 'js' / 'api-core.js').read_text(encoding='utf-8')
         html = next(ROOT.glob('AI-Chat-*.html')).read_text(encoding='utf-8')
 
         self.assertIn('function createGoalChatRecorder', goal_core_js)
@@ -1555,10 +1558,33 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn('Math.max(0, goalChatRecordedTokenTotal(chat) - tokenStatsBefore)', goal_core_js)
         self.assertIn('goalEstimateTurnTokens(systemPrompt, turnPrompt, chat, messageCountBeforeRun)', goal_core_js)
         self.assertIn('syncGoalTokenUsageFromChat(latestGoal)', goal_core_js)
+        update_goal_config_idx = config_js.index("name: 'update_goal'")
+        update_goal_config_block = config_js[update_goal_config_idx:config_js.index("code: 'return await updateGoal", update_goal_config_idx)]
+        self.assertIn("enum: ['active', 'complete', 'blocked']", update_goal_config_block)
+        self.assertIn('AI 不允许暂停或取消目标', update_goal_config_block)
+        update_goal_fn = goal_core_js[goal_core_js.index('function updateGoal'):goal_core_js.index('function summarizeGoalForTool')]
+        self.assertIn("const toolForbiddenStatus = requestedStatus === 'paused' || requestedStatus === 'cancelled';", update_goal_fn)
+        self.assertIn("pushGoalEvent(goal, 'status_rejected'", update_goal_fn)
+        self.assertIn("GOAL_TERMINAL_STATUSES.has(goal.status)", update_goal_fn)
+        self.assertIn("pushGoalEvent(goal, 'update_rejected'", update_goal_fn)
+        self.assertNotIn("Paused by tool", update_goal_fn)
+        self.assertNotIn("Cancelled by tool", update_goal_fn)
+        self.assertIn("const GOAL_RUNTIME_TOOL_NAMES = new Set(['get_goal', 'update_goal']);", goal_core_js)
+        self.assertIn("if (!tool || !GOAL_RUNTIME_TOOL_NAMES.has(tool.name)) continue;", goal_core_js)
+        self.assertIn("const GOAL_TOOL_NAMES = new Set(['create_goal', 'get_goal', 'update_goal']);", tools_js)
+        self.assertIn("const GOAL_RUNTIME_TOOL_NAMES = new Set(['get_goal', 'update_goal']);", tools_js)
+        self.assertIn('function toolVisibleForContext(tool, options = {})', tools_js)
+        self.assertIn("return isGoalToolContext(toolContext) && GOAL_RUNTIME_TOOL_NAMES.has(tool.name);", tools_js)
+        self.assertIn('if (isGoalToolName(name)) {', tools_js)
+        self.assertIn('create_goal 不允许由 AI 工具调用创建', tools_js)
+        self.assertIn('buildToolsArray({ force: true, toolContext })', api_core_js)
         self.assertIn('function scheduleGoalChatNodeUpdate', goal_core_js)
         self.assertIn("GoalCoreUiService.has('appendMsgNode')", goal_core_js)
         self.assertIn('GoalCoreUiService.appendMsgNode(item.idx, item.chat)', goal_core_js)
+        self.assertIn("GoalCoreUiService.has('updateMsgContentNode')", goal_core_js)
+        self.assertIn("GoalCoreUiService.updateMsgContentNode(item.idx, item.chat, { streaming: true })", goal_core_js)
         self.assertIn('GoalCoreUiService.refreshMsgNode(item.idx, item.chat)', goal_core_js)
+        self.assertIn("scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'content')", goal_core_js)
         self.assertIn("scheduleGoalChatNodeUpdate(chat, userMsgIdx, 'append')", goal_core_js)
         self.assertIn('const goalCurrentChat = GoalCoreStateModule.currentChat', goal_core_js)
         self.assertIn('function bindGoalToChat(goal, chat)', goal_core_js)
@@ -1683,7 +1709,7 @@ class FrontendModuleTests(unittest.TestCase):
         contracts = {
             'ui-service.js': (
                 'uiService',
-                ['has', 'toast', 'renderMessages', 'refreshMsgNode', 'appendMsgNode', 'renderChatList', 'updateSendBtn', 'scrollToBottom']
+                ['has', 'toast', 'renderMessages', 'refreshMsgNode', 'appendMsgNode', 'updateMsgContentNode', 'renderChatList', 'updateSendBtn', 'scrollToBottom']
             ),
             'orchestration-service.js': (
                 'orchestrationService',
@@ -2781,13 +2807,14 @@ class FrontendModuleTests(unittest.TestCase):
                 'typeof toast',
                 'typeof renderMessages',
                 'typeof refreshMsgNode',
+                'typeof updateMsgContentNode',
                 'typeof renderChatList',
                 'typeof updateSendBtn',
             ):
                 self.assertNotIn(direct_usage, js)
             self.assertNotRegex(
                 js,
-                r'(?<![.$\w])(toast|renderMessages|refreshMsgNode|renderChatList|updateSendBtn)\s*\('
+                r'(?<![.$\w])(toast|renderMessages|refreshMsgNode|updateMsgContentNode|renderChatList|updateSendBtn)\s*\('
             )
 
     def test_direct_ui_side_effect_calls_stay_in_ui_implementation_modules(self):
@@ -2797,11 +2824,12 @@ class FrontendModuleTests(unittest.TestCase):
             'ui-service.js',
             'utils.js',
         }
-        direct_call_pattern = r'(?<![.$\w])(toast|renderMessages|refreshMsgNode|renderChatList|updateSendBtn)\s*\('
+        direct_call_pattern = r'(?<![.$\w])(toast|renderMessages|refreshMsgNode|updateMsgContentNode|renderChatList|updateSendBtn)\s*\('
         direct_typeof_checks = (
             'typeof toast',
             'typeof renderMessages',
             'typeof refreshMsgNode',
+            'typeof updateMsgContentNode',
             'typeof renderChatList',
             'typeof updateSendBtn',
         )

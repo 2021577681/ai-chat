@@ -1018,6 +1018,42 @@ function appendMsgNode(idx, targetChat) {
   return true;
 }
 
+function updateMsgContentNode(idx, targetChat, options = {}) {
+  const c = targetChat || chatCurrentChat();
+  if (targetChat && !chatIsCurrentChat(targetChat)) return false;
+  if (!c || !c.messages[idx]) return false;
+  const m = c.messages[idx];
+  if (m._hiddenFromUI || m.plan || m.outline || m.reflection || m.pptMode) return false;
+
+  const msgNode = document.querySelector(`.message[data-idx="${idx}"]`);
+  if (!msgNode) return false;
+  const wrap = msgNode.querySelector('.msg-content');
+  if (!wrap) return false;
+
+  const shouldFollow = (typeof isNearBottom !== 'function' || isNearBottom());
+  if (!m._firstTokenAt && (m.content || (m.tool_calls && m.tool_calls.length))) {
+    m._firstTokenAt = Date.now();
+  }
+  if (typeof markMsgTimerActivity === 'function') markMsgTimerActivity(m);
+
+  const isStreaming = !m._endTime && options.streaming !== false;
+  const renderFn = isStreaming && typeof renderMarkdownStreaming === 'function'
+    ? renderMarkdownStreaming
+    : renderMarkdown;
+  wrap.innerHTML = renderFn(m.content || '') + (isStreaming ? '<span class="cursor"></span>' : '');
+
+  const timer = msgNode.querySelector(`.msg-timer[data-msg-idx="${idx}"]`);
+  if (timer) {
+    timer.innerHTML = formatMsgTimer(m);
+    if (m._endTime) timer.dataset.frozen = '1';
+    else delete timer.dataset.frozen;
+  }
+  postRender(msgNode, { skipMath: isStreaming });
+  if (shouldFollow) scrollBottom();
+  if (typeof updateDialogTimeline === 'function') requestAnimationFrame(updateDialogTimeline);
+  return true;
+}
+
 // ⭐ 局部更新：只重渲染指定消息的 plan 面板，避免整个消息列表重建
 // 解决：工具循环每秒数次 renderMessages 导致的卡顿、选中文本被清、滚动被踹的问题
 function updatePlanPanel(msgIdx, targetChat) {
@@ -1320,6 +1356,9 @@ function tickMsgTimers() {
   }
   if (typeof processScheduledTasks === 'function') {
     processScheduledTasks();
+  }
+  if (typeof processScheduledGoals === 'function') {
+    processScheduledGoals();
   }
 
   // ⭐ 有消息刚刚被冻结 → 可能解锁工具流程折叠：触发一次重新分组
@@ -2034,6 +2073,7 @@ if (typeof window !== 'undefined' && window.AgentApp) {
     setupDrag,
     setupPaste,
     groupToolFlows,
-    sealInterruptedToolFlows
+    sealInterruptedToolFlows,
+    updateMsgContentNode
   });
 }

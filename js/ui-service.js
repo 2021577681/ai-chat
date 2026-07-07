@@ -32,6 +32,9 @@
     appendMsgNode(idx, chat) {
       return call('appendMsgNode', [idx, chat]);
     },
+    updateMsgContentNode(idx, chat, options) {
+      return call('updateMsgContentNode', [idx, chat, options]);
+    },
     renderChatList() {
       return call('renderChatList');
     },

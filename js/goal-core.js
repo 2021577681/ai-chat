@@ -17,10 +17,11 @@ const goalChatTaskById = GoalCoreStateModule.chatTaskById;
 const goalSetChatTaskGuidance = GoalCoreStateModule.setChatTaskGuidance;
 const goalTakeChatTaskGuidance = GoalCoreStateModule.takeChatTaskGuidance;
 const GOAL_STORAGE_KEY = 'aichat_goals_v1';
-const GOAL_TOOL_NAMES = new Set(['create_goal', 'get_goal', 'update_goal']);
+const GOAL_RUNTIME_TOOL_NAMES = new Set(['get_goal', 'update_goal']);
 
 const GOAL_TERMINAL_STATUSES = new Set(['complete', 'blocked', 'cancelled']);
 const GOAL_RUNNERS = new Map();
+const SCHEDULED_GOAL_STATUS = { WAITING: 'waiting', RUNNING: 'running', DONE: 'done', ERROR: 'error' };
 let goalElapsedTimer = null;
 
 let goalStore = normalizeGoalStore(null);
@@ -36,7 +37,8 @@ function goalDefaultSystemPrompt() {
     'Do one minimal verifiable step per turn, use tools when needed, and record progress with update_goal.',
     'Only call update_goal with status complete when the whole objective is actually satisfied and evidence is available.',
     'If blocked, report the same concrete blocker through update_goal; the runner will only mark blocked after repeated matching blockers.',
-    'Never mark a goal complete because token budget, turn budget, or time is running out.'
+    'Never mark a goal complete because token budget, turn budget, or time is running out.',
+    'Do not use update_goal to pause or cancel the goal; pausing and cancellation are user/system controls only.'
   ].join('\n');
 }
 
@@ -95,6 +97,13 @@ function normalizeGoalRecord(goal) {
     lastResult: String(goal.lastResult || ''),
     lastError: String(goal.lastError || ''),
     nextStep: String(goal.nextStep || ''),
+    scheduled: goal.scheduled && typeof goal.scheduled === 'object' ? {
+      id: String(goal.scheduled.id || ('goal_sch_' + Date.now())),
+      runAt: Math.max(0, Number(goal.scheduled.runAt || 0) || 0),
+      createdAt: Math.max(0, Number(goal.scheduled.createdAt || Date.now()) || Date.now()),
+      status: Object.values(SCHEDULED_GOAL_STATUS).includes(goal.scheduled.status) ? goal.scheduled.status : SCHEDULED_GOAL_STATUS.WAITING,
+      error: String(goal.scheduled.error || '')
+    } : null,
     pendingGuidance: String(goal.pendingGuidance || ''),
     events,
     blockerAudit: normalizeBlockerAudit(goal.blockerAudit),
@@ -212,6 +221,7 @@ function createGoalRecord(options = {}) {
     chatId: chat && chat.id || options.chatId || '',
     objective,
     status: 'active',
+    scheduled: options.scheduled || null,
     tokenBudget: Math.max(0, Number(options.token_budget || options.tokenBudget || 0) || 0),
     tokenUsed: 0,
     turnCount: 0,
@@ -220,6 +230,9 @@ function createGoalRecord(options = {}) {
     updatedAt: nowIso(),
     events: []
   });
+  if (goal.scheduled && goal.scheduled.status === SCHEDULED_GOAL_STATUS.WAITING) {
+    goal.status = 'paused';
+  }
   if (chat) bindGoalToChat(goal, chat);
   pushGoalEvent(goal, 'created', { progress: 'Goal created.' });
   goalStore.goals.unshift(goal);
@@ -235,7 +248,7 @@ function ensureGoalToolsEnabled() {
   const builtins = Array.isArray(GoalCoreConfig.BUILTIN_TOOLS) ? GoalCoreConfig.BUILTIN_TOOLS : [];
   let added = 0;
   for (const tool of builtins) {
-    if (!tool || !GOAL_TOOL_NAMES.has(tool.name)) continue;
+    if (!tool || !GOAL_RUNTIME_TOOL_NAMES.has(tool.name)) continue;
     if (goalState.tools.some(t => t && t.name === tool.name)) continue;
     goalState.tools.push(JSON.parse(JSON.stringify(tool)));
     added++;
@@ -321,6 +334,37 @@ function goalElapsedText(goal, now = Date.now()) {
   return formatGoalElapsed(goalElapsedMs(goal, now));
 }
 
+function parseGoalScheduleTimeInput() {
+  const input = document.getElementById('scheduleTimeInput');
+  if (!input || !input.value) return 0;
+  const t = new Date(input.value).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function formatGoalScheduleDateTime(ts) {
+  const d = new Date(Number(ts) || Date.now());
+  const pad = value => String(value).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function scheduledGoalLabel(goal) {
+  const info = goal && goal.scheduled;
+  if (!info) return '';
+  const runAtText = formatGoalScheduleDateTime(info.runAt);
+  if (info.status === SCHEDULED_GOAL_STATUS.RUNNING) return ` · 定时触发中 ${runAtText}`;
+  if (info.status === SCHEDULED_GOAL_STATUS.DONE) return ` · 已定时触发 ${runAtText}`;
+  if (info.status === SCHEDULED_GOAL_STATUS.ERROR) return ` · 定时触发失败 ${runAtText}`;
+  const left = Math.max(0, (Number(info.runAt) || 0) - Date.now());
+  const seconds = Math.ceil(left / 1000);
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return ` · 等待定时 ${runAtText}${left > 0 ? ` · ${mins}:${String(secs).padStart(2, '0')}` : ' · 即将触发'}`;
+}
+
+function isScheduledGoalWaiting(goal) {
+  return !!(goal && goal.scheduled && goal.scheduled.status === SCHEDULED_GOAL_STATUS.WAITING);
+}
+
 function refreshGoalElapsedStat() {
   const statEl = document.getElementById('goalElapsedStat');
   if (!statEl) return;
@@ -344,6 +388,16 @@ function stopGoalElapsedTimer() {
 const goalChatNodeUpdateQueue = new Map();
 let goalChatNodeUpdateScheduled = false;
 
+function mergeGoalChatNodeUpdateMode(current, next) {
+  if (!current) return next || 'refresh';
+  if (!next) return current;
+  const a = current;
+  const b = next || 'refresh';
+  if (a === 'append' || b === 'append') return 'append';
+  if (a === 'refresh' || b === 'refresh') return 'refresh';
+  return 'content';
+}
+
 function scheduleGoalChatNodeUpdate(chat, idx, mode = 'refresh') {
   if (!chat || !GoalCoreStateModule.isCurrentChat(chat.id)) return;
   if (!Number.isInteger(idx) || idx < 0) return;
@@ -352,7 +406,7 @@ function scheduleGoalChatNodeUpdate(chat, idx, mode = 'refresh') {
   goalChatNodeUpdateQueue.set(key, {
     chat,
     idx,
-    append: mode === 'append' || !!(existing && existing.append)
+    mode: mergeGoalChatNodeUpdateMode(existing && existing.mode, mode)
   });
   if (goalChatNodeUpdateScheduled) return;
   goalChatNodeUpdateScheduled = true;
@@ -363,8 +417,10 @@ function scheduleGoalChatNodeUpdate(chat, idx, mode = 'refresh') {
     for (const item of updates) {
       if (!item.chat || !GoalCoreStateModule.isCurrentChat(item.chat.id)) continue;
       let ok = false;
-      if (item.append && GoalCoreUiService.has('appendMsgNode')) {
+      if (item.mode === 'append' && GoalCoreUiService.has('appendMsgNode')) {
         ok = GoalCoreUiService.appendMsgNode(item.idx, item.chat) !== false;
+      } else if (item.mode === 'content' && GoalCoreUiService.has('updateMsgContentNode')) {
+        ok = GoalCoreUiService.updateMsgContentNode(item.idx, item.chat, { streaming: true }) !== false;
       } else if (GoalCoreUiService.has('refreshMsgNode')) {
         ok = GoalCoreUiService.refreshMsgNode(item.idx, item.chat) !== false;
       }
@@ -531,7 +587,7 @@ function createGoalChatRecorder(chat, goalId, turnNo) {
         const assistant = ensureAssistant();
         if (!assistant._firstTokenAt) assistant._firstTokenAt = Date.now();
         assistant.content = String(assistant.content || '') + String(event.text || '');
-        scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'refresh');
+        scheduleGoalChatNodeUpdate(chat, recorder.assistantIdx, 'content');
         return;
       }
       if (event.type === 'tool_call') {
@@ -614,7 +670,7 @@ function renderGoalPanel() {
           <div class="goal-item ${selected ? 'selected' : ''} ${escapeGoalHtml(goal.status)}" role="button" tabindex="0" data-action="valueClick" data-keydown-action="goalCardSelect" data-handler="selectGoalById" data-value="${escapeGoalHtml(goal.id)}">
             <div class="goal-item-main">
               <span class="goal-item-title" title="${escapeGoalHtml(cardTitle)}">${escapeGoalHtml(cardTitle)}</span>
-              <span class="goal-item-meta">${statusLabel(goal.status)} · ${goal.turnCount}/${goal.maxTurns} 轮${running ? ' · 运行中' : ''}</span>
+              <span class="goal-item-meta">${statusLabel(goal.status)} · ${goal.turnCount}/${goal.maxTurns} 轮${running ? ' · 运行中' : ''}${escapeGoalHtml(scheduledGoalLabel(goal))}</span>
             </div>
             <div class="goal-item-actions">
               <button class="btn" type="button" data-action="valueClick" data-handler="continueGoalById" data-value="${escapeGoalHtml(goal.id)}">继续</button>
@@ -637,7 +693,7 @@ function renderGoalPanel() {
         <div class="goal-detail-head">
           <div>
             <div class="goal-detail-title">${escapeGoalHtml(goal.objective)}</div>
-            <div class="goal-detail-meta">${statusLabel(goal.status)}${running ? ' · 正在运行' : ''} · 更新 ${escapeGoalHtml(new Date(goal.updatedAt).toLocaleString())}</div>
+            <div class="goal-detail-meta">${statusLabel(goal.status)}${running ? ' · 正在运行' : ''}${escapeGoalHtml(scheduledGoalLabel(goal))} · 更新 ${escapeGoalHtml(new Date(goal.updatedAt).toLocaleString())}</div>
           </div>
           <span class="goal-status-pill ${escapeGoalHtml(goal.status)}">${statusLabel(goal.status)}</span>
         </div>
@@ -710,9 +766,29 @@ function createGoalFromUi() {
   try {
     const form = readGoalForm();
     form.chat = goalCurrentChat();
+    const scheduledActive = typeof isScheduledSendActive === 'function' && isScheduledSendActive();
+    if (scheduledActive) {
+      const runAt = parseGoalScheduleTimeInput();
+      if (!runAt) return goalToast('请选择定时发送时间', 2500);
+      form.scheduled = {
+        id: 'goal_sch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        runAt,
+        createdAt: Date.now(),
+        status: SCHEDULED_GOAL_STATUS.WAITING,
+        error: ''
+      };
+    }
     const goal = createGoalRecord(form);
-    goalToast('目标已创建');
-    continueGoal(goal.id);
+    if (scheduledActive) {
+      if (typeof toggleScheduledSend === 'function') toggleScheduledSend(false);
+      pushGoalEvent(goal, 'scheduled', { progress: 'Goal scheduled for ' + formatGoalScheduleDateTime(goal.scheduled.runAt) + '.' });
+      saveGoals();
+      renderGoalPanel();
+      goalToast('⏰ 已创建定时目标：' + formatGoalScheduleDateTime(goal.scheduled.runAt), 2200);
+    } else {
+      goalToast('目标已创建');
+      continueGoal(goal.id);
+    }
   } catch (e) {
     goalToast('创建目标失败：' + e.message, 4000);
   }
@@ -1116,6 +1192,13 @@ async function continueGoal(goalId) {
   const goal = goalById(goalId);
   if (!goal) return goalToast('未找到目标');
   if (GOAL_TERMINAL_STATUSES.has(goal.status)) return goalToast('目标已结束，不能继续');
+  if (isScheduledGoalWaiting(goal)) {
+    const runAt = Number(goal.scheduled.runAt) || 0;
+    if (runAt > Date.now()) {
+      return goalToast('目标已定时，将在 ' + formatGoalScheduleDateTime(runAt) + ' 自动执行');
+    }
+    goal.scheduled.status = SCHEDULED_GOAL_STATUS.RUNNING;
+  }
   if (isGoalRunning(goal.id)) return goalToast('目标正在运行');
 
   goal.status = 'active';
@@ -1258,12 +1341,48 @@ async function continueGoal(goalId) {
     GOAL_RUNNERS.delete(goal.id);
     goalClearChatTask(chat.id);
     updateGoalButton();
+    const latestAfterRun = goalById(goal.id);
+    if (latestAfterRun && latestAfterRun.scheduled && latestAfterRun.scheduled.status === SCHEDULED_GOAL_STATUS.RUNNING) {
+      latestAfterRun.scheduled.status = GOAL_TERMINAL_STATUSES.has(latestAfterRun.status)
+        ? SCHEDULED_GOAL_STATUS.DONE
+        : SCHEDULED_GOAL_STATUS.ERROR;
+      if (latestAfterRun.scheduled.status === SCHEDULED_GOAL_STATUS.ERROR) {
+        latestAfterRun.scheduled.error = latestAfterRun.lastError || '目标未完成';
+      }
+      saveGoals();
+    }
     renderGoalPanel();
     GoalCoreUiService.updateSendBtn();
     const latestGoal = goalById(goal.id);
     if (restartAfterGuidance && latestGoal && latestGoal.status === 'active') {
       setTimeout(() => continueGoal(latestGoal.id), 0);
     }
+  }
+}
+
+function findDueScheduledGoals(now = Date.now()) {
+  return listGoals().filter(goal => isScheduledGoalWaiting(goal) && (Number(goal.scheduled.runAt) || 0) <= now);
+}
+
+function processScheduledGoals() {
+  const due = findDueScheduledGoals();
+  for (const goal of due) {
+    if (!goal || isGoalRunning(goal.id)) continue;
+    if (goal.chatId && goalChatTaskById(goal.chatId)) continue;
+    goal.scheduled.status = SCHEDULED_GOAL_STATUS.RUNNING;
+    pushGoalEvent(goal, 'scheduled_trigger', { progress: 'Scheduled goal time reached; starting runner.' });
+    saveGoals();
+    renderGoalPanel();
+    Promise.resolve(continueGoal(goal.id)).catch(e => {
+      const latest = goalById(goal.id);
+      if (!latest || !latest.scheduled) return;
+      latest.scheduled.status = SCHEDULED_GOAL_STATUS.ERROR;
+      latest.scheduled.error = e && e.message ? e.message : String(e || '未知错误');
+      latest.lastError = latest.scheduled.error;
+      pushGoalEvent(latest, 'scheduled_error', { reason: latest.lastError });
+      saveGoals();
+      renderGoalPanel();
+    });
   }
 }
 
@@ -1376,12 +1495,27 @@ function updateGoal(args = {}, toolContext = {}) {
   if (!goal) return { ok: false, error: 'No active goal.' };
   if (syncGoalToolContextChat(goal, toolContext)) goalSaveData();
 
-  const status = normalizeGoalStatus(args.status || goal.status);
+  const requestedStatus = String(args.status || '').trim().toLowerCase();
+  const status = requestedStatus ? normalizeGoalStatus(requestedStatus) : 'active';
   const progress = String(args.progress || '').trim();
   const evidence = String(args.evidence || '').trim();
   const nextStep = String(args.next_step || args.nextStep || '').trim();
   const finalSummary = String(args.final_summary || args.finalSummary || '').trim();
   const blockerReason = String(args.blocker_reason || args.blockerReason || args.reason || '').trim();
+  const toolForbiddenStatus = requestedStatus === 'paused' || requestedStatus === 'cancelled';
+
+  if (GOAL_TERMINAL_STATUSES.has(goal.status)) {
+    pushGoalEvent(goal, 'update_rejected', {
+      reason: `update_goal cannot modify terminal goal status=${goal.status}.`
+    });
+    saveGoals();
+    return {
+      ok: false,
+      status: goal.status,
+      error: `update_goal cannot modify a terminal goal (${goal.status}). Create or select an active goal instead.`,
+      goal: summarizeGoalForTool(goal)
+    };
+  }
 
   if (progress || evidence || nextStep) {
     pushGoalEvent(goal, 'progress', { progress, evidence, next_step: nextStep });
@@ -1389,6 +1523,20 @@ function updateGoal(args = {}, toolContext = {}) {
   if (progress) goal.summary = progress;
   if (evidence) goal.lastResult = evidence;
   if (nextStep) goal.nextStep = nextStep;
+
+  if (toolForbiddenStatus) {
+    const rejectedStatus = requestedStatus;
+    pushGoalEvent(goal, 'status_rejected', {
+      reason: `update_goal cannot set status=${rejectedStatus}; pause/cancel are user or system controls.`
+    });
+    saveGoals();
+    return {
+      ok: false,
+      status: goal.status,
+      error: `update_goal cannot set status=${rejectedStatus}. Use status="blocked" with blocker_reason when user input is required; pause/cancel must come from user or system controls.`,
+      goal: summarizeGoalForTool(goal)
+    };
+  }
 
   if (status === 'complete') {
     if (goalSettings().goalRequireVerification !== false && !evidence && !finalSummary) {
@@ -1423,13 +1571,6 @@ function updateGoal(args = {}, toolContext = {}) {
     } else {
       goal.status = 'active';
     }
-  } else if (status === 'paused') {
-    goal.status = 'paused';
-    pushGoalEvent(goal, 'paused', { reason: progress || 'Paused by tool.' });
-  } else if (status === 'cancelled') {
-    goal.status = 'cancelled';
-    goal.cancelledAt = nowIso();
-    pushGoalEvent(goal, 'cancelled', { reason: progress || 'Cancelled by tool.' });
   } else if (!GOAL_TERMINAL_STATUSES.has(goal.status)) {
     goal.status = 'active';
   }
@@ -1517,6 +1658,8 @@ window.loadGoals = loadGoals;
 window.openGoalPanel = openGoalPanel;
 window.closeGoalPanel = closeGoalPanel;
 window.createGoalFromUi = createGoalFromUi;
+window.findDueScheduledGoals = findDueScheduledGoals;
+window.processScheduledGoals = processScheduledGoals;
 window.continueActiveGoal = continueActiveGoal;
 window.pauseActiveGoal = pauseActiveGoal;
 window.cancelActiveGoal = cancelActiveGoal;
@@ -1544,6 +1687,9 @@ window.AgentApp.define('goalCore', {
   openGoalPanel,
   closeGoalPanel,
   createGoalFromUi,
+  SCHEDULED_GOAL_STATUS,
+  findDueScheduledGoals,
+  processScheduledGoals,
   continueGoal,
   continueActiveGoal,
   pauseGoal,

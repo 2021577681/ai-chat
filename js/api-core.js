@@ -1550,7 +1550,7 @@ async function runAgentLoop({
   
   // 内部维护 messages（不动 c.messages）
   const messages = JSON.parse(JSON.stringify(initialMessages || []));
-  const tools = useTools ? buildToolsArray({ force: true }) : null;
+  const tools = useTools ? buildToolsArray({ force: true, toolContext }) : null;
   const hasUsableTools = Array.isArray(tools) ? tools.length > 0 : !!tools;
   
   let finalText = '';
