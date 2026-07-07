@@ -1943,6 +1943,73 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
         )
 
     @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
+    def test_api_adapters_sanitize_malformed_tool_call_arguments(self):
+        script = textwrap.dedent(
+            r"""
+            const assert = require('assert');
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const root = process.cwd();
+            const sandbox = { console };
+            sandbox.window = sandbox;
+            sandbox.globalThis = sandbox;
+            vm.createContext(sandbox);
+
+            function run(file) {
+              const code = fs.readFileSync(path.join(root, file), 'utf8');
+              vm.runInContext(code, sandbox, { filename: file });
+            }
+
+            run('js/app-context.js');
+            sandbox.AgentApp.define('state', {
+              state: { settings: { systemPrompt: '' } }
+            });
+
+            run('js/api-adapters.js');
+            const adapters = sandbox.AgentApp.require('apiAdapters');
+            const history = [
+              { role: 'user', content: 'inspect' },
+              {
+                role: 'assistant',
+                content: '',
+                tool_calls: [{
+                  id: 'call_bad',
+                  type: 'function',
+                  function: { name: 'read_file', arguments: '{"path":"unterminated' }
+                }]
+              },
+              { role: 'tool', tool_call_id: 'call_bad', name: 'read_file', content: 'failed' }
+            ];
+
+            const messages = adapters.buildOpenAIMessages(history);
+            const assistant = messages.find(m => m.role === 'assistant' && m.tool_calls);
+            assert.strictEqual(assistant.tool_calls[0].function.arguments, '{}');
+
+            const responsesInput = adapters.buildOpenAIResponsesInput(history);
+            const functionCall = responsesInput.find(item => item.type === 'function_call');
+            assert.strictEqual(functionCall.arguments, '{}');
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / 'tool_call_argument_sanitize_test.js'
+            script_path.write_text(script, encoding='utf-8')
+            completed = subprocess.run(
+                ['node', str(script_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f'tool call argument sanitize runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
+        )
+
+    @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
     def test_temporary_chat_stop_does_not_abort_background_chat(self):
         script = textwrap.dedent(
             r"""

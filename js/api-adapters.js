@@ -10,6 +10,36 @@ const apiAdapterState = ApiAdapterStateModule ? ApiAdapterStateModule.state : st
 
 // ============ API 调用核心 ============
 
+function normalizeToolCallArguments(raw) {
+  if (raw === undefined || raw === null || raw === '') return '{}';
+  if (typeof raw !== 'string') {
+    try { return JSON.stringify(raw); } catch (e) { return '{}'; }
+  }
+  try {
+    JSON.parse(raw);
+    return raw;
+  } catch (e) {
+    console.warn('[api-adapters] Dropping malformed tool_call arguments before request:', e.message);
+    return '{}';
+  }
+}
+
+function normalizeOpenAIToolCall(tc) {
+  if (!tc || typeof tc !== 'object') return null;
+  const fn = tc.function && typeof tc.function === 'object' ? tc.function : {};
+  const name = fn.name || tc.name || '';
+  const id = tc.id || tc.call_id || '';
+  if (!id || !name) return null;
+  return {
+    id,
+    type: tc.type || 'function',
+    function: {
+      name,
+      arguments: normalizeToolCallArguments(fn.arguments !== undefined ? fn.arguments : tc.arguments)
+    }
+  };
+}
+
 function buildOpenAIMessages(history, options = {}) {
   history = (history || []).filter(m =>
     m && !m._hiddenFromAI && !m._textToolCallSuppressed && (!m._textToolCallRecovery || options.includeTextToolCallRecovery)
@@ -47,7 +77,12 @@ function buildOpenAIMessages(history, options = {}) {
       continue;
     }
     if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length) {
-      out.push({ role: 'assistant', content: m.content || '', tool_calls: m.tool_calls });
+      const toolCalls = m.tool_calls.map(normalizeOpenAIToolCall).filter(Boolean);
+      if (toolCalls.length) {
+        out.push({ role: 'assistant', content: m.content || '', tool_calls: toolCalls });
+      } else if (m.content) {
+        out.push({ role: 'assistant', content: m.content || '' });
+      }
       continue;
     }
     
@@ -166,11 +201,13 @@ function buildOpenAIResponsesInput(history, options = {}) {
         out.push({ role: 'assistant', content: m.content });
       }
       for (const tc of m.tool_calls) {
+        const normalized = normalizeOpenAIToolCall(tc);
+        if (!normalized) continue;
         out.push({
           type: 'function_call',
-          call_id: tc.id,
-          name: tc.function?.name || '',
-          arguments: tc.function?.arguments || '{}'
+          call_id: normalized.id,
+          name: normalized.function.name,
+          arguments: normalized.function.arguments
         });
       }
       continue;
@@ -299,7 +336,7 @@ function buildAnthropicMessages(history, options = {}) {
       }
       for (const tc of m.tool_calls) {
         let input = {};
-        try { input = JSON.parse(tc.function?.arguments || '{}'); } catch (e) {}
+        try { input = JSON.parse(normalizeToolCallArguments(tc.function?.arguments)); } catch (e) {}
         parts.push({
           type: 'tool_use',
           id: tc.id,
