@@ -382,6 +382,9 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn("window.AgentApp.require('state')", chat_js)
         self.assertIn('chatState.', chat_js)
         self.assertIn('chatSaveData();', chat_js)
+        self.assertIn('function sealInterruptedToolFlows', chat_js)
+        self.assertIn('gm._toolFlowInterrupted', chat_js)
+        self.assertIn('sealInterruptedToolFlows', chat_js[chat_js.index("window.AgentApp.define('chat'"):])
         self.assertNotIn('state.', chat_js)
         self.assertNotIn('saveData();', chat_js)
 
@@ -456,6 +459,19 @@ class FrontendModuleTests(unittest.TestCase):
         ):
             self.assertNotIn(direct_usage, api_stream_code)
 
+    def test_stop_generate_seals_interrupted_tool_flows(self):
+        api_stream_js = (ROOT / 'js' / 'api-stream.js').read_text(encoding='utf-8')
+
+        self.assertIn('const apiStreamSaveData = ApiStreamStateModule.saveData;', api_stream_js)
+        self.assertIn("typeof sealInterruptedToolFlows === 'function'", api_stream_js)
+        self.assertIn('const changed = sealInterruptedToolFlows(c);', api_stream_js)
+        self.assertIn("console.warn('[stopGenerate] 收尾工具流程失败:'", api_stream_js)
+        seal_idx = api_stream_js.index("typeof sealInterruptedToolFlows === 'function'")
+        self.assertLess(
+            seal_idx,
+            api_stream_js.index('apiStreamSyncGlobalTaskState(chatId)', seal_idx)
+        )
+
     def test_api_core_consumes_state_module(self):
         api_core_js = (ROOT / 'js' / 'api-core.js').read_text(encoding='utf-8')
         api_core_code = '\n'.join(
@@ -498,6 +514,23 @@ class FrontendModuleTests(unittest.TestCase):
             'await callAPI(',
         ):
             self.assertNotIn(direct_usage, api_core_code)
+
+    def test_api_core_discards_tool_result_after_stop(self):
+        api_core_js = (ROOT / 'js' / 'api-core.js').read_text(encoding='utf-8')
+
+        self.assertIn('const isMainToolStopRequested = () => {', api_core_js)
+        main_exec = 'const result = await ApiCoreOrchestrationService.executeTool(fname, args, {'
+        main_after_stop = 'if (isMainToolStopRequested()) {\n          userStoppedAll = true;\n          pruneToolCallsToExecuted(msg, executedToolCallIds);'
+        main_prepare = 'const preparedToolResult = typeof prepareToolResultForContext'
+        self.assertLess(api_core_js.index(main_exec), api_core_js.index(main_after_stop))
+        self.assertLess(api_core_js.index(main_after_stop), api_core_js.index(main_prepare))
+        self.assertIn("lastMsg.content = '*[已停止]*';", api_core_js)
+
+        loop_exec = 'const result = await ApiCoreOrchestrationService.executeTool(tc.name, args, runToolContext);'
+        loop_after_stop = "if (_isAborted()) {\n        if (assistantMsg.tool_calls) {"
+        loop_emit = "_emit({ type: 'tool_result'"
+        self.assertLess(api_core_js.index(loop_exec), api_core_js.index(loop_after_stop, api_core_js.index(loop_exec)))
+        self.assertLess(api_core_js.index(loop_after_stop, api_core_js.index(loop_exec)), api_core_js.index(loop_emit, api_core_js.index(loop_exec)))
 
     def test_app_context_exposes_module_registry_api(self):
         app_js = (ROOT / 'js' / 'app-context.js').read_text(encoding='utf-8')
@@ -555,6 +588,7 @@ class FrontendModuleTests(unittest.TestCase):
 
     def test_full_access_permission_mode_keeps_shell_audit_and_marks_backend_requests(self):
         terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+        main_js = (ROOT / 'js' / 'main.js').read_text(encoding='utf-8')
         permissions_js = (ROOT / 'js' / 'permissions.js').read_text(encoding='utf-8')
         shell_audit_js = (ROOT / 'js' / 'shell-audit.js').read_text(encoding='utf-8')
         event_delegation_js = (ROOT / 'js' / 'event-delegation.js').read_text(encoding='utf-8')
@@ -581,12 +615,16 @@ class FrontendModuleTests(unittest.TestCase):
             'allow_full_access: fullAccessAllowed',
         ):
             self.assertIn(snippet, terminal_js)
+        self.assertIn("storage.get('aichat_terminal_full_access_v1')", main_js)
+        self.assertIn('TERMINAL_CONFIG.fullAccess = loadFullAccessMode();', main_js)
         self.assertIn("action === 'execute' && !skipShellAudit && typeof reviewShellCommandWithAI === 'function'", terminal_js)
 
         for snippet in (
             'function renderFullAccessControl()',
             'id="fullAccessPermissionPanel"',
+            'perm-full-access-toggle',
             'data-action="onToggleFullAccess"',
+            'aria-pressed="${fullAccess ? \'true\' : \'false\'}"',
             'function onToggleFullAccess()',
             'grantFullAccessPermissions()',
             'restoreFullAccessPermissions()',
@@ -1445,10 +1483,10 @@ class FrontendModuleTests(unittest.TestCase):
 
         self.assertLess(control_guard_idx, tools_available_idx)
         self.assertGreater(clone_idx, control_guard_idx)
-        self.assertRegex(
-            terminal_js,
-            r"if \(sub === 'clone'\) \{\s*return \{ passthrough: true, forceConfirm: true \};\s*\}",
-        )
+        self.assertIn("git_execute: {", terminal_js)
+        self.assertIn("function gitExecutePassthrough", terminal_js)
+        self.assertIn("permissionCategory: 'git_execute'", terminal_js)
+        self.assertRegex(terminal_js, r"if \(sub === 'clone'\) \{\s*return gitExecutePassthrough\(true\);\s*\}")
 
     def test_terminal_allows_read_only_git_passthrough(self):
         terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
@@ -1470,8 +1508,21 @@ class FrontendModuleTests(unittest.TestCase):
         self.assertIn('if (parsed.passthroughOnly)', terminal_js)
         self.assertRegex(
             terminal_js,
-            r"if \(readOnlyDecision && readOnlyDecision\.passthrough\) \{\s*return \{ passthrough: true, forceConfirm: !!readOnlyDecision\.forceConfirm \};\s*\}",
+            r"if \(readOnlyDecision && readOnlyDecision\.passthrough\) \{\s*return gitExecutePassthrough\(!!readOnlyDecision\.forceConfirm\);\s*\}",
         )
+
+    def test_terminal_full_access_bypasses_all_git_routing(self):
+        terminal_js = (ROOT / 'js' / 'terminal.js').read_text(encoding='utf-8')
+        route_start = terminal_js.index('async function routeGitExecuteCommand')
+        route_end = terminal_js.index('function normalizeExecuteTimeoutSec', route_start)
+        route = terminal_js[route_start:route_end]
+
+        self.assertIn('const fullAccessAllowed = isFullAccessModeEnabled();', route)
+        full_access_idx = route.index('if (fullAccessAllowed) return null;')
+        control_guard_idx = route.index('commandHasShellOperators(command)')
+        first_passthrough_idx = route.index('gitExecutePassthrough(true)')
+        self.assertLess(full_access_idx, control_guard_idx)
+        self.assertLess(full_access_idx, first_passthrough_idx)
 
     def test_goal_mode_surfaces_tool_calls_in_main_chat(self):
         goal_core_js = (ROOT / 'js' / 'goal-core.js').read_text(encoding='utf-8')
@@ -1769,14 +1820,20 @@ class FrontendModuleTests(unittest.TestCase):
             self.assertNotIn(removed, file_explorer_js)
 
         self.assertIn('function fileExplorerReadFileAsArrayBuffer', file_explorer_js)
+        self.assertIn('const FILE_EXPLORER_UPLOAD_CHUNK_BYTES', file_explorer_js)
+        self.assertIn('function uploadExplorerFileInChunks', file_explorer_js)
+        self.assertIn('file.slice(offset, end)', file_explorer_js)
         self.assertIn('reader.readAsArrayBuffer(file)', file_explorer_js)
         self.assertNotIn('reader.readAsDataURL(file)', file_explorer_js)
-        self.assertIn("callAgentBackend(\n          'write_file'", file_explorer_js)
+        self.assertNotIn('FILE_EXPLORER_UPLOAD_MAX_BYTES', file_explorer_js)
+        self.assertIn("callAgentBackend(\n      'file_upload_chunk'", file_explorer_js)
+        self.assertIn('total_chunks: totalChunks', file_explorer_js)
+        self.assertIn('checkpoint_id: checkpointId || undefined', file_explorer_js)
         self.assertIn("encoding: 'base64'", file_explorer_js)
         self.assertIn('{ skipConfirm: true }', file_explorer_js)
         self.assertNotIn('.file-explorer-list.is-drag-over', base_css)
         self.assertIn('def _compact_large_write_payload', handler_py)
-        self.assertIn("action != 'write_file'", handler_py)
+        self.assertIn("action not in ('write_file', 'file_upload_chunk')", handler_py)
 
     def test_chat_attachment_reading_avoids_browser_data_url_limit(self):
         chat_js = (ROOT / 'js' / 'chat.js').read_text(encoding='utf-8')

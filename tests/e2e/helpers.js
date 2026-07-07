@@ -1075,7 +1075,7 @@ function agentBackendPayload(action, body, state = {}) {
       cwd: MOCK_WORKSPACE
     };
   }
-  if (['write_file', 'append_file', 'edit_file', 'apply_patch', 'create_file', 'create_dir', 'rename_file', 'copy_file', 'move_file', 'delete_file'].includes(action)) {
+  if (['write_file', 'file_upload_chunk', 'append_file', 'edit_file', 'apply_patch', 'create_file', 'create_dir', 'rename_file', 'copy_file', 'move_file', 'delete_file'].includes(action)) {
     return { ok: true, action, path: body.path || '', new_path: body.new_path || body.target_path || body.target_dir || '', workspace: MOCK_WORKSPACE, cwd: MOCK_WORKSPACE };
   }
   return { ok: true, action, workspace: MOCK_WORKSPACE, cwd: MOCK_WORKSPACE };

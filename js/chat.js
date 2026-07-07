@@ -1887,7 +1887,13 @@ function groupToolFlows(innerOverride, chatOverride) {
       //   typeof tool_calls 不一定有，所以原表达式恒 false，这里独立放过。
       const completeButEmpty = finalMsg && finalMsg._endTime && !(finalMsg.content || '').trim();
 
-      const canCollapse = isComplete || interruptedByUser || completeButEmpty;
+      const interruptedFlow = msgNodes.slice(i, endExclusive).some(gn => {
+        const gIdx = parseInt(gn.dataset.idx);
+        const gm = c.messages[gIdx];
+        return !!(gm && gm._toolFlowInterrupted);
+      });
+
+      const canCollapse = isComplete || interruptedByUser || completeButEmpty || interruptedFlow;
 
       if (canCollapse && endExclusive > i) {
         const groupNodes = msgNodes.slice(i, endExclusive);
@@ -1895,6 +1901,7 @@ function groupToolFlows(innerOverride, chatOverride) {
         // 用第一条消息的 idx 作为流程唯一 key
         const flowKey = 'flow_' + idx;
         const wasExpanded = expandedKeys.has(flowKey);
+        const shouldExpand = wasExpanded && !interruptedFlow;
         
         // 统计总耗时：从起点 _startTime 到最后一条 tool/assistant _endTime
         let startT = null, endT = null;
@@ -1908,8 +1915,9 @@ function groupToolFlows(innerOverride, chatOverride) {
         const elapsed = (startT && endT) ? ((endT - startT) / 1000).toFixed(1) + 's' : '';
         
         const group = document.createElement('div');
-        group.className = 'tool-flow-group' + (wasExpanded ? '' : ' collapsed');
+        group.className = 'tool-flow-group' + (shouldExpand ? '' : ' collapsed');
         group.dataset.flowKey = flowKey;
+        if (interruptedFlow) group.dataset.interrupted = 'true';
         group.innerHTML = `
           <button class="tool-flow-toggle" type="button">
             <span class="tool-flow-icon">🛠</span>
@@ -1943,6 +1951,70 @@ function groupToolFlows(innerOverride, chatOverride) {
   }
 }
 
+function sealInterruptedToolFlows(targetChat) {
+  const c = targetChat || chatCurrentChat();
+  if (!c || !Array.isArray(c.messages)) return false;
+
+  let lastVisibleIdx = -1;
+  for (let i = c.messages.length - 1; i >= 0; i--) {
+    if (c.messages[i] && !c.messages[i]._hiddenFromUI) {
+      lastVisibleIdx = i;
+      break;
+    }
+  }
+  if (lastVisibleIdx < 0) return false;
+
+  let lastUserIdx = -1;
+  for (let i = lastVisibleIdx; i >= 0; i--) {
+    const m = c.messages[i];
+    if (m && !m._hiddenFromUI && m.role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+
+  let flowStart = -1;
+  for (let i = lastUserIdx + 1; i <= lastVisibleIdx; i++) {
+    const m = c.messages[i];
+    if (!m || m._hiddenFromUI) continue;
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length) {
+      flowStart = i;
+      continue;
+    }
+    if (m.role === 'assistant' && !(m.tool_calls && m.tool_calls.length)) {
+      flowStart = -1;
+    }
+  }
+  if (flowStart < 0) return false;
+
+  const now = Date.now();
+  let changed = false;
+  for (let i = flowStart; i <= lastVisibleIdx; i++) {
+    const m = c.messages[i];
+    if (!m || m._hiddenFromUI) continue;
+    if (m.role !== 'assistant' && m.role !== 'tool') continue;
+    if (!m._toolFlowInterrupted) {
+      m._toolFlowInterrupted = true;
+      changed = true;
+    }
+    if (m._startTime && !m._endTime) {
+      m._endTime = now;
+      changed = true;
+    }
+  }
+
+  if (chatIsCurrentChat(c)) {
+    if (typeof groupToolFlows === 'function') groupToolFlows(null, c);
+    const inner = document.getElementById('messagesInner');
+    if (inner) {
+      inner
+        .querySelectorAll('.tool-flow-group[data-interrupted="true"]:not(.collapsed), .tool-flow-group[data-interrupted="true"] .tool-call:not(.collapsed)')
+        .forEach(el => el.classList.add('collapsed'));
+    }
+  }
+  return changed;
+}
+
 if (typeof window !== 'undefined' && window.AgentApp) {
   window.AgentApp.define('chat', {
     newChat,
@@ -1961,6 +2033,7 @@ if (typeof window !== 'undefined' && window.AgentApp) {
     removeAttachment,
     setupDrag,
     setupPaste,
-    groupToolFlows
+    groupToolFlows,
+    sealInterruptedToolFlows
   });
 }

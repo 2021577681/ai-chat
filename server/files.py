@@ -52,6 +52,29 @@ def _body_flag_enabled(value):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
 
+def _int_body_value(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _decode_base64_payload(content):
+    payload = str(content or '')
+    if payload.startswith('data:') and ',' in payload:
+        payload = payload.split(',', 1)[1]
+    return base64.b64decode(payload, validate=True)
+
+
+def _upload_temp_path(target_path, upload_id):
+    parent = os.path.dirname(target_path)
+    name = os.path.basename(target_path) or 'upload.bin'
+    safe_id = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(upload_id or '').strip())[:80]
+    if not safe_id:
+        safe_id = secrets.token_hex(8)
+    return os.path.join(parent, f'.{name}.upload-{safe_id}.tmp')
+
+
 def _is_workspace_root_path(path):
     try:
         return os.path.realpath(path) == os.path.realpath(config.WORKSPACE_ROOT)
@@ -766,10 +789,7 @@ class FilesMixin:
                 except Exception:
                     old_lines = 0
             if is_base64:
-                payload = str(content or '')
-                if payload.startswith('data:') and ',' in payload:
-                    payload = payload.split(',', 1)[1]
-                binary = base64.b64decode(payload, validate=True)
+                binary = _decode_base64_payload(content)
                 with open(path, 'wb') as f:
                     f.write(binary)
                 bytes_written = len(binary)
@@ -792,6 +812,72 @@ class FilesMixin:
             self.response.json(200, {'ok': False, 'error': str(e)})
 
     # ============ 追加文件 ============
+    def handle_file_upload_chunk(self, body):
+        path, err = check_path_or_error(body.get('path', ''))
+        if err: return self.response.json(200, {'ok': False, 'error': err})
+        encoding = str(body.get('encoding') or body.get('content_encoding') or '').strip().lower()
+        if encoding != 'base64':
+            return self.response.json(200, {'ok': False, 'error': 'file_upload_chunk only accepts base64 chunks'})
+
+        offset = max(0, _int_body_value(body.get('offset'), 0))
+        chunk_index = max(0, _int_body_value(body.get('chunk_index') or body.get('chunkIndex'), 0))
+        total_chunks = max(1, _int_body_value(body.get('total_chunks') or body.get('totalChunks'), 1))
+        total_size = _int_body_value(body.get('total_size') or body.get('totalSize'), -1)
+        done = _body_flag_enabled(body.get('done')) or chunk_index >= total_chunks - 1
+        upload_id = body.get('upload_id') or body.get('uploadId') or ''
+        tmp_path = _upload_temp_path(path, upload_id)
+
+        try:
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            checkpoint = None
+            if offset == 0 or chunk_index == 0:
+                checkpoint = self._checkpoint_before_mutation([path], body, 'file_upload_chunk')
+                mode = 'wb'
+            else:
+                if not os.path.exists(tmp_path):
+                    return self.response.json(200, {'ok': False, 'error': 'upload chunk state is missing; please retry the upload'})
+                current_size = os.path.getsize(tmp_path)
+                if current_size != offset:
+                    return self.response.json(200, {
+                        'ok': False,
+                        'error': f'upload chunk offset mismatch: expected {current_size}, got {offset}',
+                        'expected_offset': current_size,
+                        'offset': offset
+                    })
+                mode = 'ab'
+
+            binary = _decode_base64_payload(body.get('content', ''))
+            with open(tmp_path, mode) as f:
+                f.write(binary)
+            bytes_received = os.path.getsize(tmp_path)
+
+            if done:
+                if total_size >= 0 and bytes_received != total_size:
+                    return self.response.json(200, {
+                        'ok': False,
+                        'error': f'upload size mismatch: expected {total_size}, got {bytes_received}',
+                        'bytes_received': bytes_received,
+                        'total_size': total_size
+                    })
+                os.replace(tmp_path, path)
+
+            self.response.json(200, {
+                'ok': True,
+                'path': path,
+                'upload_id': upload_id,
+                'chunk_index': chunk_index,
+                'total_chunks': total_chunks,
+                'bytes_received': bytes_received,
+                'total_size': total_size,
+                'complete': bool(done),
+                'checkpoint_id': checkpoint['id'] if checkpoint else (body.get('checkpoint_id') or body.get('checkpointId') or None),
+                'checkpoint': checkpoint
+            })
+        except Exception as e:
+            self.response.json(200, {'ok': False, 'error': str(e)})
+
     def handle_append_file(self, body):
         path, err = check_path_or_error(body.get('path', ''))
         if err: return self.response.json(200, {'ok': False, 'error': err})

@@ -12,6 +12,7 @@ import locale
 import shlex
 import subprocess
 import tempfile
+import base64
 
 from . import config
 from .sandbox import command_workspace_violation, is_dangerous_command, is_inside_workspace, resolve_path
@@ -119,6 +120,36 @@ def _remote_terminal_ssh_args(ssh_command, remote_workspace, proxy_url=''):
         )
     remote_cmd = f'cd {_quote_remote_cd_path(remote_workspace)} && {proxy_exports}exec "${{SHELL:-/bin/sh}}" -l'
     return list(parts[:-1]) + ['-t', parts[-1], remote_cmd]
+
+
+def _powershell_single_quoted(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _windows_remote_terminal_launcher_args(terminal_title, ssh_args):
+    filename = ssh_args[0] if ssh_args else 'ssh'
+    arguments = subprocess.list2cmdline(ssh_args[1:])
+    script = (
+        f"$Host.UI.RawUI.WindowTitle = {_powershell_single_quoted(terminal_title)}\n"
+        "$psi = [System.Diagnostics.ProcessStartInfo]::new()\n"
+        f"$psi.FileName = {_powershell_single_quoted(filename)}\n"
+        f"$psi.Arguments = {_powershell_single_quoted(arguments)}\n"
+        "$psi.UseShellExecute = $false\n"
+        "$proc = [System.Diagnostics.Process]::Start($psi)\n"
+        "$proc.WaitForExit()\n"
+        "$global:LASTEXITCODE = $proc.ExitCode\n"
+    )
+    encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
+    return ['powershell.exe', '-NoLogo', '-NoExit', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded]
+
+
+def _windows_remote_terminal_commands(terminal_title, ssh_args):
+    launcher_args = _windows_remote_terminal_launcher_args(terminal_title, ssh_args)
+    return [
+        ['wt.exe', 'new-tab', '--title', terminal_title, '--'] + launcher_args,
+        ['wt.exe', '--'] + launcher_args,
+        launcher_args,
+    ]
 
 
 def _unique_encodings(names):
@@ -361,11 +392,7 @@ class ExecMixin:
             terminal_title = 'AI Remote Terminal'
 
             if system == 'windows':
-                commands = [
-                    ['wt.exe', 'new-tab', '--title', terminal_title] + ssh_args,
-                    ['wt.exe'] + ssh_args,
-                    ['cmd.exe', '/k', f'title {terminal_title} & {subprocess.list2cmdline(ssh_args)}'],
-                ]
+                commands = _windows_remote_terminal_commands(terminal_title, ssh_args)
                 last_error = None
                 for cmd in commands:
                     try:
@@ -424,7 +451,7 @@ class ExecMixin:
         print(f'💻 [执行] cwd={cwd}\n   $ {command}')
 
         # ⭐ L3: 危险命令黑名单
-        is_danger, reason = is_dangerous_command(command)
+        is_danger, reason = is_dangerous_command(command, cwd=cwd)
         if is_danger:
             print(f'🚫 [拦截] 危险命令：{reason}')
             return self.response.json(200, {
@@ -433,7 +460,7 @@ class ExecMixin:
             })
 
         # ⭐ L4: 命令文本中的路径越界检测
-        violates_workspace, workspace_reason = command_workspace_violation(command)
+        violates_workspace, workspace_reason = command_workspace_violation(command, cwd=cwd)
         if violates_workspace:
             print(f'🚫 [拦截] 命令路径越界：{workspace_reason}')
             return self.response.json(200, {

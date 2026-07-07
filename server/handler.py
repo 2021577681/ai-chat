@@ -54,7 +54,7 @@ def _redact_log_secrets(value):
 
 
 def _compact_large_write_payload(action, body):
-    if action != 'write_file' or not isinstance(body, dict):
+    if action not in ('write_file', 'file_upload_chunk') or not isinstance(body, dict):
         return body
     encoding = str(body.get('encoding') or body.get('content_encoding') or '').lower()
     if encoding != 'base64' or not isinstance(body.get('content'), str):

@@ -534,6 +534,10 @@ async function callAPI(roundLimit, options = {}) {
 
   const currentTask = () => apiCoreChatTaskById(taskChatId) || task;
   const hasPendingGuidance = () => !!(currentTask() && currentTask().pendingGuidance);
+  const isMainToolStopRequested = () => {
+    const t = currentTask();
+    return !!(t && t.stopRequested) || !!apiCoreState.stopRequested || !!abortCtrl.signal.aborted;
+  };
   const pruneToolCallsToExecuted = (msg, executedIds) => {
     if (!msg || !msg.tool_calls) return;
     msg.tool_calls = msg.tool_calls.filter(tc => executedIds.includes(tc.id));
@@ -776,7 +780,7 @@ async function callAPI(roundLimit, options = {}) {
       for (const tc of msg.tool_calls) {
         // ⭐ 用户点了"停止"：立刻退出工具循环，不再执行后续工具
         //   即使当前轮的 fetch 已结束、abortCtrl 已 null，stopRequested 仍能拦住
-        if (task ? task.stopRequested : apiCoreState.stopRequested) {
+        if (isMainToolStopRequested()) {
           userStoppedAll = true;
           // ⭐ 关键修复：去掉未执行的 tool_calls，避免下次请求时
           //   DeepSeek/OpenAI 报 400："tool_calls must be followed by tool messages"
@@ -791,11 +795,15 @@ async function callAPI(roundLimit, options = {}) {
           chatId: taskChatId,
           chat: c,
           signal: abortCtrl.signal,
-          isStopped: () => {
-            const t = currentTask();
-            return !!(t && t.stopRequested) || !!apiCoreState.stopRequested;
-          }
+          isStopped: isMainToolStopRequested
         });
+        if (isMainToolStopRequested()) {
+          userStoppedAll = true;
+          pruneToolCallsToExecuted(msg, executedToolCallIds);
+          apiCoreRefreshMsgNodeOrRender(lastIdx, c, isTaskVisible());
+          apiCoreSaveData();
+          break;
+        }
         
         let contentText;
         let isError = false;
@@ -878,7 +886,7 @@ async function callAPI(roundLimit, options = {}) {
       
       // ⭐ 用户点了"停止"：不再递归发下一轮请求
       //   关键修复：避免"工具执行完后照样再发一轮 API"的死循环
-      if (task ? task.stopRequested : apiCoreState.stopRequested) {
+      if (isMainToolStopRequested()) {
         if (hasPendingGuidance()) {
           await appendPendingGuidanceAndContinue(Math.max(0, roundLimit - 1));
           return;
@@ -898,6 +906,10 @@ async function callAPI(roundLimit, options = {}) {
           } else {
             apiCoreRenderMessagesIfVisible(isTaskVisible());
           }
+        } else if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.content && !(lastMsg.tool_calls && lastMsg.tool_calls.length)) {
+          lastMsg.content = '*[已停止]*';
+          if (!lastMsg._endTime) lastMsg._endTime = Date.now();
+          apiCoreRefreshMsgNodeOrRender(c.messages.length - 1, c, isTaskVisible());
         }
         apiCoreSaveData();
         return;
@@ -1963,6 +1975,14 @@ async function runAgentLoop({
         isStopped: _isAborted
       };
       const result = await ApiCoreOrchestrationService.executeTool(tc.name, args, runToolContext);
+      if (_isAborted()) {
+        if (assistantMsg.tool_calls) {
+          assistantMsg.tool_calls = assistantMsg.tool_calls.filter(
+            t => executedIds.includes(t.id)
+          );
+        }
+        const err = new Error('用户中断'); err.name = 'AbortError'; throw err;
+      }
       
       let contentText;
       let isError = false;

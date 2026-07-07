@@ -2135,6 +2135,95 @@ class FrontendServiceRuntimeTests(unittest.TestCase):
             msg=f'outline initial item limit runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
         )
 
+    @unittest.skipIf(shutil.which('node') is None, 'node is required for frontend runtime smoke tests')
+    def test_file_explorer_resolves_remote_workspace_absolute_links(self):
+        script = textwrap.dedent(
+            r"""
+            const assert = require('assert');
+            const fs = require('fs');
+            const path = require('path');
+            const vm = require('vm');
+
+            const root = process.cwd();
+            const sandbox = {
+              console,
+              document: {
+                getElementById() { return null; },
+                querySelector() { return null; },
+                createElement() {
+                  return {
+                    appendChild() {},
+                    addEventListener() {},
+                    classList: { add() {}, remove() {}, toggle() {} }
+                  };
+                },
+                body: { appendChild() {}, removeChild() {} },
+                addEventListener() {},
+                removeEventListener() {}
+              },
+              navigator: { clipboard: { writeText() { return Promise.resolve(); } } },
+              TERMINAL_CONFIG: {
+                serverUrl: 'http://127.0.0.1:18765',
+                workspace: '/media/inspur/disk1/zhzhang/NLGCL'
+              },
+              isRemoteAgentActive() { return true; },
+              toast(message, ms) {
+                sandbox.toastArgs = [message, ms];
+              }
+            };
+            sandbox.window = sandbox;
+            sandbox.globalThis = sandbox;
+            vm.createContext(sandbox);
+
+            function run(file) {
+              const code = fs.readFileSync(path.join(root, file), 'utf8');
+              vm.runInContext(code, sandbox, { filename: file });
+            }
+
+            run('js/app-context.js');
+            run('js/ui-service.js');
+            run('js/file-explorer.js');
+
+            const fileExplorer = sandbox.AgentApp.require('fileExplorer');
+            let resolved = fileExplorer.resolveFileExplorerOpenPath('/media/inspur/disk1/zhzhang/NLGCL/src/main.py');
+            assert.strictEqual(resolved.ok, true);
+            assert.strictEqual(resolved.path, 'src/main.py');
+
+            resolved = fileExplorer.resolveFileExplorerOpenPath('/media/inspur/disk1/zhzhang/NLGCL');
+            assert.strictEqual(resolved.ok, true);
+            assert.strictEqual(resolved.path, '.');
+
+            resolved = fileExplorer.resolveFileExplorerOpenPath('src/main.py');
+            assert.strictEqual(resolved.ok, true);
+            assert.strictEqual(resolved.path, 'src/main.py');
+
+            assert.strictEqual(
+              fileExplorer.resolveFileExplorerOpenPath('/media/inspur/disk1/other/main.py').ok,
+              false
+            );
+            assert.strictEqual(
+              fileExplorer.resolveFileExplorerOpenPath('C:\\Users\\philips\\Desktop\\agent\\main.py').ok,
+              false
+            );
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / 'file_explorer_remote_link_test.js'
+            script_path.write_text(script, encoding='utf-8')
+            completed = subprocess.run(
+                ['node', str(script_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f'file explorer remote link runtime test failed\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

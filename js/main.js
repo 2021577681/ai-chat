@@ -40,6 +40,19 @@ async function init() {
       if (permsRaw) {
         try { TERMINAL_CONFIG.permanentAllow = JSON.parse(permsRaw) || {}; } catch (e) {}
       }
+      const fullAccessRaw = storage.get('aichat_terminal_full_access_v1');
+      if (fullAccessRaw !== null && fullAccessRaw !== undefined) {
+        try {
+          if (typeof loadFullAccessMode === 'function') {
+            TERMINAL_CONFIG.fullAccess = loadFullAccessMode();
+          } else {
+            const parsed = JSON.parse(fullAccessRaw);
+            TERMINAL_CONFIG.fullAccess = parsed === true || !!(parsed && parsed.enabled);
+          }
+        } catch (e) {
+          TERMINAL_CONFIG.fullAccess = fullAccessRaw === true || fullAccessRaw === 'true' || fullAccessRaw === '1';
+        }
+      }
     } catch (e) {}
   }
 

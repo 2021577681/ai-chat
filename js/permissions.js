@@ -64,7 +64,10 @@ function renderFullAccessControl() {
             : `一键允许全部 ${total} 类工具，并允许 AI 对沙箱目录外的路径发起操作。当前已永久允许 ${granted}/${total} 类。`}
         </div>
       </div>
-      <button class="btn ${fullAccess ? '' : 'btn-primary'}" data-action="onToggleFullAccess">
+      <button class="btn perm-full-access-toggle ${fullAccess ? 'active' : 'btn-primary'}"
+              type="button"
+              data-action="onToggleFullAccess"
+              aria-pressed="${fullAccess ? 'true' : 'false'}">
         ${fullAccess ? '关闭完全访问' : '允许完全访问'}
       </button>
     </div>

@@ -24,7 +24,8 @@ const PERMISSION_CATEGORIES = {
   attach:  { icon: '📎',  label: '加载附件',       desc: 'attach_file：把二进制文件塞入对话上下文' },
   screenshot: { icon: '📸', label: '屏幕截图',       desc: 'ai_screenshot：截取指定窗口/全屏/区域，可能包含屏幕隐私信息' },
   mcp: { icon: '🔌', label: 'MCP 服务器', desc: '连接或调用本地 MCP stdio 服务器。服务器代码可能访问文件、网络或外部服务。' },
-  // ⭐ AI Git 操作（3 个独立类别，权限粒度分级）
+  // ⭐ AI Git 操作（独立类别，权限粒度分级）
+  git_execute: { icon: '🌐', label: 'Git 命令执行', desc: 'execute_action 透传 git clone / git ls-remote / 只读 Git 命令等' },
   git_read:    { icon: '🔍',  label: 'Git 查看',     desc: 'note_history / note_status / note_diff：只读查看版本历史' },
   git_write:   { icon: '💾',  label: 'Git 保存快照', desc: 'note_snapshot：将当前工作区改动提交为一个版本快照（不会覆盖文件）' },
   git_restore: { icon: '⏪',  label: 'Git 恢复历史', desc: 'note_restore：将某个文件恢复到历史快照版本（⚠️ 会覆盖当前工作区文件）' },
@@ -35,6 +36,7 @@ const PERMISSION_CATEGORIES = {
 const ACTION_TO_CATEGORY = {
   execute: 'execute',
   write_file: 'write',
+  file_upload_chunk: 'write',
   copy_file: 'write',
   move_file: 'edit',
   append_file: 'append',
@@ -730,7 +732,9 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
   const chatId = resolveToolChatId(context);
   const forceConfirm = !!(context && typeof context === 'object' && context.forceConfirm);
   const skipConfirm = !!(context && typeof context === 'object' && context.skipConfirm);
-  const category = ACTION_TO_CATEGORY[action] || '';
+  const baseCategory = ACTION_TO_CATEGORY[action] || '';
+  const requestedCategory = context && typeof context === 'object' ? String(context.permissionCategory || '') : '';
+  const category = (requestedCategory && PERMISSION_CATEGORIES[requestedCategory]) ? requestedCategory : baseCategory;
   const fullAccessAllowed = isFullAccessModeEnabled();
   const requestParams = withCheckpointParam(params, context);
   if (typeof guardConcurrentFileOwnership === 'function') {
@@ -745,10 +749,10 @@ async function callAgentBackend(action, params, confirmTitle, confirmCommand, co
     const permanentlyAllowed = !!TERMINAL_CONFIG.permanentAllow[category];
     const alreadyAllowed = fullAccessAllowed || permanentlyAllowed || taskAllowed;
     
-    // forceConfirm 用于 Git 命令在快照工具未启用时绕过“永久允许执行命令”，
-    // 避免旧的永久 execute 权限静默放行 Git 写入/恢复类命令。
-    // 但用户点击“本任务后续允许执行命令”后，应在当前任务内继续生效。
-    if ((forceConfirm && !taskAllowed && !fullAccessAllowed) || !alreadyAllowed) {
+    // forceConfirm 只绕过 action 的默认权限类别；如果调用方指定了更细类别
+    // （例如 git_execute），该类别自己的永久允许仍应生效。
+    const forceDefaultCategoryConfirm = forceConfirm && category === baseCategory && !taskAllowed && !fullAccessAllowed;
+    if (forceDefaultCategoryConfirm || !alreadyAllowed) {
       const result = await termAskConfirm(confirmTitle, params.path || params.cwd, confirmCommand, category, {
         ...(context && typeof context === 'object' ? context : {}),
         chatId
@@ -1215,20 +1219,30 @@ function aiGitToolsAvailable() {
   return terminalState.tools.some(t => t && names.has(t.name));
 }
 
+function gitExecutePassthrough(forceConfirm = true) {
+  return {
+    passthrough: true,
+    forceConfirm: !!forceConfirm,
+    permissionCategory: 'git_execute'
+  };
+}
+
 async function routeGitExecuteCommand(command, context) {
   const tokens = tokenizeShellLikeCommand(command);
   if (!tokens.length || String(tokens[0]).toLowerCase() !== 'git') return null;
+  const fullAccessAllowed = isFullAccessModeEnabled();
+  if (fullAccessAllowed) return null;
   if (commandHasShellOperators(command)) {
     return '❌ 检测到包含 shell 控制符的 git 命令。为避免绕过 Git/回滚权限，请改用 note_status、note_history、note_diff、note_snapshot、note_restore 或 restore_checkpoint。';
   }
-  if (!aiGitToolsAvailable()) return { passthrough: true, forceConfirm: true };
+  if (!aiGitToolsAvailable()) return gitExecutePassthrough(true);
   const parsed = parseGitExecuteTokens(tokens);
   if (parsed.invalid) return '❌ git -C 缺少目标目录。';
   const sub = parsed.sub;
   const rest = parsed.rest;
 
   if (sub === 'clone') {
-    return { passthrough: true, forceConfirm: true };
+    return gitExecutePassthrough(true);
   }
 
   const readOnlyDecision = gitReadOnlyPassthroughDecision(sub, rest);
@@ -1236,7 +1250,7 @@ async function routeGitExecuteCommand(command, context) {
     return '❌ 这个 Git 命令不在只读白名单内，或包含可能写文件/启动外部程序的选项。请改用专用 Git 工具，或去掉危险选项后重试。';
   }
   if (readOnlyDecision && readOnlyDecision.passthrough) {
-    return { passthrough: true, forceConfirm: !!readOnlyDecision.forceConfirm };
+    return gitExecutePassthrough(!!readOnlyDecision.forceConfirm);
   }
   if (parsed.passthroughOnly) {
     return '❌ git -C 只允许用于只读 Git 命令透传。写入、恢复或未识别命令请在目标目录中执行，或改用专用 Git 工具。';
@@ -1293,12 +1307,13 @@ async function executeTerminalCommand(command, cwd, newWindow, timeout, context)
   const timeoutSec = normalizeExecuteTimeoutSec(timeout);
   let gitRouted = await routeGitExecuteCommand(command, context);
   const forceConfirm = gitRouted && typeof gitRouted === 'object' && gitRouted.forceConfirm;
+  const permissionCategory = gitRouted && typeof gitRouted === 'object' ? gitRouted.permissionCategory : '';
   if (gitRouted && typeof gitRouted === 'object' && gitRouted.passthrough) gitRouted = null;
   if (gitRouted !== null) return gitRouted;
   const r = await callAgentBackend('execute', { command, cwd, timeout: timeoutSec, new_window: !!newWindow },
-    forceConfirm ? 'AI 想执行 Git 命令' : 'AI 想执行任务指令',
+    permissionCategory === 'git_execute' ? 'AI 想执行 Git 命令' : 'AI 想执行任务指令',
     command,
-    { ...(context && typeof context === 'object' ? context : {}), forceConfirm });
+    { ...(context && typeof context === 'object' ? context : {}), forceConfirm, permissionCategory });
   if (typeof r === 'string') return r;
   if (!r.ok && (r._stopAll || r._userRejected)) return r;
   if (!r.ok) return `❌ ${r.error}`;

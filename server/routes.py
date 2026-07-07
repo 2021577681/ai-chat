@@ -46,6 +46,7 @@ ACTION_ROUTES = (
     ActionRoute('read_file', 'handle_read_file'),
     ActionRoute('read_file_binary', 'handle_read_file_binary'),
     ActionRoute('write_file', 'handle_write_file'),
+    ActionRoute('file_upload_chunk', 'handle_file_upload_chunk'),
     ActionRoute('append_file', 'handle_append_file'),
     ActionRoute('edit_file', 'handle_edit_file'),
     ActionRoute('apply_patch', 'handle_apply_patch'),

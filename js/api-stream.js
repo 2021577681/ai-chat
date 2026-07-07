@@ -5,6 +5,7 @@
 
 const ApiStreamStateModule = window.AgentApp.require('state');
 const apiStreamState = ApiStreamStateModule.state;
+const apiStreamSaveData = ApiStreamStateModule.saveData;
 const apiStreamCurrentChat = ApiStreamStateModule.currentChat;
 const apiStreamIsCurrentChat = ApiStreamStateModule.isCurrentChat;
 const apiStreamChatTaskById = ApiStreamStateModule.chatTaskById;
@@ -136,6 +137,14 @@ function stopGenerate() {
   }
   // ⭐ 清掉流式刷新与残留光标
   if (typeof cancelPendingStreamFlush === 'function') cancelPendingStreamFlush();
+  if (typeof sealInterruptedToolFlows === 'function') {
+    try {
+      const changed = sealInterruptedToolFlows(c);
+      if (changed && typeof apiStreamSaveData === 'function') apiStreamSaveData();
+    } catch (e) {
+      console.warn('[stopGenerate] 收尾工具流程失败:', e);
+    }
+  }
   apiStreamSyncGlobalTaskState(chatId);
   if (typeof updateSendBtn === 'function') updateSendBtn();
 }

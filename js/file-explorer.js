@@ -49,7 +49,7 @@ const INLINE_FILE_MIN_WINDOW_WIDTH = 1100;
 const INLINE_FILE_MIN_MAIN_WIDTH = 920;
 const INLINE_FILE_MIN_CHAT_WIDTH = 460;
 const INLINE_FILE_MIN_FILE_WIDTH = 360;
-const FILE_EXPLORER_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const FILE_EXPLORER_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
 
 const FILE_EXPLORER_TEXT_EXTENSIONS = new Set([
   'txt', 'md', 'markdown', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
@@ -66,6 +66,61 @@ function normalizeExplorerPath(path) {
   if (!p || p === '/') return '.';
   p = p.replace(/^\/+/, '').replace(/\/+$/g, '');
   return p || '.';
+}
+
+function fileExplorerComparablePath(path) {
+  return String(path || '').trim().replace(/\\/g, '/').replace(/\/+$/g, '');
+}
+
+function isWindowsAbsoluteExplorerPath(path) {
+  const raw = String(path || '').trim();
+  return /^[A-Za-z]:[\\/]/.test(raw) || /^\\\\[^\\]+\\[^\\]+/.test(raw) || /^\/\/[^/]+\/[^/]+/.test(raw);
+}
+
+function isPosixAbsoluteExplorerPath(path) {
+  const raw = String(path || '').trim();
+  return raw.startsWith('/') && !raw.startsWith('//');
+}
+
+function isAbsoluteExplorerPath(path) {
+  return isWindowsAbsoluteExplorerPath(path) || isPosixAbsoluteExplorerPath(path);
+}
+
+function fileExplorerRelativeToWorkspace(path) {
+  const root = fileExplorerComparablePath(fileExplorerWorkspaceRoot());
+  const target = fileExplorerComparablePath(path);
+  if (!root || !target || !isAbsoluteExplorerPath(target)) return '';
+  const caseInsensitive = isWindowsAbsoluteExplorerPath(root) || isWindowsAbsoluteExplorerPath(target);
+  const cmpRoot = caseInsensitive ? root.toLowerCase() : root;
+  const cmpTarget = caseInsensitive ? target.toLowerCase() : target;
+  if (cmpTarget === cmpRoot) return '.';
+  if (cmpTarget.startsWith(`${cmpRoot}/`)) return target.slice(root.length + 1) || '.';
+  return '';
+}
+
+function resolveFileExplorerOpenPath(path) {
+  const raw = String(path || '').trim();
+  if (!raw) return { ok: false, error: '路径为空' };
+
+  const relative = fileExplorerRelativeToWorkspace(raw);
+  if (relative) return { ok: true, path: normalizeExplorerPath(relative) };
+
+  const workspaceRoot = fileExplorerWorkspaceRoot();
+  if (isFileExplorerRemoteMode() && isWindowsAbsoluteExplorerPath(raw) && !isWindowsAbsoluteExplorerPath(workspaceRoot)) {
+    return {
+      ok: false,
+      error: `当前连接的是远程工作区，不能打开本机 Windows 路径：${raw}`
+    };
+  }
+
+  if (isAbsoluteExplorerPath(raw) && workspaceRoot) {
+    return {
+      ok: false,
+      error: `该绝对路径不在当前工作区内，不能直接打开：${raw}`
+    };
+  }
+
+  return { ok: true, path: normalizeExplorerPath(raw) };
 }
 
 function joinExplorerPath(base, name) {
@@ -995,8 +1050,62 @@ function fileExplorerReadFileAsArrayBuffer(file) {
   });
 }
 
-async function readUploadFileAsBase64(file) {
-  return fileExplorerArrayBufferToBase64(await fileExplorerReadFileAsArrayBuffer(file));
+async function readUploadBlobAsBase64(blob) {
+  return fileExplorerArrayBufferToBase64(await fileExplorerReadFileAsArrayBuffer(blob));
+}
+
+function createFileExplorerUploadId(file, targetFilePath) {
+  const size = Number(file && file.size || 0);
+  const stamp = Date.now().toString(36);
+  const random = Math.random().toString(36).slice(2, 10);
+  const name = String(targetFilePath || (file && file.name) || 'upload')
+    .replace(/[^A-Za-z0-9_.-]+/g, '_')
+    .slice(-80);
+  return `${stamp}-${random}-${size}-${name}`;
+}
+
+async function uploadExplorerFileInChunks(file, targetFilePath, progress = {}) {
+  const size = Math.max(0, Number(file && file.size || 0));
+  const chunkSize = Math.max(1, FILE_EXPLORER_UPLOAD_CHUNK_BYTES);
+  const totalChunks = Math.max(1, Math.ceil(size / chunkSize));
+  const uploadId = createFileExplorerUploadId(file, targetFilePath);
+  let checkpointId = '';
+  let lastToastAt = 0;
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+    const offset = size === 0 ? 0 : chunkIndex * chunkSize;
+    const end = size === 0 ? 0 : Math.min(size, offset + chunkSize);
+    const blob = size === 0 ? file.slice(0, 0) : file.slice(offset, end);
+    const content = await readUploadBlobAsBase64(blob);
+    const now = Date.now();
+    if (now - lastToastAt > 1000 || chunkIndex === 0 || chunkIndex === totalChunks - 1) {
+      const pct = size > 0 ? Math.min(100, Math.round((end / size) * 100)) : 100;
+      fileExplorerToast(`正在上传 ${progress.itemIndex + 1 || 1}/${progress.itemCount || 1}: ${progress.displayName || file.name || targetFilePath} ${pct}%`);
+      lastToastAt = now;
+    }
+    const r = await callAgentBackend(
+      'file_upload_chunk',
+      {
+        path: targetFilePath,
+        upload_id: uploadId,
+        offset,
+        chunk_index: chunkIndex,
+        total_chunks: totalChunks,
+        total_size: size,
+        done: chunkIndex === totalChunks - 1,
+        content,
+        encoding: 'base64',
+        mime: file.type || 'application/octet-stream',
+        checkpoint_id: checkpointId || undefined
+      },
+      undefined,
+      undefined,
+      { skipConfirm: true }
+    );
+    if (typeof r === 'string') throw new Error(r);
+    if (!r || !r.ok) throw new Error((r && r.error) || '上传失败');
+    if (r.checkpoint_id) checkpointId = r.checkpoint_id;
+  }
 }
 
 function fileExplorerItemsFromFileList(files) {
@@ -1017,13 +1126,6 @@ async function uploadSelectedFilesToExplorer(files, targetPath = FILE_EXPLORER_S
     fileExplorerToast('已有文件正在上传');
     return;
   }
-  const oversized = items.filter(item => Number(item.file.size || 0) > FILE_EXPLORER_UPLOAD_MAX_BYTES);
-  if (oversized.length) {
-    const names = oversized.slice(0, 3).map(item => item.file.name || '未命名').join('、');
-    fileExplorerToast(`${names}${oversized.length > 3 ? ' 等文件' : ''} 超过 20MB，未上传`);
-    return;
-  }
-
   FILE_EXPLORER_STATE.uploading = true;
   const normalizedTarget = normalizeExplorerPath(targetPath || FILE_EXPLORER_STATE.path);
   let uploaded = 0;
@@ -1037,21 +1139,11 @@ async function uploadSelectedFilesToExplorer(files, targetPath = FILE_EXPLORER_S
       const relativePath = sanitizeUploadRelativePath(item.relativePath, file.name);
       const targetFilePath = joinExplorerPath(normalizedTarget, relativePath);
       try {
-        const content = await readUploadFileAsBase64(file);
-        const r = await callAgentBackend(
-          'write_file',
-          {
-            path: targetFilePath,
-            content,
-            encoding: 'base64',
-            mime: file.type || 'application/octet-stream'
-          },
-          undefined,
-          undefined,
-          { skipConfirm: true }
-        );
-        if (typeof r === 'string') throw new Error(r);
-        if (!r || !r.ok) throw new Error((r && r.error) || '上传失败');
+        await uploadExplorerFileInChunks(file, targetFilePath, {
+          itemIndex: i,
+          itemCount: items.length,
+          displayName: relativePath
+        });
         uploaded += 1;
       } catch (e) {
         failed.push({ path: targetFilePath, error: e.message || String(e) });
@@ -1786,7 +1878,12 @@ async function openFileWithSystemDefault(path) {
 }
 
 function openFileExplorerPath(path, type = '') {
-  const normalizedPath = normalizeExplorerPath(path);
+  const resolved = resolveFileExplorerOpenPath(path);
+  if (!resolved.ok) {
+    fileExplorerToast(resolved.error || '无法打开路径', 5200);
+    return;
+  }
+  const normalizedPath = resolved.path;
   if (type === 'dir') {
     loadFileExplorer(normalizedPath);
     return;
@@ -2463,6 +2560,7 @@ window.toggleInlineFileSide = toggleInlineFileSide;
 window.AgentApp.define('fileExplorer', {
   FILE_EXPLORER_STATE,
   normalizeExplorerPath,
+  resolveFileExplorerOpenPath,
   joinExplorerPath,
   parentExplorerPath,
   renderFileExplorer,

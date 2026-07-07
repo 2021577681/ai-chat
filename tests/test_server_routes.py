@@ -1,3 +1,4 @@
+import base64
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +11,7 @@ from server.exec import (
     _git_proxy_bat_lines,
     _normalize_local_git_proxy_url,
     _remote_terminal_ssh_args,
+    _windows_remote_terminal_commands,
 )
 from server.handler import Handler
 from server.routes import (
@@ -173,6 +175,23 @@ class ExecGitProxyTests(unittest.TestCase):
         self.assertIn('export HTTP_PROXY=http://127.0.0.1:7890', args[-1])
         self.assertIn('https_proxy=http://127.0.0.1:7890', args[-1])
         self.assertIn('exec "${SHELL:-/bin/sh}" -l', args[-1])
+
+    def test_windows_remote_terminal_wraps_ssh_in_encoded_powershell(self):
+        ssh_args = _remote_terminal_ssh_args('ssh -p 2222 user@example.com', '~/project dir')
+        commands = _windows_remote_terminal_commands('AI Remote Terminal', ssh_args)
+
+        self.assertEqual(['wt.exe', 'new-tab', '--title', 'AI Remote Terminal', '--'], commands[0][:5])
+        self.assertEqual(['wt.exe', '--'], commands[1][:2])
+        self.assertEqual('powershell.exe', commands[0][5])
+        self.assertEqual('powershell.exe', commands[1][2])
+        self.assertEqual('powershell.exe', commands[2][0])
+        self.assertNotIn('exec "${SHELL:-/bin/sh}" -l', commands[0])
+
+        encoded = commands[0][-1]
+        script = base64.b64decode(encoded).decode('utf-16le')
+        self.assertIn("$psi.FileName = 'ssh'", script)
+        self.assertIn("$psi.Arguments = '-p 2222 -t user@example.com", script)
+        self.assertIn('exec \\"${SHELL:-/bin/sh}\\" -l', script)
 
 
 if __name__ == '__main__':

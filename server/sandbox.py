@@ -9,17 +9,21 @@
 
 import os
 import re
+import shlex
 
 from . import config
 
 
 # ============ L3：危险命令黑名单 ============
 # 采用"去空格 + 小写"后的子串匹配 + 正则匹配
+_RM_DANGEROUS_TARGET_RE = re.compile(r'\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)+(/|~|\$home|\*|\.)', re.IGNORECASE)
+_RM_RECURSIVE_FORCE_RE = re.compile(r'\brm\s+-[a-zA-Z]*[rRfF]', re.IGNORECASE)
+
 DANGEROUS_PATTERNS = [
     # 大规模删除
-    (re.compile(r'\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*\s+)+(/|~|\$home|\*|\.)', re.IGNORECASE),
+    (_RM_DANGEROUS_TARGET_RE,
         'rm -rf 对根/家目录/通配符'),
-    (re.compile(r'\brm\s+-[a-zA-Z]*[rRfF]', re.IGNORECASE),
+    (_RM_RECURSIVE_FORCE_RE,
         'rm -rf （强制递归删除，需特别确认）'),
     # Windows 删除
     (re.compile(r'\b(del|rmdir|rd)\s+/[sSqQ]', re.IGNORECASE),
@@ -87,10 +91,90 @@ DANGEROUS_PATTERNS = [
 ]
 
 
-def is_dangerous_command(cmd):
+_SHELL_SEGMENT_RE = re.compile(r'&&|\|\||[;&|]')
+_GLOB_OR_EXPANSION_RE = re.compile(r'[*?\[\]{}]')
+
+
+def _split_shell_tokens(segment):
+    try:
+        return shlex.split(segment, posix=True)
+    except ValueError:
+        return []
+
+
+def _is_rm_command_token(token):
+    name = os.path.basename(str(token or '').strip().strip('"').strip("'")).lower()
+    return name in ('rm', 'rm.exe')
+
+
+def _rm_option_requests_recursive_or_force(option):
+    if not isinstance(option, str) or not option.startswith('-') or option == '--':
+        return False
+    if option.startswith('--'):
+        return option in ('--recursive', '--force')
+    return bool(re.search(r'[rRfF]', option))
+
+
+def _resolve_rm_target(target, cwd):
+    base = resolve_path(cwd) if cwd else config.get_current_cwd()
+    raw = os.path.expanduser(str(target or ''))
+    if os.path.isabs(raw):
+        return os.path.realpath(raw)
+    return os.path.realpath(os.path.join(base, raw))
+
+
+def _is_safe_rm_target(target, cwd=None):
+    raw = str(target or '').strip()
+    if not raw or raw.startswith('-'):
+        return False
+    normalized = raw.replace('\\', '/').rstrip('/')
+    if normalized in ('', '.', './', '..') or normalized.startswith('../') or '/../' in normalized:
+        return False
+    if raw.startswith('~') or '$' in raw or '`' in raw or '\n' in raw or '\r' in raw:
+        return False
+    if _GLOB_OR_EXPANSION_RE.search(raw):
+        return False
+    target_abs = _resolve_rm_target(raw, cwd)
+    workspace_abs = os.path.realpath(config.WORKSPACE_ROOT)
+    if target_abs == workspace_abs:
+        return False
+    return is_inside_workspace(target_abs)
+
+
+def _all_rm_delete_targets_are_safe(cmd, cwd=None):
+    found = False
+    for segment in _SHELL_SEGMENT_RE.split(str(cmd or '')):
+        tokens = _split_shell_tokens(segment)
+        if not tokens or not _is_rm_command_token(tokens[0]):
+            continue
+        delete_mode = False
+        targets = []
+        end_options = False
+        for token in tokens[1:]:
+            if not end_options and token == '--':
+                end_options = True
+                continue
+            if not end_options and token.startswith('-') and token != '-':
+                if _rm_option_requests_recursive_or_force(token):
+                    delete_mode = True
+                continue
+            targets.append(token)
+        if not delete_mode:
+            continue
+        found = True
+        if not targets:
+            return False
+        if not all(_is_safe_rm_target(target, cwd) for target in targets):
+            return False
+    return found
+
+
+def is_dangerous_command(cmd, cwd=None):
     """返回 (是否危险, 原因)"""
     for pattern, reason in DANGEROUS_PATTERNS:
         if pattern.search(cmd):
+            if pattern in (_RM_DANGEROUS_TARGET_RE, _RM_RECURSIVE_FORCE_RE) and _all_rm_delete_targets_are_safe(cmd, cwd=cwd):
+                continue
             return True, reason
     return False, ''
 
@@ -134,13 +218,78 @@ def _masked_urls(cmd: str) -> str:
     return re.sub(r'https?://\S+', ' ', cmd, flags=re.IGNORECASE)
 
 
+def _masked_shell_variable_paths(cmd: str) -> str:
+    """Shell variable path joins like "$dir"/file are not absolute paths."""
+    if not cmd:
+        return ''
+    var = r'(?:\$\w+|\$\{[^}]+\})'
+    quoted_var = r'(?:"' + var + r'"|\'' + var + r'\')'
+    pattern = re.compile(r'(?:' + quoted_var + r'|' + var + r')(?:/[^\s"\'<>|&;)]*)+')
+    return pattern.sub(' ', cmd)
+
+
+def _contains_parent_ref(token: str) -> bool:
+    normalized = str(token or '').replace('\\', '/')
+    return normalized == '..' or normalized.startswith('../') or '/../' in normalized or normalized.endswith('/..')
+
+
+def _is_plain_shell_path_token(token: str) -> bool:
+    return bool(re.match(r'^[A-Za-z0-9_./\\:+@%=-]+$', str(token or '')))
+
+
+def _resolve_shell_path(token: str, base_dir: str) -> str:
+    raw = os.path.expanduser(str(token or ''))
+    if os.path.isabs(raw):
+        return os.path.realpath(raw)
+    return os.path.realpath(os.path.join(base_dir, raw))
+
+
+def _command_parent_traversal_escapes_workspace(cmd: str, cwd=None) -> bool:
+    try:
+        current_dir = os.path.realpath(resolve_path(cwd) if cwd else config.get_current_cwd())
+    except Exception:
+        current_dir = os.path.realpath(config.WORKSPACE_ROOT)
+
+    # Track simple shell sequencing so "cd subdir && ../tool" resolves from subdir.
+    for segment in re.split(r'&&|\|\||[;\n]', str(cmd or '')):
+        tokens = _split_shell_tokens(segment)
+        if not tokens:
+            continue
+        command_name = os.path.basename(tokens[0]).lower()
+        if command_name in ('cd', 'chdir', 'pushd', 'set-location', 'sl'):
+            target = ''
+            for token in tokens[1:]:
+                if token.startswith('-'):
+                    continue
+                target = token
+                break
+            if not target:
+                continue
+            if _contains_parent_ref(target) and not _is_plain_shell_path_token(target):
+                return True
+            next_dir = _resolve_shell_path(target, current_dir)
+            if not is_inside_workspace(next_dir):
+                return True
+            current_dir = next_dir
+            continue
+
+        for token in tokens:
+            if not _contains_parent_ref(token):
+                continue
+            if not _is_plain_shell_path_token(token):
+                return True
+            if not is_inside_workspace(_resolve_shell_path(token, current_dir)):
+                return True
+    return False
+
+
 def _is_allowed_shell_device_path(path: str) -> bool:
     """Allow harmless shell pseudo-files that do not expose real filesystem data."""
     normalized = (path or '').replace('\\', '/').rstrip('/')
     return normalized == '/dev/null'
 
 
-def command_workspace_violation(cmd: str):
+def command_workspace_violation(cmd: str, cwd=None):
     """返回 (是否越界, 原因)。用于 shell 命令执行前的保守拦截。
 
     注意：这是防御层，不是为了证明命令绝对安全。命令里只要出现
@@ -151,15 +300,15 @@ def command_workspace_violation(cmd: str):
     if not cmd:
         return False, ''
 
-    masked = _masked_urls(cmd)
+    masked = _masked_shell_variable_paths(_masked_urls(cmd))
 
     if _USER_HOME_REF_RE.search(masked):
         return True, '命令引用了用户目录/环境变量（如 ~、%USERPROFILE%、$HOME），可能越出沙箱'
 
-    if _PARENT_TRAVERSAL_RE.search(masked):
+    if _PARENT_TRAVERSAL_RE.search(masked) and _command_parent_traversal_escapes_workspace(masked, cwd=cwd):
         return True, '命令包含 ../ 或 ..\\ 父目录跳转，可能越出沙箱'
 
-    if _CD_PARENT_RE.search(masked):
+    if _CD_PARENT_RE.search(masked) and _command_parent_traversal_escapes_workspace(masked, cwd=cwd):
         return True, '命令把 .. 作为目录参数，可能越出沙箱'
 
     for m in _UNC_PATH_RE.finditer(masked):
@@ -176,7 +325,7 @@ def command_workspace_violation(cmd: str):
 
     # Unix/macOS/Linux 绝对路径。Windows 下跳过，避免把 cmd 参数 /c /d 误判。
     if os.name != 'nt':
-        unix_abs_re = re.compile(r'(?<![:\w.-])(/[^\s"\'<>|&]+)')
+        unix_abs_re = re.compile(r'(?<![:\w.-])(/[^\s"\'<>|&;)]+)')
         for m in unix_abs_re.finditer(masked):
             p = _trim_shell_path(m.group(1))
             if _is_allowed_shell_device_path(p):
